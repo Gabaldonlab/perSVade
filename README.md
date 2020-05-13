@@ -20,10 +20,12 @@ In addition, it will require NINJA to be installed (we installed it from https:/
 
 ### Comments for the developers
 The conda environment can be exported to a .yml file with:
+
 `conda env export --no-builds -n perSVade_env --file perSVade_env.yml`
 
 ## Running
 Once you have installed all the dependencies, you can call the perSVade pipeline with:
+
 `conda activate perSVade_env`
 
 `python ./scripts/perSVade.py -r <path to the reference genome (fasta)> -o <output_directory> -p <ploidy, 1 or 2> -f1 <forward_reads.fastq.gz> -f2 <reverse_reads.fastq.gz>`
@@ -65,7 +67,7 @@ Breakpoints are called using gridss and integrated into complex structural varia
 
 7. Running of gridss and clove for the real short-read data, filtering and parsing the output with the chosen optimum set of filters. In addition to the explainable variants (deletions, tandem duplications, insertions and translocations) we keep the unclassified breakpoints for further analysis, which may represent structural variants not included in our simulations. 
 
-We acknowledge that our benchmarking could yield high accuracy because random simulations may not include the sources of false positive calls found in real data. However, if there is no available set of real structural variants in your genome we consider that simulations cannot be realistic.
+We acknowledge that our benchmarking could yield high accuracy because random simulations may not include the sources of false positive calls found in real data. However, if there is no available set of real structural variants in your genome we consider that random simulations are as realistic as possible.
 
 
 
