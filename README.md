@@ -24,7 +24,8 @@ The conda environment can be exported to a .yml file with:
 
 ## Running
 Once you have installed all the dependencies, you can call the perSVade pipeline with:
-`conda activare perSVade_env`
+`conda activate perSVade_env`
+
 `python ./scripts/perSVade.py -r <path to the reference genome (fasta)> -o <output_directory> -p <ploidy, 1 or 2> -f1 <forward_reads.fastq.gz> -f2 <reverse_reads.fastq.gz>`
 
 ## Method
@@ -42,29 +43,30 @@ Breakpoints are called using gridss and integrated into complex structural varia
     4. “FILTER” column (all combinations tried).
     5. Presence of a poly-G or poly-C (16bp) sequence around the breakpoint (always filtered).
     6. Split-reads support (present or absent), only applicable for small deletion or deletion events.
-Discordant read-pair support  (present or absent), not applicable for small deletion or deletion events.
-Maximum strand bias (0.9 to 0.95), only applicable for small deletion or deletion events.
-Maximum microhomology length (100 to 108).
-Maximum inexact homology length (100 to 108).
-Range of lengths of deletion breakpoints with an inexact microhomology of 6bp or greater that should be filtered out (100-800, 50-900, 200-700 and 0-1).
-Minimum inversion length (0, 40 and 108)
-Maximum difference between the breakpoint-inserted sequence and the length of a deletion (0, 5, 10 and 108)
+    7. Discordant read-pair support  (present or absent), not applicable for small deletion or deletion events.
+    8. Maximum strand bias (0.9 to 0.95), only applicable for small deletion or deletion events.
+    9. Maximum microhomology length (100 to 108).
+    10. Maximum inexact homology length (100 to 108).
+    11. Range of lengths of deletion breakpoints with an inexact microhomology of 6bp or greater that should be filtered out (100-800, 50-900, 200-700 and 0-1).
+    12. Minimum inversion length (0, 40 and 108)
+    13. Maximum difference between the breakpoint-inserted sequence and the length of a deletion (0, 5, 10 and 108)
 
-This yielded 7.74*106 combinations of filters to be tried on the gridss output, each of them resulting in an independent set of called breakpoints.
+  This yields 7.74x1e6 combinations of filters to be tried on the gridss output, each of them resulting in an independent set of called breakpoints.
 
-For each set of breakpoints, integration into complex events with clove. The output of clove was parsed to output translocations (balanced or not), insertions (copy-and-paste or cut-and-paste) tandem duplications, deletions and inversions to match the “known” simulated variants (in 1) and allow benchmarking of each filter set. In addition, the set of breakpoints that could not be classified into any of these types of variants were kept.. This parsing was not trivial for the following types of variants:
+4. For each set of breakpoints, integration into complex events with clove. The output of clove is parsed to output translocations (balanced or not), insertions (copy-and-paste or cut-and-paste) tandem duplications, deletions and inversions to match the “known” simulated variants (in 1) and allow benchmarking of each filter set. In addition, the set of breakpoints that is not classified into any of these types of variants is kept. This parsing was is trivial for the following types of variants:
 
-Unbalanced translocations (the arm the origin chromosome is copied and replaces an arm of the target chromosome), which may result in non-reciprocal interchromosomal breakpoint. However, not all such breakpoints imply unbalanced translocations (cite_clove), which required an additional method to find the true events. We reasoned that only those that imply a deletion of the target chromosome and a duplication of the origin may be real unbalanced translocations, which was tested from read-depth. For each combination of origin-target chromosomes and breakpoints, we calculated “probability of unbalanced translocation” (p_unbalTRA) as the mean of the “probability of origin duplication” (p_origin_dup) and the “probability of target deletion” (p_target_del). p_origin_dup was calculated as the relative coverage of the origin region - 1 (set to 1 as maximum), while p_target_del was calculated as 1 - relative coverage of the target region. We benchmarked several thresholds for p_unbalTRA between 0 and 1 to find the optimum ones.
+    1. Unbalanced translocations (the arm the origin chromosome is copied and replaces an arm of the target chromosome), which may result in non-reciprocal interchromosomal breakpoint. However, not all such breakpoints imply unbalanced translocations, which required an additional method to find the true events. We reasoned that only those that imply a deletion of the target chromosome and a duplication of the origin may be real unbalanced translocations, which is tested from read-depth. For each combination of origin-target chromosomes and breakpoints, we calculate “probability of unbalanced translocation” (p_unbalTRA) as the mean of the “probability of origin duplication” (p_origin_dup) and the “probability of target deletion” (p_target_del). p_origin_dup is calculated as the relative coverage of the origin region - 1 (set to 1 as maximum), while p_target_del is calculated as 1 - relative coverage of the target region. We benchmark several thresholds for p_unbalTRA between 0 and 1 to find the optimum ones.
 
-Deletions and tandem duplications, which generate breakpoints referred as DEL and DUP.  Unfortunately, these can also result from complex structural variants, which hampers direct interpretation. Read-depth validation can be used on such variants, and clove calls as true tandem duplications or deletions those events with a coverage above or below (respectively) a symmetric interval across a provided value (cite_clove). However, we reasoned that this strategy may lead to inaccurate results because of the coverage simley-pattern observed in our samples. We thus filtered each type of variant based on an independent coverage threshold. Any DEL event with a relative coverage below the threshold (termed max_coverage_for_del) or DUP event with a relative coverage above the threshold (min_coverage_for_tan) was called as a true deletion or tandem duplication, respectively. We benchmarked several of these thresholds (0-1 for max_coverage_for_del and 0-3.5 for min_coverage_for_tan) to find the optimum ones.
+    2. Deletions and tandem duplications, which generate breakpoints referred as DEL and DUP.  Unfortunately, these can also result from complex structural variants, which hampers direct interpretation. Read-depth validation can be used on such variants, and clove calls as true tandem duplications or deletions those events with a coverage above or below (respectively) a symmetric interval across a provided value. However, we consider that this strategy may lead to inaccurate results when a coverage "smiley-pattern" affects the input sample. We thus filter each type of variant based on an independent coverage threshold. Any DEL event with a relative coverage below the threshold (termed max_coverage_for_del) or DUP event with a relative coverage above the threshold (min_coverage_for_tan) is called as a true deletion or tandem duplication, respectively. We benchmark several of these thresholds (0-1 for max_coverage_for_del and 0-3.5 for min_coverage_for_tan) to find the optimum ones.
 	
-For each filter combination (gridss, p_unbalTRA, max_coverage_for_del and min_coverage_for_tan), benchmarking of the calling accuracy as compared to the known simulated variants. This totaled up to  3.01*108 sets of filters. The chosen optimal parameters for each SV genome were those with the highest F score (a combination of precision and recall (Kosugi et al. 2019)) . Each event was defined as a true positive if there a matching “known” variant, with all the breakpoints overlapping by less than 50 bp. For those sets of filters with the same F score we kept the least conservative one. 
+5. For each filter combination (gridss, p_unbalTRA, max_coverage_for_del and min_coverage_for_tan), benchmarking of the calling accuracy as compared to the known simulated variants. This includes up to 3.01x1e8 sets of filters. The chosen optimal parameters for each SV genome are those with the highest F score (a combination of precision and recall). Each event is defined as a true positive if there is a matching “known” variant, with all the breakpoints overlapping by less than 50 bp. For those sets of filters with the same F score we keep the least conservative one. 
 
-Choosing the optimal set of filters for structural variant calling on real data. Each of the simulations yielded a different set of optimum filters, where accuracy may have been high due to overfitting to the training data. In order to test each of these filter sets on an independent dataset we calculated the accuracy of each of them on the other simulations. We chose the final “optimum set” of filters as the one yielding the maximum minimum F score across all simulations.
+6. Choosing the optimal set of filters for structural variant calling on real data. Each of the simulations may yield a different set of optimum filters, where accuracy may be high due to overfitting to the training data. In order to test each of these filter sets on an independent dataset we calculate the accuracy of each of them on the other simulations. We choose the final “optimum set” of filters as the one yielding the maximum minimum F score across all simulations.
 
-Running of gridss and clove for the real short-read data, filtering and parsing the output with the chosen optimum set of filters. In addition to the explainable variants (deletions, tandem duplications, insertions and translocations) we kept the unclassified breakpoints for further analysis, which may represent structural variants not included in our simulations. 
+7. Running of gridss and clove for the real short-read data, filtering and parsing the output with the chosen optimum set of filters. In addition to the explainable variants (deletions, tandem duplications, insertions and translocations) we keep the unclassified breakpoints for further analysis, which may represent structural variants not included in our simulations. 
 
-We acknowledge that our benchmarking could yield high accuracy because random simulations may not include the sources of false positive calls found in real data (cite_BenchmarkNatComm). However, there is no available set of real structural variants in C. glabrata, which hampered more realistic simulations.
+We acknowledge that our benchmarking could yield high accuracy because random simulations may not include the sources of false positive calls found in real data. However, if there is no available set of real structural variants in your genome we consider that simulations cannot be realistic.
+
 
 
 
