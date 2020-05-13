@@ -10,11 +10,11 @@ perSVade is written in python and R for Linux. Most of the dependecies can be in
 
 In addition, there some dependecies that we did not install through conda. You should have installed gridss (tested on version 2.8.1) and clove (tested on version 0.17). This pipeline will look for the following files in the folders of your $PATH environmental variable:
 
-1. "gridss.sh", which is a bash sscript to run gridss provided by the authors, and is equivalent to https://github.com/PapenfussLab/gridss/tree/master/scripts/gridss.sh
+1. `gridss.sh`, which is a bash sscript to run gridss provided by the authors, and is equivalent to https://github.com/PapenfussLab/gridss/tree/master/scripts/gridss.sh
 
-2. "gridss-<version>-gridss-jar-with-dependencies.jar", which is a file with all the code necessary to run gridss. You can download it from any version of https://github.com/PapenfussLab/gridss/releases. This pipeline has been tested on version 2.8.1.
+2. `gridss-<version>-gridss-jar-with-dependencies.jar`, which is a file with all the code necessary to run gridss. You can download it from any version of https://github.com/PapenfussLab/gridss/releases. This pipeline has been tested on version 2.8.1.
 
-3. "clove-<version>-jar-with-dependencies.jar", which is a file with all the code necessary to run clove. You can download it from any version of https://github.com/PapenfussLab/clove/releases. This pipeline has been tested on version 0.17. 
+3. `clove-<version>-jar-with-dependencies.jar`, which is a file with all the code necessary to run clove. You can download it from any version of https://github.com/PapenfussLab/clove/releases. This pipeline has been tested on version 0.17. 
 
 In addition, it will require NINJA to be installed (we installed it from https://github.com/TravisWheelerLab/NINJA/releases/tag/0.95-cluster_only) for the running of RepeatModeller. This pipeline will look if any of the directories of your $PATH contains a folder called "NINJA". If this "NINJA" folder contains the files expected to run Ninja it will be used as the ninja directory.
 
