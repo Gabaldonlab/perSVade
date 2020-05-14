@@ -156,13 +156,12 @@ if fun.file_is_empty("%s.fai"%opt.ref) or opt.replace is True:
 print("Starting structural variation analysis with GRIDSS")
 
 # create the directories
-gridss_outdir = "%s/gridss_output"%opt.outdir
-#fun.delete_folder(gridss_outdir) # this is to debug
+SVdetection_outdir = "%s/SVdetection_output"%opt.outdir
 
 # run pipeline, this has to be done with this if to run the pipeline
 if __name__ == '__main__':
 
-    sv_fun.run_GridssClove_optimising_parameters(sorted_bam, opt.ref, gridss_outdir, replace_covModelObtention=opt.replace, threads=opt.threads, replace=opt.replace, mitochondrial_chromosome=opt.mitochondrial_chromosome, simulation_types=["uniform"], n_simulated_genomes=3, target_ploidies=["haploid", "diploid_hetero"], range_filtering_benchmark="theoretically_meaningful", expected_ploidy=opt.ploidy)
+    sv_fun.run_GridssClove_optimising_parameters(sorted_bam, opt.ref, SVdetection_outdir, replace_covModelObtention=opt.replace, threads=opt.threads, replace=opt.replace, mitochondrial_chromosome=opt.mitochondrial_chromosome, simulation_types=["uniform"], n_simulated_genomes=2, target_ploidies=["haploid", "diploid_hetero"], range_filtering_benchmark="theoretically_meaningful", expected_ploidy=opt.ploidy)
 
 
 print("structural variation analysis with perSVade finished")
