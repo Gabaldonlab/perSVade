@@ -26,7 +26,9 @@ CWD = "/".join(__file__.split("/")[0:-1]); sys.path.insert(0, CWD)
 EnvDir = "/".join(sys.executable.split("/")[0:-2])
 
 # import functions
-import perSVade_functions as fun
+import smallVarsCNV_functions as fun
+import sv_functions as sv_fun
+import graphics_functions as graph_fun
 
 # packages installed into the conda environment 
 picard = "%s/share/picard-2.18.26-0/picard.jar"%EnvDir
@@ -36,13 +38,7 @@ java = "%s/bin/java"%EnvDir
 #######
 
 description = """
-Runs perSVade pipeline on an input set of paired end short ends. It is expected to be run on a coda environment and have several dependencies (see https://github.com/Gabaldonlab/perSVade). Some of these dependencies are not installable through conda. You should have installed gridss (tested on version 2.8.1) and clove (tested on version 0.17). This pipeline will look for the following files in the folders of your $PATH environmental variable:
-
-    - "gridss.sh", which is a bash sscript to run gridss provided by the authors, and is equivalent to https://github.com/PapenfussLab/gridss/tree/master/scripts/gridss.sh
-    - "gridss-<version>-gridss-jar-with-dependencies.jar", which is a file with all the code necessary to run gridss. You can download it from any version of https://github.com/PapenfussLab/gridss/releases. This pipeline has been tested on version 2.8.1.
-    - "clove-<version>-jar-with-dependencies.jar", which is a file with all the code necessary to run clove. You can download it from any version of https://github.com/PapenfussLab/clove/releases. This pipeline has been tested on version 0.17. 
-
-    In addition, it will require NINJA to be installed (we installed it from https://github.com/TravisWheelerLab/NINJA/releases/tag/0.95-cluster_only) for the running of RepeatModeller. This pipeline will look if any of the directories of your $PATH contains a folder called "NINJA". If this "NINJA" folder contains the files expected to run Ninja it will be used.
+Runs perSVade pipeline on an input set of paired end short ends. It is expected to be run on a coda environment and have several dependencies (see https://github.com/Gabaldonlab/perSVade). Some of these dependencies are included in the respository "installation/external_software". These are gridss (tested on version 2.8.1), clove (tested on version 0.17) and NINJA (we installed it from https://github.com/TravisWheelerLab/NINJA/releases/tag/0.95-cluster_only). If you have any trouble with these you can replace them from the source code.
 """
               
 parser = argparse.ArgumentParser(description=description, formatter_class=RawTextHelpFormatter)
@@ -60,17 +56,24 @@ parser.add_argument("-f2", "--fastq2", dest="fastq2", default=None, help="fastq_
 parser.add_argument("-sbam", "--sortedbam", dest="sortedbam", default=None, help="The path to the sorted bam file, which should have a bam.bai file in the same dir. This is mutually exclusive with providing reads")
 parser.add_argument("--run_qualimap", dest="run_qualimap", action="store_true", help="Run qualimap for quality assessment of bam files. This may be inefficient sometimes because of the ")
 
-
 # other args
-parser.add_argument("-mchr", "--mitochondrial_chromosome", dest="mitochondrial_chromosome", default="mito_C_glabrata_CBS138", type=str, help="The name of the mitochondrial chromosome. This is important if you have mitochondrial proteins for which to annotate the impact of nonsynonymous variants, as the mitochondrial genetic code is different. This should be the same as in the gff. If there is no mitochondria just put no_mitochondria")
+parser.add_argument("-mchr", "--mitochondrial_chromosome", dest="mitochondrial_chromosome", default="mito_C_glabrata_CBS138", type=str, help="The name of the mitochondrial chromosome. This is important if you have mitochondrial proteins for which to annotate the impact of nonsynonymous variants, as the mitochondrial genetic code is different. This should be the same as in the gff. If there is no mitochondria just put 'no_mitochondria'. If there is more than one mitochindrial scaffold, provide them as comma-sepparated IDs.")
 
 opt = parser.parse_args()
 
-# debug commands
-if not os.path.isdir(opt.outdir): os.mkdir(opt.outdir)
+
+# if replace is set remove the outdir, and then make it
+if opt.replace is True: fun.delete_folder(opt.outdir)
+fun.make_folder(opt.outdir)
 
 # define the name that will be used as tag, it is the name of the outdir, without the full path
 name_sample = opt.outdir.split("/")[-1]; print("working on %s"%name_sample)
+
+# move the reference genome into the outdir, so that every file is written under outdir
+reference_genome_dir = "%s/reference_genome_dir"%(opt.outdir); fun.make_folder(reference_genome_dir)
+new_reference_genome_file = "%s/reference_genome.fasta"%reference_genome_dir
+fun.run_cmd("cp %s %s"%(opt.ref, new_reference_genome_file))
+opt.ref = new_reference_genome_file
 
 # define files that may be used in many steps of the pipeline
 if opt.sortedbam is None:
@@ -109,6 +112,10 @@ if all([not x is None for x in {opt.fastq1, opt.fastq2}]):
 
 else: print("Warning: No fastq file given, assuming that you provided a bam file")
 
+#####################################
+#####################################
+#####################################
+
 # check that all the important files exist
 if any([fun.file_is_empty(x) for x in {sorted_bam, index_bam}]): raise ValueError("You need the sorted and indexed bam files in ")
 
@@ -146,23 +153,25 @@ if fun.file_is_empty("%s.fai"%opt.ref) or opt.replace is True:
 ##### STRUCTURAL VARIATION ##########
 #####################################
 
-if opt.run_gridss:
+print("Starting structural variation analysis with GRIDSS")
 
-    print("Starting structural variation analysis with GRIDSS")
+# create the directories
+gridss_outdir = "%s/gridss_output"%opt.outdir
+#fun.delete_folder(gridss_outdir) # this is to debug
 
-    # create the directories
-    gridss_outdir = "%s/gridss_output"%opt.outdir
-    #fun.delete_folder(gridss_outdir) # this is to debug
+# run pipeline, this has to be done with this if to run the pipeline
+if __name__ == '__main__':
 
-    # run pipeline, this has to be done with this if to run the pipeline
-    if __name__ == '__main__':
-
-
-        fun.run_GridssClove_optimising_parameters(sorted_bam, opt.ref, gridss_outdir, replace_covModelObtention=(opt.replace or opt.replace_gridss), threads=opt.threads, replace=(opt.replace or opt.replace_gridss), mitochondrial_chromosome=opt.mitochondrial_chromosome, simulation_types=["uniform"], n_simulated_genomes=3, target_ploidies=["haploid", "diploid_hetero"], range_filtering_benchmark="theoretically_meaningful", coverage=opt.coverage, expected_ploidy=opt.ploidy)
+    sv_fun.run_GridssClove_optimising_parameters(sorted_bam, opt.ref, gridss_outdir, replace_covModelObtention=opt.replace, threads=opt.threads, replace=opt.replace, mitochondrial_chromosome=opt.mitochondrial_chromosome, simulation_types=["uniform"], n_simulated_genomes=3, target_ploidies=["haploid", "diploid_hetero"], range_filtering_benchmark="theoretically_meaningful", expected_ploidy=opt.ploidy)
 
 
-    print("structural variation analysis with perSVade finished")
+print("structural variation analysis with perSVade finished")
 
-print("VarCall Finished")
+#####################################
+#####################################
+#####################################
+
+
+print("perSVade Finished")
 
 

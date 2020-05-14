@@ -170,25 +170,7 @@ def chunks(l, n):
     for i in range(0, len(l), n):
         yield l[i:i + n]
 
-def run_cmd(cmd):
 
-    """Runs a cmd under the VarCall_CNV_env environment, as defined in CONDA_ACTIVATING_CMD"""
-    #out_stat = os.system("%s %s"%(CONDA_ACTIVATING_CMD, cmd)); 
-    out_stat = os.system(cmd); 
-    if out_stat!=0: raise ValueError("\n%s\n did not finish correctly. Out status: %i"%(cmd, out_stat))
-
-def file_is_empty(path): 
-    
-    """ask if a file is empty or does not exist """
-    
-    if not os.path.isfile(path):
-        return_val = True
-    elif os.stat(path).st_size==0:
-        return_val = True
-    else:
-        return_val = False
-            
-    return return_val
 
 def make_flat_listOflists(LoL):
 
@@ -236,12 +218,8 @@ def get_object_as_str(x):
     else: raise ValueError("%s has not been considered"%tx)
 
 def get_dir(filename): return "/".join(filename.split("/")[0:-1])
+
 def get_file(filename): return filename.split("/")[-1]
-
-
-def remove_file(f):
-
-    if os.path.isfile(f): os.unlink(f)
 
 def clean_reference_genome_windows_files(reference_genome):
 
@@ -254,32 +232,6 @@ def clean_reference_genome_windows_files(reference_genome):
     for file in os.listdir(ref_dir):
         if file.startswith(ref_name) and "windows" in file and "bp.bed" in file : remove_file("%s/%s"%(ref_dir, file))
 
-
-def delete_folder(f):
-
-    if os.path.isdir(f): shutil.rmtree(f)
-
-def make_folder(f):
-
-    if not os.path.isdir(f): os.mkdir(f)
-
-def delete_file_or_folder(f):
-
-    """Takes a path and removes it"""
-
-    if os.path.isdir(f): shutil.rmtree(f)
-    if os.path.isfile(f): os.unlink(f)
-
-
-def id_generator(size=10, chars=string.ascii_uppercase + string.digits, already_existing_ids=set()):
-
-    """ already_existing_ids is a set that indicates whihc IDs can't be picked """
-
-    ID = ''.join(random.choice(chars) for _ in range(size))
-    while ID in already_existing_ids:
-        ID = ''.join(random.choice(chars) for _ in range(size))
-
-    return ID
 
 def save_object(obj, filename):
     
@@ -442,9 +394,6 @@ def write_coverage_per_gene(mpileup, bed, gene_to_coverage_file):
 
     # write
     df_coverage.to_csv(path_or_buf=gene_to_coverage_file, sep="\t", index=False)
-
-
-
 
 
 def leftTrimVariant(pos, ref, alt, onlyOneBp=True):
@@ -1934,76 +1883,6 @@ def get_samples_with_wrong_pairs(paths_df, cwd):
 
     return wrong_samples
         
-def run_bwa_mem(fastq1, fastq2, ref, outdir, bamfile, sorted_bam, index_bam, name_sample, threads=1, replace=False):
-
-    """Takes a set of files and runs bwa mem getting sorted_bam and index_bam"""
-
-    if file_is_empty(sorted_bam) or file_is_empty(index_bam) or replace is True:
-
-        #index fasta
-        index_files = ["%s.%s"%(ref, x) for x in ["amb", "ann", "bwt", "pac", "sa"]]
-
-        if any([file_is_empty(x) for x in index_files]) or replace is True:
-            print("Indexing fasta")
-
-            # create a branch reference, which will have a tag that is unique to this run. This is important since sometimes you run this pipeline in parallel, and this may give errors in fasta indexing.
-            branch_ref = "%s.%s.fasta"%(ref, id_generator())
-            shutil.copy2(ref, branch_ref)
-
-            # run indexing in the copy
-            cmd_indexFasta = "%s index %s"%(bwa, branch_ref); run_cmd(cmd_indexFasta) # creates a set of indexes of fasta
-            index_files_branch = ["%s.%s"%(branch_ref, x) for x in ["amb", "ann", "bwt", "pac", "sa"]]
-
-            # rename each of the indices so that it matches the ref format
-            for branchIDX, realIDX in dict(zip(index_files_branch, index_files)).items(): os.rename(branchIDX, realIDX)
-
-            # rm the branch
-            os.unlink(branch_ref)
-
-        #BWA MEM --> get .sam
-        samfile = "%s/aligned_reads.sam"%outdir;
-        if file_is_empty(samfile) or replace is True:
-
-            # remove previuous generated temporary file
-            if os.path.isfile("%s.tmp"%samfile): os.unlink("%s.tmp"%samfile)
-
-            print("Running bwa mem")
-            cmd_bwa = '%s mem -R "@RG\\tID:%s\\tSM:%s" -t %i %s %s %s > %s.tmp'%(bwa, name_sample, name_sample, threads, ref, fastq1, fastq2, samfile); run_cmd(cmd_bwa)
-            os.rename("%s.tmp"%samfile , samfile)
-
-        # convert to bam 
-        if file_is_empty(bamfile) or replace is True:
-            print("Converting to bam")
-            cmd_toBAM = "%s view -Sbu %s > %s.tmp"%(samtools, samfile, bamfile); run_cmd(cmd_toBAM)
-            os.rename("%s.tmp"%bamfile , bamfile)
-
-            # remove the sam
-            print("Removing sam"); os.unlink(samfile)
-
-        # sorting bam
-        if file_is_empty(sorted_bam) or replace is True:
-            print("Sorting bam")
-
-            # remove all temporary files generated previously in samtools sort (they'd make a new sort to be an error)
-            for outdir_file in os.listdir(outdir): 
-                fullfilepath = "%s/%s"%(outdir, outdir_file)
-                if outdir_file.startswith("aligned_reads") and ".tmp." in outdir_file: os.unlink(fullfilepath)
-
-            # sort
-            cmd_sort = "%s sort --threads %i -o %s.tmp %s"%(samtools, threads, sorted_bam, bamfile); run_cmd(cmd_sort)
-            os.rename("%s.tmp"%sorted_bam , sorted_bam)
-
-            # remove the the raw bam file
-            print("Removing unsorted bam"); os.unlink(bamfile)
-
-    # indexing bam
-    if file_is_empty(index_bam) or replace is True:
-        print("Indexing bam")
-        cmd_indexBam = "%s index -@ %i %s"%(samtools, threads, sorted_bam); run_cmd(cmd_indexBam)   # creates a .bai of sorted_bam
-
-
-    print("ALIGNMENT STEP WAS CORRECTLY PERFORMED")
-
 def run_gatk_HaplotypeCaller(outdir_gatk, ref, sorted_bam, ploidy, threads, coverage, replace=False):
 
     """Runs haplotype caller under outdir and returns the filename of the filtered results"""
