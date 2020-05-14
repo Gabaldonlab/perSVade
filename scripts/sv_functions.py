@@ -99,7 +99,6 @@ rmblast_dir = "%s/bin"%EnvDir
 rscout_dir = "%s/bin"%EnvDir
 trf_prgm_dir = "%s/bin/trf"%EnvDir
 
-
 # executables that are provided in the repository
 external_software = "%s/../installation/external_software"%CWD
 gridss_run = "%s/gridss.sh"%external_software

@@ -22,15 +22,7 @@ This is essential so that all the dependencies of the pipeline are met.
 
 In addition, there are some dependencies that are included in the respository "installation/external_software" (only in the "release" packages). These are gridss (tested on version 2.8.1), clove (tested on version 0.17) and NINJA (we installed it from https://github.com/TravisWheelerLab/NINJA/releases/tag/0.95-cluster_only). 
 
-## Running
-Once you have installed all the dependencies, you can call the perSVade pipeline with:
-
-`conda activate perSVade_env`
-
-`python ./scripts/perSVade.py -r <path to the reference genome (fasta)> -o <output_directory> -p <ploidy, 1 or 2> -f1 <forward_reads.fastq.gz> -f2 <reverse_reads.fastq.gz>`
-
-
-### Comments for the developers
+## Comments for the installation of extra dependencies
 The conda environment can be exported to a .yml file with:
 
 `conda env export --no-builds -n perSVade_env --file perSVade_env.yml`
@@ -66,6 +58,17 @@ The non-conda dependencies can be installed like this:
 `cd <perSVade_installation_dir>/installation/external_software/NINJA-0.95-cluster_only/NINJA`
 
 `make`
+
+You may want to repeat this in case you have problems running any of the programs with the pipeline
+
+## Running
+Once you have installed all the dependencies, you can call the perSVade pipeline with:
+
+`conda activate perSVade_env`
+
+`python ./scripts/perSVade.py -r <path to the reference genome (fasta)> -o <output_directory> -p <ploidy, 1 or 2> -f1 <forward_reads.fastq.gz> -f2 <reverse_reads.fastq.gz>`
+
+
 
 ## Method
 Breakpoints are called using gridss and integrated into complex structural variation with clove. The straightforward implementation of these algorithms is challenging for 1) genomes without established parameters and 2) sequencing runs were there is a "smiley-pattern" in read-depth (such as https://www.cell.com/cell/pdf/S0092-8674(16)31071-6.pdf). The latter occurs when read-depth is correlated with the distance to the telomere, which may be an artifact of library preparation and/or sequencing. This impedes the usage of a single read-depth threshold for filtering deletions and tandem duplications (used by clove). perSVade selects the running and filtering parameters from a simulation-based optimization, including the following pipeline for the input sequencing:
