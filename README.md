@@ -1,6 +1,6 @@
 # perSVade: personalized Structural Variation detection
 
-perSVade is a method that runs structural variation (SV) calling and interpretation for a set of paired end WGS short reads. It is a pipeline to call breakpoints with  GRIDSS (https://github.com/PapenfussLab/gridss) and summarize them into complex structural variants with CLOVE (https://github.com/PapenfussLab/clove), with some added features. perSVade provides an automated benchmarking and parameter selection for these methods in any genome or sequencing run. This is useful for species without reccommended running and filtering parameters. In addition, it provides an automated report of the SV calling accuracy on simulations and real data, useful to assess the confidence of the results. Note that the current version is only a pre-release that has not been tested on multiples systems and genomes, so that it is not intended for widespread usage. We are working on a new version.
+perSVade is a method that runs structural variation (SV) calling and interpretation for a set of paired end WGS short reads. It is a pipeline to call breakpoints with  GRIDSS (https://github.com/PapenfussLab/gridss) and summarize them into complex structural variants with CLOVE (https://github.com/PapenfussLab/clove), with some added features. perSVade provides an automated benchmarking and parameter selection for these methods in any genome or sequencing run. This is useful for species without reccommended running and filtering parameters. In addition, it provides an automated report of the SV calling accuracy on simulations and real data, useful to assess the confidence of the results.
 
 
 ## Installation:
@@ -8,15 +8,19 @@ perSVade is written in python and R for Linux. Most of the dependecies can be in
 
 `conda env create --file installation/perSVade_env.yml --name perSVade_env`
 
-In addition, there some dependecies that we did not install through conda. You should have installed gridss (tested on version 2.8.1) and clove (tested on version 0.17). This pipeline will look for the following files in the folders of your $PATH environmental variable:
+When running the pipeline make sure that the python interpreter is the one of this environment. To test this execute:
 
-1. `gridss.sh`, which is a bash sscript to run gridss provided by the authors, and is equivalent to https://github.com/PapenfussLab/gridss/tree/master/scripts/gridss.sh
+`conda activate perSVade_env`
 
-2. `gridss-<version>-gridss-jar-with-dependencies.jar`, which is a file with all the code necessary to run gridss. You can download it from any version of https://github.com/PapenfussLab/gridss/releases. This pipeline has been tested on version 2.8.1.
+`which python`
 
-3. `clove-<version>-jar-with-dependencies.jar`, which is a file with all the code necessary to run clove. You can download it from any version of https://github.com/PapenfussLab/clove/releases. This pipeline has been tested on version 0.17. 
+It is expected to print: 
 
-In addition, it will require NINJA to be installed (we installed it from https://github.com/TravisWheelerLab/NINJA/releases/tag/0.95-cluster_only) for the running of RepeatModeller. This pipeline will look if any of the directories of your $PATH contains a folder called "NINJA". If this "NINJA" folder contains the files expected to run Ninja it will be used as the ninja directory.
+`<path_to_conda>/envs/perSVade_env/bin/python`
+
+This is essential so that all the dependencies of the pipeline are met.
+
+In addition, there are ome dependencies included in the respository "installation/external_software". These are gridss (tested on version 2.8.1), clove (tested on version 0.17) and NINJA (we installed it from https://github.com/TravisWheelerLab/NINJA/releases/tag/0.95-cluster_only). If you have any trouble with these you can replace them from the source code.
 
 ### Comments for the developers
 The conda environment can be exported to a .yml file with:

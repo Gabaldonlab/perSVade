@@ -1,0 +1,61 @@
+Quick NINJA README pre-release clustering only ( 0.95-cluster_only ) 
+
+Compilation:
+    Tested only on linux using g++, with the "make all" command.
+
+Arguments:
+
+--in (or -i) filename 
+    Specify file (fasta format) containing precomputed pairwise distances.
+    (default is to read the filename from the first argument not associated
+    with a -- flag, as shown above) 
+
+--out (or -o) filename 
+    Specify file to which the tree will be written (default = stdout)
+
+--in_type type [a | d]
+    Type of input, alignment or distance matrix
+    'a' type causes NINJA to accept an alignment in fasta format
+    'd' type causes NINJA to accept a (phylip format) file containing 
+    precomputed pairwise distances.
+    Default = a
+    
+--out_type type [c | d]   
+    Type of output, tree or distance matrix
+    'c' type calculates a Nearest-Neighbor clustering of the sequences,
+        and writes a table including a cluster identifier to a file.
+    'd' type just computes the distances and outputs them.
+    Default = c           
+         
+--alph_type type [a | d]
+    'a' if input consists of amino acid sequence
+    'd' if input consists of dna sequence
+    Default = amino. 
+    
+--corr_type type [n | j | k | s | m]
+    Correction for multiple same-site substitutions.
+    'n' no correction
+    'j' jukes-cantor correction  { dist = -3/4 * ln (1 - 4/3 * dist ) }
+    'k' kimura 2-parameter correction { dist = -1/2 * ln ( (1-2p-q)*sqrt(1-2q) ) }    
+    's' FastTree's scoredist-like correction { dist = -1.3 * ln (1.0 - dist) }
+    'm' Mothur's onegap correction -- only counts a string of gaps as a single
+        gap. This includes end gaps but excludes alignment padding. 
+        { dist = (mismatches + gap_inits) / (matches + mismatches + gap_inits) }
+    Default: 'k' for DNA, 's' for amino acid
+
+--cluster_cutoff dist_cutoff 
+    The maximum distance between two sequences for inclusion in the same 
+    cluster.  Only applicable to the clustering method ( --out_type c ).
+    Default: 0.03
+
+--rebuild_step_ratio (or -r)  
+    See paper for details.  Default = 0.5.
+
+Execution:
+
+./NINJA [arguments]
+
+Example:
+
+./NINJA --out_type c -i e_coli_1000.fa -o out.txt
+

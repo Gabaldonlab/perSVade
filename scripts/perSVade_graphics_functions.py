@@ -1562,9 +1562,6 @@ def plot_clustermap_with_annotation(df, row_colors_df, col_colors_df, filename, 
     return cm
 
     
-
-
-
 def getPlots_filtering_accuracy_across_genomes_and_ploidies(df_cross_benchmark, PlotsDir, simName_to_color={**Cglabrata_Nanopore_Assemblies_strain_to_color, **{"simulation_1":"black", "simulation_2":"red", "simulation_3":"green"}}, simType_to_color={'biased_towards_repeats':"red", 'realData':"black", 'uniform':"blue"}, ploidy_to_color={'consensus_ref': 'gray', 'haploid': 'black', 'diploid_hetero': 'maroon', 'ref:3_var:1': 'red', 'ref:9_var:1': 'lightsalmon', 'ref:99_var:1': 'white'}, svtype_to_color={"tandemDuplications": "gray", "deletions": "black", "inversions": "blue", "translocations": "olive", "insertions": "red", "remaining":"magenta", "integrated":"c"}):
 
     """This function takes a df that has several training and testing genomes with accuracy in each, and makes several plots to represent the data under outdir """
