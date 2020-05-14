@@ -61,6 +61,12 @@ The non-conda dependencies can be installed like this:
 
 `chmod u+x *`
 
+5. build NINJA binaries:
+
+`cd <perSVade_installation_dir>/installation/external_software/NINJA-0.95-cluster_only/NINJA`
+
+`make`
+
 ## Method
 Breakpoints are called using gridss and integrated into complex structural variation with clove. The straightforward implementation of these algorithms is challenging for 1) genomes without established parameters and 2) sequencing runs were there is a "smiley-pattern" in read-depth (such as https://www.cell.com/cell/pdf/S0092-8674(16)31071-6.pdf). The latter occurs when read-depth is correlated with the distance to the telomere, which may be an artifact of library preparation and/or sequencing. This impedes the usage of a single read-depth threshold for filtering deletions and tandem duplications (used by clove). perSVade selects the running and filtering parameters from a simulation-based optimization, including the following pipeline for the input sequencing:
 

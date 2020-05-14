@@ -99,13 +99,6 @@ rmblast_dir = "%s/bin"%EnvDir
 rscout_dir = "%s/bin"%EnvDir
 trf_prgm_dir = "%s/bin/trf"%EnvDir
 
-# executables that are provided in the repository
-external_software = "%s/../installation/external_software"%CWD
-gridss_run = "%s/gridss_2.8.1.sh"%external_software
-gridss_jar = "%s/gridss-2.8.1-gridss-jar-with-dependencies.jar"%external_software
-clove = "%s/clove-0.17-jar-with-dependencies.jar"%external_software
-ninja_dir = "%s/NINJA"%external_software
-
 # scripts that are of this pipeline
 simulateSV_R = "%s/create_simulatedSVgenome.R"%CWD
 annotate_simpleEvents_gridssVCF_R = "%s/annotate_simpleEvents_gridssVCF.R"%CWD
