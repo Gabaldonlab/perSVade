@@ -20,12 +20,38 @@ It is expected to print:
 
 This is essential so that all the dependencies of the pipeline are met.
 
-In addition, there are ome dependencies included in the respository "installation/external_software". These are gridss (tested on version 2.8.1), clove (tested on version 0.17) and NINJA (we installed it from https://github.com/TravisWheelerLab/NINJA/releases/tag/0.95-cluster_only). If you have any trouble with these you can replace them from the source code.
+In addition, there are some dependencies that are included in the respository "installation/external_software" (only in the "release" packages). These are gridss (tested on version 2.8.1), clove (tested on version 0.17) and NINJA (we installed it from https://github.com/TravisWheelerLab/NINJA/releases/tag/0.95-cluster_only). 
+
 
 ### Comments for the developers
 The conda environment can be exported to a .yml file with:
 
 `conda env export --no-builds -n perSVade_env --file perSVade_env.yml`
+
+The non-conda dependencies can be installed like this:
+
+1. change to the directory where you installed the perSVade repository:
+
+`cd <perSVade_installation_dir>/installation/external_software`
+
+2. download dependencies
+
+`wget https://github.com/PapenfussLab/gridss/releases/download/v2.8.1/gridss-2.8.1-gridss-jar-with-dependencies.jar`
+
+`wget https://github.com/PapenfussLab/gridss/releases/download/v2.8.1/gridss.sh`
+
+`wget https://github.com/PapenfussLab/clove/releases/download/v0.17/clove-0.17-jar-with-dependencies.jar`
+
+`wget https://github.com/TravisWheelerLab/NINJA/archive/0.95-cluster_only.tar.gz`
+
+3. uncompress the NINJA dir and remove the tar
+
+`tar -xvf 0.95-cluster_only.tar.gz`
+
+`rm 0.95-cluster_only.tar.gz`
+
+4. give execution permssion to all these files
+
 
 ## Running
 Once you have installed all the dependencies, you can call the perSVade pipeline with:
