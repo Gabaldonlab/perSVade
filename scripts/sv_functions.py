@@ -144,7 +144,7 @@ def get_affected_region_bed_for_SVdf(svDF, svtype, interesting_chromosomes, add_
 
     """This function takes a df with SVs and returns the regions that are affected in bed format, which depends on the svtype. It adds an interval arround this values.
 
-    only consider svs were all the chroms are in interesting_chromosomes"""
+    only consider svs were ANY of the chroms are in interesting_chromosomes"""
 
     # if the df is empty just return an empty df
     if len(svDF)==0: affected_region_bed_df = pd.DataFrame()
@@ -244,30 +244,15 @@ def rearrange_genomes_simulateSV(reference_genome, outdir, replace=True, nvars=1
         random_sim_dir = "%s/random_SVs"%genome_outdir; fun.delete_folder(random_sim_dir); fun.make_folder(random_sim_dir)
 
         # get the cmd of the simulation
-        backbone_cmd = "%s --input_genome %s --outdir %s"%(create_random_simulatedSVgenome_R, genome_file, random_sim_dir)
+        randomSV_cmd = "%s --input_genome %s --outdir %s --regions_bed %s"%(create_random_simulatedSVgenome_R, genome_file, random_sim_dir, regions_without_SV_bed)
 
         # add the number of each SV that should be added
-        for svtype, number_alreadyGeneratedSVs in svtype_to_nSVs.items():
-
-
-
-        #
-
-        std_rearranging_genome = "%s/simulation_std.txt"%random_sim_dir
-        run_cmd("%s --input_genome %s --outdir %s --regions_bed %s --mitochondrial_chromosome %s --max_time_rearrangement %i  --percBalancedTrans %.2f > %s 2>&1"%(simulateSV_R, reference_genome, sim_outdir, sim_type_to_regionsBed[simulation_type], mitochondrial_chromosome, max_time_rearrangement, percBalancedTrans, std_rearranging_genome))
-
-
-        argp = arg_parser("Takes a genome and generates a simulated genome with rearrangements with the known rearrangements in outdir. It will generate these rearrangements and the rearranged genome under outdir, only in the regions that are provided (--regions_bed)")
-
-argp = add_argument(argp, "--number_Dup", default=100, help="The number of duplications to generate")
-argp = add_argument(argp, "--number_Ins", default=100, help="The number of insertions to generate")
-argp = add_argument(argp, "--number_Inv", default=100, help="The number of inversions to generate")
-argp = add_argument(argp, "--number_Del", default=100, help="The number of deletions to generate")
-argp = add_argument(argp, "--number_Tra", default=100, help="The number of translocations to generate")
-
-
-
-
+        svtype_to_arg = {"insertions":"number_Ins", "deletions":"number_Del", "inversions":"number_Inv", "translocations":"number_Tra", "tandemDuplications":"number_Dup"}
+        for svtype, number_alreadyGeneratedSVs in svtype_to_nSVs.items(): randomSV_cmd += " --%s %i"%(svtype_to_arg[svtype], max([1, (vars_to_simulate-svtype_to_nSVs[svtype])]))
+            
+        # run the random simulation
+        #std_rearranging_genome = "%s/simulation_std.txt"%random_sim_dir
+        fun.run_cmd(randomSV_cmd)
 
 
 
