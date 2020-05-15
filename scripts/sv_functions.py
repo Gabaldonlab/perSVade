@@ -140,27 +140,56 @@ def clean_reference_genome_windows_files(reference_genome):
         if file.startswith(ref_name) and "windows" in file and "bp.bed" in file : fun.remove_file("%s/%s"%(ref_dir, file))
 
 
-def get_affected_region_bed_for_SVdf(svDF, svtype, interesting_chromosomes, add_interval_bp=2000):
+def get_affected_region_bed_for_SVdf(svDF, svtype, interesting_chromosomes, add_interval_bp=1000):
 
-    """This function takes a df with SVs and returns the regions that are affected in bed format, which depends on the svtype. It adds an interval arround this values.
+    """This function takes a df with SVs and returns the regions that are affected in bed format, which depends on the svtype. It adds an interval arround this values. It also returns the number 
 
     only consider svs were ANY of the chroms are in interesting_chromosomes"""
 
+
+    # load df
+    if type(svDF)==str: svDF = pd.read_csv(svDF, sep="\t")
+
     # if the df is empty just return an empty df
-    if len(svDF)==0: affected_region_bed_df = pd.DataFrame()
+    if len(svDF)==0: 
+        affected_region_bed_df = pd.DataFrame(columns=["chromosome", "start", "end"])
+        nSVs_in_interesting_chromosomes = 0
     else:
 
-        pass
+        # simple svtypes
+        if svtype in {"deletions", "inversions", "tandemDuplications"}: 
 
-    print(svDF)
+            # everything goes to the bed
+            affected_region_bed_df = svDF.rename(columns={"Chr":"chromosome", "Start":"start", "End":"end"})[["chromosome", "start", "end"]]
 
-    youshoulddefinethebedregionsofSVtypes
+            # all SVs count
+            nSVs_in_interesting_chromosomes = sum(affected_region_bed_df.chromosome.isin(interesting_chromosomes))
 
-    affected_region_bed_df
 
-    return affected_region_bed_df
+        # insertions (the b region will only be included as start)
+        elif svtype=="insertions":
 
-def get_bed_df_not_overlapping_with_SVs(all_regions_bed_df, svtypes, svtype_to_svfile, bed_regions_prefix, distance_between_SVs=2000):
+            # count the SVs
+            nSVs_in_interesting_chromosomes = sum(svDF.apply(lambda r: r["ChrA"] in interesting_chromosomes or r["ChrB"] in interesting_chromosomes, axis=1))
+
+            # initialize with the origin chromosome
+            affected_region_bed_df = svDF.rename(columns={"ChrA":"chromosome", "StartA":"start", "EndA":"end"})[["chromosome", "start", "end"]]
+
+            # add the end only with the start
+            chrB_df = svDF.rename(columns={"ChrB":"chromosome", "StartB":"start"}); chrB_df["end"] = chrB_df["start"]
+            affected_region_bed_df = affected_region_bed_df.append(chrB_df[["chromosome", "start", "end"]], sort=True)
+
+        else: raise ValueError("%s is not valid"%(svtype))
+
+
+        # add the confidence arround each region
+        affected_region_bed_df["start"] = (affected_region_bed_df.start - add_interval_bp).apply(lambda x: max([0,x]))
+        affected_region_bed_df["end"] = affected_region_bed_df.start + add_interval_bp
+
+
+    return affected_region_bed_df[["chromosome", "start", "end"]], nSVs_in_interesting_chromosomes
+
+def get_bed_df_not_overlapping_with_SVs(all_regions_bed_df, svtypes, svtype_to_svfile, bed_regions_prefix, distance_between_SVs=1000):
 
     """This function takes a bed df where all the regions of a genomes. It goes through a set of svs and returns the bed were there are regions where there are no SVs (at least by distance_between_SVs). It writes files under outdir"""
 
@@ -183,24 +212,200 @@ def get_bed_df_not_overlapping_with_SVs(all_regions_bed_df, svtypes, svtype_to_s
         # whenever the svtype is in svtype_to_svfile it has to be added to regions_with_SV_bed_df
         if svtype in svtype_to_svfile: 
 
-            # get the df
-            svDF = pd.read_csv(svtype_to_svfile[svtype], sep="\t")
+            regions_with_SV_bed_svtype_df, nSVs = get_affected_region_bed_for_SVdf(svtype_to_svfile[svtype], svtype, interesting_chromosomes, add_interval_bp=distance_between_SVs)
 
             # keep the number of SVs
-            svtype_to_nSVs[svtype] += len(svDF)
+            svtype_to_nSVs[svtype] += nSVs
 
             # append the bed regions
-            regions_with_SV_bed_df = regions_with_SV_bed_df.append(get_affected_region_bed_for_SVdf(svDF, svtype, interesting_chromosomes, add_interval_bp=distance_between_SVs))
+            regions_with_SV_bed_df = regions_with_SV_bed_df.append(regions_with_SV_bed_svtype_df, sort=True)
 
     # write the bed with the regions with SV
     regions_with_SV_bed = "%s_sv_regions.bed"%bed_regions_prefix
-    regions_with_SV_bed_df.to_csv(regions_with_SV_bed, sep="\t", index=False, header=False)
+    regions_with_SV_bed_df[["chromosome", "start", "end"]].to_csv(regions_with_SV_bed, sep="\t", index=False, header=False)
 
     # get the regions in all_regions_bed that are not in regions_with_SV_bed
     regions_without_SV_bed = "%s_noSV_regions.bed"%bed_regions_prefix
     fun.run_cmd("%s subtract -a %s -b %s > %s"%(bedtools, all_regions_bed, regions_with_SV_bed, regions_without_SV_bed))
 
     return regions_without_SV_bed, svtype_to_nSVs
+
+
+def format_translocation_row_simulateSV(r, chr_to_len, start_pos=1):
+
+    """balanced translocations have chromosomes sorted alphabetically and the A region has 1-BP and B region has BP-end. Start pos indicates where the start is"""
+
+    # initiaize edited row to put the content
+    er = {}
+
+    # edit balanced translocations
+    if r["Balanced"] is True:
+
+        # define the important fields
+        important_fields = {"Chr", "Start", "End", "Size", "BpSeq"}.intersection(set([k.rstrip("A").rstrip("B") for k in r.keys()]))
+
+        # map each END to the coordinates
+        coords_df = cp.deepcopy(pd.DataFrame({end : {field :  r["%s%s"%(field, end)] for field in important_fields} for end in {"A", "B"}}).transpose()) # columns are the coords and the index is each end
+
+        # add the breakpoint
+        coords_df["breakpoint"] = coords_df.apply(lambda c: sorted({c["End"], c["Start"]}.difference({start_pos, chr_to_len[c["Chr"]]}))[0], axis=1)
+        coords_df = coords_df.set_index("Chr", drop=False)
+
+        # add the segment which is copied (3end or 5end)
+        start_to_segment = {**{start_pos:"5end"}, **{s:"3end" for s in set(coords_df["Start"]).difference({start_pos})}}
+        coords_df["segment"] = coords_df.Start.apply(lambda x: start_to_segment[x])
+
+        # get the sorted chromosome
+        chrA_sorted, chrB_sorted = sorted(coords_df["Chr"])
+        er["ChrA"] = chrA_sorted
+        er["ChrB"] = chrB_sorted
+
+        # if the ends are the same, define the 5' ends to be joined, in a way that is alphabeticaally sorted by chromosome
+        if set(coords_df.segment)=={"3end"} or set(coords_df.segment)=={"5end"}:
+            er["StartA"] = start_pos
+            er["StartB"] = start_pos
+            er["EndA"] = coords_df.loc[chrA_sorted, "breakpoint"]
+            er["EndB"] = coords_df.loc[chrB_sorted, "breakpoint"]
+
+        # when there are different ends, you first put the 5' of the chrA_sorted, which is replaced with the 3' end of the chrB_sorte
+        else:
+            er["StartA"] = start_pos
+            er["StartB"] = coords_df.loc[chrB_sorted, "breakpoint"]
+            er["EndA"] = coords_df.loc[chrA_sorted, "breakpoint"]
+            er["EndB"] = chr_to_len[chrB_sorted]
+
+        # calculate the size
+        if "SizeA" in r.keys():
+            er["SizeA"] = er["EndA"] - er["StartA"] + start_pos
+            er["SizeB"] = er["EndB"] - er["StartB"] + start_pos
+
+        # add the bpseq as XXX
+        if "BpSeqA" in r.keys():
+            er["BpSeqA"] = "N"*len(r["BpSeqA"])
+            er["BpSeqB"] = "N"*len(r["BpSeqB"])
+
+    else: er = {field : r[field] for field in ["StartA", "EndA", "SizeA", "ChrA", "StartB", "EndB", "SizeB", "ChrB", "BpSeqA", "BpSeqB"] if field in r.keys()}
+
+    # change the fields
+    for k, v in er.items():
+        if pd.isna(v): er[k] = ""
+
+    # add extra things
+    if "Name" in r.keys(): er["Name"] = r["Name"]
+    er["Balanced"] = str(r["Balanced"]).upper()
+
+    # add X for empty BpSeqA 
+    if "BpSeqA" in er.keys():
+        for letter in {"A", "B"}:
+            if er["BpSeq%s"%letter]=="": er["BpSeq%s"%letter] = "X"
+
+    # return series
+    return pd.Series(er)
+
+def rewrite_translocations_uniformizedFormat_simulateSV(translocations_file, reference_genome):
+
+    """Takes the translocations file output by simulateSV and rewrites it in a way that the balanced translocations have chromosomes sorted alphabetically and the A region has 1-BP and B region has BP-end"""
+
+    print("rewriting %s"%translocations_file)
+
+    # define chromosome_to_length
+    chr_to_len = {seq.id: len(seq.seq) for seq in SeqIO.parse(reference_genome, "fasta")}
+
+    # load translocations
+    df = pd.read_csv(translocations_file, sep="\t")
+
+    # define a function that takes a translocation and formats it
+    df_corrected = df.apply(lambda r: format_translocation_row_simulateSV(r, chr_to_len), axis=1)[["Name", "ChrA", "StartA", "EndA", "SizeA", "ChrB", "StartB", "EndB", "SizeB", "Balanced", "BpSeqA", "BpSeqB"]]
+
+    # write the translocations
+    df_corrected.to_csv(translocations_file, sep="\t", header=True, index=False)
+
+def change_EmptyString_to_X(string):
+
+    """Takes an empty string and replaces it with X"""
+
+    if pd.isna(string) or len(string)==0 or string=="": return "X"
+    else: return string
+
+
+def rewrite_insertions_uniformizedFormat_simulateSV(insertions_file):
+
+    """Takes an insertions file and rewrites the fact that the BpSeq is empty"""
+
+    print("rewriting %s"%insertions_file)
+
+    # load df
+    df = pd.read_csv(insertions_file, sep="\t")
+
+    # correct BpSeq
+    for field in ["BpSeqA", "BpSeqB_5prime", "BpSeqB_3prime"]: df[field] = df[field].apply(change_EmptyString_to_X)
+    df["Copied"] = df.Copied.apply(lambda x: str(x).upper())
+
+    # write as corrected
+    df.to_csv(insertions_file, sep="\t", header=True, index=False)
+
+
+def get_tandemDuplications_file_in_target_regions(target_regions_bed, sizes, tanDup_file, max_n_copies=5):
+
+    """This function writes a file that contains tandem duplications (format like RSVsim) of 'sizes' into tanDupl_file. max_n_copies would be the maxium number of tanDups inserted.
+
+    We will try all the sizes down to 50, and if it is not possible to find them we'll drop them """
+
+    # load the regions bed and sort by size
+    regions_df = pd.read_csv(target_regions_bed, sep="\t", header=None, names=["chromosome", "start", "end"])
+    regions_df["size"] = regions_df.end - regions_df.start
+    regions_df = regions_df.sort_values(by="size", ascending=False)
+
+    # define the total number of tanDels
+    maximum_tan = len(sizes); n_tan_simulated = 0
+
+    # initialize a dict
+    tanDict = {}
+
+    # define the order of the sizes to try
+    if min(sizes)<=50: tried_sizes = list(reversed(sorted(sizes)))
+    else: tried_sizes = list(reversed(sorted(sizes))) + list(range(min(sizes), 50))
+
+    for size in tried_sizes:
+
+        # break if you have already simulated all the desired tandels
+        if n_tan_simulated>=maximum_tan: break
+
+        # find if there is a region in regions_df where it fits
+        df = regions_df[regions_df["size"]>=size]
+
+        # try another size if not found
+        if len(df)==0: continue
+
+        # get the largest window (upmost) to insert the tandem duplication and calculate the randomly inserted tanDup
+        target_window = df.iloc[0]
+        start_tanDup = random.randrange(target_window.start, (target_window.end-size-1))
+        end_tanDup = start_tanDup + size
+
+        # keep them
+        n_tan_simulated += 1
+        tanDict[n_tan_simulated] = {"Chr": target_window.chromosome, "Start":start_tanDup, "End":end_tanDup, "Name":"tandemDuplication%i_%s"%(n_tan_simulated, target_window.chromosome), "Duplications":random.randrange(2, max_n_copies), "Size":(end_tanDup-start_tanDup)}
+
+        # get a df with the left and right parts that would be kept after the tanDup is inserted
+        maxI = max(regions_df.index) # get the maxium current idx of the SVs
+        df_surrounding_regions = pd.DataFrame(
+            {maxI+1: {"chromosome":target_window.chromosome, "start":target_window.start, "end":start_tanDup-1000}, # 
+            maxI+2: {"chromosome":target_window.chromosome, "start":end_tanDup+1000, "end":target_window.end}}
+            ).transpose()
+
+        df_surrounding_regions["size"] = df_surrounding_regions.end - df_surrounding_regions.start
+
+        # add this df and remove the previous one
+        regions_df = regions_df.drop(target_window.name, axis=0) # remove the window were the dup was inserted
+        regions_df = regions_df.append(df_surrounding_regions, sort=True).sort_values(by="size", ascending=False) # add the newly broken regions 
+
+    # get the tan dict as numbers
+    tan_cols = ["Name", "Chr", "Start", "End", "Size", "Duplications"]
+    if len(tanDict)==0: tan_df = pd.DataFrame(columns=tan_cols)
+    else: tan_df = pd.DataFrame(tanDict).transpose()
+
+    # write
+    tan_df[tan_cols].to_csv(tanDup_file, sep="\t", header=True, index=False)
 
 def rearrange_genomes_simulateSV(reference_genome, outdir, replace=True, nvars=100, mitochondrial_chromosome="mito_C_glabrata_CBS138", simulated_svtype_to_svfile={}, svtypes={"insertions", "deletions", "inversions", "translocations", "tandemDuplications"}):
 
@@ -214,6 +419,23 @@ def rearrange_genomes_simulateSV(reference_genome, outdir, replace=True, nvars=1
 
     # map the chromosome to the length
     chrom_to_len = {s.id : len(s.seq) for s in SeqIO.parse(reference_genome, "fasta")}
+
+    # initialize a df where each svtype is mapped against a 
+    final_svtype_to_svDF = {}
+    for svtype in svtypes:
+        if svtype in simulated_svtype_to_svfile: 
+
+            # get the df and change the names
+            svDF = pd.read_csv(simulated_svtype_to_svfile[svtype], sep="\t")
+            svDF["name"] = svDF.name + "_realSV"
+
+            # keep all vals but the non real ones
+            final_svtype_to_svDF[svtype] = svDF[[c for c in svDF.keys() if "BpSeq" not in c]]
+
+        else: final_svtype_to_svDF[svtype] = pd.DataFrame()
+
+
+    ###### GENERATE ALL THE RANDOM SIMULATIONS THAT ARE NECESSARY TO ADD ON simulated_svtype_to_svfile ########
 
     # go through each of the mtDNA and gDNA
     for type_genome, chroms in [("mtDNA", mtDNA_chromosomes), ("gDNA", gDNA_chromosomes)]:
@@ -235,36 +457,85 @@ def rearrange_genomes_simulateSV(reference_genome, outdir, replace=True, nvars=1
         # define a bed file with all the data
         all_regions_bed_df = pd.DataFrame({chrom: {"start":0, "end":chrom_to_len[chrom]} for chrom in chroms}).transpose()
         all_regions_bed_df["chromosome"] = all_regions_bed_df.index
+        all_regions_bed_df = all_regions_bed_df[["chromosome", "start", "end"]]
 
         # get the regions without SV where simulations should be placed
         bed_regions_prefix = "%s/bed_regions"%genome_outdir
-        regions_without_SV_bed, svtype_to_nSVs = get_bed_df_not_overlapping_with_SVs(all_regions_bed_df[["chromosome", "start", "end"]], svtypes, simulated_svtype_to_svfile, bed_regions_prefix)
+        regions_without_SV_bed, svtype_to_nSVs = get_bed_df_not_overlapping_with_SVs(all_regions_bed_df, svtypes, simulated_svtype_to_svfile, bed_regions_prefix)
 
         # simulate random SVs into regions without previous SVs 
-        random_sim_dir = "%s/random_SVs"%genome_outdir; fun.delete_folder(random_sim_dir); fun.make_folder(random_sim_dir)
+        random_sim_dir = "%s/random_SVs"%genome_outdir; 
+
+        # make and delete the folder
+        fun.delete_folder(random_sim_dir); fun.make_folder(random_sim_dir)
+
+        #### GET THE RANDOM INS,INV,DEL,TRA ####
 
         # get the cmd of the simulation
         randomSV_cmd = "%s --input_genome %s --outdir %s --regions_bed %s"%(create_random_simulatedSVgenome_R, genome_file, random_sim_dir, regions_without_SV_bed)
 
         # add the number of each SV that should be added
-        svtype_to_arg = {"insertions":"number_Ins", "deletions":"number_Del", "inversions":"number_Inv", "translocations":"number_Tra", "tandemDuplications":"number_Dup"}
-        for svtype, number_alreadyGeneratedSVs in svtype_to_nSVs.items(): randomSV_cmd += " --%s %i"%(svtype_to_arg[svtype], max([1, (vars_to_simulate-svtype_to_nSVs[svtype])]))
-            
+        svtype_to_arg = {"insertions":"number_Ins", "deletions":"number_Del", "inversions":"number_Inv", "translocations":"number_Tra"}
+        for svtype, number_alreadyGeneratedSVs in svtype_to_nSVs.items(): 
+            if svtype not in svtype_to_arg: continue
+
+            randomSV_cmd += " --%s %i"%(svtype_to_arg[svtype], max([1, (vars_to_simulate-svtype_to_nSVs[svtype])]))
+
         # run the random simulation
         #std_rearranging_genome = "%s/simulation_std.txt"%random_sim_dir
         fun.run_cmd(randomSV_cmd)
 
+        # edit the translocations so that the balanced ones are sorted
+        translocations_file = "%s/translocations.tab"%random_sim_dir
+        if not fun.file_is_empty(translocations_file): rewrite_translocations_uniformizedFormat_simulateSV(translocations_file, genome_file)
+        else: open(translocations_file, "w").write("\t".join(["Name", "ChrA", "StartA", "EndA", "SizeA", "ChrB", "StartB", "EndB", "SizeB", "Balanced", "BpSeqA", "BpSeqB"])) # this needs to be 
+
+        # edit the insertions
+        insertions_file = "%s/insertions.tab"%random_sim_dir
+        rewrite_insertions_uniformizedFormat_simulateSV(insertions_file)
+        
+        ########################################
+
+        #### ADD THE TANDEM DUPLICATIONS #### 
+
+        # deifine the currently generated svtypes
+        random_svtypes_generated = {"insertions", "deletions", "translocations", "inversions"}
+
+        # get the randomly simulated svs into a dict, together with the randomly generated ones.
+        random_svtype_to_svfile = {svtype : "%s/%s.tab"%(random_sim_dir, svtype) for svtype in random_svtypes_generated}
+
+        # get the remaining bed regions
+        bed_regions_prefix = "%s/bed_regions_rmaining_afterInsInvDelTra"%genome_outdir
+        all_regions_bed_df =  pd.read_csv(regions_without_SV_bed, sep="\t", header=None, names=["chromosome", "start", "end"]) # these are the remining after removing the already present ones
+        regions_without_SV_bed, svtype_to_nSVs = get_bed_df_not_overlapping_with_SVs(all_regions_bed_df, random_svtypes_generated, random_svtype_to_svfile, bed_regions_prefix)
+
+        # get the tandem duplications for the 
+        tandemDuplications_file = "%s/tandemDuplications.tab"%random_sim_dir
+        sizes = list(pd.read_csv("%s/deletions.tab"%random_sim_dir, sep="\t")["Size"])
+        get_tandemDuplications_file_in_target_regions(regions_without_SV_bed, sizes, tandemDuplications_file)
+
+        ####################################
+
+        # add the simulations into simulated_svtype_to_svDF
+        for svtype, svDF in final_svtype_to_svDF.items():
+
+            # get the new sv
+            new_svDF = pd.DataFrame("%s/%s.tab"%(random_sim_dir, svtype))
+            new_svDF = new_svDF[[c for c in new_svDF.keys() if "BpSeq" not in c]]
+
+            # append 
+            svDF = svDF.append(new_svDF, sort=True)
+
+    ###############################################################################################################
 
 
-        adljhdaldah
+    ####### generate a rearranged genome with all the simulations in final_svtype_to_svDF #########
+
+    ###############################################################################################
 
 
 
-
-        print(all_regions_bed)
-
-        slkjfsslfhj
-
+    adljhdaldah
 
 
 
