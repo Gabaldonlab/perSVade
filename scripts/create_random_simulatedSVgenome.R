@@ -11,7 +11,7 @@ library(GenomicRanges, quietly=TRUE)
 library(R.utils, quietly=TRUE)
 
 # print the traceback on exit
-options(error=function()traceback(2))
+#options(error=function()traceback(2))
 
 # parse cmd line args
 argp = arg_parser("Takes a genome and generates a simulated genome with rearrangements with the known rearrangements in outdir. It will generate these rearrangements and the rearranged genome under outdir, only in the regions that are provided (--regions_bed)")
@@ -20,10 +20,11 @@ argp = add_argument(argp, "--input_genome", help="Path to the genome where to ge
 argp = add_argument(argp, "--outdir", help="Path to the directory where to write all the files")
 argp = add_argument(argp, "--regions_bed", help="Path to the bed file where the simulations should be generated")
 
-argp = add_argument(argp, "--number_Ins", default=100, help="The number of insertions to generate")
-argp = add_argument(argp, "--number_Inv", default=100, help="The number of inversions to generate")
-argp = add_argument(argp, "--number_Del", default=100, help="The number of deletions to generate")
-argp = add_argument(argp, "--number_Tra", default=100, help="The number of translocations to generate")
+argp = add_argument(argp, "--number_Ins", default=0, help="The number of insertions to generate")
+argp = add_argument(argp, "--number_Inv", default=0, help="The number of inversions to generate")
+argp = add_argument(argp, "--number_Del", default=0, help="The number of deletions to generate")
+argp = add_argument(argp, "--number_Tra", default=0, help="The number of translocations to generate")
+argp = add_argument(argp, "--number_Dup", default=0, help="The number of duplications to generate")
 
 argp = add_argument(argp, "--percCopiedIns", default=0.5, help="The fraction of INS that are copy-and-paste")
 argp = add_argument(argp, "--percBalancedTrans", default=1, help="The fraction of TRA that are balanced")
@@ -72,8 +73,8 @@ all_fraction_shortest_chr_to_consider = c(0.1, 0.07, 0.05, 0.03, 0.02, 0.01, 0.0
 
 
 # define the fraction of nevents that will be considered
-#all_fraction_n_events = c(1, 0.8, 0.7, 0.5, 0.3, 0.2, 0.1, 0.05, 0.01, 0.05)
-all_fraction_n_events = c(1)
+all_fraction_n_events = c(1, 0.8, 0.7, 0.5, 0.3, 0.2, 0.1, 0.05, 0.01, 0.05)
+#all_fraction_n_events = c(1)
 
 # first iterate through the number of events. It is more important to get as much events as possible
 for (fraction_n_events in all_fraction_n_events) {
@@ -83,6 +84,7 @@ for (fraction_n_events in all_fraction_n_events) {
   number_Inv = as.integer(argv$number_Inv*fraction_n_events)
   number_Del = as.integer(argv$number_Del*fraction_n_events)
   number_Tra = as.integer(argv$number_Tra*fraction_n_events)
+  number_Dup = as.integer(argv$number_Dup*fraction_n_events)
 
   # the maximum number of translocations is defined by the number of chromosomes
   max_trans =  length(chromosomes)-1
@@ -101,11 +103,12 @@ for (fraction_n_events in all_fraction_n_events) {
     size_Del = estimateSVSizes(n=number_Del, minSize=50, maxSize=size, default="deletions", hist=FALSE)
     size_Ins = estimateSVSizes(n=number_Ins, minSize=50, maxSize=size, default="insertions", hist=FALSE)
     size_Inv = estimateSVSizes(n=number_Inv, minSize=50, maxSize=size, default="inversions", hist=FALSE)
-    
+    size_Dup = estimateSVSizes(n=number_Dup, minSize=50, maxSize=size, default="inversions", hist=FALSE)
+
     # try to run simulations, depending on the provided bed file
     gr_regions = import(regions_bed)
 
-    rearranged_genome = withTimeout(try(simulateSV(output=NA, genome=genome_obj, chrs=chromosomes, dels=number_Del, ins=number_Ins, invs=number_Inv, trans=number_Tra, sizeDels=size_Del, sizeIns=size_Ins, sizeInvs=size_Inv,  percCopiedIns=argv$percCopiedIns, percBalancedTrans=argv$percBalancedTrans, bpFlankSize=0, percSNPs=0, indelProb=0, maxIndelSize=0, repeatBias=FALSE, bpSeqSize=100, random=TRUE, verbose=TRUE, regionsDels=gr_regions, regionsIns=gr_regions, regionsInvs=gr_regions, regionsTrans=gr_regions)), timeout=argv$max_time_rearrangement)
+    rearranged_genome = withTimeout(try(simulateSV(output=NA, genome=genome_obj, chrs=chromosomes, dels=number_Del, ins=number_Ins, invs=number_Inv, trans=number_Tra, dups=number_Dup, sizeDels=size_Del, sizeIns=size_Ins, sizeInvs=size_Inv,  sizeDups=size_Dup, percCopiedIns=argv$percCopiedIns, percBalancedTrans=argv$percBalancedTrans, bpFlankSize=0, percSNPs=0, indelProb=0, maxIndelSize=0, repeatBias=FALSE, bpSeqSize=100, random=TRUE, verbose=TRUE, regionsDels=gr_regions, regionsIns=gr_regions, regionsInvs=gr_regions, regionsTrans=gr_regions)), timeout=argv$max_time_rearrangement, regionsDups=gr_regions, maxDups=3)
 
     #rearranged_genome = simulateSV(output=NA, genome=genome_obj, chrs=chromosomes, dels=number_Del, ins=number_Ins, invs=number_Inv, dups=number_Dup, trans=number_Tra, sizeDels=size_Del, sizeIns=size_Ins, sizeInvs=size_Inv, sizeDups=size_Dup, maxDups=2, percCopiedIns=argv$percCopiedIns, percBalancedTrans=argv$percBalancedTrans, bpFlankSize=0, percSNPs=0, indelProb=0, maxIndelSize=0, repeatBias=FALSE, bpSeqSize=100, random=TRUE, verbose=TRUE, regionsDels=gr_regions, regionsIns=gr_regions, regionsInvs=gr_regions, regionsDups=gr_regions, regionsTrans=gr_regions)
       
@@ -132,6 +135,10 @@ report_genome_rearranging = paste(report_genome_rearranging, report, sep="")
 write.table(metadata(rearranged_genome)$insertions, file=paste(outdir, "insertions.tab", sep="/"), sep="\t", row.names=FALSE, col.names=TRUE, quote=FALSE)
 write.table(metadata(rearranged_genome)$deletions, file=paste(outdir, "deletions.tab", sep="/"), sep="\t", row.names=FALSE, col.names=TRUE, quote=FALSE)
 write.table(metadata(rearranged_genome)$inversions, file=paste(outdir, "inversions.tab", sep="/"), sep="\t", row.names=FALSE, col.names=TRUE, quote=FALSE)
+
+if (number_Dup>0){
+  write.table(metadata(rearranged_genome)$tandemDuplications, file=paste(outdir, "tandemDuplications.tab", sep="/"), sep="\t", row.names=FALSE, col.names=TRUE, quote=FALSE)
+}
 
 # only write translocations if any generated
 if (number_Tra>0){
