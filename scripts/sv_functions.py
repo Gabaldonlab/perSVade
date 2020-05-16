@@ -57,10 +57,6 @@ CWD = "/".join(__file__.split("/")[0:-1]); sys.path.insert(0, CWD)
 # define the EnvDir where the environment is defined
 EnvDir = "/".join(sys.executable.split("/")[0:-2])
 
-# import functions
-import graphics_functions as graph_fun
-import smallVarsCNV_functions as fun
-
 # EnvDir executables. These are all the ones installed with conda
 JAVA = "%s/bin/java"%EnvDir
 bcftools = "%s/bin/bcftools"%EnvDir
@@ -125,21 +121,152 @@ analyze_svVCF_simple = "%s/generate_files_from_svVCF_simple.R"%CWD
 # define the strings that have to be considered as NaN in the VCF parsing
 vcf_strings_as_NaNs = ['', '#N/A', '#N/A N/A', '#NA', '-1.#IND', '-1.#QNAN', '-NaN', '-nan', '1.#IND', '1.#QNAN', 'N/A', 'NULL', 'NaN', 'n/a', 'nan', 'null']
 
+
+# define default parameters for gridss filtering
+default_filtersDict_gridss = {"min_Nfragments":0, "min_af":0.0, "wrong_FILTERtags":("",), "filter_polyGC":False, "filter_noSplitReads":False, "filter_noReadPairs":False, "maximum_strand_bias":1.0, "maximum_microhomology":1000000000, "maximum_lenght_inexactHomology":100000000, "range_filt_DEL_breakpoints":(0,1), "min_length_inversions":0, "dif_between_insert_and_del":0, "max_to_be_considered_small_event":1, "wrong_INFOtags":('IMPRECISE',), "min_size":50, "min_af_EitherSmallOrLargeEvent":0.0}
+
+
 ####################################
 ####################################
 ####################################
+
+def id_generator(size=10, chars=string.ascii_uppercase + string.digits, already_existing_ids=set()):
+
+    """ already_existing_ids is a set that indicates whihc IDs can't be picked """
+
+    ID = ''.join(random.choice(chars) for _ in range(size))
+    while ID in already_existing_ids:
+        ID = ''.join(random.choice(chars) for _ in range(size))
+
+    return ID
+
+def run_cmd(cmd):
+
+    """Runs a cmd under the VarCall_CNV_env environment, as defined in CONDA_ACTIVATING_CMD"""
+
+    out_stat = os.system(cmd); 
+    if out_stat!=0: raise ValueError("\n%s\n did not finish correctly. Out status: %i"%(cmd, out_stat))
+
+def get_dir(filename): return "/".join(filename.split("/")[0:-1])
+
+def get_file(filename): return filename.split("/")[-1]
+
+def file_is_empty(path): 
+    
+    """ask if a file is empty or does not exist """
+    
+    if not os.path.isfile(path):
+        return_val = True
+    elif os.stat(path).st_size==0:
+        return_val = True
+    else:
+        return_val = False
+            
+    return return_val
+
+def remove_file(f):
+
+    if os.path.isfile(f): os.unlink(f)
+
+def delete_folder(f):
+
+    if os.path.isdir(f): shutil.rmtree(f)
+
+def make_folder(f):
+
+    if not os.path.isdir(f): os.mkdir(f)
+
+def delete_file_or_folder(f):
+
+    """Takes a path and removes it"""
+
+    if os.path.isdir(f): shutil.rmtree(f)
+    if os.path.isfile(f): os.unlink(f)
+
+def run_bwa_mem(fastq1, fastq2, ref, outdir, bamfile, sorted_bam, index_bam, name_sample, threads=1, replace=False):
+
+    """Takes a set of files and runs bwa mem getting sorted_bam and index_bam"""
+
+    if file_is_empty(sorted_bam) or file_is_empty(index_bam) or replace is True:
+
+        #index fasta
+        index_files = ["%s.%s"%(ref, x) for x in ["amb", "ann", "bwt", "pac", "sa"]]
+
+        if any([file_is_empty(x) for x in index_files]) or replace is True:
+            print("Indexing fasta")
+
+            # create a branch reference, which will have a tag that is unique to this run. This is important since sometimes you run this pipeline in parallel, and this may give errors in fasta indexing.
+            branch_ref = "%s.%s.fasta"%(ref, id_generator())
+            shutil.copy2(ref, branch_ref)
+
+            # run indexing in the copy
+            cmd_indexFasta = "%s index %s"%(bwa, branch_ref); run_cmd(cmd_indexFasta) # creates a set of indexes of fasta
+            index_files_branch = ["%s.%s"%(branch_ref, x) for x in ["amb", "ann", "bwt", "pac", "sa"]]
+
+            # rename each of the indices so that it matches the ref format
+            for branchIDX, realIDX in dict(zip(index_files_branch, index_files)).items(): os.rename(branchIDX, realIDX)
+
+            # rm the branch
+            os.unlink(branch_ref)
+
+        #BWA MEM --> get .sam
+        samfile = "%s/aligned_reads.sam"%outdir;
+        if file_is_empty(samfile) or replace is True:
+
+            # remove previuous generated temporary file
+            if os.path.isfile("%s.tmp"%samfile): os.unlink("%s.tmp"%samfile)
+
+            print("Running bwa mem")
+            cmd_bwa = '%s mem -R "@RG\\tID:%s\\tSM:%s" -t %i %s %s %s > %s.tmp'%(bwa, name_sample, name_sample, threads, ref, fastq1, fastq2, samfile); run_cmd(cmd_bwa)
+            os.rename("%s.tmp"%samfile , samfile)
+
+        # convert to bam 
+        if file_is_empty(bamfile) or replace is True:
+            print("Converting to bam")
+            cmd_toBAM = "%s view -Sbu %s > %s.tmp"%(samtools, samfile, bamfile); run_cmd(cmd_toBAM)
+            os.rename("%s.tmp"%bamfile , bamfile)
+
+            # remove the sam
+            print("Removing sam"); os.unlink(samfile)
+
+        # sorting bam
+        if file_is_empty(sorted_bam) or replace is True:
+            print("Sorting bam")
+
+            # remove all temporary files generated previously in samtools sort (they'd make a new sort to be an error)
+            for outdir_file in os.listdir(outdir): 
+                fullfilepath = "%s/%s"%(outdir, outdir_file)
+                if outdir_file.startswith("aligned_reads") and ".tmp." in outdir_file: os.unlink(fullfilepath)
+
+            # sort
+            cmd_sort = "%s sort --threads %i -o %s.tmp %s"%(samtools, threads, sorted_bam, bamfile); run_cmd(cmd_sort)
+            os.rename("%s.tmp"%sorted_bam , sorted_bam)
+
+            # remove the the raw bam file
+            print("Removing unsorted bam"); os.unlink(bamfile)
+
+    # indexing bam
+    if file_is_empty(index_bam) or replace is True:
+        print("Indexing bam")
+        cmd_indexBam = "%s index -@ %i %s"%(samtools, threads, sorted_bam); run_cmd(cmd_indexBam)   # creates a .bai of sorted_bam
+
+
+    print("ALIGNMENT STEP WAS CORRECTLY PERFORMED")
+
+def make_flat_listOflists(LoL):
+
+    return list(itertools.chain.from_iterable(LoL))
 
 def clean_reference_genome_windows_files(reference_genome):
 
     """Cleans all the files under reference_genome that are windows files and bed's """
 
     print("removing windows files")
-    ref_dir = fun.get_dir(reference_genome)
-    ref_name = fun.get_file(reference_genome)
+    ref_dir = get_dir(reference_genome)
+    ref_name = get_file(reference_genome)
 
     for file in os.listdir(ref_dir):
-        if file.startswith(ref_name) and "windows" in file and "bp.bed" in file : fun.remove_file("%s/%s"%(ref_dir, file))
-
+        if file.startswith(ref_name) and "windows" in file and "bp.bed" in file : remove_file("%s/%s"%(ref_dir, file))
 
 def get_affected_region_bed_for_SVdf(svDF, svtype, interesting_chromosomes, add_interval_bp=1000):
 
@@ -247,10 +374,9 @@ def get_bed_df_not_overlapping_with_SVs(all_regions_bed_df, svtypes, svtype_to_s
 
     # get the regions in all_regions_bed that are not in regions_with_SV_bed
     regions_without_SV_bed = "%s_noSV_regions.bed"%bed_regions_prefix
-    fun.run_cmd("%s subtract -a %s -b %s > %s"%(bedtools, all_regions_bed, regions_with_SV_bed, regions_without_SV_bed))
+    run_cmd("%s subtract -a %s -b %s > %s"%(bedtools, all_regions_bed, regions_with_SV_bed, regions_without_SV_bed))
 
     return regions_without_SV_bed, svtype_to_nSVs
-
 
 def format_translocation_row_simulateSV(r, chr_to_len, start_pos=1):
 
@@ -330,7 +456,7 @@ def rewrite_translocations_uniformizedFormat_simulateSV(translocations_file, ref
     print("rewriting %s"%translocations_file)
 
     # keep the unmodified version
-    fun.run_cmd("cp %s %s.unmodified"%(translocations_file, translocations_file))
+    run_cmd("cp %s %s.unmodified"%(translocations_file, translocations_file))
 
     # define chromosome_to_length
     chr_to_len = {seq.id: len(seq.seq) for seq in SeqIO.parse(reference_genome, "fasta")}
@@ -352,7 +478,6 @@ def change_EmptyString_to_X(string):
 
     if pd.isna(string) or len(string)==0 or string=="": return "X"
     else: return string
-
 
 def rewrite_insertions_uniformizedFormat_simulateSV(insertions_file):
 
@@ -380,12 +505,12 @@ def rearrange_genomes_simulateSV(reference_genome, outdir, replace=True, nvars=5
     final_rearranged_genome = "%s/rearranged_genome.fasta"%final_simulated_SVs_dir
     final_rearranged_genome_finalFile = "%s.performed"%(final_rearranged_genome)
 
-    if fun.file_is_empty(final_rearranged_genome_finalFile) or replace is True:
+    if file_is_empty(final_rearranged_genome_finalFile) or replace is True:
 
         # make the folder again
-        fun.delete_folder(outdir)
-        fun.make_folder(outdir)
-        fun.make_folder(final_simulated_SVs_dir)
+        delete_folder(outdir)
+        make_folder(outdir)
+        make_folder(final_simulated_SVs_dir)
 
         # define the different types of chromosomes. Note that the mtDNA chromosomes will be simulated appart
         all_chromosomes = {s.id for s in SeqIO.parse(reference_genome, "fasta")}
@@ -426,7 +551,7 @@ def rearrange_genomes_simulateSV(reference_genome, outdir, replace=True, nvars=5
             else: vars_to_simulate = int(nvars*0.05) + 1
 
             # define the outdir
-            genome_outdir = "%s/simulation_%s"%(outdir, type_genome); fun.make_folder(genome_outdir)
+            genome_outdir = "%s/simulation_%s"%(outdir, type_genome); make_folder(genome_outdir)
 
             # get the genome 
             genome_file = "%s/genome.fasta"%genome_outdir
@@ -446,10 +571,10 @@ def rearrange_genomes_simulateSV(reference_genome, outdir, replace=True, nvars=5
 
             #### GET THE RANDOM INS,INV,DEL,TRA ####
 
-            if any([fun.file_is_empty("%s/%s.tab"%(random_sim_dir, svtype)) for svtype in {"insertions", "deletions", "translocations", "inversions"}]) or replace is True:
+            if any([file_is_empty("%s/%s.tab"%(random_sim_dir, svtype)) for svtype in {"insertions", "deletions", "translocations", "inversions"}]) or replace is True:
 
                 # make and delete the folder
-                fun.delete_folder(random_sim_dir); fun.make_folder(random_sim_dir)
+                delete_folder(random_sim_dir); make_folder(random_sim_dir)
 
                 # get the cmd of the simulation
                 randomSV_cmd = "%s --input_genome %s --outdir %s --regions_bed %s"%(create_random_simulatedSVgenome_R, genome_file, random_sim_dir, regions_without_SV_bed)
@@ -465,11 +590,11 @@ def rearrange_genomes_simulateSV(reference_genome, outdir, replace=True, nvars=5
 
                 # run the random simulation
                 std_rearranging_genome = "%s/simulation_std.txt"%random_sim_dir
-                fun.run_cmd("%s > %s 2>&1"%(randomSV_cmd, std_rearranging_genome))
+                run_cmd("%s > %s 2>&1"%(randomSV_cmd, std_rearranging_genome))
 
                 # edit the translocations so that the balanced ones are sorted
                 translocations_file = "%s/translocations.tab"%random_sim_dir
-                if fun.file_is_empty(translocations_file): open(translocations_file, "w").write("\t".join(["Name", "ChrA", "StartA", "EndA", "SizeA", "ChrB", "StartB", "EndB", "SizeB", "Balanced", "BpSeqA", "BpSeqB"])) # this needs to be 
+                if file_is_empty(translocations_file): open(translocations_file, "w").write("\t".join(["Name", "ChrA", "StartA", "EndA", "SizeA", "ChrB", "StartB", "EndB", "SizeB", "Balanced", "BpSeqA", "BpSeqB"])) # this needs to be 
 
             ########################################
 
@@ -507,7 +632,7 @@ def rearrange_genomes_simulateSV(reference_genome, outdir, replace=True, nvars=5
 
         # run the cmd
         std_rearranging_genome = "%s/simulation_std.txt"%final_simulated_SVs_dir
-        fun.run_cmd("%s > %s 2>&1"%(targetSV_cmd, std_rearranging_genome))
+        run_cmd("%s > %s 2>&1"%(targetSV_cmd, std_rearranging_genome))
 
         # edit the insertions
         insertions_file = "%s/insertions.tab"%final_simulated_SVs_dir
@@ -527,11 +652,494 @@ def rearrange_genomes_simulateSV(reference_genome, outdir, replace=True, nvars=5
 
     return final_svtype_to_svfile, final_rearranged_genome
 
+def get_int_or_float_as_text(number):
+
+    """Formats numbers"""
+
+    if int(number)==float(number): return "%i"%number
+    else: 
+        float_parts = ("%.1f"%number).split(".")
+
+        if float_parts[0]=="0": return ".%s"%float_parts[1]
+        else: return "%.1f"%number
+
+def convert_fasta_to_fqgz(fasta_file, replace=False, remove_fasta=True):
+
+    """Takes a fasta file and converts it to fq"""
+
+    # define fastq name
+    prefix = fasta_file.rstrip(".fasta").rstrip(".fa")
+    fastqgz = "%s.fq.gz"%prefix
+    fastqgz_tmp = "%s.tmp.fq.gz"%prefix
+
+    # convert into fastq and gzip
+    if file_is_empty(fastqgz) or replace is True:
+        print("generating %s"%fastqgz)
+
+        # convert
+        print("running reformat")
+        run_cmd("%s in=%s out=%s qfake=50 overwrite=true"%(bbmap_reformat_sh, fasta_file, fastqgz_tmp))
+
+        # remove the fasta
+        if remove_fasta is True: os.unlink(fasta_file)
+
+        os.rename(fastqgz_tmp, fastqgz)
+
+    return fastqgz
+
+def get_mosdepth_coverage_per_windows_output_likeBamStats(fileprefix, sorted_bam, windows_bed, replace=False, extra_threads=0, chromosome_id=""):
+
+    """This function uses mosdepth to get the coverage for some regions in bed for a sorted_bam """
+
+    # get outfiles
+    fileprefix_tmp = "%s.tmp"%fileprefix
+    regions_file = "%s.regions.bed.gz"%fileprefix 
+    regions_file_tmp = "%s.regions.bed.gz"%fileprefix_tmp 
+    thresholds_file = "%s.thresholds.bed.gz"%fileprefix 
+    thresholds_file_tmp = "%s.thresholds.bed.gz"%fileprefix_tmp
+
+    if file_is_empty(regions_file) or file_is_empty(thresholds_file) or replace is True:
+
+        print("running mosdepth into %s"%fileprefix)
+        
+        # change the end, setting it to -1, and also sorting
+        windows_1_based = "%s.1_based.bed"%windows_bed
+        run_cmd(""" awk '{print $1 "\t" ($2+1) "\t" ($3)}' %s | sort -k1,1 -k2,2n > %s"""%(windows_bed, windows_1_based))
+
+        # get the cmd
+        cmd = "%s --threads %i --by %s --no-per-base --fast-mode --thresholds 1 --use-median %s %s"%(mosdepth, extra_threads, windows_1_based, fileprefix_tmp, sorted_bam) # mosdepth does not look at internal cigar operations or correct mate overlaps (recommended for most use-cases). It is also faster
+
+        # add the chromosome_id if provided
+        if chromosome_id!="": cmd = cmd.replace("--use-median", "--use-median --chrom %s"%chromosome_id)
+
+        # run 
+        run_cmd(cmd)
+
+        # remove the 1-based file
+        remove_file(windows_1_based)
+ 
+        # remove innecessary files
+        for sufix in ["mosdepth.global.dist.txt", "mosdepth.region.dist.txt", "mosdepth.summary.txt", "thresholds.bed.gz.csi", "regions.bed.gz.csi"]: remove_file("%s.%s"%(fileprefix_tmp, sufix))
+
+        # keep
+        os.rename(regions_file_tmp, regions_file)
+        os.rename(thresholds_file_tmp, thresholds_file)
+
+    print("arranging mosdepth output into df")
+
+    # get as dfs
+    df_regions = pd.read_csv(regions_file, sep="\t", header=-1, names=["#chrom",  "start", "end", "mediancov_1"]).drop_duplicates(subset=["#chrom",  "start", "end"])
+    df_thresholds = pd.read_csv(thresholds_file, sep="\t").drop_duplicates(subset=["#chrom",  "start", "end"])
+
+    # add the number of basepairs in each region that are covered by at least one
+    try: df = df_regions.merge(df_thresholds, on=["#chrom",  "start", "end"], validate="one_to_one").rename(columns={"1X":"nbp_more_than_1x"})
+    except:
+        print("!!!!!!!!regions:%s, \n thresholds:%s, \n prefix:%s"%(regions_file, thresholds_file, fileprefix))
+        raise ValueError("There was an error with joining the mosdepth outputs")
+
+    def convert_to_float(x):
+        
+        """Takes a number and converts to float, and 0 if NaN"""
+
+        if pd.isna(x): return 0.0
+        else: return float(x)
 
 
-def generate_tables_of_SV_between_genomes_gridssClove(query_genome, reference_genome, replace=False, threads=4, coverage=10, insert_size=250, read_lengths=[kb*1000 for kb in [0.5, 0.7, 0.9, 1, 1.3, 1.5, 2]], error_rate=0.0, expected_ploidy=1):
+    # add some trivial info
+    df["length"] = df.end - df.start
+    df["nocoveragebp_1"] = df.length - df.nbp_more_than_1x
+    df["percentcovered_1"] = 100 - ((df.nocoveragebp_1/df.length) * 100).apply(convert_to_float)
 
-    """Takes a bam file with aligned reads or genomes and generates calls, returning a dict that maps variation type to variants"""
+    # get as 0-based
+    df["start"] = df.start - 1
+
+    # delete unnecessary files
+    for f in [regions_file, thresholds_file]: remove_file(f)
+
+    return df
+
+def get_coverage_per_window_for_chromosomeDF(chromosome_id, destination_dir, windows_bed, sorted_bam, replace, window_l):
+
+    """Takes a chromosome id, a destination dir where to write files, a windows file (provided by generate_coverage_per_window_file_parallel) and a sorted bam and it generates a dataframe with the coverage stats"""
+
+    # define the output coverage file
+    print("running coverage calculation for %s"%chromosome_id)
+        
+    # generate a randomID
+    randID = id_generator(25)
+
+    # define a file for the coverage
+    windows_bed_chromsome = "%s.%s.%s.bed"%(windows_bed, chromosome_id, randID)
+    run_cmd("grep $'%s\t' %s > %s"%(chromosome_id, windows_bed, windows_bed_chromsome))
+
+    # if there is nothing, return an empty df
+    bamstats_fields = ["#chrom", "start", "end", "length", "mediancov_1", "nocoveragebp_1", "percentcovered_1"]
+    if file_is_empty(windows_bed_chromsome): return pd.DataFrame(columns=bamstats_fields)
+
+    # calculate extra threads
+    extra_threads = multiproc.cpu_count() - 1
+
+    # define a file prefix on which to calculate the coverage
+    mosdepth_outprefix = "%s.mosdepth_output"%windows_bed_chromsome
+
+    # get a df that has all the
+    df_coverage =  get_mosdepth_coverage_per_windows_output_likeBamStats(mosdepth_outprefix, sorted_bam, windows_bed_chromsome, replace=replace, extra_threads=extra_threads, chromosome_id=chromosome_id)
+
+    remove_file(windows_bed_chromsome)
+
+    return df_coverage[bamstats_fields]
+
+
+
+def generate_coverage_per_window_file_parallel(reference_genome, destination_dir, sorted_bam, windows_file="none", replace=False, window_l=1000, run_in_parallel=True, delete_bams=True):
+
+    """Takes a reference genome and a sorted bam and runs a calculation of coverage per window (with bamstats04_jar) in parallel for sorted_bam, writing results under ddestination_dir. if window_file is provided then it is used. If not, it generates a file with non overlappping windows of length window_l"""
+
+    # in the case that you have provided a window file
+    if windows_file=="none":
+
+        make_folder(destination_dir)
+
+        # first generate the windows file
+        windows_file = "%s.windows%ibp.bed"%(reference_genome, window_l)
+        run_cmd("%s makewindows -g %s.fai -w %i > %s"%(bedtools, reference_genome, window_l, windows_file))
+
+        # define the file
+        coverage_file = "%s/coverage_windows_%ibp.tab"%(destination_dir, window_l)
+
+        # define the chromosomes
+        all_chromosome_IDs = [seq.id for seq in SeqIO.parse(reference_genome, "fasta")]
+
+    # in the case you have provied a window file
+    elif not file_is_empty(windows_file):
+
+        # rename windows_file so that it is sorted
+        pd.read_csv(windows_file, sep="\t", header=None, names=["chromosome", "start", "end"]).sort_values(by=["chromosome", "start", "end"]).to_csv(windows_file, header=False, index=False, sep="\t")
+
+        # create the coverage file
+        coverage_file = "%s.coverage_provided_windows.tab"%windows_file
+
+        # define the destination dir personalized for the given windows file
+        destination_dir = "%s.coverage_measurement_destination"%windows_file; make_folder(destination_dir)
+
+        # define the chromosomes
+        all_chromosome_IDs = sorted(set(pd.read_csv(windows_file, sep="\t", header=None, names=["chromosome", "start", "end"])["chromosome"]))
+
+        # debug the fact that there is nothing to analyze
+        if len(all_chromosome_IDs)==0: raise ValueError("There are no chromosomes in %s, so that no coverage can be calculated"%windows_file)
+
+    else: raise ValueError("The provided windows_file %s does not exist"%windows_file)
+
+    # generate the coverage file in parallel    
+    if file_is_empty(coverage_file) or replace is True:
+
+        # get the chromosomal dfs
+        inputs_run = [(ID, destination_dir, windows_file, sorted_bam, replace, window_l) for ID in all_chromosome_IDs]
+
+        if run_in_parallel is True:
+        #if False is True: # DEBUG!!! ALWAYS NOT RUN IN PARALLEL # never running in parallel
+            
+            try:
+
+                # initialize the pool class with the available CPUs --> this is syncronous parallelization
+                pool = multiproc.Pool(multiproc.cpu_count())
+
+                # run in parallel the coverage generation, which returns a list of dataframes, each with one chromosome
+                chromosomal_dfs = pool.starmap(get_coverage_per_window_for_chromosomeDF, inputs_run)
+
+                # close the pool
+                pool.close(); pool.terminate(); pool.join()
+                
+            except KeyboardInterrupt:
+                
+                pool.close(); pool.terminate(); pool.join()
+                raise ValueError("Keyboard Interrupt")
+
+        else: chromosomal_dfs = list(map(lambda x: get_coverage_per_window_for_chromosomeDF(x[0], x[1], x[2], x[3], x[4], x[5]), inputs_run))
+
+        # merge the dfs
+        all_df = pd.DataFrame()
+        for df in chromosomal_dfs: all_df = all_df.append(df, sort=True)
+
+        # remove chromosomal files:
+        for ID in all_chromosome_IDs: remove_file("%s/%s_coverage_windows%ibp.tab"%(destination_dir, ID, window_l))
+
+        # check that it is not empty
+        if len(all_df)==0: raise ValueError("There is no proper coverage calculation for %s on windows %s"%(sorted_bam, windows_file))
+
+        # write
+        all_df.to_csv(coverage_file, sep="\t", header=True, index=False)
+
+        # at the end remove all the bam files # at some point I commented the lines below and I don't know why
+        """
+        if delete_bams is True:
+            print("removing chromosomal bamfiles")
+
+            for chrom in all_chromosome_IDs: 
+                sorted_bam_chr = "%s.%s.bam"%(sorted_bam, chrom)
+                os.unlink(sorted_bam_chr); os.unlink("%s.bai"%sorted_bam_chr)
+        """
+
+    return coverage_file
+
+def plot_coverage_across_genome_pairedEndReads(sorted_bam, reference_genome, window_l=10000, replace=False):
+
+    """Takes a sorted_bam and plots the coverage for windows of the genome"""
+
+    print("plotting coverage across genome")
+
+    # get coverage df  
+    calculate_coverage_dir = "%s.calculating_windowcoverage"%sorted_bam; make_folder(calculate_coverage_dir)
+    coverage_df = pd.read_csv(generate_coverage_per_window_file_parallel(reference_genome, calculate_coverage_dir, sorted_bam, replace=replace, window_l=window_l), "\t")
+    all_chromosomes = sorted(set(coverage_df["#chrom"]))
+
+    # plot, for each chromosome, the coverage
+    fig = plt.figure(figsize=(6*len(all_chromosomes), 8)); I=1
+    for yfield in ["mediancov_1", "percentcovered_1"]:
+        for chromosome in all_chromosomes:
+
+            ax = plt.subplot(2, len(all_chromosomes), I); I+=1
+            df_c = coverage_df[coverage_df["#chrom"]==chromosome]
+            sns.lineplot(x="start", y=yfield, data=df_c)
+
+            ax.set_title(chromosome)
+
+
+    #fig.tight_layout()  # otherwise the right y-label is slightly 
+    filename="%s.coverage.pdf"%(sorted_bam)
+    fig.savefig(filename, bbox_inches='tight');
+    #if is_cluster is False: plt.show()
+    plt.close(fig)
+
+
+
+def simulate_pairedEndReads_per_chromosome_uniform(chr_obj, coverage, insert_size, read_lengths, max_fraction_chromosome=0.1):
+
+    """This function takes a chromosome object (SeqRecord) and it generates reads that are as long as read_lengths, in a window that increases. It returns a list of objects, each of which has a chromosomeID_readID"""
+
+    # define a function that takes a start, a length and an insert size and returns formated reads
+    def get_paired_reads_list(chr_obj, startRead, len_read, insert_size, extraID):
+
+        # define the end of the read
+        endRead = startRead + len_read
+
+        # define the coordinates of the pair
+        startPair = endRead + insert_size
+        endPair = startPair + len_read
+
+        if endRead>len_chromosome or endPair>len_chromosome: raise ValueError("The calculation of read ends was not correct")
+
+        # define ID of the read
+        ID = "%s_readStart%i_%s"%(chr_obj.id, startRead, extraID)
+
+        # keep the read and the pair
+        read = chr_obj[startRead:endRead]
+        read.id = "%s/1"%ID; read.name = ""; read.description = ""
+
+        pair = chr_obj[startPair:endPair].reverse_complement()
+        pair.id = "%s/2"%ID; pair.name = ""; pair.description = ""
+
+        return [read, pair]
+
+    # define overall metrics
+    len_chromosome = len(chr_obj)
+    read_lengths = [int(x) for x in sorted(read_lengths) if x<=int(len_chromosome*max_fraction_chromosome)]
+    per_readLength_coverage = int((coverage/len(read_lengths))/2) + 1  # coverage that has to be achieved by each length of reads
+
+    # initialize the reads
+    reads_1 = []
+    reads_2 = []
+
+    # go through each read_length
+    for len_read in read_lengths:
+
+        # define the size of the increasing window that has to be reached to generate the per_readLength_coverage
+        len_window_increment = int(len_read/per_readLength_coverage)
+
+        # debug 
+        if len_read<len_window_increment: raise ValueError("the read length has to be longer that the window increment")
+
+        # go through each window, considering the pair
+        startRead = 0
+        while (startRead + 2*len_read + insert_size)<len_chromosome:
+
+            # get the read pairs
+            reads = get_paired_reads_list(chr_obj, startRead, len_read, insert_size, extraID="readLen%i_intrachromosomal_read"%len_read)
+            reads_1.append(reads[0])
+            reads_2.append(reads[1])
+
+            # increment for the next window
+            startRead += len_window_increment
+
+        # add some reads at the end and the start
+        for I in range(per_readLength_coverage):
+
+            # get the reads for the first read
+            reads = get_paired_reads_list(chr_obj, 0, len_read, insert_size, extraID="readLen%i_firstRead%i"%(len_read, I))
+            reads_1.append(reads[0])
+            reads_2.append(reads[1])
+
+            # define coordinates of the last read
+            start_lastRead = len_chromosome - (2*len_read + insert_size)
+
+            # keep 
+            reads = get_paired_reads_list(chr_obj, start_lastRead, len_read, insert_size, extraID="readLen%i_lastRead%i"%(len_read, I))
+            reads_1.append(reads[0])
+            reads_2.append(reads[1])
+
+
+
+    return (reads_1, reads_2)
+
+
+###################################################################################################
+################################## RUN GRIDSS AND CLOVE PIPELINE ##################################
+###################################################################################################
+
+def run_gridss_and_annotateSimpleType(sorted_bam, reference_genome, outdir, replace=False, threads=4, blacklisted_regions="", maxcoverage=50000, max_threads=16):
+
+    """Runs gridss for the sorted_bam in outdir, returning the output vcf. blacklisted_regions is a bed with regions to blacklist"""
+
+    # define the output
+    gridss_VCFoutput = "%s/gridss_output.vcf"%outdir; 
+    if gridss_VCFoutput.split(".")[-1]!="vcf": raise ValueError("gridss needs a .vcf file. this is not the case for"%gridss_VCFoutput)
+
+    if file_is_empty(gridss_VCFoutput) or replace is True:
+
+        # define other files
+        gridss_assemblyBAM = "%s/gridss_assembly.bam"%outdir
+        gridss_tmpdir = "%s/gridss_tmp"%outdir
+
+        # if the blacklisted_regions does not exist, just create an empty file
+        if file_is_empty(blacklisted_regions): 
+
+            blacklisted_regions = "%s/empty_regions.bed"%outdir; open(blacklisted_regions, "w").write("")
+
+        print("blacklisting %s\n"%blacklisted_regions)
+        
+        # change the number of threads if more than max_threads, which is the optimum for gridss (8 is the optimum)
+        if threads>max_threads: threads =  max_threads # this is to optimise for the reccommended level of parallelism
+
+        # define the out and error of gridss
+        #gridss_std = "%s/gridss_run_std.txt"%outdir
+        gridss_std = "stdout"
+        
+        max_tries = 2
+        for Itry in range(max_tries):
+            print("running gridss try %i"%(Itry+1))
+            try: 
+                # delete previous files
+                delete_folder(gridss_tmpdir); make_folder(gridss_tmpdir)
+                remove_file(gridss_assemblyBAM)
+
+                # define the heap size, which depends on the cloud or not
+                #jvmheap = "27.5g" # this is the default
+                jvmheap = "20g" # this works in MN. This can be changed to fit the machine
+
+                # run
+                print("running gridss on %s jvmheap"%jvmheap)
+
+                gridss_cmd = "%s --jar %s --reference %s -o %s --assembly %s --threads %i --workingdir %s --maxcoverage %i --blacklist %s --jvmheap %s %s"%(gridss_run, gridss_jar, reference_genome, gridss_VCFoutput, gridss_assemblyBAM, threads, gridss_tmpdir, maxcoverage, blacklisted_regions, jvmheap, sorted_bam)
+                if gridss_std!="stdout": gridss_cmd += " > %s 2>&1"%gridss_std
+
+                run_cmd(gridss_std)
+
+                break
+
+            except: print("WARNING: GRIDSS failed on try %i"%(Itry+1))
+
+        # if it did not finish correctly finish it
+        if file_is_empty(gridss_VCFoutput): raise ValueError("gridss did not finish correctly after %i tries. Check the log in %s and the std in %s"%(max_tries, gridss_tmpdir, gridss_std))
+
+        delete_folder(gridss_tmpdir); remove_file(gridss_assemblyBAM)
+
+    # annotated simple events, the ones that can be predicted from each breakpoint, but only if there are some predicted events
+    gridss_VCFoutput_with_simple_event = "%s.withSimpleEventType.vcf"%gridss_VCFoutput
+    simple_event_std = "%s/simple_event_annotation.std"%outdir
+    n_breakends = len([l for l in open(gridss_VCFoutput, "r").readlines() if not l.startswith("#")])
+    if (file_is_empty(gridss_VCFoutput_with_simple_event) or replace is True) and n_breakends>0 : run_cmd("%s %s > %s 2>&1"%(annotate_simpleEvents_gridssVCF_R, gridss_VCFoutput, simple_event_std))
+
+    return gridss_VCFoutput_with_simple_event
+
+
+
+def run_gridssClove_given_filters(sorted_bam, reference_genome, working_dir, median_coverage, replace=True, threads=4, gridss_blacklisted_regions="", gridss_VCFoutput="", gridss_maxcoverage=50000, median_insert_size=500, median_insert_size_sd=0, gridss_filters_dict=default_filtersDict_gridss, tol_bp=50, threshold_p_unbalTRA=0.7, run_in_parallel=True, max_rel_coverage_to_consider_del=0.1, min_rel_coverage_to_consider_dup=1.5, replace_FromGridssRun=False, coverage_field="relative_coverage"):
+
+    """This function runs gridss and clove with provided filtering and parameters. This can be run at the end of a parameter optimisation process. It returns a dict mapping each SV to a table, and a df with the gridss.
+
+    coverage_field is the field where clove is filtered to detect CNV. It can be relative_coverage or relative_coverage_dist_to_telomere.
+    """
+
+    print("running gridss and clove with given parameter")
+    make_folder(working_dir)
+
+    # edit the replace, regarding if filtering from the run of GRIDSS
+    if replace is True and replace_FromGridssRun is False: replace_FromGridssRun = True
+
+    # first obtain the gridss output if it is not provided
+    if file_is_empty(gridss_VCFoutput) or replace is True: gridss_VCFoutput = run_gridss_and_annotateSimpleType(sorted_bam, reference_genome, working_dir, replace=replace, threads=threads, blacklisted_regions=gridss_blacklisted_regions, maxcoverage=gridss_maxcoverage)
+
+    KHVJHGKJHFKJFHJGFFGKGHFGF
+
+    ##### GET A LIST OF FILTERED BREAKPOINTS ########
+    
+    # get the output of gridss into a df
+    print("getting gridss")
+    df_gridss = add_info_to_gridssDF(load_single_sample_VCF(gridss_VCFoutput), median_insert_size=median_insert_size, median_insert_size_sd=median_insert_size_sd) # this is a dataframe with some info
+
+    # filter according to gridss_filters_dict
+    #print("filtering gridss")
+    df_gridss_filt = get_gridssDF_filtered_from_filtersDict(df_gridss, gridss_filters_dict)
+    gridss_VCFoutput_filt = "%s.filtered_default.vcf"%(gridss_VCFoutput)
+
+    # write the filtered gridss vcf
+    df_text = df_gridss_filt[list(df_gridss_filt.keys())[0:10]].to_csv(sep="\t", header=True, index=False)
+    header_lines = "".join([l for l in open(gridss_VCFoutput, "r").readlines() if l.startswith("##")])
+    open(gridss_VCFoutput_filt, "w").write("%s%s"%(header_lines, df_text))
+
+    # get bedpe into a file, only with the minimal fields
+    bedpe_with_adds = get_bedpe_from_svVCF(gridss_VCFoutput_filt, working_dir, replace=replace_FromGridssRun, only_simple_conversion=True) # REPLACE debug
+
+    # check that it is not empty
+    if open(bedpe_with_adds, "r").readlines()[0].startswith("no_vcf_records"): return {}, df_gridss
+
+    # write the raw fields
+    raw_bedpe_file = "%s.raw.bedpe"%bedpe_with_adds
+    bedpe_fields = ["chrom1", "start1", "end1", "chrom2", "start2", "end2", "name", "score", "strand1", "strand2"]
+    df_bedpe = pd.read_csv(bedpe_with_adds, sep="\t")[bedpe_fields]
+    df_bedpe.to_csv(raw_bedpe_file, sep="\t", header=False, index=False)
+    print("there are %i breakpoints"%len(df_bedpe))
+
+    #################################################
+
+    # run clove without checking filtering
+    outfile_clove = "%s.clove.vcf"%(raw_bedpe_file)
+    run_clove_filtered_bedpe(raw_bedpe_file, outfile_clove, sorted_bam, replace=replace_FromGridssRun, median_coverage=median_coverage, median_coverage_dev=1, check_coverage=False) #  REPLACE debug
+
+    # add the filter of coverage to the clove output
+    df_clove = get_clove_output_with_coverage_forTANDEL(outfile_clove, reference_genome, sorted_bam, replace=replace_FromGridssRun, run_in_parallel=run_in_parallel, delete_bams=run_in_parallel)
+    maxDELcoverage = int(max_rel_coverage_to_consider_del*median_coverage)
+    minDUPcoverage = int(min_rel_coverage_to_consider_dup*median_coverage) 
+    df_clove["coverage_FILTER"] = df_clove.apply(lambda r: get_covfilter_cloveDF_row_according_to_SVTYPE(r, maxDELcoverage=maxDELcoverage, minDUPcoverage=minDUPcoverage), axis=1)
+
+    # annotated clove 
+    fileprefix = "%s.structural_variants"%outfile_clove
+    remaining_df_clove, svtype_to_SVtable = write_clove_df_into_bedORbedpe_files_like_RSVSim(df_clove, fileprefix, reference_genome, sorted_bam, tol_bp=tol_bp, replace=replace_FromGridssRun, median_coverage=median_coverage, svtypes_to_consider={"insertions", "deletions", "inversions", "translocations", "tandemDuplications"}, threshold_p_unbalTRA=threshold_p_unbalTRA, run_in_parallel=run_in_parallel)
+
+    # merge the coverage files in one
+    merge_coverage_per_window_files_in_one(sorted_bam)
+
+    return svtype_to_SVtable, df_gridss
+
+
+###################################################################################################
+###################################################################################################
+###################################################################################################
+
+def generate_tables_of_SV_between_genomes_gridssClove(query_genome, reference_genome, replace=False, threads=4, coverage=10, insert_size=250, read_lengths=[kb*1000 for kb in [0.5, 0.7, 0.9, 1]], error_rate=0.0, gridss_min_af=0.25):
+
+    """Takes a bam file with aligned reads or genomes and generates calls, returning a dict that maps variation type to variants
+    - aligner can be minimap2 or ngmlr"""
 
     # first run svim under the outdir of the aligned reads
     working_dir = "%s/findingSVlongReadsSimulation_ouptut_%s_against_%s"%(get_dir(query_genome), get_file(query_genome), get_file(reference_genome))
@@ -590,13 +1198,12 @@ def generate_tables_of_SV_between_genomes_gridssClove(query_genome, reference_ge
     
     # define the gridss filters according to the freq, which is related to the expected ploidy
     gridss_filters_dict = default_filtersDict_gridss
-    gridss_filters_dict["min_af"] = max([0.0, (1/expected_ploidy)*0.25])
+    gridss_filters_dict["min_af"] = gridss_min_af
     print("Filtering out when any AF is below %.3f"%(gridss_filters_dict["min_af"]))
 
     # run the gridss and clove pipeline with high-confidence parameters
     gridss_outdir = "%s/%s_gridss_outdir"%(working_dir, ID)
     SV_dict, df_gridss =  run_gridssClove_given_filters(sorted_bam, reference_genome, gridss_outdir, coverage, replace=replace, threads=threads, median_insert_size=insert_size, gridss_filters_dict=gridss_filters_dict, replace_FromGridssRun=False) # DEBUG. The replace_FromGridssRun in True would be debugging is to replace from the GRIDSS run step
-
 
     # remove all the chromosomal bam files and coverage measurements
     for file in os.listdir(working_dir):
@@ -605,7 +1212,6 @@ def generate_tables_of_SV_between_genomes_gridssClove(query_genome, reference_ge
         if filepath.startswith("%s."%sorted_bam) and filepath!=index_bam and filepath!="%s.coverage_per_window.tab"%sorted_bam: remove_file(filepath)
 
     return SV_dict
-
 
 
 def run_GridssClove_optimising_parameters(sorted_bam, reference_genome, outdir, threads=4, replace=False, window_l=1000, n_simulated_genomes=2, mitochondrial_chromosome="mito_C_glabrata_CBS138", simulation_types=["uniform", "biased_towards_repeats"], target_ploidies=["haploid", "diploid_homo", "diploid_hetero", "ref:2_var:1", "ref:3_var:1", "ref:4_var:1", "ref:5_var:1", "ref:9_var:1", "ref:19_var:1", "ref:99_var:1"], replace_covModelObtention=False, range_filtering_benchmark="theoretically_meaningful", known_genomes_withSV_and_shortReads_table=True, expected_ploidy=1, nvars=100):
@@ -634,30 +1240,26 @@ def run_GridssClove_optimising_parameters(sorted_bam, reference_genome, outdir, 
     """
 
     # prepare files
-    fun.make_folder(outdir)
+    make_folder(outdir)
 
     ##### test how well the finding of SVs in an assembly works #####
-    outdir_test_FindSVinAssembly = "%s/test_FindSVinAssembly"%outdir; fun.make_folder(outdir_test_FindSVinAssembly)
+    outdir_test_FindSVinAssembly = "%s/test_FindSVinAssembly"%outdir; make_folder(outdir_test_FindSVinAssembly)
+
+    print("WORKING ON THE VALIDATION THAT WE CAN FIND READS IN AN ASSEMBLY")
 
     # go through each simulation
     for simID in range(n_simulated_genomes):
 
         # define outdir 
-        outdir_sim = "%s/simulation_%i"%(outdir_test_FindSVinAssembly, simID); fun.make_folder(outdir_sim)
+        outdir_sim = "%s/simulation_%i"%(outdir_test_FindSVinAssembly, simID); make_folder(outdir_sim)
 
         # generate genome with simulated SVs
         sim_svtype_to_svfile, rearranged_genome = rearrange_genomes_simulateSV(reference_genome, outdir_sim, replace=replace, nvars=nvars, mitochondrial_chromosome=mitochondrial_chromosome)
 
+        # get the variants from simulating reads. Always ploidy 1 to get homozygous SVs
+        predicted_svtype_to_svfile = generate_tables_of_SV_between_genomes_gridssClove(rearranged_genome, reference_genome, replace=replace, threads=threads)
 
-
-
-
-        khvkhg
-
-
-
-        # get the variants from simulating reads
-        predicted_tablesSV = generate_tables_of_SV_between_genomes_gridssClove(rearranged_genome, reference_genome, replace=replace, threads=threads, expected_ploidy=expected_ploidy)
+        finsihedrunningGridssClove
 
 
 
