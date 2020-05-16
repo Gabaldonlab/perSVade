@@ -26,9 +26,7 @@ CWD = "/".join(__file__.split("/")[0:-1]); sys.path.insert(0, CWD)
 EnvDir = "/".join(sys.executable.split("/")[0:-2])
 
 # import functions
-import smallVarsCNV_functions as fun
-import sv_functions as sv_fun
-import graphics_functions as graph_fun
+import sv_functions as fun
 
 # packages installed into the conda environment 
 picard = "%s/share/picard-2.18.26-0/picard.jar"%EnvDir
@@ -161,7 +159,7 @@ SVdetection_outdir = "%s/SVdetection_output"%opt.outdir
 # run pipeline, this has to be done with this if to run the pipeline
 if __name__ == '__main__':
 
-    sv_fun.run_GridssClove_optimising_parameters(sorted_bam, opt.ref, SVdetection_outdir, replace_covModelObtention=opt.replace, threads=opt.threads, replace=opt.replace, mitochondrial_chromosome=opt.mitochondrial_chromosome, simulation_types=["uniform"], n_simulated_genomes=2, target_ploidies=["haploid", "diploid_hetero"], range_filtering_benchmark="theoretically_meaningful", expected_ploidy=opt.ploidy)
+    fun.run_GridssClove_optimising_parameters(sorted_bam, opt.ref, SVdetection_outdir, replace_covModelObtention=opt.replace, threads=opt.threads, replace=opt.replace, mitochondrial_chromosome=opt.mitochondrial_chromosome, simulation_types=["uniform"], n_simulated_genomes=2, target_ploidies=["haploid", "diploid_hetero"], range_filtering_benchmark="theoretically_meaningful", expected_ploidy=opt.ploidy)
 
 
 print("structural variation analysis with perSVade finished")
