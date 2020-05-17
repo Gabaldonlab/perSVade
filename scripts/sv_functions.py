@@ -38,6 +38,7 @@ from collections import Counter, defaultdict
 import inspect
 import collections
 from shutil import copyfile
+import igraph
 
 warnings.simplefilter(action='ignore', category=pd.core.common.SettingWithCopyWarning) # avoid the slicing warning
 #pd.options.mode.chained_assignment = 'raise'
@@ -123,7 +124,8 @@ vcf_strings_as_NaNs = ['', '#N/A', '#N/A N/A', '#NA', '-1.#IND', '-1.#QNAN', '-N
 
 
 # define default parameters for gridss filtering
-default_filtersDict_gridss = {"min_Nfragments":0, "min_af":0.0, "wrong_FILTERtags":("",), "filter_polyGC":False, "filter_noSplitReads":False, "filter_noReadPairs":False, "maximum_strand_bias":1.0, "maximum_microhomology":1000000000, "maximum_lenght_inexactHomology":100000000, "range_filt_DEL_breakpoints":(0,1), "min_length_inversions":0, "dif_between_insert_and_del":0, "max_to_be_considered_small_event":1, "wrong_INFOtags":('IMPRECISE',), "min_size":50, "min_af_EitherSmallOrLargeEvent":0.0}
+default_filtersDict_gridss = {"min_Nfragments":0, "min_af":0.25, "wrong_FILTERtags":("",), "filter_polyGC":False, "filter_noSplitReads":False, "filter_noReadPairs":False, "maximum_strand_bias":1.0, "maximum_microhomology":1000000000, "maximum_lenght_inexactHomology":100000000, "range_filt_DEL_breakpoints":(0,1), "min_length_inversions":0, "dif_between_insert_and_del":0, "max_to_be_considered_small_event":1, "wrong_INFOtags":('IMPRECISE',), "min_size":50, "min_af_EitherSmallOrLargeEvent":0.25} # the minimum af is 0.25 to include both heterozygous and homozygous vars as default
+
 
 
 ####################################
@@ -996,6 +998,9 @@ def simulate_pairedEndReads_per_chromosome_uniform(chr_obj, coverage, insert_siz
 ################################## RUN GRIDSS AND CLOVE PIPELINE ##################################
 ###################################################################################################
 
+
+
+
 def run_gridss_and_annotateSimpleType(sorted_bam, reference_genome, outdir, replace=False, threads=4, blacklisted_regions="", maxcoverage=50000, max_threads=16):
 
     """Runs gridss for the sorted_bam in outdir, returning the output vcf. blacklisted_regions is a bed with regions to blacklist"""
@@ -1041,8 +1046,7 @@ def run_gridss_and_annotateSimpleType(sorted_bam, reference_genome, outdir, repl
 
                 gridss_cmd = "%s --jar %s --reference %s -o %s --assembly %s --threads %i --workingdir %s --maxcoverage %i --blacklist %s --jvmheap %s %s"%(gridss_run, gridss_jar, reference_genome, gridss_VCFoutput, gridss_assemblyBAM, threads, gridss_tmpdir, maxcoverage, blacklisted_regions, jvmheap, sorted_bam)
                 if gridss_std!="stdout": gridss_cmd += " > %s 2>&1"%gridss_std
-
-                run_cmd(gridss_std)
+                run_cmd(gridss_cmd)
 
                 break
 
@@ -1061,7 +1065,471 @@ def run_gridss_and_annotateSimpleType(sorted_bam, reference_genome, outdir, repl
 
     return gridss_VCFoutput_with_simple_event
 
+def load_single_sample_VCF(path):
 
+    """Loads a vcf with a single sample into a df."""
+
+    # load the df
+    df = pd.read_csv(path, sep="\t", header = len([l for l in open(path, "r") if l.startswith("##")]))
+
+    # change the name of the last column, which is the actual sample data
+    df = df.rename(columns={df.keys()[-1]: "DATA"})
+
+    # get the filter as set and filter
+    df["FILTER_set"] = df.FILTER.apply(lambda x: set(x.split(";")))
+    #df = df[df.FILTER_set.apply(lambda x: len(x.intersection(interesting_filterTAGs))>0)]
+
+    # check that there
+
+    ### INFO COLUMN ####
+
+    def get_real_value(string):
+
+        try: return ast.literal_eval(string)
+        except: return string
+
+    def get_dict_fromRow(row):
+
+        # get as a list, considering to put appart whatever has an "="
+        list_row = row.split(";")
+        rows_with_equal = [x.split("=") for x in list_row if "=" in x]
+        rows_without_equal = [x for x in list_row if "=" not in x]
+
+        # add the values with an "=" to the dictionary
+        final_dict = {"INFO_%s"%x[0] : get_real_value(x[1]) for x in rows_with_equal}
+
+        # add the others collapsed
+        final_dict["INFO_misc"] = ";".join(rows_without_equal)
+
+        return final_dict
+
+    # add a column that has a dictionary with the info fields
+    df["INFO_as_dict"] = df.INFO.apply(get_dict_fromRow)
+    all_INFO_fields = sorted(list(set.union(*df.INFO_as_dict.apply(lambda x: set(x)))))
+
+    # add them as sepparated columns
+    def get_from_dict_orNaN(value, dictionary):
+
+        if value in dictionary: return dictionary[value]
+        else: return np.nan
+
+    for f in all_INFO_fields: df[f] = df.INFO_as_dict.apply(lambda d: get_from_dict_orNaN(f, d))
+    df.pop("INFO_as_dict")
+
+    #########################
+
+    ### FORMAT COLUMN ###
+
+    # check that there is only one format
+    all_formats = set(df.FORMAT)
+    if len(all_formats)!=1: raise ValueError("There should be only one format in the FORMAT file")
+
+    # get as dictionary
+    format_list = next(iter(all_formats)).split(":")
+
+    def getINTorFLOATdictionary(data):
+
+        # get dictionary
+        dictionary = dict(zip(format_list, data.split(":")))
+
+        # change the type
+        final_dict = {}
+        for k, v in dictionary.items():
+
+            if v==".": final_dict[k] = "."
+            elif "/" in v or "," in v: final_dict[k] = v
+            elif "." in v: final_dict[k] = float(v)
+            else: final_dict[k] = int(v)
+
+        return final_dict
+
+    df["FORMAT_as_dict"] = df.DATA.apply(getINTorFLOATdictionary)
+
+    # get as independent fields
+    for f in sorted(format_list): df["DATA_%s"%f] = df.FORMAT_as_dict.apply(lambda d: d[f])
+    df.pop("FORMAT_as_dict")
+
+    #########################
+
+    # calculate allele frequencies (if AD is provided)
+    if "DATA_AD" in df.keys():
+
+        df["allele_freqs"] = df.apply(lambda r: [int(reads_allele)/r["DATA_DP"] for reads_allele in r["DATA_AD"].split(",")], axis=1)
+
+        # assign a boolean whether it is heterozygius
+        df["is_heterozygous_coverage"] = df.allele_freqs.apply(lambda x: any([freq>=0.25 and freq<=0.75 for freq in x]))
+        df["is_heterozygous_GT"] = df.DATA_GT.apply(lambda x: len(set(x.split("/")))>1)
+
+    return df
+
+def getNaN_to_0(x):
+
+    if pd.isna(x): return 0.0
+    else: return x
+
+def add_info_to_gridssDF(df, expected_fields={"allele_frequency", "allele_frequency_SmallEvent", "other_coordinates", "other_chromosome", "other_position", "other_orientation",  "inserted_sequence", "len_inserted_sequence", "length_event", "has_poly16GC", "length_inexactHomology", "length_microHomology"}, median_insert_size=500, median_insert_size_sd=50):
+
+    """This function takes a gridss df and returns the same adding expected_fields"""
+
+    #print("adding info to gridss df")
+    if len(set(df.keys()).intersection(expected_fields))!=len(expected_fields):
+
+        df = cp.deepcopy(df)
+
+        # add the allele frequencies
+        #print("adding allele freq")
+        df["allele_frequency"] = df.apply(lambda r: np.divide(r["DATA_VF"] , (r["DATA_VF"] + r["DATA_REF"] + r["DATA_REFPAIR"])), axis=1).apply(getNaN_to_0)
+        df["allele_frequency_SmallEvent"] = df.apply(lambda r: np.divide(r["DATA_VF"] , (r["DATA_VF"] + r["DATA_REF"])), axis=1).apply(getNaN_to_0)
+
+        # add data to calculate the other breakpoint
+        #print("get position of other bend")
+        def get_other_position(r):
+            
+            if "." in r["ALT"]: return "%s:%i"%(r["#CHROM"], r["POS"])
+            else: return re.split("\]|\[", r["ALT"])[1]
+
+        df["other_coordinates"] = df.apply(get_other_position, axis=1)
+        df["other_chromosome"] = df.other_coordinates.apply(lambda x: x.split(":")[0])
+        df["other_position"] = df.other_coordinates.apply(lambda x: int(x.split(":")[1]))
+
+        # add the orientation of the other
+        def get_other_orientation(alt): 
+
+            if "]" in alt: return "]"
+            elif "[" in alt: return "["
+            else: return "unk"
+
+        df["other_orientation"] = df.ALT.apply(get_other_orientation)
+
+        # get the inserted sequence
+        def get_inserted_seq(ALT):
+            
+            if "." in ALT: return ""
+            else: return [x for x in re.split("\]|\[", ALT) if all([base.upper() in {"A", "C", "T", "G", "N"} and len(base)>0 for base in set(x)])][0]
+            
+        df["inserted_sequence"] = df.ALT.apply(get_inserted_seq)
+        df["len_inserted_sequence"] = df.inserted_sequence.apply(len)
+
+        def get_length(r):
+
+            
+            # same chromosome
+            if r["#CHROM"]==r["other_chromosome"]: return abs(r["other_position"] - r["POS"])
+            
+            # different chromosomes
+            return 100000000000
+
+        df["length_event"] = df[["#CHROM", "other_chromosome", "POS", "other_position"]].apply(get_length, axis=1)
+        
+    
+        # add if the df has a polyG tag
+        df["has_poly16GC"] = df.ALT.apply(lambda x: ("G"*16) in x or ("C"*16) in x)
+
+        # add the range of inexact homology
+        def add_inexact_homology_length(IHOMPOS):
+            
+            if pd.isna(IHOMPOS): return  0
+            else: return int(IHOMPOS.split(",")[1]) - int(IHOMPOS.split(",")[0])
+
+        df["length_inexactHomology"] = df.INFO_IHOMPOS.apply(add_inexact_homology_length)
+
+        # add the length of homology
+        def get_homology_length(HOMLEN):
+            
+            if pd.isna(HOMLEN): return 0
+            else: return int(HOMLEN)
+
+        df["length_microHomology"] = df.INFO_HOMLEN.apply(get_homology_length)
+
+        # add the actual allele_frequency, which depends on the median_insert_size and the median_insert_size_sd. If the breakend is longer than the insert size it is a large event
+        maxiumum_insert_size = median_insert_size + median_insert_size_sd
+        def get_allele_freq(r):
+            
+            if r["length_event"]>maxiumum_insert_size: return r["allele_frequency"]
+            else: return r["allele_frequency_SmallEvent"]
+        
+        df["real_AF"] = df.apply(get_allele_freq, axis=1)
+
+        if any(pd.isna(df["real_AF"])): raise ValueError("There are NaNs in the real_AF field")
+
+
+    return df
+
+def get_gridssDF_filtered(df, min_Nfragments=8, min_af=0.005, wrong_INFOtags={"IMPRECISE"}, wrong_FILTERtags={"NO_ASSEMBLY"}, filter_polyGC=True, filter_noSplitReads=True, filter_noReadPairs=True, maximum_strand_bias=0.95, maximum_microhomology=50, maximum_lenght_inexactHomology=50, range_filt_DEL_breakpoints=[100, 800], min_length_inversions=40, dif_between_insert_and_del=5, max_to_be_considered_small_event=1000, min_size=50, add_columns=True, min_af_EitherSmallOrLargeEvent=0.0 ):
+
+    """Takes a gridss df (each line is a breakend and it has the field INFO_SIMPLE_TYPE) and it returns the same df bt with a personalFILTER field, according to all the passed filters .
+    Below are the filters with the meaning:
+
+    max_length_SmallDupDel = 1000 # the maximum length to be considered a small duplication or deletion
+    min_Nfragments = 8 # the minimum number of reads that should support the variant
+    min_af = 0.005 # the minimum allele frequency for a var to be considered. Heterozygous variants will have much less tan 0.5 frequency
+    wrong_INFOtags = {"IMPRECISE"} # the tags in miscINFO to filter out
+    wrong_FILTERtags = {"NO_ASSEMBLY"} # the tags in FILTER to avoid
+    filter_polyGC = True # eliminate breakpoints that have a long G or C tract
+    filter_noSplitReads = True # eliminate breakpoints that have no split reads supporting them
+    filter_noReadPairs = True # eliminate brreakpints that do not have any discordant read pairs
+    maximum_strand_bias = 0.95 # all vars with a SB above this will be removed
+    maximum_microhomology = 50 # all vars with a microhomology above this are removed
+    maximum_lenght_inexactHomology = 50 # all vars that are longer than min_len and have an indexact homology above this number will be filtered
+    range_filt_DEL_breakpoints = [100, 800] # remove all variants that are DEL with a length within this range if their inexact microhomology is >= 6bp
+    min_length_inversions= 40 # remove all INV variants that are below this length and have >= 6bp of microhomology
+    dif_between_insert_and_del = 5 # any small deletion that has an insertion sequence longer than length_event-dif_between_insert_and_del will be removed
+    max_to_be_considered_small_event is the maxiumum length that small events is considered
+    min_size is the minimum length that a breakend should have to be considered
+    min_af_EitherSmallOrLargeEvent is the minimum allele frequency regardless of if it is a small or a large event, which depends on the insert size that is not always constant. The idea is that any breakend with any AF (calculated as VF/VF+REF+REFPAIR or VF/VF+REF) above min_af_EitherSmallOrLargeEvent will be kept
+
+    add_columns indicates whether to add columns to the df, which may have been done before
+
+    The default values are the ones used in the gridss-purple-linx pipeline to generate the somatic callset
+
+    """
+
+    ######## ADD COLUMNS TO THE DF FOR FURTHER CALCULATION ##########
+    if add_columns is True: df = add_info_to_gridssDF(df)
+
+    # define whether the variant is a small duplication or insertion. These have special filters
+    df["is_small_DupDel"] = (df.INFO_SIMPLE_TYPE.isin({"DEL", "DUP"})) & (df.length_event<=max_to_be_considered_small_event)
+
+    # get sets
+    wrong_INFOtags = set(wrong_INFOtags)
+    wrong_FILTERtags = set(wrong_FILTERtags)
+
+    ############ APPLY THE FILTERS ###########
+
+    idx = ((df.length_event>=min_size) &
+       (df.DATA_VF>=min_Nfragments) &  
+       (df.real_AF>=min_af) & 
+       ( (df.allele_frequency>=min_af_EitherSmallOrLargeEvent) | (df.allele_frequency_SmallEvent>=min_af_EitherSmallOrLargeEvent) ) & 
+       ~(df.INFO_misc.isin(wrong_INFOtags)) & 
+       (df.FILTER.apply(lambda f: len(set(f.split(";")).intersection(wrong_FILTERtags))==0) ) & 
+       ( ((df.INFO_SB.apply(float)<maximum_strand_bias) | pd.isna(df.INFO_SB.apply(float))) | ~(df.is_small_DupDel) ) &
+       (df.length_microHomology<maximum_microhomology) &
+       ((df.length_inexactHomology<maximum_lenght_inexactHomology) | (df.is_small_DupDel)) &
+       ~((df.INFO_SIMPLE_TYPE=="DEL") & (df.length_inexactHomology>=6) & (df.length_event>=range_filt_DEL_breakpoints[0]) & (df.length_event<=range_filt_DEL_breakpoints[1])) & 
+       ~((df.INFO_SIMPLE_TYPE=="INV") & (df.length_event<min_length_inversions) & (df.length_microHomology>=6)) &       
+       ~((df.INFO_SIMPLE_TYPE=="DEL") & (df.length_event<=max_to_be_considered_small_event) & (df.len_inserted_sequence>=(df.length_event-dif_between_insert_and_del)) )       
+       )
+
+    if filter_polyGC: idx = idx & ~(df.has_poly16GC)
+    if filter_noSplitReads: idx = idx & (~(df.DATA_SR==0) | ~(df.is_small_DupDel))
+    if filter_noReadPairs: idx = idx & (~(df.DATA_RP==0) | (df.is_small_DupDel))
+
+    # return the filtered df
+
+    return df[idx]
+
+def get_gridssDF_filtered_from_filtersDict(df_gridss, filters_dict):
+
+    """Takes a df gridss and returns the filtered one, according to filters_dict"""
+
+    # debug the fact that there is no min_af_EitherSmallOrLargeEvent
+    if "min_af_EitherSmallOrLargeEvent" not in filters_dict: filters_dict["min_af_EitherSmallOrLargeEvent"] = 0.0
+
+    # get the filtered df
+    df_filt = get_gridssDF_filtered(df_gridss, min_Nfragments=filters_dict["min_Nfragments"], min_af=filters_dict["min_af"], wrong_INFOtags=filters_dict["wrong_INFOtags"], wrong_FILTERtags=filters_dict["wrong_FILTERtags"], filter_polyGC=filters_dict["filter_polyGC"], filter_noSplitReads=filters_dict["filter_noSplitReads"], filter_noReadPairs=filters_dict["filter_noReadPairs"], maximum_strand_bias=filters_dict["maximum_strand_bias"], maximum_microhomology=filters_dict["maximum_microhomology"], maximum_lenght_inexactHomology=filters_dict["maximum_lenght_inexactHomology"], range_filt_DEL_breakpoints=filters_dict["range_filt_DEL_breakpoints"], min_length_inversions=filters_dict["min_length_inversions"], dif_between_insert_and_del=filters_dict["dif_between_insert_and_del"], max_to_be_considered_small_event=filters_dict["max_to_be_considered_small_event"], min_size=filters_dict["min_size"], add_columns=False, min_af_EitherSmallOrLargeEvent=filters_dict["min_af_EitherSmallOrLargeEvent"] )
+
+    return df_filt
+
+
+
+def get_bedpe_from_svVCF(svVCF, outdir, replace=False, only_simple_conversion=False):
+
+    """Takes a svVCF and writes a bedpe file. outdir is where to write files"""
+
+    # generate the bedpe file 
+    bedpe_file = "%s.bedpe"%svVCF
+
+    if file_is_empty(bedpe_file) or replace is True:
+
+        remove_file(bedpe_file)
+
+        # write one file or another if the file has no records
+        len_vcf_records = len([l for l in open(svVCF, "r").readlines() if not l.startswith("#")])
+
+        if len_vcf_records>0:
+
+            if only_simple_conversion is True:
+
+                print("Getting files for svVCF file. Mainly generating a bedpe file for breakpoints with some extra info, but simple.")
+                r_stdout = "%s/svVCF_analysis_log.out"%outdir
+                run_cmd("%s %s > %s 2>&1"%(analyze_svVCF_simple, svVCF, r_stdout))                
+
+            else:
+                print("Getting files for svVCF file. Mainly generating a bedpe file for breakpoints with some extra info.")
+                r_stdout = "%s/svVCF_analysis_log.out"%outdir
+                run_cmd("%s %s > %s 2>&1"%(analyze_svVCF, svVCF, r_stdout))
+
+        else: open(bedpe_file, "w").write("no_vcf_records\n")
+
+    return bedpe_file
+
+
+def get_bedpe_df_with_added_feats(df_bedpe, df_gridss):
+
+    """This function takes a bedpe file and a df gridss and returns de bedpe as df with the real_af of each of the breakends"""
+
+    # add the eventID to the gridss df
+    df_gridss["eventID"] = df_gridss.INFO_EVENT.apply(lambda x: x+"o")
+
+    # map each eventID to the chromosome and the af
+    eventID_to_chrom_to_pos_to_af = df_gridss.groupby("eventID").apply(lambda df_e: df_e.set_index(["#CHROM", "POS"])["real_AF"])
+
+    # map each event to an af
+    df_bedpe["af_1"] = df_bedpe.apply(lambda r: [af for pos,af in dict(eventID_to_chrom_to_pos_to_af.loc[(r["name"], r["chrom1"])]).items() if pos>=r["start1"] and pos<=r["end1"]][0], axis=1)
+    df_bedpe["af_2"] = df_bedpe.apply(lambda r: [af for pos,af in dict(eventID_to_chrom_to_pos_to_af.loc[(r["name"], r["chrom2"])]).items() if pos>=r["start2"] and pos<=r["end2"]][0], axis=1)
+
+    # get the ploidy
+    df_bedpe["bp1_heterozygous"] = df_bedpe.af_1<0.75
+    df_bedpe["bp2_heterozygous"] = df_bedpe.af_2<0.75
+
+    ##### add the 5'->3' added regions #####
+    def get_tuple_5_to_3_positions(r):
+
+        """Takes a row of the bedpe and returns a tuple where there is the 5' position and the 3' attached. This depends on the orientation. See the clove paper to understand what the orientations mean."""
+
+        # get data
+        chrom1 = r["chrom1"]
+        pos1 = r["start1"]
+        strand1 = r["strand1"]
+        chrom2 = r["chrom2"]
+        pos2 = r["start2"]
+        strand2 = r["strand2"]
+
+        # define for chroms that are the same
+        if chrom1==chrom2:
+
+            # first check that the second position is 3'
+            if pos2<=pos1: raise ValueError("Your bedpe may not be properly formated as pos2<=pos1")
+
+            # DEL
+            if strand1=="+" and strand2=="-": tuple_5_to_3_positions = [(chrom1, pos1), (chrom2, pos2)]
+
+            # TAN
+            elif strand1=="-" and strand2=="+": tuple_5_to_3_positions = [(chrom2, pos2), (chrom1, pos1)]
+
+            # INV1 and INV2 are the same
+            else: tuple_5_to_3_positions = [(chrom1, pos1), (chrom2, pos2)]
+
+        # define for chroms that are different
+        else: tuple_5_to_3_positions = [(chrom1, pos1), (chrom2, pos2)]
+
+        return tuple_5_to_3_positions
+
+    
+    df_bedpe["5_to_3_positions_tuple"] = df_bedpe.apply(get_tuple_5_to_3_positions, axis=1)
+
+    ########################################
+
+    return df_bedpe
+
+def get_genomeGraph_object(genome, df_bedpe, df_gridss_filt, genomeGraph_outfile):
+
+    """This function takes a bedpe and generates an undirected graph where each position is mapped to the 3' position in the genome."""
+
+    # get the 5' to 3' positions and ploidy of the breakpoints into bedpe
+    df_bedpe = get_bedpe_df_with_added_feats(df_bedpe, df_gridss_filt)
+    print("getting graph-based genome")
+
+    # map each chromosome to an offset
+    chrom_to_lenSeq = {seq.id : len(seq.seq) for seq in SeqIO.parse(genome, "fasta")}
+
+    # deffine an offset for each chromosome, which is necessary to keep all the positions of the genome as independent numbers
+    chrom_to_offset = {}
+    current_offset = 0
+    for chrom, seqLen in chrom_to_lenSeq.items():
+        chrom_to_offset[chrom] = current_offset
+        current_offset+=seqLen
+
+    # create the graph
+    genome_graph = igraph.Graph(directed=False)
+
+    # add one vertex (node) for each position in the genome
+    npositions = sum(chrom_to_lenSeq.values())
+    genome_graph.add_vertices(npositions)
+
+    # define the edges that are the end of chromosomes
+    chromosome_start_nodes = {offset for chrom, offset in chrom_to_offset.items()}
+    chromosome_end_nodes = {(offset + chrom_to_lenSeq[chrom] - 1) for chrom, offset in chrom_to_offset.items()}
+
+    # define the connections (edges, parts of the genomes that are linked) from the breakpoint
+    all_edges = []
+    for (bp1_heterozygous, bp2_heterozygous, bp_positions_tuple) in df_bedpe[["bp1_heterozygous", "bp2_heterozygous", "5_to_3_positions_tuple"]].values:
+
+        # initialize a list of the existing edges in the form of [(chr1, pos1), (chr2, pos2)]
+        existing_joined_positions = []
+
+        # add the breakpoint edge
+        existing_joined_positions.append(bp_positions_tuple)
+
+        # get the positions of the breakpoint
+        chrom1, pos1 = bp_positions_tuple[0]
+        chrom2, pos2 = bp_positions_tuple[1]
+
+        # for tandem dups, the order is changed
+        if chrom1==chrom2 and pos2<=pos1:  # these are tandem dups 
+            chrom1, pos1 = bp_positions_tuple[1]
+            chrom2, pos2 = bp_positions_tuple[0]
+
+        # add the map between each position and next one if it is heterozygous
+        if bp1_heterozygous: existing_joined_positions.append([(chrom1, pos1), (chrom1, pos1+1)])
+        if bp2_heterozygous: existing_joined_positions.append([(chrom2, pos2), (chrom2, pos2+1)])
+
+        # add the existing mapped positions
+        all_edges += [(chrom_to_offset[pos1[0]]+pos1[1], chrom_to_offset[pos2[0]]+pos2[1]) for pos1, pos2 in existing_joined_positions]
+
+    # add the non-mapped positions to the 3' ones
+    positions_already_added = {edge[0] for edge in all_edges}
+    remaining_positions = set(range(npositions)).difference(positions_already_added).difference(chromosome_end_nodes)
+    all_edges += [(pos, pos+1) for pos in remaining_positions]
+
+    # add the edges to the graph
+    genome_graph.add_edges(all_edges)
+    igraph.summary(genome_graph)
+
+
+    print(len(all_edges))
+
+    alkndalk
+
+
+
+
+
+
+
+
+
+def run_clove_filtered_bedpe(bedpe_file, outfile, sorted_bam, replace=False, median_coverage=10, median_coverage_dev=1, check_coverage=True):
+
+    """ Takes a bedpe file and a sorted bam and generates the clove output. df_cov is a df of the first 4 columns of the mpileup output. If sorted_bam and median_coverage are provided, there will be a check for TAN and DEL of coverage 
+
+    every TAN or DEL outside median_coverage +- median_coverage_dev will be filtered out"""
+
+    if file_is_empty(outfile) or replace is True:
+
+        print("running clove")
+        outfile_tmp = "%s.tmp"%outfile
+        clove_std = "%s.std"%outfile
+        cmd = "%s -jar %s -i %s BEDPE -b %s -o %s -c %i %i"%(JAVA, clove, bedpe_file, sorted_bam, outfile_tmp, median_coverage, median_coverage_dev)
+
+        if check_coverage is False:
+
+            print("avoid checking coverage")
+            cmd += " -r "
+
+        print("running clove with cmd:", cmd)
+
+
+        # add the std
+        cmd = "%s > %s 2>&1"%(cmd, clove_std)
+
+        run_cmd(cmd)
+        os.rename(outfile_tmp, outfile)
+
+        # remove at the end
+        remove_file(clove_std)
+
+    #print("clove finsihed correctly")
 
 def run_gridssClove_given_filters(sorted_bam, reference_genome, working_dir, median_coverage, replace=True, threads=4, gridss_blacklisted_regions="", gridss_VCFoutput="", gridss_maxcoverage=50000, median_insert_size=500, median_insert_size_sd=0, gridss_filters_dict=default_filtersDict_gridss, tol_bp=50, threshold_p_unbalTRA=0.7, run_in_parallel=True, max_rel_coverage_to_consider_del=0.1, min_rel_coverage_to_consider_dup=1.5, replace_FromGridssRun=False, coverage_field="relative_coverage"):
 
@@ -1079,8 +1547,6 @@ def run_gridssClove_given_filters(sorted_bam, reference_genome, working_dir, med
     # first obtain the gridss output if it is not provided
     if file_is_empty(gridss_VCFoutput) or replace is True: gridss_VCFoutput = run_gridss_and_annotateSimpleType(sorted_bam, reference_genome, working_dir, replace=replace, threads=threads, blacklisted_regions=gridss_blacklisted_regions, maxcoverage=gridss_maxcoverage)
 
-    KHVJHGKJHFKJFHJGFFGKGHFGF
-
     ##### GET A LIST OF FILTERED BREAKPOINTS ########
     
     # get the output of gridss into a df
@@ -1088,7 +1554,7 @@ def run_gridssClove_given_filters(sorted_bam, reference_genome, working_dir, med
     df_gridss = add_info_to_gridssDF(load_single_sample_VCF(gridss_VCFoutput), median_insert_size=median_insert_size, median_insert_size_sd=median_insert_size_sd) # this is a dataframe with some info
 
     # filter according to gridss_filters_dict
-    #print("filtering gridss")
+    print("filtering gridss")
     df_gridss_filt = get_gridssDF_filtered_from_filtersDict(df_gridss, gridss_filters_dict)
     gridss_VCFoutput_filt = "%s.filtered_default.vcf"%(gridss_VCFoutput)
 
@@ -1110,14 +1576,30 @@ def run_gridssClove_given_filters(sorted_bam, reference_genome, working_dir, med
     df_bedpe.to_csv(raw_bedpe_file, sep="\t", header=False, index=False)
     print("there are %i breakpoints"%len(df_bedpe))
 
+    # get the genome graph
+    genomeGraph_outfile = "%s.genomeGraph.py"%raw_bedpe_file
+    genomeGraph = get_genomeGraph_object(reference_genome, df_bedpe, df_gridss_filt, genomeGraph_outfile)
+
+
+
+
+    ldanljdn
+
     #################################################
 
     # run clove without checking filtering
     outfile_clove = "%s.clove.vcf"%(raw_bedpe_file)
     run_clove_filtered_bedpe(raw_bedpe_file, outfile_clove, sorted_bam, replace=replace_FromGridssRun, median_coverage=median_coverage, median_coverage_dev=1, check_coverage=False) #  REPLACE debug
 
+
+    hkhjjhkjhkj
+
     # add the filter of coverage to the clove output
     df_clove = get_clove_output_with_coverage_forTANDEL(outfile_clove, reference_genome, sorted_bam, replace=replace_FromGridssRun, run_in_parallel=run_in_parallel, delete_bams=run_in_parallel)
+
+    lknlknkjklkl
+
+
     maxDELcoverage = int(max_rel_coverage_to_consider_del*median_coverage)
     minDUPcoverage = int(min_rel_coverage_to_consider_dup*median_coverage) 
     df_clove["coverage_FILTER"] = df_clove.apply(lambda r: get_covfilter_cloveDF_row_according_to_SVTYPE(r, maxDELcoverage=maxDELcoverage, minDUPcoverage=minDUPcoverage), axis=1)
@@ -1201,9 +1683,15 @@ def generate_tables_of_SV_between_genomes_gridssClove(query_genome, reference_ge
     gridss_filters_dict["min_af"] = gridss_min_af
     print("Filtering out when any AF is below %.3f"%(gridss_filters_dict["min_af"]))
 
+    # define the median coverage per region
+    outdir_coverage_calculation = "%s/coverage_per_regions"%working_dir; make_folder(outdir_coverage_calculation)
+    coverage_df =  pd.read_csv(generate_coverage_per_window_file_parallel(reference_genome, outdir_coverage_calculation, sorted_bam, windows_file="none", replace=replace, window_l=10000), sep="\t")
+    median_coverage = np.median(coverage_df.mediancov_1)
+    print("The median coverage is %i"%median_coverage)
+
     # run the gridss and clove pipeline with high-confidence parameters
     gridss_outdir = "%s/%s_gridss_outdir"%(working_dir, ID)
-    SV_dict, df_gridss =  run_gridssClove_given_filters(sorted_bam, reference_genome, gridss_outdir, coverage, replace=replace, threads=threads, median_insert_size=insert_size, gridss_filters_dict=gridss_filters_dict, replace_FromGridssRun=False) # DEBUG. The replace_FromGridssRun in True would be debugging is to replace from the GRIDSS run step
+    SV_dict, df_gridss =  run_gridssClove_given_filters(sorted_bam, reference_genome, gridss_outdir, median_coverage, replace=replace, threads=threads, median_insert_size=insert_size, gridss_filters_dict=gridss_filters_dict, replace_FromGridssRun=False) # DEBUG. The replace_FromGridssRun in True would be debugging is to replace from the GRIDSS run step
 
     # remove all the chromosomal bam files and coverage measurements
     for file in os.listdir(working_dir):
