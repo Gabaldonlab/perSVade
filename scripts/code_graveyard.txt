@@ -88,3 +88,48 @@ def get_tandemDuplications_file_in_target_regions(target_regions_bed, sizes, tan
     # write
     tan_df[tan_cols].to_csv(tanDup_file, sep="\t", header=True, index=False)
 
+
+############# distance to the telomere #################
+
+
+def get_distance_to_telomere_through_breakpoints(genome, df_bedpe, df_gridss_filt, genomeGraph_outfileprefix):
+
+    """This function returns a df where each genomic position is mappend to the real distance to the telomere through all the breakpoints"""
+
+    adlkadjhdlajthisdoesnotwork
+
+
+    # get the graoh as a genome
+    genome_graph, chrom_to_offset, chrom_to_lenSeq, all_positions, chromosome_end_nodes, chromosome_start_nodes = get_genomeGraph_object(genome, df_bedpe, df_gridss_filt)
+
+    # initialize a df where each col is a telomeric position and the rows are the the positions of the genome graph
+    telomericNode_to_pos_to_dist = {}
+
+    # get the shortest paths mapping each node to the 
+    for I, telomeric_node in enumerate(chromosome_end_nodes.union(chromosome_start_nodes)):
+        print("working on telomeric_node %i"%telomeric_node)
+
+        # get the connected positions list
+        connected_positions = genome_graph.subcomponent(telomeric_node)
+        print("There are %i connected positions"%len(connected_positions))
+
+        # get the shortest paths to all the others
+        all_shorest_paths_len = map(len, genome_graph.get_all_shortest_paths(v=telomeric_node, to=connected_positions, mode="OUT"))
+        pos_to_shortestPathLen = dict(zip(connected_positions, all_shorest_paths_len))
+
+        telomericNode_to_pos_to_dist[telomeric_node] = pos_to_shortestPathLen
+
+        if I==2: break
+
+    df_telomeric_dist = pd.DataFrame(telomericNode_to_pos_to_dist)
+
+    print(df_telomeric_dist)
+
+
+    ldjhdljjhlsfd
+
+    return df_telomeric_dist
+
+
+
+

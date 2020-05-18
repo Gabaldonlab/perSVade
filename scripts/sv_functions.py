@@ -153,6 +153,19 @@ def get_dir(filename): return "/".join(filename.split("/")[0:-1])
 
 def get_file(filename): return filename.split("/")[-1]
 
+def save_object(obj, filename):
+    
+    """ This is for saving python objects """
+    
+    with open(filename, 'wb') as output:  # Overwrites any existing file.
+        pickle.dump(obj, output, pickle.HIGHEST_PROTOCOL)
+
+def load_object(filename):
+    
+    """ This is for loading python objects """
+        
+    return pickle.load(open(filename,"rb"))
+
 def file_is_empty(path): 
     
     """ask if a file is empty or does not exist """
@@ -998,9 +1011,6 @@ def simulate_pairedEndReads_per_chromosome_uniform(chr_obj, coverage, insert_siz
 ################################## RUN GRIDSS AND CLOVE PIPELINE ##################################
 ###################################################################################################
 
-
-
-
 def run_gridss_and_annotateSimpleType(sorted_bam, reference_genome, outdir, replace=False, threads=4, blacklisted_regions="", maxcoverage=50000, max_threads=16):
 
     """Runs gridss for the sorted_bam in outdir, returning the output vcf. blacklisted_regions is a bed with regions to blacklist"""
@@ -1385,7 +1395,7 @@ def get_bedpe_df_with_added_feats(df_bedpe, df_gridss):
     ##### add the 5'->3' added regions #####
     def get_tuple_5_to_3_positions(r):
 
-        """Takes a row of the bedpe and returns a tuple where there is the 5' position and the 3' attached. This depends on the orientation. See the clove paper to understand what the orientations mean."""
+        """Takes a row of the bedpe and returns a tuple where there is the 5' position and the 3' attached. This depends on the orientation. See the clove paper to understand what the orientations mean. Only tandem duplictaions are avoided"""
 
         # get data
         chrom1 = r["chrom1"]
@@ -1401,13 +1411,10 @@ def get_bedpe_df_with_added_feats(df_bedpe, df_gridss):
             # first check that the second position is 3'
             if pos2<=pos1: raise ValueError("Your bedpe may not be properly formated as pos2<=pos1")
 
-            # DEL
-            if strand1=="+" and strand2=="-": tuple_5_to_3_positions = [(chrom1, pos1), (chrom2, pos2)]
+            # for TANDEM duplications just add the next position
+            if strand1=="-" and strand2=="+": tuple_5_to_3_positions = [(chrom2, pos2), (chrom2, pos2+1)]
 
-            # TAN
-            elif strand1=="-" and strand2=="+": tuple_5_to_3_positions = [(chrom2, pos2), (chrom1, pos1)]
-
-            # INV1 and INV2 are the same
+            # INV1, DEL and INV2 are the same
             else: tuple_5_to_3_positions = [(chrom1, pos1), (chrom2, pos2)]
 
         # define for chroms that are different
@@ -1416,87 +1423,122 @@ def get_bedpe_df_with_added_feats(df_bedpe, df_gridss):
         return tuple_5_to_3_positions
 
     
-    df_bedpe["5_to_3_positions_tuple"] = df_bedpe.apply(get_tuple_5_to_3_positions, axis=1)
+    df_bedpe["5_to_3_positions_tuple_withoutTAN"] = df_bedpe.apply(get_tuple_5_to_3_positions, axis=1)
 
     ########################################
 
     return df_bedpe
 
-def get_genomeGraph_object(genome, df_bedpe, df_gridss_filt, genomeGraph_outfile):
 
-    """This function takes a bedpe and generates an undirected graph where each position is mapped to the 3' position in the genome."""
+def get_genomeGraph_object(genome, df_bedpe, df_gridss_filt, genomeGraph_outfileprefix, replace=False):
 
-    # get the 5' to 3' positions and ploidy of the breakpoints into bedpe
-    df_bedpe = get_bedpe_df_with_added_feats(df_bedpe, df_gridss_filt)
-    print("getting graph-based genome")
+    """This function takes a bedpe and generates an undirected graph where each position is mapped to the 3' position in the genome. Tandem duplications are not considered as they may get weird loops"""
 
-    # map each chromosome to an offset
-    chrom_to_lenSeq = {seq.id : len(seq.seq) for seq in SeqIO.parse(genome, "fasta")}
+    # define the files
+    genomeGraph_outfile = "%s.graph.py"%genomeGraph_outfileprefix
+    genomeGraph_positions_df = "%s.df_positions.py"%genomeGraph_outfileprefix
 
-    # deffine an offset for each chromosome, which is necessary to keep all the positions of the genome as independent numbers
-    chrom_to_offset = {}
-    current_offset = 0
-    for chrom, seqLen in chrom_to_lenSeq.items():
-        chrom_to_offset[chrom] = current_offset
-        current_offset+=seqLen
+    if any([file_is_empty(x) for x in {genomeGraph_outfile, genomeGraph_positions_df}]) or replace is True:
+    #if True: # debug
 
-    # create the graph
-    genome_graph = igraph.Graph(directed=False)
+        # map each chromosome to an offset
+        chrom_to_lenSeq = {seq.id : len(seq.seq) for seq in SeqIO.parse(genome, "fasta")}
 
-    # add one vertex (node) for each position in the genome
-    npositions = sum(chrom_to_lenSeq.values())
-    genome_graph.add_vertices(npositions)
+        # deffine an offset for each chromosome, which is necessary to keep all the positions of the genome as independent numbers
+        chrom_to_offset = {}
+        current_offset = 0
+        for chrom, seqLen in chrom_to_lenSeq.items():
+            chrom_to_offset[chrom] = current_offset
+            current_offset+=seqLen
 
-    # define the edges that are the end of chromosomes
-    chromosome_start_nodes = {offset for chrom, offset in chrom_to_offset.items()}
-    chromosome_end_nodes = {(offset + chrom_to_lenSeq[chrom] - 1) for chrom, offset in chrom_to_offset.items()}
+        # create the graph
+        genome_graph = igraph.Graph(directed=False)
 
-    # define the connections (edges, parts of the genomes that are linked) from the breakpoint
-    all_edges = []
-    for (bp1_heterozygous, bp2_heterozygous, bp_positions_tuple) in df_bedpe[["bp1_heterozygous", "bp2_heterozygous", "5_to_3_positions_tuple"]].values:
+        # add one vertex (node) for each position in the genome
+        npositions = sum(chrom_to_lenSeq.values())
+        genome_graph.add_vertices(npositions)
 
-        # initialize a list of the existing edges in the form of [(chr1, pos1), (chr2, pos2)]
-        existing_joined_positions = []
+        # define the edges that are the end of chromosomes
+        chromosome_start_nodes = {offset for chrom, offset in chrom_to_offset.items()}
+        chromosome_end_nodes = {(offset + chrom_to_lenSeq[chrom] - 1) for chrom, offset in chrom_to_offset.items()}
 
-        # add the breakpoint edge
-        existing_joined_positions.append(bp_positions_tuple)
+        # define the connections (edges, parts of the genomes that are linked) from the breakpoint
+        all_edges = [] 
 
-        # get the positions of the breakpoint
-        chrom1, pos1 = bp_positions_tuple[0]
-        chrom2, pos2 = bp_positions_tuple[1]
+        # if a df bedpe is provided, calculate the edges resulting from the breakpoints
+        if df_bedpe is not None and len(df_bedpe)>0:
 
-        # for tandem dups, the order is changed
-        if chrom1==chrom2 and pos2<=pos1:  # these are tandem dups 
-            chrom1, pos1 = bp_positions_tuple[1]
-            chrom2, pos2 = bp_positions_tuple[0]
+            # get the 5' to 3' positions and ploidy of the breakpoints into bedpe
+            df_bedpe = get_bedpe_df_with_added_feats(df_bedpe, df_gridss_filt)
+            print("getting graph-based genome")
 
-        # add the map between each position and next one if it is heterozygous
-        if bp1_heterozygous: existing_joined_positions.append([(chrom1, pos1), (chrom1, pos1+1)])
-        if bp2_heterozygous: existing_joined_positions.append([(chrom2, pos2), (chrom2, pos2+1)])
+            for (bp1_heterozygous, bp2_heterozygous, bp_positions_tuple) in df_bedpe[["bp1_heterozygous", "bp2_heterozygous", "5_to_3_positions_tuple_withoutTAN"]].values:
 
-        # add the existing mapped positions
-        all_edges += [(chrom_to_offset[pos1[0]]+pos1[1], chrom_to_offset[pos2[0]]+pos2[1]) for pos1, pos2 in existing_joined_positions]
+                # initialize a list of the existing edges in the form of [(chr1, pos1), (chr2, pos2)]
+                existing_joined_positions = []
 
-    # add the non-mapped positions to the 3' ones
-    positions_already_added = {edge[0] for edge in all_edges}
-    remaining_positions = set(range(npositions)).difference(positions_already_added).difference(chromosome_end_nodes)
-    all_edges += [(pos, pos+1) for pos in remaining_positions]
+                # add the breakpoint edge
+                existing_joined_positions.append(bp_positions_tuple)
 
-    # add the edges to the graph
-    genome_graph.add_edges(all_edges)
-    igraph.summary(genome_graph)
+                # get the positions of the breakpoint
+                chrom1, pos1 = bp_positions_tuple[0]
+                chrom2, pos2 = bp_positions_tuple[1]
 
+                # add the map between each position and next one if it is heterozygous
+                if bp1_heterozygous: existing_joined_positions.append([(chrom1, pos1), (chrom1, pos1+1)])
+                if bp2_heterozygous: existing_joined_positions.append([(chrom2, pos2), (chrom2, pos2+1)])
 
-    print(len(all_edges))
+                # add the existing mapped positions
+                all_edges += [(chrom_to_offset[pos1[0]]+pos1[1], chrom_to_offset[pos2[0]]+pos2[1]) for pos1, pos2 in existing_joined_positions]
 
-    alkndalk
+        # add the non-mapped positions to the 3' ones
+        positions_already_added = {edge[0] for edge in all_edges}
+        all_positions = set(range(npositions))
+        remaining_positions = all_positions.difference(positions_already_added.union(chromosome_end_nodes))
+        all_edges += [(pos, pos+1) for pos in remaining_positions]
 
+        # add the edges to the graph
+        genome_graph.add_edges(all_edges)
+        print("genome graph got")
 
+        # get the real ends of the chromosomes
+        sorted_positions = sorted(all_positions)
+        pos_to_nNeighbors = pd.Series(dict(zip(sorted_positions, map(lambda x: len(genome_graph.neighbors(x, mode="ALL")), sorted_positions))))
 
+        # debug
+        if any(pos_to_nNeighbors<1): raise ValueError("there are some unnconected nodes in the graph genome")
+        if any(pos_to_nNeighbors>100000): raise ValueError("there are some very highly connected regions in the graph genome")
+        if any(pd.isna(pos_to_nNeighbors)): raise ValueError("there are some NaNs in the graph genome")
 
+        real_chromosome_end_nodes = set(pos_to_nNeighbors[pos_to_nNeighbors==1].index)
+        print("There are %i telomeric nodes in the graph genome"%len(real_chromosome_end_nodes))
 
+        # generate a df that maps each position to the real position
+        positions_real = []
+        chromosomes_real = []
+        for chrom, lenChrom in chrom_to_lenSeq.items():
+            positions_real += list(range(lenChrom))
+            chromosomes_real += [chrom]*lenChrom
 
+        df_positions = pd.DataFrame()
+        df_positions["chromosome"] =  chromosomes_real
+        df_positions["real_position"] =  positions_real
+        df_positions["offset"] = df_positions.chromosome.apply(lambda x: chrom_to_offset[x])
+        df_positions["graph_position"] = df_positions.real_position + df_positions.offset
+        df_positions["is_end_of_chr"] = df_positions.graph_position.isin(real_chromosome_end_nodes)
 
+        if set(df_positions.graph_position)!=all_positions: raise ValueError("There is a bad graph calculation of the positions")
+
+        # save
+        save_object(genome_graph, genomeGraph_outfile)
+        save_object(df_positions, genomeGraph_positions_df)
+
+    else:
+        print("loading graph genome")
+        genome_graph = load_object(genomeGraph_outfile)
+        df_positions = load_object(genomeGraph_positions_df)
+
+    return genome_graph, df_positions
 
 
 def run_clove_filtered_bedpe(bedpe_file, outfile, sorted_bam, replace=False, median_coverage=10, median_coverage_dev=1, check_coverage=True):
@@ -1531,11 +1573,465 @@ def run_clove_filtered_bedpe(bedpe_file, outfile, sorted_bam, replace=False, med
 
     #print("clove finsihed correctly")
 
-def run_gridssClove_given_filters(sorted_bam, reference_genome, working_dir, median_coverage, replace=True, threads=4, gridss_blacklisted_regions="", gridss_VCFoutput="", gridss_maxcoverage=50000, median_insert_size=500, median_insert_size_sd=0, gridss_filters_dict=default_filtersDict_gridss, tol_bp=50, threshold_p_unbalTRA=0.7, run_in_parallel=True, max_rel_coverage_to_consider_del=0.1, min_rel_coverage_to_consider_dup=1.5, replace_FromGridssRun=False, coverage_field="relative_coverage"):
+def get_distance_to_telomere_series(df_chromosome_position, genome_graph, df_positions_graph):
+
+    """This function takes a df with chromosome and position and returns the distance to the telomere according to the genome graph"""
+
+    print("getting distance to the telomere")
+
+    # rename the df to have chrom and pos
+    df_chromosome_position = df_chromosome_position.rename(columns=dict(zip(df_chromosome_position.columns, ["chromosome", "position"])))
+
+    # add the graph positions
+    df_chromosome_position = df_chromosome_position.merge(df_positions_graph, left_on=["chromosome", "position"], right_on=["chromosome", "real_position"], how="left", validate="one_to_one")
+
+    # define all the positions
+    all_positions = sorted(set(df_chromosome_position.graph_position))
+
+    # define the positions that are ends of chromosomes
+    chrom_end_positions = sorted(set(df_positions_graph[df_positions_graph.is_end_of_chr].graph_position))
+
+    # calculate the distance from each position to the 
+    print("calculating shortest paths in genome graph from %i end positions to %i positions. This may take a lot"%(len(chrom_end_positions), len(all_positions)))
+    shortestPath_lengths_df = pd.DataFrame(genome_graph.shortest_paths(source=chrom_end_positions, target=all_positions, mode="IN"), columns=all_positions, index=chrom_end_positions)
+    distance_telomere_series = shortestPath_lengths_df.apply(min, axis=0).apply(int)
+    print("distance calculated")
+
+    #distance_telomere_series = pd.Series([1]*len(all_positions), index=all_positions)  # debug
+
+    # reorder so that it fits the input df
+    distance_telomere_series = pd.Series(distance_telomere_series.loc[df_chromosome_position.graph_position])
+    distance_telomere_series.index = df_chromosome_position.index
+
+    # return ordered as in df_chromosome_position
+    return distance_telomere_series
+
+
+def generate_nt_content_file(genome, target_nts="GC", replace=False):
+
+    """Takes a genome and outputs a file with chromosome, position and 1 or 0 regarding if any of the target_nts is the same in the genome. This is 0-based"""
+
+    target_nt_content_file = "%s.%scontent.tab"%(genome, target_nts)
+
+    if file_is_empty(target_nt_content_file) or replace is True:
+        print("getting GC content df per position")
+
+        print("calculating %s content"%target_nts)
+
+        # initialize a dict to create a genome df
+        genome_dict = {"chromosome":[], "position":[], "base":[]}
+        for seq in SeqIO.parse(genome, "fasta"): 
+
+            # load with the sequence content at each position
+            sequence_str = str(seq.seq).upper()
+            genome_dict["chromosome"] += [seq.id]*len(sequence_str)
+            genome_dict["position"] += list(range(0, len(sequence_str)))
+            genome_dict["base"] += list(sequence_str)
+
+        # get into df
+        genome_df = pd.DataFrame(genome_dict)
+
+        # add if the base is in target_nts
+        target_nts_set = set(target_nts.upper())
+        genome_df["is_in_%s"%target_nts] = genome_df["base"].isin(target_nts_set).apply(int)
+
+        # write
+        target_nt_content_file_tmp = "%s.tmp"%target_nt_content_file
+        genome_df.to_csv(target_nt_content_file_tmp, sep="\t", header=True, index=False)
+        os.rename(target_nt_content_file_tmp, target_nt_content_file)
+
+    return target_nt_content_file
+
+def get_df_with_GCcontent(df_windows, genome, gcontent_outfile, replace=False):
+
+    """This function takes a df with windows of the genome and adds the gc content for each window, writing a file under gcontent_outfile"""
+
+    print("Getting GC content")
+
+    if file_is_empty(gcontent_outfile) or replace is True:
+
+        # resort
+        df_windows = df_windows.sort_values(by=["chromosome", "start", "end"])
+
+        # get the GC content file for each position
+        gc_content_outfile_perPosition = generate_nt_content_file(genome, replace=replace, target_nts="GC")
+        gc_df = pd.read_csv(gc_content_outfile_perPosition, sep="\t")[["chromosome", "position", "is_in_GC"]].sort_values(by=["chromosome", "position"])
+
+        # define a df where each position is one row and it has the start_window as an add
+        df_windows["length"] = df_windows.end - df_windows.start
+        positions = make_flat_listOflists(list(df_windows.apply(lambda r: list(range(r["start"], r["end"])), axis=1)))
+        start_windows = make_flat_listOflists(list(df_windows.apply(lambda r: [r["start"]]*r["length"], axis=1)))
+        chromosomes = make_flat_listOflists(list(df_windows.apply(lambda r: [r["chromosome"]]*r["length"], axis=1)))
+        df_positions = pd.DataFrame({"position":positions, "chromosome":chromosomes, "start_window":start_windows})
+
+        # add the positions to the gc df
+        gc_df = gc_df.merge(df_positions, on=["chromosome", "position"], how="right")        
+
+        # calculate the GC content and add to df
+        startWindow_to_gc = gc_df[["start_window", "is_in_GC"]].groupby("start_window").mean()["is_in_GC"]
+        df_windows["GCcontent"] = list(startWindow_to_gc.loc[df_windows.start])
+
+        # at the end save
+        save_object(df_windows, gcontent_outfile)
+
+    else: df_windows = load_object(gcontent_outfile)
+
+
+    return df_windows
+
+def get_distanceToTelomere_chromosome_GCcontent_to_coverage_fn(df_coverage_train, genome, genome_graph, df_positions_graph, outdir, mitochondrial_chromosome="mito_C_glabrata_CBS138", replace=False):
+
+    """This function takes a training df_coverage (with windows of a genome) and returns a lambda function that takes GC content, chromosome and  distance to the telomere and returns coverage according to the model.
+
+    Your genome graph can also be a linear genome, you just have to create it without considering breakpoints"""
+    print("getting coverage-predictor function")
+
+    # rename the training df
+    df = df_coverage_train.rename(columns={"#chrom":"chromosome", "mediancov_1":"coverage"})
+
+    # add the distance to the telomere
+    df_with_distance_to_telomere_file = "%s/df_with_distance_to_telomere_file.py"%outdir
+    if file_is_empty(df_with_distance_to_telomere_file) or replace is True:
+
+        df["middle_position"] = (df.start + (df.end - df.start)/2).apply(int)
+        df["distance_to_telomere"] = get_distance_to_telomere_series(df[["chromosome", "middle_position"]], genome_graph, df_positions_graph)
+
+        save_object(df, df_with_distance_to_telomere_file)
+
+    else: df = load_object(df_with_distance_to_telomere_file)
+
+    # add the gc content
+    gcontent_outfile = "%s/GCcontent.py"%outdir
+    df = get_df_with_GCcontent(df, genome, gcontent_outfile, replace=replace)
+
+    # define the set of each type of chromosomes
+    all_chromosomes = set(df.chromosome)
+    if mitochondrial_chromosome!="no_mitochondria": mtDNA_chromosomes = set(mitochondrial_chromosome.split(","))
+    else: mtDNA_chromosomes = set()
+    gDNA_chromosomes = all_chromosomes.difference(mtDNA_chromosomes)
+
+    ######## find the coeficients for each chromosome #########
+
+    # map each chromosome to the coefs of the quadratic fit that explains coverage form the distance to the telomere and also the coefs of the GC content explaining the resiudal of this fit
+    chrom_to_coefType_to_coefs = {}
+
+    # go through each type of genome
+    for type_genome, chroms in [("mtDNA", mtDNA_chromosomes), ("gDNA", gDNA_chromosomes)]:
+        print("investigating %s"%type_genome)
+
+        # define the training df
+        df_g = df[df.chromosome.isin(chroms)]
+
+        # define the relative coverage of each window of this genome
+        df_g["relative_coverage"] = df_g.coverage / np.median(df_g.coverage)
+
+        # go through each chrom and identify that it is duplicated if the quadratic fit from the prediction of the distance to the telomere suggests a minimum of >=1.6
+        duplicated_chroms = set()
+        for chrom in chroms:
+
+            # get df of this chrom
+            df_c = df_g[df_g.chromosome==chrom]
+
+            # fit a quadratic fit
+            coefs = poly.polyfit(df_c.distance_to_telomere, df_c.relative_coverage, 2)
+            predicted_coverage = poly.polyval(df_c.distance_to_telomere, coefs)
+
+            if min(predicted_coverage)>1.6: duplicated_chroms.add(chrom)
+
+        # define the training set for the modelling
+        df_correct = df_g[(df_g.relative_coverage<=4) & (df_g.relative_coverage>0.1) & ~(df_g.chromosome.isin(duplicated_chroms))]
+
+        # now fit the model that predicts coverage from the distance to the telomere
+        coefs_dist_to_telomere = poly.polyfit(df_correct.distance_to_telomere, df_correct.coverage, 2)
+
+        # get the residual variation in coverage
+        df_correct["coverage_from_dist_to_telomere"] = poly.polyval(df_correct.distance_to_telomere, coefs_dist_to_telomere)
+        df_correct["residualCoverage_from_dist_to_telomere"] = df_correct.coverage - df_correct.coverage_from_dist_to_telomere
+
+        # get a quadratic fit that predicts coverage from GC content
+        coefs_GCcontent = poly.polyfit(df_correct.GCcontent, df_correct.residualCoverage_from_dist_to_telomere, 2)
+        df_correct["residualCoverage_from_dist_to_telomere_from_GC_content"] = poly.polyval(df_correct.GCcontent, coefs_GCcontent)
+
+        df_correct["coverage_from_dist_to_telomere_and_GC_content"] = df_correct["coverage_from_dist_to_telomere"] + df_correct["residualCoverage_from_dist_to_telomere_from_GC_content"]
+
+        # save the coefficients
+        for chrom in chroms: chrom_to_coefType_to_coefs[chrom] = {"dist_telomere":coefs_dist_to_telomere, "GCcontent":coefs_GCcontent}
+
+        # plot the coverage for each of the chromosomes
+        fig = plt.figure(figsize=(7, len(chroms)*5))
+        for I, chrom in enumerate(chroms):
+
+            # initialize a subplot, where each row is one chromosome
+            ax = plt.subplot(len(chroms), 1, I+1)
+
+            # get df of this chrom
+            df_c = df_correct[df_correct.chromosome==chrom]
+
+            # make a line plot for the real coverage
+            plt.scatter(df_c.start, df_c.coverage, marker="o", color="gray", label="data")
+
+            # make a line for the prediction from the distance to the telomere
+            plt.plot(df_c.start, df_c.coverage_from_dist_to_telomere, linestyle="-", color="blue", label="pred_dist_telomere")
+
+            # make a line for the prediction for both
+            plt.plot(df_c.start, df_c.coverage_from_dist_to_telomere_and_GC_content, linestyle="-", color="red", label="pred_dist_and_gc_content")
+
+            # add a line with the distance to the telomere
+            #plt.plot(df_c.start, df_c.distance_to_telomere, linestyle="-", color="green", label="dist_telomere")
+
+            ax.legend()
+            ax.set_ylabel("coverage")
+            ax.set_xlabel("position (bp)")
+            ax.set_title(chrom)
+
+        # save
+        outfile = "%s/coverage_modelling_%s.pdf"%(outdir, type_genome)
+        #print("saving %s"%outfile)
+        fig.savefig(outfile, bbox_inches="tight")
+
+        # get the rsquare of the model
+        r2 = r2_score(df_correct.coverage, df_correct.coverage_from_dist_to_telomere_and_GC_content)
+        print("The rsquare for %s is %.3f"%(type_genome, r2))
+
+    ###############################################################
+
+    # define the function that takes a tuple of (distToTelomere, chromosome and GCcontent) and returns the predicted relative coverage
+    final_function = (lambda dist_telomere, chrom, GCcontent:  # this is suposed to be the tuple
+
+                        (poly.polyval([dist_telomere], chrom_to_coefType_to_coefs[chrom]["dist_telomere"]) + # from the dist to tel
+                        poly.polyval([GCcontent], chrom_to_coefType_to_coefs[chrom]["GCcontent"]))[0] # residual predicted from GC
+
+                     )
+
+    # check that it works
+    df_correct["cov_predicted_from_final_lambda"] = df_correct.apply(lambda r: final_function(r["distance_to_telomere"], r["chromosome"], r["GCcontent"]), axis=1)
+
+    if any(((df_correct["coverage_from_dist_to_telomere_and_GC_content"]-df_correct["cov_predicted_from_final_lambda"]).apply(abs))>0.01): raise ValueError("error in lambda function generation for coverage")
+
+      
+    return final_function
+
+
+def get_clove_output(output_vcf_clove):
+
+    """Gets the raw output of clove and returns a df with it"""
+
+    # load df
+    df = pd.read_csv(output_vcf_clove, skiprows=list(range(len([line for line in open(output_vcf_clove, "r", encoding='utf-8', errors='ignore') if line.startswith("##")]))), sep="\t", na_values=vcf_strings_as_NaNs, keep_default_na=False)
+
+    # get FORMAT into several cells
+    INFOfields_data = pd.DataFrame(dict(df.INFO.apply(lambda x: {content.split("=")[0] : content.split("=")[1]  for content in  make_flat_listOflists([y.split(";") for y in x.split("; ")])}))).transpose()
+    df = df.merge(INFOfields_data, left_index=True, right_index=True, validate="one_to_one")
+
+    # debug that some of the CHR2 are NaN or without N
+    if any([pd.isna(x) for x in set(df.CHR2)]): raise ValueError("The CLOVE output parsing was incorrect for %s"%output_vcf_clove)
+    if any([pd.isna(x) for x in set(df.END)]): raise ValueError("The CLOVE output parsing was incorrect for %s"%output_vcf_clove)
+    if any([pd.isna(x) for x in set(df.SVTYPE)]): raise ValueError("The CLOVE output parsing was incorrect for %s"%output_vcf_clove)
+
+
+    # change the END by -1 if it is NaN
+    def getNaN_to_minus1(x):
+
+        if pd.isna(x): return -1
+        else: return int(x)
+
+    if "START" in df.keys(): df["START"] = df.START.apply(getNaN_to_minus1)
+    else: df["START"] = [-1]*len(df)
+
+    df["END"] = df.END.apply(getNaN_to_minus1)
+
+    return df
+
+def get_coverage_per_window_df_without_repeating(reference_genome, sorted_bam, windows_file, replace=False, run_in_parallel=True, delete_bams=False):
+
+    """This function takes a windows file and a bam, and it runs generate_coverage_per_window_file_parallel but only for regions that are not previously calculated"""
+    #print("calculating coverage per windows on %s"%sorted_bam)
+
+    # define bams
+    outdir_bam = "/".join(sorted_bam.split("/")[0:-1])
+    sorted_bam_name = sorted_bam.split("/")[-1]
+
+    # define the query_windows
+    query_windows_df = pd.read_csv(windows_file, sep="\t").set_index(["chromosome", "start", "end"], drop=False)
+    if len(query_windows_df)==0: return pd.DataFrame()
+
+    # define the file were the coverage will be calculated
+    calculated_coverage_file_prefix = "%s.coverage_per_window.tab"%sorted_bam_name
+
+    # define all previous files, all those that do not end with tmp 
+    previously_calculated_windows_coverage_files = ["%s/%s"%(outdir_bam, x) for x in os.listdir(outdir_bam) if x.startswith(calculated_coverage_file_prefix) and "temporary_file" not in x]
+
+    ######### define previously measured regions ##########
+
+    if len(previously_calculated_windows_coverage_files)>0:
+
+        # get into a df all the previously calculated coverages
+        df_previosuly_calculated_coverages = pd.concat([pd.read_csv(file, sep="\t").set_index(["chromosome", "start", "end"], drop=False) for file in previously_calculated_windows_coverage_files], sort=True)
+
+        # define the windows_to_measure_df as those that are not in df_previosuly_calculated_coverages
+        windows_still_to_measure = set(query_windows_df.index).difference(set(df_previosuly_calculated_coverages.index))
+
+        if len(windows_still_to_measure)==0: windows_to_measure_df = pd.DataFrame()
+        else: windows_to_measure_df = query_windows_df.loc[list(windows_still_to_measure)]
+
+    else: 
+        windows_to_measure_df = query_windows_df
+        df_previosuly_calculated_coverages = pd.DataFrame()
+
+    ###################################
+
+    ######## measure regions, keeping in tmp ######
+
+    if len(windows_to_measure_df)>0:
+
+        # write a bed with the regions to measure
+        bed_windows_to_measure = "%s/%s.%s.temporary_file"%(outdir_bam, calculated_coverage_file_prefix, id_generator(20))
+        windows_to_measure_df[["chromosome", "start", "end"]].to_csv(bed_windows_to_measure, sep="\t", header=False, index=False)
+
+        # get the coverage df
+        destination_dir = "%s.calculating_windowcoverage"%sorted_bam
+        coverage_df = pd.read_csv(generate_coverage_per_window_file_parallel(reference_genome, destination_dir, sorted_bam, windows_file=bed_windows_to_measure, replace=replace, window_l=1000, run_in_parallel=run_in_parallel, delete_bams=delete_bams), sep="\t").rename(columns={"#chrom":"chromosome"}).set_index(["chromosome", "start", "end"], drop=False)
+
+        # save file
+        coverage_df_file = "%s/%s.%s"%(outdir_bam, calculated_coverage_file_prefix, id_generator(20)); coverage_df_file_tmp = "%s.temporary_file"%coverage_df_file
+        coverage_df.to_csv(coverage_df_file_tmp, sep="\t", header=True, index=False)
+
+        # remove the bed
+        remove_file(bed_windows_to_measure)
+        remove_file("%s.coverage_provided_windows.tab"%bed_windows_to_measure)
+
+        # rename to keep
+        os.rename(coverage_df_file_tmp, coverage_df_file)
+
+    else: coverage_df = pd.DataFrame()
+
+    #############################################
+
+    # append the dataframes
+    df_coverage_all = df_previosuly_calculated_coverages.append(coverage_df, sort=True).loc[list(query_windows_df.index)]
+    df_coverage_all.index = list(range(len(df_coverage_all)))
+
+    # drop duplicates
+    df_coverage_all = df_coverage_all.drop_duplicates(subset=["chromosome", "start", "end", "mediancov_1", "percentcovered_1"], keep='first') 
+
+    return df_coverage_all
+
+def get_int(x):
+
+    # def get nans to -1
+
+    try: return int(x)
+    except: return -1
+
+def get_coverage_list_relative_to_predictedFromTelomereAndGCcontent(df_cov, genome, distToTel_chrom_GC_to_coverage_fn, genome_graph, df_positions_graph, outdir, real_coverage_field="mediancov_1", replace=False):
+
+    """This function takes a df with coverage for some windows of the genome and coverage. The returned list is in the same order as the df_cov"""
+
+
+    print("getting coverage relative to the one predicted from seq features")
+
+    # make the outdir
+    make_folder(outdir)
+
+    # rename the training df and copy
+    df = cp.deepcopy(df_cov.rename(columns={"#chrom":"chromosome", real_coverage_field:"coverage"}))
+    df.index = list(range(len(df)))
+    initial_index = list(df.index)
+
+    # add the distance to the telomere
+    df_with_distance_to_telomere_file = "%s/df_with_distance_to_telomere_file.py"%outdir
+    if file_is_empty(df_with_distance_to_telomere_file) or replace is True:
+
+        df["middle_position"] = (df.start + (df.end - df.start)/2).apply(int)
+        df["distance_to_telomere"] = get_distance_to_telomere_series(df[["chromosome", "middle_position"]], genome_graph, df_positions_graph)
+
+        save_object(df, df_with_distance_to_telomere_file)
+
+    else: df = load_object(df_with_distance_to_telomere_file)
+
+    # add the gc content
+    gcontent_outfile = "%s/GCcontent.py"%outdir
+    df = get_df_with_GCcontent(df, genome, gcontent_outfile, replace=replace)
+
+    # predict genome from the sequence features 
+    df["cov_predicted_from_features"] = df.apply(lambda r: distToTel_chrom_GC_to_coverage_fn(r["distance_to_telomere"], r["chromosome"], r["GCcontent"]), axis=1)
+
+    # get the relative to the 
+    df["cov_rel_to_predFromFeats"] = df.coverage/df.cov_predicted_from_features
+    if any(pd.isna(df["cov_rel_to_predFromFeats"])): raise ValueError("There was a problem with the prediction from features")
+
+    # get the final list
+    return list(df.loc[initial_index, "cov_rel_to_predFromFeats"])
+
+def get_clove_output_with_coverage_forTANDEL(outfile_clove, reference_genome, sorted_bam, distToTel_chrom_GC_to_coverage_fn, genome_graph, df_positions_graph, replace=False, run_in_parallel=False, delete_bams=False):
+
+    """Takes the output of clove and adds the coverage of the TAN and DEL, or -1"""
+
+    # first load clove into a df
+    df_clove = get_clove_output(outfile_clove)
+
+    if len(df_clove)>0:
+
+        # now write a bed with the TANDEL regions
+        bed_TANDEL_regions = "%s.TANDEL.bed"%outfile_clove
+        df_TANDEL = df_clove[df_clove.SVTYPE.isin({"TAN", "DEL"})][["#CHROM", "POS", "END"]].rename(columns={"#CHROM":"chromosome", "POS":"start", "END":"end"})
+        
+        if len(df_TANDEL)>0:
+
+            df_TANDEL.to_csv(bed_TANDEL_regions, sep="\t", header=True, index=False)
+
+            # get a file that has the coverage of these windows
+            coverage_df = get_coverage_per_window_df_without_repeating(reference_genome, sorted_bam, bed_TANDEL_regions, replace=replace, run_in_parallel=run_in_parallel, delete_bams=delete_bams)
+
+            # get the coverage relative to prediction from features
+            outdir_rel_cov_calculation = "%s_calculatig_rel_coverage"%outfile_clove
+            coverage_df["coverage_rel_to_predFromFeats"] = get_coverage_list_relative_to_predictedFromTelomereAndGCcontent(coverage_df, reference_genome, distToTel_chrom_GC_to_coverage_fn, genome_graph, df_positions_graph, outdir_rel_cov_calculation, real_coverage_field="mediancov_1", replace=replace)
+
+        else: coverage_df = pd.DataFrame(columns=["chromosome", "end", "length", "mediancov_1", "nocoveragebp_1", "percentcovered_1", "start"])
+
+        # merge
+        merged_df = df_clove.merge(coverage_df, how="left", left_on=["#CHROM", "POS", "END"], right_on=["chromosome", "start", "end"], validate="many_to_one")
+
+        # change types of fields
+        merged_df["POS"] = merged_df.POS.apply(get_int)
+        merged_df["END"] = merged_df.END.apply(get_int)
+        merged_df["START"] = merged_df.START.apply(get_int)
+
+        return merged_df 
+
+    else: return pd.DataFrame()
+
+
+def get_covfilter_cloveDF_row_according_to_SVTYPE(r, maxDELcoverage=0.1, minDUPcoverage=1.9, coverage_field="coverage_rel_to_predFromFeats"):
+
+    # define a function that takes a row of the dataframe and does the filterinf can be any that is in coverage
+
+    if r["SVTYPE"]=="DEL":
+
+        if r[coverage_field]<=maxDELcoverage: return "PASS"
+        else: return "FAIL" 
+
+    elif r["SVTYPE"]=="TAN":
+
+        if r[coverage_field]>=minDUPcoverage: return "PASS"
+        else: return "FAIL" 
+
+    else: return "PASS"
+
+def run_gridssClove_given_filters(sorted_bam, reference_genome, working_dir, median_coverage, replace=True, threads=4, gridss_blacklisted_regions="", gridss_VCFoutput="", gridss_maxcoverage=50000, median_insert_size=500, median_insert_size_sd=0, gridss_filters_dict=default_filtersDict_gridss, tol_bp=50, threshold_p_unbalTRA=0.7, run_in_parallel=True, max_rel_coverage_to_consider_del=0.1, min_rel_coverage_to_consider_dup=1.5, replace_FromGridssRun=False, include_breakpoints_in_genomeGraph=True, mitochondrial_chromosome="mito_C_glabrata_CBS138", type_coverage_to_filterTANDEL="coverage_rel_to_predFromFeats"):
 
     """This function runs gridss and clove with provided filtering and parameters. This can be run at the end of a parameter optimisation process. It returns a dict mapping each SV to a table, and a df with the gridss.
 
     coverage_field is the field where clove is filtered to detect CNV. It can be relative_coverage or relative_coverage_dist_to_telomere.
+
+    include_breakpoints_in_genomeGraph indicates whether breakpoints should be included in the genome graph
+
+    type_coverage_to_filterTANDEL is a field that determines what type of coverage is used to filter deletions and tandem duplications in the CLOVE output:
+
+    - mediancov_1 indicates that it should be the abslute and raw coverage
+    - coverage_rel_to_predFromFeats means that it should be  based on the coverage relative to the predicted from the features
+
+
     """
 
     print("running gridss and clove with given parameter")
@@ -1547,7 +2043,9 @@ def run_gridssClove_given_filters(sorted_bam, reference_genome, working_dir, med
     # first obtain the gridss output if it is not provided
     if file_is_empty(gridss_VCFoutput) or replace is True: gridss_VCFoutput = run_gridss_and_annotateSimpleType(sorted_bam, reference_genome, working_dir, replace=replace, threads=threads, blacklisted_regions=gridss_blacklisted_regions, maxcoverage=gridss_maxcoverage)
 
+    #################################################
     ##### GET A LIST OF FILTERED BREAKPOINTS ########
+    #################################################
     
     # get the output of gridss into a df
     print("getting gridss")
@@ -1576,33 +2074,56 @@ def run_gridssClove_given_filters(sorted_bam, reference_genome, working_dir, med
     df_bedpe.to_csv(raw_bedpe_file, sep="\t", header=False, index=False)
     print("there are %i breakpoints"%len(df_bedpe))
 
-    # get the genome graph
-    genomeGraph_outfile = "%s.genomeGraph.py"%raw_bedpe_file
-    genomeGraph = get_genomeGraph_object(reference_genome, df_bedpe, df_gridss_filt, genomeGraph_outfile)
 
+    ##### GRAPH GENOME OPERATIONS #####
 
+    # get a graph of the genome
+    genomeGraph_outfileprefix = "%s.genomeGraph_incluingBPs%s"%(raw_bedpe_file, include_breakpoints_in_genomeGraph)
+    if include_breakpoints_in_genomeGraph is True:
+        df_bedpe_arg = df_bedpe
+        df_gridss_filt_arg = df_gridss_filt
+    else:
+        df_bedpe_arg = None
+        df_gridss_filt_arg = None
 
+    genome_graph, df_positions_graph = get_genomeGraph_object(reference_genome, df_bedpe_arg, df_gridss_filt_arg, genomeGraph_outfileprefix, replace=replace)
 
-    ldanljdn
+    # get a function that takes the GC content, chromosome and distance to the telomere and returns coverage. This is actually a lambda function
+    outdir_coverage_calculation = "%s/coverage_per_regions2kb_incluingBPs%s"%(working_dir, include_breakpoints_in_genomeGraph); make_folder(outdir_coverage_calculation)
+    df_coverage_train = pd.read_csv(generate_coverage_per_window_file_parallel(reference_genome, outdir_coverage_calculation, sorted_bam, windows_file="none", replace=replace, window_l=2000), sep="\t")
 
+    distToTel_chrom_GC_to_coverage_fn = get_distanceToTelomere_chromosome_GCcontent_to_coverage_fn(df_coverage_train, reference_genome, genome_graph, df_positions_graph, outdir_coverage_calculation, mitochondrial_chromosome=mitochondrial_chromosome, replace=replace)
+
+    ###################################
+
+    #################################################
+    #################################################
     #################################################
 
     # run clove without checking filtering
     outfile_clove = "%s.clove.vcf"%(raw_bedpe_file)
     run_clove_filtered_bedpe(raw_bedpe_file, outfile_clove, sorted_bam, replace=replace_FromGridssRun, median_coverage=median_coverage, median_coverage_dev=1, check_coverage=False) #  REPLACE debug
 
-
-    hkhjjhkjhkj
-
     # add the filter of coverage to the clove output
-    df_clove = get_clove_output_with_coverage_forTANDEL(outfile_clove, reference_genome, sorted_bam, replace=replace_FromGridssRun, run_in_parallel=run_in_parallel, delete_bams=run_in_parallel)
+    df_clove = get_clove_output_with_coverage_forTANDEL(outfile_clove, reference_genome, sorted_bam, distToTel_chrom_GC_to_coverage_fn,  genome_graph, df_positions_graph, replace=replace_FromGridssRun, run_in_parallel=run_in_parallel, delete_bams=run_in_parallel)
 
-    lknlknkjklkl
+    # define the coverage filtering based on the type_coverage_to_filterTANDEL
+    if type_coverage_to_filterTANDEL=="mediancov_1":
+        maxDELcoverage = int(max_rel_coverage_to_consider_del*median_coverage)
+        minDUPcoverage = int(min_rel_coverage_to_consider_dup*median_coverage) 
+
+    elif type_coverage_to_filterTANDEL=="coverage_rel_to_predFromFeats":
+        maxDELcoverage = max_rel_coverage_to_consider_del
+        minDUPcoverage = min_rel_coverage_to_consider_dup
+
+    df_clove["coverage_FILTER"] = df_clove.apply(lambda r: get_covfilter_cloveDF_row_according_to_SVTYPE(r, maxDELcoverage=maxDELcoverage, minDUPcoverage=minDUPcoverage, coverage_field="coverage_rel_to_predFromFeats"), axis=1)
+
+    print(df_clove)
 
 
-    maxDELcoverage = int(max_rel_coverage_to_consider_del*median_coverage)
-    minDUPcoverage = int(min_rel_coverage_to_consider_dup*median_coverage) 
-    df_clove["coverage_FILTER"] = df_clove.apply(lambda r: get_covfilter_cloveDF_row_according_to_SVTYPE(r, maxDELcoverage=maxDELcoverage, minDUPcoverage=minDUPcoverage), axis=1)
+
+
+    khadkjghadkjdakghj
 
     # annotated clove 
     fileprefix = "%s.structural_variants"%outfile_clove
@@ -1618,7 +2139,7 @@ def run_gridssClove_given_filters(sorted_bam, reference_genome, working_dir, med
 ###################################################################################################
 ###################################################################################################
 
-def generate_tables_of_SV_between_genomes_gridssClove(query_genome, reference_genome, replace=False, threads=4, coverage=10, insert_size=250, read_lengths=[kb*1000 for kb in [0.5, 0.7, 0.9, 1]], error_rate=0.0, gridss_min_af=0.25):
+def generate_tables_of_SV_between_genomes_gridssClove(query_genome, reference_genome, replace=False, threads=4, coverage=10, insert_size=250, read_lengths=[kb*1000 for kb in [0.5, 0.7, 0.9, 1]], error_rate=0.0, gridss_min_af=0.25, mitochondrial_chromosome="mito_C_glabrata_CBS138"):
 
     """Takes a bam file with aligned reads or genomes and generates calls, returning a dict that maps variation type to variants
     - aligner can be minimap2 or ngmlr"""
@@ -1745,7 +2266,7 @@ def run_GridssClove_optimising_parameters(sorted_bam, reference_genome, outdir, 
         sim_svtype_to_svfile, rearranged_genome = rearrange_genomes_simulateSV(reference_genome, outdir_sim, replace=replace, nvars=nvars, mitochondrial_chromosome=mitochondrial_chromosome)
 
         # get the variants from simulating reads. Always ploidy 1 to get homozygous SVs
-        predicted_svtype_to_svfile = generate_tables_of_SV_between_genomes_gridssClove(rearranged_genome, reference_genome, replace=replace, threads=threads)
+        predicted_svtype_to_svfile = generate_tables_of_SV_between_genomes_gridssClove(rearranged_genome, reference_genome, replace=replace, threads=threads, mitochondrial_chromosome=mitochondrial_chromosome)
 
         finsihedrunningGridssClove
 
