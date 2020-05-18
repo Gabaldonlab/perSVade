@@ -2018,7 +2018,249 @@ def get_covfilter_cloveDF_row_according_to_SVTYPE(r, maxDELcoverage=0.1, minDUPc
 
     else: return "PASS"
 
-def run_gridssClove_given_filters(sorted_bam, reference_genome, working_dir, median_coverage, replace=True, threads=4, gridss_blacklisted_regions="", gridss_VCFoutput="", gridss_maxcoverage=50000, median_insert_size=500, median_insert_size_sd=0, gridss_filters_dict=default_filtersDict_gridss, tol_bp=50, threshold_p_unbalTRA=0.7, run_in_parallel=True, max_rel_coverage_to_consider_del=0.1, min_rel_coverage_to_consider_dup=1.5, replace_FromGridssRun=False, include_breakpoints_in_genomeGraph=True, mitochondrial_chromosome="mito_C_glabrata_CBS138", type_coverage_to_filterTANDEL="coverage_rel_to_predFromFeats"):
+
+
+def get_bedpeDF_for_clovebalTRA_5with5_or_3with3(df_clove, tol_bp=50):
+
+    """Takes a clove df and returns a dataframe with events that could be balanced translocations, in the sense that they are ITX1 and ITX2 events very close (according to tol_bp) """
+
+    # get the ITX dataframes
+    df_ITX1 = df_clove[df_clove.SVTYPE=="ITX1"]
+    df_ITX2 = df_clove[df_clove.SVTYPE=="ITX2"]
+
+    # initialize a dict
+    data_dict = {}
+
+    # go through each combination
+    for I1 in df_ITX1.index:
+        I1s = df_ITX1.loc[I1]
+
+        for I2 in df_ITX2.index:
+            I2s = df_ITX2.loc[I2]
+
+            # ask whether this combination can be close
+            if I1s["#CHROM"]==I2s["#CHROM"] and I1s["CHR2"]==I2s["CHR2"] and abs(I1s["POS"]-I2s["POS"])<=tol_bp and abs(I1s["END"]-I2s["END"])<=tol_bp:
+
+                # keep in a way that it is in the same order as in the clove VCF
+                data_dict[(I1, I2)] = {"ChrA":I1s["#CHROM"], "StartA":0, "EndA":I1s["POS"], "ChrB":I1s["CHR2"], "StartB":0, "EndB":I1s["END"], "Balanced":True} # all the starts are 0s
+
+    df = pd.DataFrame(data_dict).transpose()
+
+    return df
+
+
+
+def get_bedpeDF_for_clovebalTRA_5with3_or_3with5_INVTXbreakpoints(df_clove, chr_to_len, tol_bp=50):
+
+    """Takes a clove df and returns a dataframe with events that could be balanced translocations, in the sense that they are INVTX1 and INVTX2 events very close (according to tol_bp) """
+
+    # get the INVTX2 dataframes
+    df_INVTX1 = df_clove[df_clove.SVTYPE=="INVTX1"]
+    df_INVTX2 = df_clove[df_clove.SVTYPE=="INVTX2"]
+
+    # initialize a dict
+    data_dict = {}
+
+    # go through each combination
+    for I1 in df_INVTX1.index:
+        I1s = df_INVTX1.loc[I1]
+
+        for I2 in df_INVTX2.index:
+            I2s = df_INVTX2.loc[I2]
+
+            # ask whether this combination can be close
+            if I1s["#CHROM"]==I2s["#CHROM"] and I1s["CHR2"]==I2s["CHR2"] and abs(I1s["POS"]-I2s["POS"])<=tol_bp and abs(I1s["END"]-I2s["END"])<=tol_bp:
+
+                # keep in a way that it is in the same order as in the clove VCF
+                data_dict[(I1, I2)] = {"ChrA":I1s["#CHROM"], "StartA":0, "EndA":I1s["POS"], "ChrB":I1s["CHR2"], "StartB":I1s["END"], "EndB":chr_to_len[I1s["CHR2"]], "Balanced":True} # all the starts are 0s
+
+    df = pd.DataFrame(data_dict).transpose()
+
+    return df
+
+def get_bedpe_for_clovebalTRA_5with3(r, chr_to_len):
+
+    """Takes a row of the df_balTRA_5with3 df and returns a bedpe row, sorted"""
+
+    return pd.Series({"ChrA":r["#CHROM"], "StartA":0, "EndA":r["POS"], "ChrB":r["CHR2"], "StartB":r["END"], "EndB":chr_to_len[r["CHR2"]]-1, "Balanced":True})
+
+def write_clove_df_into_bedORbedpe_files_like_RSVSim(df_clove, fileprefix, reference_genome, sorted_bam, tol_bp=50, replace=False, svtypes_to_consider={"insertions", "deletions", "inversions", "translocations", "tandemDuplications", "remaining"}, threshold_p_unbalTRA=0.1, run_in_parallel=False):
+
+    """Takes a clove dataframe and writes the different SV into several files, all starting with fileprefix. it returns a dict mapping each SVtype to the file with the bed or bedpe containing it. tol_bp indicates the basepairs that are considered as tolerated to be regarded as 'the same event' 
+
+    consider_TANDEL indicates whether to write, it requires the coverage_FILTER to PASS.
+
+    only balanced translocations are considered """
+    print("getting SVs from clove")
+
+    # initialize as a copy
+    df_clove = cp.deepcopy(df_clove)
+
+    # initialize the final dict
+    svtype_to_svfile = {}
+
+    # initialize the considered idxs
+    df_clove.index = list(range(len(df_clove)))
+    considered_idxs = []
+
+    # map each index to the ID
+    cloveIDX_to_ID = dict(df_clove.ID)
+
+    # GENERAL THINGS #############
+
+    # add length chromosome
+    chr_to_len = {seq.id: len(seq.seq) for seq in SeqIO.parse(reference_genome, "fasta")}
+
+    # define the svtypes that are straightforwardly classified
+    cloveSVtypes_easy_classification = {"CID", "CIT", "DUP", "TRA", "CIV", "IVD", "DEL", "TAN"}
+
+    ###############################
+
+
+    ###### TRANSLOCATIONS:  A segment from the 5’ or 3’ end of one chromosome A is exchanged with the 5’ or 3’ end of another chromosome B. ONLY BALANCED TRANSLOCATIONS ARE CONSIDERED#######
+    if any([x in set(df_clove.SVTYPE) for x in {"ITX1", "ITX2", "IVD", "INVTX1", "INVTX2"}]) and "translocations" in svtypes_to_consider:
+
+        # balanced translocations 5with5
+        df_balTRA_5with5_or_3with3 = get_bedpeDF_for_clovebalTRA_5with5_or_3with3(df_clove, tol_bp=tol_bp) # here the index is not balanced
+        considered_idxs += make_flat_listOflists(df_balTRA_5with5_or_3with3.index); df_clove = df_clove.loc[set(df_clove.index).difference(set(considered_idxs))]
+
+        # balanced translocations 5with3 (these are the ones with an IVD field, assigned by clove)
+        df_balTRA_5with3_IVD = df_clove[(df_clove.SVTYPE=="IVD") & ((df_clove.START - df_clove.END)<=tol_bp)].apply(lambda r: get_bedpe_for_clovebalTRA_5with3(r, chr_to_len), axis=1)
+        considered_idxs += list(df_balTRA_5with3_IVD.index); df_clove = df_clove.loc[set(df_clove.index).difference(set(considered_idxs))]
+
+        # balanced translocations 5with3 where there are two close INVTX breakpoints
+        df_balTRA_5with3_INVTXbps = get_bedpeDF_for_clovebalTRA_5with3_or_3with5_INVTXbreakpoints(df_clove, chr_to_len, tol_bp=tol_bp).apply(lambda r: get_bedpe_for_clovebalTRA_5with3(r, chr_to_len), axis=1)
+        considered_idxs += list(df_balTRA_5with3_INVTXbps.index); df_clove = df_clove.loc[set(df_clove.index).difference(set(considered_idxs))]
+
+        # merge both
+        df_balTRA_5with3 = df_balTRA_5with3_IVD.append(df_balTRA_5with3_INVTXbps)
+
+        adfñijdiljfidljhilhfdihfadihadhl
+
+        # merge together and add some fields
+        important_fields = ["ChrA", "StartA", "EndA", "ChrB", "StartB", "EndB", "Balanced"]
+        translocations_dfs =  [df_balTRA_5with5_or_3with3, df_balTRA_5with3]
+        if any([len(d)>0 for d in translocations_dfs]): 
+
+            # non empty df
+            df_tra = pd.concat([d[important_fields] for d in translocations_dfs if all([f in d.keys() for f in important_fields])], sort=True)
+            
+            # forrmat the translocation table in the same way as simulateSV
+            df_tra = df_tra.apply(lambda r: format_translocation_row_simulateSV(r, chr_to_len, start_pos=0), axis=1)[important_fields]
+            df_tra["Balanced"] = df_tra.Balanced.apply(lambda x: str(x).upper())
+
+        else: df_tra = pd.DataFrame(columns=important_fields)
+
+
+        # add the ID to the df
+        def get_ID(idx):
+            if type(idx)==int: return cloveIDX_to_ID[idx]
+            else: return "+".join([cloveIDX_to_ID[x] for x in idx])
+
+        df_tra["ID"] = [get_ID(idx) for idx in df_tra.index]
+        important_fields += ["ID"]
+
+        # write, rewrite, and keep
+        bedpe_translocations = "%s.translocations.bedpe.withBlancedINFO"%fileprefix
+        df_tra[important_fields].to_csv(bedpe_translocations, sep="\t", header=True, index=False)
+
+        # keep
+        svtype_to_svfile["translocations"] = bedpe_translocations
+
+        print("There are %i translocations"%len(df_tra))
+
+    #############################
+
+    ####### INVERSIONS ##########
+    if "CIV" in set(df_clove.SVTYPE) and "inversions" in svtypes_to_consider:
+
+        df_inversions = df_clove[df_clove.SVTYPE=="CIV"][["#CHROM", "POS", "END", "ID"]].rename(columns={"#CHROM":"Chr", "POS":"Start", "END":"End"})
+        inversions_bed = "%s.inversions.bed"%fileprefix
+        df_inversions.to_csv(inversions_bed, sep="\t", header=True, index=False)
+
+        considered_idxs += list(df_inversions.index); df_clove = df_clove.loc[set(df_clove.index).difference(set(considered_idxs))]
+        svtype_to_svfile["inversions"] = inversions_bed
+
+        print("There are %i inversions"%len(df_inversions))
+
+
+    #############################
+
+    ####### INSERTIONS ########
+    if any([x in set(df_clove.SVTYPE) for x in {"CID", "CIT", "DUP", "TRA"}]) and "insertions" in svtypes_to_consider:
+
+        # get the df
+        df_ins = df_clove[df_clove.SVTYPE.isin({"CID", "CIT", "DUP", "TRA"})][["#CHROM", "POS", "CHR2", "START", "END", "ID", "SVTYPE"]]
+
+        # rename
+        df_ins = df_ins.rename(columns={"#CHROM":"ChrB", "POS":"StartB", "CHR2":"ChrA", "START":"StartA", "END":"EndA"})
+        
+        # add the end. It is formated in a way that the insertion length is equivalent to the inserted fragment
+        df_ins["EndB"] = df_ins.StartB + (df_ins.EndA - df_ins.StartA)
+
+        # add whether it is copied
+        svtype_to_isCopied = {"CID":"TRUE", "CIT":"FALSE", "DUP":"TRUE", "TRA":"FALSE"}
+        df_ins["Copied"] = df_ins.SVTYPE.apply(lambda x: svtype_to_isCopied[x])
+
+        # write as bedpe
+        important_fields = ["ChrA", "StartA", "EndA", "ChrB", "StartB", "EndB", "Copied", "ID"]
+        bedpe_insertions = "%s.insertions.bedpe.withCopiedINFO"%fileprefix
+        df_ins[important_fields].to_csv(bedpe_insertions, sep="\t", header=True, index=False)
+
+        # keep
+        svtype_to_svfile["insertions"] = bedpe_insertions
+        considered_idxs += list(df_ins.index); df_clove = df_clove.loc[set(df_clove.index).difference(set(considered_idxs))]
+
+        print("There are %i insertions"%len(df_ins))
+
+    ############################
+
+    # write the remaining events which are not easily assignable
+    df_noTANDEL = df_clove[~(df_clove.SVTYPE.isin(cloveSVtypes_easy_classification))]
+    remaining_noTANDELfile = "%s.remaining_threshold_p_unbalTRA=%.2f.tab"%(fileprefix, threshold_p_unbalTRA)
+    df_noTANDEL[["ID", "#CHROM", "POS", "CHR2", "START", "END", "SVTYPE"]].to_csv(remaining_noTANDELfile, sep="\t", header=True, index=False)
+    svtype_to_svfile["remaining"] = remaining_noTANDELfile
+
+    print("There are %i remaining SVs"%len(df_noTANDEL))
+
+
+    ###### DEL and TAN. This is done at the end because some TAN and DEL are filtered before and included to be   #######
+
+    typeSV_to_tag = {"deletions":"DEL", "tandemDuplications":"TAN"}
+    for typeSV, tag  in typeSV_to_tag.items():
+
+        # check that it exists
+        if tag in set(df_clove.SVTYPE) and typeSV in svtypes_to_consider:
+
+            # write the file
+            bed_filename = "%s.%s.bed"%(fileprefix, typeSV)
+            df_svtype = df_clove[(df_clove.SVTYPE==tag) & (df_clove.coverage_FILTER=="PASS")].rename(columns={"#CHROM":"Chr", "POS":"Start", "END":"End"})
+            df_svtype[["Chr", "Start", "End", "ID"]].to_csv(bed_filename, sep="\t", header=True, index=False)
+
+            # keep
+            svtype_to_svfile[typeSV] = bed_filename
+            considered_idxs += list(df_svtype.index)
+
+            print("There are %i %s"%(len(df_svtype), typeSV))
+
+    # keep only df_clove that has not been already used, which should be done after each step
+    df_clove = df_clove.loc[set(df_clove.index).difference(set(considered_idxs))]
+
+    ###########################
+
+
+    # at the end make sure that the considered idxs are unique
+    if len(considered_idxs)!=len(set(considered_idxs)): 
+        print(fileprefix, considered_idxs)
+        #raise ValueError("ERROR: Some clove events are assigned to more than one cathegory. Check the insertions and translocations calling")
+        print("WARNING: Some clove events are assigned to more than one cathegory. Check the insertions and translocations calling")
+
+    # return the df_clove and the remaining SVs
+    return df_clove, svtype_to_svfile
+
+
+
+def run_gridssClove_given_filters(sorted_bam, reference_genome, working_dir, median_coverage, replace=True, threads=4, gridss_blacklisted_regions="", gridss_VCFoutput="", gridss_maxcoverage=50000, median_insert_size=500, median_insert_size_sd=0, gridss_filters_dict=default_filtersDict_gridss, tol_bp=50, run_in_parallel=True, max_rel_coverage_to_consider_del=0.1, min_rel_coverage_to_consider_dup=1.5, replace_FromGridssRun=False, include_breakpoints_in_genomeGraph=True, mitochondrial_chromosome="mito_C_glabrata_CBS138", type_coverage_to_filterTANDEL="coverage_rel_to_predFromFeats"):
 
     """This function runs gridss and clove with provided filtering and parameters. This can be run at the end of a parameter optimisation process. It returns a dict mapping each SV to a table, and a df with the gridss.
 
@@ -2118,16 +2360,11 @@ def run_gridssClove_given_filters(sorted_bam, reference_genome, working_dir, med
 
     df_clove["coverage_FILTER"] = df_clove.apply(lambda r: get_covfilter_cloveDF_row_according_to_SVTYPE(r, maxDELcoverage=maxDELcoverage, minDUPcoverage=minDUPcoverage, coverage_field="coverage_rel_to_predFromFeats"), axis=1)
 
-    print(df_clove)
-
-
-
-
-    khadkjghadkjdakghj
-
     # annotated clove 
     fileprefix = "%s.structural_variants"%outfile_clove
-    remaining_df_clove, svtype_to_SVtable = write_clove_df_into_bedORbedpe_files_like_RSVSim(df_clove, fileprefix, reference_genome, sorted_bam, tol_bp=tol_bp, replace=replace_FromGridssRun, median_coverage=median_coverage, svtypes_to_consider={"insertions", "deletions", "inversions", "translocations", "tandemDuplications"}, threshold_p_unbalTRA=threshold_p_unbalTRA, run_in_parallel=run_in_parallel)
+    remaining_df_clove, svtype_to_SVtable = write_clove_df_into_bedORbedpe_files_like_RSVSim(df_clove, fileprefix, reference_genome, sorted_bam, tol_bp=tol_bp, replace=replace_FromGridssRun, svtypes_to_consider={"insertions", "deletions", "inversions", "translocations", "tandemDuplications"}, run_in_parallel=run_in_parallel)
+
+    lkjadldhaljhda
 
     # merge the coverage files in one
     merge_coverage_per_window_files_in_one(sorted_bam)
