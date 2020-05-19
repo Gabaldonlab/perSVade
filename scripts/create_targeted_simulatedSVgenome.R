@@ -38,11 +38,15 @@ argv = parse_args(argp)
 # insertions
 insertions_df = read.table(argv$insertions_file, header=TRUE)[,c("ChrA","StartA","EndA","ChrB","StartB","EndB","Copied")]
 colnames(insertions_df) = c("chr","start","end","chrB","startB","endB","Copied")
+insertions_df$Copied = as.logical(insertions_df$Copied)
 regionsIns = GRanges(insertions_df)
+
+# change the name so that the insertions are kept
 
 # change trans to be 0-based
 tra_df = read.table(argv$translocations_file, header=TRUE)[,c("ChrA","StartA","EndA","ChrB","StartB","EndB", "Balanced")]
 colnames(tra_df) = c("chr","start","end","chrB","startB","endB","Balanced")
+tra_df$Balanced = as.logical(tra_df$Balanced)
 regionsTrans = GRanges(tra_df)
 
 # load the single-region vars
@@ -55,7 +59,8 @@ genome_obj = readDNAStringSet(argv$input_genome)
 names(genome_obj) = lapply(names(genome_obj), function(x) (strsplit(x, "(\t)|( )")[[1]][1]))
 
 # get the rearranged genome
-rearranged_genome = simulateSV(output=NA, genome=genome_obj, random=FALSE, verbose=TRUE, regionsDels=regionsDels, regionsInvs=regionsInvs, regionsIns=regionsIns, regionsTrans=regionsTrans, regionsDups=regionsDups)
+rearranged_genome = simulateSV(output=NA, genome=genome_obj, random=FALSE, verbose=TRUE, regionsDels=regionsDels, regionsInvs=regionsInvs, regionsIns=regionsIns, regionsTrans=regionsTrans, regionsDups=regionsDups, bpSeqSize=10000)
+
 
 # write the rearranged genome
 writeXStringSet(rearranged_genome, filepath = argv$output_genome, format = "fasta")

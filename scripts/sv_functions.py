@@ -140,6 +140,25 @@ def id_generator(size=10, chars=string.ascii_uppercase + string.digits, already_
 
     return ID
 
+
+def find_nearest(a, a0):
+
+    """Element in nd array `a` closest to the scalar value `a0`"""
+    
+    # Debug elements that are inf
+    if a0 not in [np.inf, -np.inf]:
+        a = np.array(a)
+        idx = np.abs(a - a0).argmin()
+        closest_in_a = a.flat[idx]
+        
+    elif a0==np.inf:
+        closest_in_a = max(a)
+        
+    elif a0==-np.inf:
+        closest_in_a = min(a)        
+
+    return closest_in_a
+
 def run_cmd(cmd):
 
     """Runs a cmd under the VarCall_CNV_env environment, as defined in CONDA_ACTIVATING_CMD"""
@@ -195,6 +214,8 @@ def delete_file_or_folder(f):
 
     if os.path.isdir(f): shutil.rmtree(f)
     if os.path.isfile(f): os.unlink(f)
+
+def get_uniqueVals_df(df): return set.union(*[set(df[col]) for col in df.columns])
 
 def run_bwa_mem(fastq1, fastq2, ref, outdir, bamfile, sorted_bam, index_bam, name_sample, threads=1, replace=False):
 
@@ -506,12 +527,162 @@ def rewrite_insertions_uniformizedFormat_simulateSV(insertions_file):
         if field in df.keys(): df[field] = df[field].apply(change_EmptyString_to_X)
     df["Copied"] = df.Copied.apply(lambda x: str(x).upper())
 
+    # keep an uncorrected version
+    run_cmd("cp %s %s.unmodified"%(insertions_file, insertions_file))
+
     # write as corrected
     df.to_csv(insertions_file, sep="\t", header=True, index=False)
 
+
+def get_breakpoint_positions_df_in_svDF(svDF):
+
+    """Takes and svDF and returns a df with the chromosomes and positions of the breakpoimts"""
+
+    # small vars
+    if "Chr" in svDF.keys(): 
+        df_start = svDF[["Chr", "Start"]].rename(columns={"Chr":"Chr", "Start":"Pos"})
+        df_end = svDF[["Chr", "End"]].rename(columns={"Chr":"Chr", "End":"Pos"})
+
+        df_pos = df_start.append(df_end)
+
+    # bedpe vars
+    else:
+        df_startA = svDF[["ChrA", "StartA"]].rename(columns={"ChrA":"Chr", "StartA":"Pos"})
+        df_startB = svDF[["ChrB", "StartB"]].rename(columns={"ChrB":"Chr", "StartB":"Pos"})
+        df_endA = svDF[["ChrA", "EndA"]].rename(columns={"ChrA":"Chr", "EndA":"Pos"})
+        df_endB = svDF[["ChrB", "EndB"]].rename(columns={"ChrB":"Chr", "EndB":"Pos"})
+
+        df_pos = pd.concat([d for d in [df_startA, df_startB, df_endA, df_endB]])
+
+    return df_pos
+
+def transform_cut_and_paste_to_copy_and_paste_insertions(reference_genome, rearranged_genome, insertions_file, svtype_to_svDF):
+
+    """ This function takes a rearranged genome and reinserts the copy-and-paste insertions where they should be """
+
+    print("reinserting-copy-and-paste insertions into %s"%insertions_file)
+
+    # load df and keep the copy-and-paste insertions
+    df = pd.read_csv(insertions_file, sep="\t")
+    df = df[df.Copied]
+
+    if len(df)>0:
+
+        # get the rearranged genome seq
+        chr_to_rearrangedSeq = {seq.id: str(seq.seq) for seq in SeqIO.parse(rearranged_genome, "fasta")}
+
+        # get the seq
+        chr_to_refSeq = {seq.id: str(seq.seq) for seq in SeqIO.parse(reference_genome, "fasta")}
+
+        # define the length of each chrom
+        chr_to_lenSeq = {chrom : len(seq) for chrom, seq in chr_to_refSeq.items()}
+
+        # define all the positions with breakpoints
+        df_positions = pd.concat([get_breakpoint_positions_df_in_svDF(svDF) for svtype, svDF in svtype_to_svDF.items()])
+        chr_to_bpPositions = dict(df_positions.groupby("Chr").apply(lambda df_c: set(df_c["Pos"])))
+
+        # add the ends of the chromosome, and convert to np array
+        for chrom, lenSeq in chr_to_lenSeq.items(): 
+
+            chr_to_bpPositions[chrom].update({1, lenSeq})
+            chr_to_bpPositions[chrom] = np.array(sorted(chr_to_bpPositions[chrom]))
+
+        # add the closest breakpoint position of ChrA in the reference
+        df["closest_5'breakpoint_position"] = df.apply(lambda r: find_nearest(chr_to_bpPositions[r["ChrA"]][chr_to_bpPositions[r["ChrA"]]<(r["StartA"])], r["StartA"]), axis=1)
+
+        df["closest_3'breakpoint_position"] = df.apply(lambda r: find_nearest(chr_to_bpPositions[r["ChrA"]][chr_to_bpPositions[r["ChrA"]]>(r["EndA"])], r["EndA"]), axis=1)
+
+        # get the 5' sequence (from one position after the closest breakpoint to the position before the breakpoint)
+        df["5'sequence"] = df.apply(lambda r: chr_to_refSeq[r["ChrA"]][r["closest_5'breakpoint_position"]:r["StartA"]-1], axis=1)
+
+        # get the 3' sequence (from the position after End to the position before the closest breakpoint)
+        df["3'sequence"] = df.apply(lambda r: chr_to_refSeq[r["ChrA"]][r["EndA"]:r["closest_3'breakpoint_position"]-1], axis=1)
+
+        # get the deleted sequence (from the start to the end)
+        df["deleted_sequence"] = df.apply(lambda r: chr_to_refSeq[r["ChrA"]][r["StartA"]-1:r["EndA"]], axis=1)
+
+        # change the chromosome seq in the sequence 
+        for I, (chrA, seq5, seq3, del_seq) in enumerate(df[["ChrA", "5'sequence", "3'sequence", "deleted_sequence"]].values):
+            print("copy-paste-insertion %i.."%I)
+
+            # initialize a boolean that indicates if the seq has been found
+            n_chroms_found = 0
+
+            # all seq
+            ref_seq = seq5+del_seq+seq3
+
+            # conformation in the rearranged chromosome
+            rearranged_seq = seq5+seq3
+
+            # check that the rearranged genome has the sequence o
+            chrA_refSeq = chr_to_refSeq[chrA]
+            if not(chrA_refSeq.count(ref_seq)==1 and chrA_refSeq.count(rearranged_seq)==0): raise ValueError("The sequence is not unique")
+
+            # get the rearranged seqs
+            for chrom, seq in chr_to_rearrangedSeq.items():
+
+                # if the rearrangement sequence is in this chromosome, change it
+                if rearranged_seq in seq: 
+
+                    # update the chr_to_rearrangedSeq so that it contains the reference sequence (copied)
+                    chr_to_rearrangedSeq[chrom] = seq.replace(rearranged_seq, ref_seq)
+
+                    # record the number of lost chromosomes
+                    n_chroms_found+=1
+
+                # if the ref seq is found raise an error
+                if ref_seq in seq: raise ValueError("the rearranged genome contains the ref_seq")
+
+            # if you can't find this drop it
+            if n_chroms_found!=1: 
+                print(n_chroms_found)
+                raise ValueError("You could not find one of the insertions")
+
+
+        # get the rearranged genome into the file
+        seq_records_list = [ for chrom, seq in chr_to_rearrangedSeq.items()]
+
+        jhjhgfjfjffjf
+
+
+
+        ñojdaihadlihlaidh
+
+
+
+
+
+        # get the joined sequences of the rearranged genome
+
+        print(df)
+
+
+        kjadkjdakjagdjg
+
+       
+
+
+
+        # add the
+
+        print(chr_to_bpPositions)
+
+        kamdaldkjadkl
+
+        # get the chromosome to length
+            
+
+        print(df)
+
+        dakjgadgad
+
+
+
 def rearrange_genomes_simulateSV(reference_genome, outdir, replace=True, nvars=50, mitochondrial_chromosome="mito_C_glabrata_CBS138", simulated_svtype_to_svfile={}, svtypes={"insertions", "deletions", "inversions", "translocations", "tandemDuplications"}):
 
-    """Runs a simulation of nvars SVs of each type into the reference genome. It will be sepparated by gDNA and mtDNA. mtDNA will only include 5% of the gDNA vars. Everything is written to outdir. simulated_svtype_to_svfile is a dictionary that maps each svtype to a file with it. This function will insert these SVs plus the remaining ones up to nvars (which will be placed randomly in the remaining spots on the genome). Note that only balanced translocations will be simulated, as unbalanced translocations are hard to bechmark based on coverage. """
+    """Runs a simulation of nvars SVs of each type into the reference genome. It will be sepparated by gDNA and mtDNA. mtDNA will only include 5% of the gDNA vars. Everything is written to outdir. simulated_svtype_to_svfile is a dictionary that maps each svtype to a file with it. This function will insert these SVs plus the remaining ones up to nvars (which will be placed randomly in the remaining spots on the genome). Note that only balanced translocations will be simulated, as unbalanced translocations are hard to bechmark based on coverage. 
+
+    Keep in mind that all RSVSim are 1-based coordinates"""
 
     # define the final outdirs
     final_simulated_SVs_dir = "%s/final_simulated_SVs"%(outdir); 
@@ -520,8 +691,9 @@ def rearrange_genomes_simulateSV(reference_genome, outdir, replace=True, nvars=5
 
     if file_is_empty(final_rearranged_genome_finalFile) or replace is True:
 
+
         # make the folder again
-        delete_folder(outdir)
+        #delete_folder(outdir) # debug
         make_folder(outdir)
         make_folder(final_simulated_SVs_dir)
 
@@ -584,7 +756,8 @@ def rearrange_genomes_simulateSV(reference_genome, outdir, replace=True, nvars=5
 
             #### GET THE RANDOM INS,INV,DEL,TRA ####
 
-            if any([file_is_empty("%s/%s.tab"%(random_sim_dir, svtype)) for svtype in {"insertions", "deletions", "translocations", "inversions"}]) or replace is True:
+            if any([file_is_empty("%s/%s.tab"%(random_sim_dir, svtype)) for svtype in {"insertions", "deletions", "translocations", "inversions", "tandemDuplications"}]) or replace is True:
+                print("generating random SVs")
 
                 # make and delete the folder
                 delete_folder(random_sim_dir); make_folder(random_sim_dir)
@@ -609,6 +782,10 @@ def rearrange_genomes_simulateSV(reference_genome, outdir, replace=True, nvars=5
                 translocations_file = "%s/translocations.tab"%random_sim_dir
                 if file_is_empty(translocations_file): open(translocations_file, "w").write("\t".join(["Name", "ChrA", "StartA", "EndA", "SizeA", "ChrB", "StartB", "EndB", "SizeB", "Balanced", "BpSeqA", "BpSeqB"])) # this needs to be 
 
+                # edit the insertions 
+                insertions_file = "%s/insertions.tab"%random_sim_dir
+                rewrite_insertions_uniformizedFormat_simulateSV(insertions_file)
+
             ########################################
 
             # add the simulations into simulated_svtype_to_svDF
@@ -629,23 +806,36 @@ def rearrange_genomes_simulateSV(reference_genome, outdir, replace=True, nvars=5
 
         ####### generate a rearranged genome with all the simulations in final_svtype_to_svDF #########
         print("inserting these random simulations")
+        if file_is_empty(final_rearranged_genome) or replace is True:
 
-        # initialize a cmd to create the simulated genome
-        targetSV_cmd = "%s --input_genome %s --output_genome %s"%(create_targeted_simulatedSVgenome_R, reference_genome, final_rearranged_genome)
+            # initialize a cmd to create the simulated genome
+            targetSV_cmd = "%s --input_genome %s --output_genome %s"%(create_targeted_simulatedSVgenome_R, reference_genome, final_rearranged_genome)
 
-        # write the SVs into files and add to the cmd
-        for svtype, svDF in final_svtype_to_svDF.items(): 
+            # write the SVs into files and add to the cmd
+            for svtype, svDF in final_svtype_to_svDF.items(): 
 
-            # write file
-            svfile = "%s/%s.tab"%(final_simulated_SVs_dir, svtype)
-            svDF.to_csv(svfile, sep="\t", header=True, index=False)
+                # shift the insertions by 15 bp so that they are not at the beginning of the chrom
+                if svtype=="insertions": svDF["Start"] = svDF["Start"] + 15
 
-            # get cmd
-            targetSV_cmd += " --%s_file %s"%(svtype, svfile)
+                # write file
+                svfile = "%s/%s.tab"%(final_simulated_SVs_dir, svtype)
+                svDF.to_csv(svfile, sep="\t", header=True, index=False)
 
-        # run the cmd
-        std_rearranging_genome = "%s/simulation_std.txt"%final_simulated_SVs_dir
-        run_cmd("%s > %s 2>&1"%(targetSV_cmd, std_rearranging_genome))
+                # get cmd
+                targetSV_cmd += " --%s_file %s"%(svtype, svfile)
+
+            # run the cmd
+            std_rearranging_genome = "%s/simulation_std.txt"%final_simulated_SVs_dir
+            std_rearranging_genome = "stdout"
+
+            if std_rearranging_genome!="stdout": run_cmd("%s > %s 2>&1"%(targetSV_cmd, std_rearranging_genome))
+            else: run_cmd(targetSV_cmd)
+
+        # transform the cut-and-paste insertions to copy-and-paste, whenever necessary
+        insertions_file = "%s/insertions.tab"%final_simulated_SVs_dir
+        transform_cut_and_paste_to_copy_and_paste_insertions(reference_genome, final_rearranged_genome, insertions_file, final_svtype_to_svDF)
+
+        lkndajhdakjhad
 
         # edit the insertions
         insertions_file = "%s/insertions.tab"%final_simulated_SVs_dir
@@ -2048,68 +2238,215 @@ def get_clove_output_with_coverage_forTANDEL(outfile_clove, reference_genome, so
     else: return pd.DataFrame()
 
 
-def get_df_with_coverage_per_windows_relative_to_neighbor_regions(df_windows, bed_windows, reference_genome, sorted_bam, df_clove, replace=True, run_in_parallel=True, delete_bams=True, max_relative_len_neighbors=2):
+def get_target_region_row(r, region, breakpoint_positions, maxPos, max_relative_len_neighbors=2):
 
-    """Takes a """
+    """This function takes a row of a df with windows and returns a row of the 'region', which can be 5 or 3. It will span to the next breakpoint or the max_relative_len_neighbors"""
 
-def get_clove_output_with_coverage(outfile_clove, reference_genome, sorted_bam, replace=False, run_in_parallel=True, delete_bams=True):
+    # sort the breakpoint positions
+    breakpoint_positions = np.array(sorted(breakpoint_positions))
+
+    # get the maximum region length
+    max_region_length = (r["end"]-r["start"])*max_relative_len_neighbors
+
+    # define the minimum region length
+    min_region_len = 100
+
+    # get the 5' region
+    if region=="5":
+
+        # the end is the start of the region
+        end = r["start"]-1
+
+        ##### define the start #####
+
+        # get the breakpoint positions that are before the end, if any
+        bps_before_end = breakpoint_positions[breakpoint_positions<(end-min_region_len)]
+
+        if len(bps_before_end)>0: previous_bp = sorted(bps_before_end)[-1]
+        else: previous_bp = 0
+
+        # only keep the previous_bp as start if the length is not above max_region_length
+        length = end - previous_bp
+        if length<=max_region_length: start = previous_bp
+        else: start = end - max_region_length
+
+        ############################
+
+    # get the 3' region
+    elif region=="3":
+
+        # the start is the end of the region
+        start = r["end"]+1
+
+        ##### define the end #####
+
+        # get the breakpoint positions that are after the start, if any
+        bps_after_start = breakpoint_positions[breakpoint_positions>(start+min_region_len)]
+
+        if len(bps_after_start)>0: next_bp = sorted(bps_after_start)[0]
+        else: next_bp = maxPos
+
+         # only keep the next_bp as start if the length is not above max_region_length
+        length = next_bp - start
+        if length<=max_region_length: end = next_bp
+        else: end = start + max_region_length
+
+        ##########################
+
+    # define general names
+    region_name = "%s_region"%region
+
+    # return a series of all important fields
+    return pd.Series({"chromosome":r["chromosome"], "start":start, "end":end, "region_name":region_name})
+
+
+def get_df_with_coverage_per_windows_relative_to_neighbor_regions(df_windows, bed_windows_prefix, reference_genome, sorted_bam, df_clove, median_coverage, replace=True, run_in_parallel=True, delete_bams=True):
+
+    """Takes a df with windows of the genome and returns it with the coverage and the relative to the genome. It returns a df with several relative coverage measures."""
+
+    print("getting coverage relative to neighbors")
+
+    # get the coverage to len
+    chrom_to_maxPos= {seq.id : len(seq.seq)-1 for seq in SeqIO.parse(reference_genome, "fasta")}
+
+    # map the chromosome to the positions with breakpoints
+    chrom_to_bpPositions_CHROM = dict(df_clove.groupby("#CHROM").apply(lambda df_c: get_uniqueVals_df(df_c[["POS"]])))
+    chrom_to_bpPositions_CHR2 = dict(df_clove.groupby("CHR2").apply(lambda df_c: get_uniqueVals_df(df_c[["START", "END"]]).difference({-1})))
+    chrom_to_bpPositions = {chrom:set() for chrom in chrom_to_maxPos}
+    for chromDict in [chrom_to_bpPositions_CHROM, chrom_to_bpPositions_CHR2]:
+        for chrom, bpPositions in chromDict.items():
+            chrom_to_bpPositions[chrom].update(bpPositions)
+
+    # initialize a df windows for the 5' and 3' regions
+    df_windows = df_windows.sort_values(by=["chromosome", "start", "end"])
+    all_df_windows = cp.deepcopy(df_windows)
+
+    # go through each region and get a coverage df
+    for region in ["target", "5", "3"]: 
+
+        if region=="target":
+            df_region = df_windows
+            df_region["region_name"] = "target_region"
+
+        else:
+
+            # get a df with the regions
+            df_region = df_windows.apply(lambda r: get_target_region_row(r, region, chrom_to_bpPositions[r["chromosome"]], chrom_to_maxPos[r["chromosome"]]), axis=1)
+
+        # get the coverage df
+        bed_file = "%s.%s.bed"%(bed_windows_prefix, region)
+        df_region.to_csv(bed_file, sep="\t", header=True, index=False)
+
+        coverage_df = get_coverage_per_window_df_without_repeating(reference_genome, sorted_bam, bed_file, replace=replace, run_in_parallel=run_in_parallel, delete_bams=delete_bams)
+
+        # add to df region
+        df_region = df_region.merge(coverage_df[["chromosome", "start", "end", "mediancov_1"]], on=["chromosome", "start", "end"], validate="one_to_one").sort_values(by=["chromosome", "start", "end"])
+
+        # add to all df
+        median_coverage_list = list(df_region["mediancov_1"])
+        all_df_windows["%s_coverage"%region] = median_coverage_list
+
+        # add relative parms
+        all_df_windows["relative_coverage_%s"%region] = all_df_windows["%s_coverage"%region]/median_coverage
+
+    # get the coverage relative to the regions
+    for region in ["5", "3"]: all_df_windows["coverage_rel_to_%s"%region] = all_df_windows["target_coverage"]/all_df_windows["%s_coverage"%region]
+
+    # get estimate of both relative coverages
+    all_df_windows["mean_rel_coverage_to_neighbor"] = (all_df_windows["coverage_rel_to_5"]+all_df_windows["coverage_rel_to_3"])/2
+    all_df_windows["closestTo1_rel_coverage_to_neighbor"] = all_df_windows.apply(lambda r: find_nearest([r["coverage_rel_to_5"], r["coverage_rel_to_3"]], 1), axis=1)
+
+    return all_df_windows
+
+def get_clove_output_with_coverage(outfile_clove, reference_genome, sorted_bam, median_coverage, replace=False, run_in_parallel=True, delete_bams=True):
 
     """Takes the output of clove and adds the coverage of the TAN, DEL and INS-like features or -1. The added coverage is the closest-to-1 relative coverage of the the 5' and 3' regions to each region. Each 5' or 3' regions spans from the end of the target region to the next breakpoint, given that the region is maximum 2x the target region.  """
 
     # first load clove into a df
     df_clove = get_clove_output(outfile_clove)
 
+    # define the SVtypes
+    all_svtypes = set(df_clove.SVTYPE)
+    tanDEL_svtypes = {"TAN", "DEL"}
+    ins_svtypes = {"CID", "CIT", "DUP", "TRA"}
+    remaining_svtypes = all_svtypes.difference(tanDEL_svtypes.union(ins_svtypes))
+
     if len(df_clove)>0:
 
-        # now write a bed with the TANDELINS regions
-        bed_TANDELINS_regions = "%s.TANDELINS.bed"%outfile_clove
-
         # get the regions of TANDEL and INS that should be renamed
-        df_TANDEL = df_clove[df_clove.SVTYPE.isin({"TAN", "DEL"})].rename(columns={"#CHROM":"chromosome", "POS":"start", "END":"end"})[["chromosome", "start", "end"]]
+        df_TANDEL = df_clove[df_clove.SVTYPE.isin(tanDEL_svtypes)].rename(columns={"#CHROM":"chromosome", "POS":"start", "END":"end"})[["chromosome", "start", "end"]]
 
-        df_INS = df_clove[df_clove.SVTYPE.isin({"CID", "CIT", "DUP", "TRA"})].rename(columns={"CHR2":"chromosome", "START":"start", "END":"end"})[["chromosome", "start", "end"]]
+        df_INS = df_clove[df_clove.SVTYPE.isin(ins_svtypes)].rename(columns={"CHR2":"chromosome", "START":"start", "END":"end"})[["chromosome", "start", "end"]]
 
         df_TANDELINS = df_TANDEL.append(df_INS)
         
         if len(df_TANDELINS)>0:
 
-            df_TANDELINS.to_csv(bed_TANDELINS_regions, sep="\t", header=True, index=False)
+            # define a bed with these regions
+            bed_TANDELINS_regions = "%s.TANDELINS.bed"%outfile_clove
 
-            print(df_TANDELINS)
-
-
-            ñkclkhlkdahljkhad
-
-            # get a file that has the coverage of these windows
-            coverage_df = get_coverage_per_window_df_without_repeating(reference_genome, sorted_bam, bed_TANDEL_regions, replace=replace, run_in_parallel=run_in_parallel, delete_bams=delete_bams)
+            # define a coverage df
+            coverage_df = get_df_with_coverage_per_windows_relative_to_neighbor_regions(df_TANDELINS, bed_TANDELINS_regions, reference_genome, sorted_bam, df_clove, median_coverage, replace=replace, run_in_parallel=run_in_parallel, delete_bams=delete_bams)
+         
+        else: coverage_df = pd.DataFrame(columns=['chromosome', 'start', 'end', 'target_coverage', 'relative_coverage_target', '5_coverage', 'relative_coverage_5', '3_coverage', 'relative_coverage_3', 'coverage_rel_to_5', 'coverage_rel_to_3', 'mean_rel_coverage_to_neighbor', 'closestTo1_rel_coverage_to_neighbor'])
 
 
-        else: coverage_df = pd.DataFrame(columns=["chromosome", "end", "length", "mediancov_1", "nocoveragebp_1", "percentcovered_1", "start"])
+        # initialize merge
+        merged_df = pd.DataFrame()
 
-        # merge
-        merged_df = df_clove.merge(coverage_df, how="left", left_on=["#CHROM", "POS", "END"], right_on=["chromosome", "start", "end"], validate="many_to_one")
+        svtypeName_to_coordFields = {"tanDel":["#CHROM", "POS", "END"], "remaining":["#CHROM", "POS", "END"], "ins":["CHR2", "START", "END"], }
+        # merge by SVtypes
+        for svtypeName, svtypes in [("tanDel", tanDEL_svtypes), ("ins", ins_svtypes), ("remaining", remaining_svtypes)]:
+
+            # get the coord fields
+            coord_fields = svtypeName_to_coordFields[svtypeName]
+
+            # interesting df clove
+            svtype_df_clove = df_clove[df_clove.SVTYPE.isin(svtypes)]
+
+            # get the merged df
+            if svtypeName in {"tanDel", "ins"}: 
+
+                # the df with the actual coverage
+                merged_df_svtype = svtype_df_clove.merge(coverage_df, left_on=coord_fields, right_on=["chromosome", "start", "end"], validate="one_to_one", how="left")
+
+            else: 
+
+                # initialize as clove
+                merged_df_svtype = svtype_df_clove
+
+                # add nan fields
+                for field in set(merged_df.columns).difference(set(merged_df_svtype.columns)): merged_df_svtype[field] = np.nan
+
+            # add
+            merged_df = merged_df.append(merged_df_svtype, sort=True)
 
         # change types of fields
         merged_df["POS"] = merged_df.POS.apply(get_int)
         merged_df["END"] = merged_df.END.apply(get_int)
         merged_df["START"] = merged_df.START.apply(get_int)
 
+        # set index
+        merged_df.index = list(range(len(merged_df)))
+
         return merged_df 
 
     else: return pd.DataFrame()
 
-def get_covfilter_cloveDF_row_according_to_SVTYPE(r, maxDELcoverage=0.1, minDUPcoverage=1.9, coverage_field="coverage_rel_to_predFromFeats"):
+def get_covfilter_cloveDF_row_according_to_SVTYPE(r, max_rel_coverage_to_consider_del=0.1, min_rel_coverage_to_consider_dup=1.9, coverage_field="closestTo1_rel_coverage_to_neighbor"):
 
     # define a function that takes a row of the dataframe and does the filterinf can be any that is in coverage
 
+    potential_duplication_fields = {"CID", "CIT", "DUP", "TRA", "TAN"} # note that this includes insertions and TAN 
+
     if r["SVTYPE"]=="DEL":
 
-        if r[coverage_field]<=maxDELcoverage: return "PASS"
+        if r[coverage_field]<=max_rel_coverage_to_consider_del: return "PASS"
         else: return "FAIL" 
 
-    elif r["SVTYPE"]=="TAN":
+    elif r["SVTYPE"] in potential_duplication_fields:
 
-        if r[coverage_field]>=minDUPcoverage: return "PASS"
+        if r[coverage_field]>=min_rel_coverage_to_consider_dup: return "PASS"
         else: return "FAIL" 
 
     else: return "PASS"
@@ -2177,9 +2514,6 @@ def get_bedpe_for_clovebalTRA_5with3(r, chr_to_len):
     """Takes a row of the df_balTRA_5with3 df and returns a bedpe row, sorted"""
 
     return pd.Series({"ChrA":r["#CHROM"], "StartA":0, "EndA":r["POS"], "ChrB":r["CHR2"], "StartB":r["END"], "EndB":chr_to_len[r["CHR2"]]-1, "Balanced":True})
-
-
-
 
 def write_clove_df_into_bedORbedpe_files_like_RSVSim(df_clove, fileprefix, reference_genome, sorted_bam, tol_bp=50, replace=False, svtypes_to_consider={"insertions", "deletions", "inversions", "translocations", "tandemDuplications", "remaining"}, run_in_parallel=False, define_insertions_based_on_coverage=False):
 
@@ -2305,7 +2639,7 @@ def write_clove_df_into_bedORbedpe_files_like_RSVSim(df_clove, fileprefix, refer
     if any([x in set(df_clove.SVTYPE) for x in {"CID", "CIT", "DUP", "TRA"}]) and "insertions" in svtypes_to_consider:
 
         # get the df
-        df_ins = df_clove[df_clove.SVTYPE.isin({"CID", "CIT", "DUP", "TRA"})][["#CHROM", "POS", "CHR2", "START", "END", "ID", "SVTYPE"]]
+        df_ins = df_clove[df_clove.SVTYPE.isin({"CID", "CIT", "DUP", "TRA"})][["#CHROM", "POS", "CHR2", "START", "END", "ID", "SVTYPE", "coverage_FILTER"]]
 
         # rename
         df_ins = df_ins.rename(columns={"#CHROM":"ChrB", "POS":"StartB", "CHR2":"ChrA", "START":"StartA", "END":"EndA"})
@@ -2319,19 +2653,8 @@ def write_clove_df_into_bedORbedpe_files_like_RSVSim(df_clove, fileprefix, refer
             svtype_to_isCopied = {"CID":"TRUE", "CIT":"FALSE", "DUP":"TRUE", "TRA":"FALSE"}
             df_ins["Copied"] = df_ins.SVTYPE.apply(lambda x: svtype_to_isCopied[x])
 
-        # based on the coverage of the neighbors
-        else: 
-
-            print(df_ins)
-
-            lñkadnlkdlkh
-
-
-
-
-        min_coverage_for_duplicated_insertion=1.8
-        # get a file that has the coverage of these windows
-        #coverage_df = get_coverage_per_window_df_without_repeating(reference_genome, sorted_bam, bed_TANDEL_regions, replace=replace, run_in_parallel=run_in_parallel, delete_bams=delete_bams)
+        # based on the coverage field
+        else: df_ins["Copied"] = (df_ins.coverage_FILTER=="PASS").apply(lambda x: str(x).upper())
 
         # write as bedpe
         important_fields = ["ChrA", "StartA", "EndA", "ChrB", "StartB", "EndB", "Copied", "ID"]
@@ -2385,8 +2708,6 @@ def write_clove_df_into_bedORbedpe_files_like_RSVSim(df_clove, fileprefix, refer
         raise ValueError("ERROR: Some clove events are assigned to more than one cathegory. Check the insertions and translocations calling")
         #print("WARNING: Some clove events are assigned to more than one cathegory. Check the insertions and translocations calling")
 
-    lkjdalladh
-
     # return the df_clove and the remaining SVs
     return df_clove, svtype_to_svfile
 
@@ -2417,7 +2738,7 @@ def merge_coverage_per_window_files_in_one(bamfile, bam_sufix=".coverage_per_win
         if f!=integrated_file: remove_file(f)
 
 
-def run_gridssClove_given_filters(sorted_bam, reference_genome, working_dir, median_coverage, replace=True, threads=4, gridss_blacklisted_regions="", gridss_VCFoutput="", gridss_maxcoverage=50000, median_insert_size=250, median_insert_size_sd=0, gridss_filters_dict=default_filtersDict_gridss, tol_bp=50, run_in_parallel=True, max_rel_coverage_to_consider_del=0.2, min_rel_coverage_to_consider_dup=1.8, replace_FromGridssRun=False, mitochondrial_chromosome="mito_C_glabrata_CBS138", define_insertions_based_on_coverage=True):
+def run_gridssClove_given_filters(sorted_bam, reference_genome, working_dir, median_coverage, replace=True, threads=4, gridss_blacklisted_regions="", gridss_VCFoutput="", gridss_maxcoverage=50000, median_insert_size=250, median_insert_size_sd=0, gridss_filters_dict=default_filtersDict_gridss, tol_bp=50, run_in_parallel=True, max_rel_coverage_to_consider_del=0.2, min_rel_coverage_to_consider_dup=1.0, replace_FromGridssRun=False, mitochondrial_chromosome="mito_C_glabrata_CBS138", define_insertions_based_on_coverage=True):
 
     """This function runs gridss and clove with provided filtering and parameters. This can be run at the end of a parameter optimisation process. It returns a dict mapping each SV to a table, and a df with the gridss.
 
@@ -2435,7 +2756,7 @@ def run_gridssClove_given_filters(sorted_bam, reference_genome, working_dir, med
 
     """
 
-    print("running gridss and clove with given parameter")
+    print("running gridss and clove with given parameter with %.2f min_rel_coverage_to_consider_dup"%min_rel_coverage_to_consider_dup)
     make_folder(working_dir)
 
     # edit the replace, regarding if filtering from the run of GRIDSS
@@ -2485,29 +2806,29 @@ def run_gridssClove_given_filters(sorted_bam, reference_genome, working_dir, med
     outfile_clove = "%s.clove.vcf"%(raw_bedpe_file)
     run_clove_filtered_bedpe(raw_bedpe_file, outfile_clove, sorted_bam, replace=replace_FromGridssRun, median_coverage=median_coverage, median_coverage_dev=1, check_coverage=False) #  REPLACE debug
 
-    replace_FromGridssRun = True # debug
+    #replace_FromGridssRun = True # debug
 
     # add the filter of coverage to the clove output
-    df_clove = get_clove_output_with_coverage(outfile_clove, reference_genome, sorted_bam, replace=replace_FromGridssRun, run_in_parallel=run_in_parallel, delete_bams=run_in_parallel)
-
-
-    lkjjhkjhdfkjhsdjkhsdfkjhsdf
+    df_clove = get_clove_output_with_coverage(outfile_clove, reference_genome, sorted_bam, median_coverage, replace=replace_FromGridssRun, run_in_parallel=run_in_parallel, delete_bams=run_in_parallel)
 
     # define the coverage filtering based on the type_coverage_to_filterTANDEL
-    if type_coverage_to_filterTANDEL=="mediancov_1":
-        maxDELcoverage = int(max_rel_coverage_to_consider_del*median_coverage)
-        minDUPcoverage = int(min_rel_coverage_to_consider_dup*median_coverage) 
+    df_clove["coverage_FILTER"] = df_clove.apply(lambda r: get_covfilter_cloveDF_row_according_to_SVTYPE(r, max_rel_coverage_to_consider_del=max_rel_coverage_to_consider_del, min_rel_coverage_to_consider_dup=min_rel_coverage_to_consider_dup, coverage_field="mean_rel_coverage_to_neighbor"), axis=1)
 
-    elif type_coverage_to_filterTANDEL=="coverage_rel_to_predFromFeats":
-        maxDELcoverage = max_rel_coverage_to_consider_del
-        minDUPcoverage = min_rel_coverage_to_consider_dup
 
-    df_clove["coverage_FILTER"] = df_clove.apply(lambda r: get_covfilter_cloveDF_row_according_to_SVTYPE(r, maxDELcoverage=maxDELcoverage, minDUPcoverage=minDUPcoverage, coverage_field=type_coverage_to_filterTANDEL), axis=1)
+    # print the coverage for the insertions
+    df_clove = df_clove[df_clove.SVTYPE.isin({"CID", "CIT", "DUP", "TRA"})]
+    print(df_clove["target_coverage"], df_clove.keys())
+
+    lkhadladjh
+
+    # mean_rel_coverage_to_neighbor, closestTo1_rel_coverage_to_neighbor
 
     # annotated clove 
     fileprefix = "%s.structural_variants"%outfile_clove
 
-    remaining_df_clove, svtype_to_SVtable = write_clove_df_into_bedORbedpe_files_like_RSVSim(df_clove, fileprefix, reference_genome, sorted_bam, tol_bp=tol_bp, replace=replace_FromGridssRun, svtypes_to_consider={"insertions", "deletions", "inversions", "translocations", "tandemDuplications", "remaining"}, run_in_parallel=run_in_parallel, define_insertions_based_on_coverage=define_insertions_based_on_coverage, min_rel_coverage_to_consider_dup=min_rel_coverage_to_consider_dup, )
+    remaining_df_clove, svtype_to_SVtable = write_clove_df_into_bedORbedpe_files_like_RSVSim(df_clove, fileprefix, reference_genome, sorted_bam, tol_bp=tol_bp, replace=replace_FromGridssRun, svtypes_to_consider={"insertions", "deletions", "inversions", "translocations", "tandemDuplications", "remaining"}, run_in_parallel=run_in_parallel, define_insertions_based_on_coverage=define_insertions_based_on_coverage)
+
+    kjacsjkakjksjjashkjh
 
     # merge the coverage files in one
     merge_coverage_per_window_files_in_one(sorted_bam)
