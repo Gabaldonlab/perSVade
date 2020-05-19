@@ -131,5 +131,30 @@ def get_distance_to_telomere_through_breakpoints(genome, df_bedpe, df_gridss_fil
     return df_telomeric_dist
 
 
+##### GRAPH GENOME OPERATIONS #####
+if type_coverage_to_filterTANDEL=="coverage_rel_to_predFromFeats":
+
+    # only take into account if you want to correct by coverage_rel_to_predFromFeats
+
+    # get a graph of the genome
+    genomeGraph_outfileprefix = "%s.genomeGraph_incluingBPs%s"%(raw_bedpe_file, include_breakpoints_in_genomeGraph)
+    if include_breakpoints_in_genomeGraph is True:
+        df_bedpe_arg = df_bedpe
+        df_gridss_filt_arg = df_gridss_filt
+    
+    else: df_bedpe_arg = df_gridss_filt_arg = None
+
+    genome_graph, df_positions_graph = get_genomeGraph_object(reference_genome, df_bedpe_arg, df_gridss_filt_arg, genomeGraph_outfileprefix, replace=replace_FromGridssRun)
+
+    # get a function that takes the GC content, chromosome and distance to the telomere and returns coverage. This is actually a lambda function
+    outdir_coverage_calculation = "%s/coverage_per_regions2kb_incluingBPs%s"%(working_dir, include_breakpoints_in_genomeGraph); make_folder(outdir_coverage_calculation)
+    df_coverage_train = pd.read_csv(generate_coverage_per_window_file_parallel(reference_genome, outdir_coverage_calculation, sorted_bam, windows_file="none", replace=replace_FromGridssRun, window_l=2000), sep="\t")
+
+    distToTel_chrom_GC_to_coverage_fn = get_distanceToTelomere_chromosome_GCcontent_to_coverage_fn(df_coverage_train, reference_genome, genome_graph, df_positions_graph, outdir_coverage_calculation, mitochondrial_chromosome=mitochondrial_chromosome, replace=replace_FromGridssRun)
+
+
+elif type_coverage_to_filterTANDEL=="mediancov_1": distToTel_chrom_GC_to_coverage_fn = genome_graph = df_positions_graph = None
+
+
 
 

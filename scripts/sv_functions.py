@@ -123,10 +123,8 @@ analyze_svVCF_simple = "%s/generate_files_from_svVCF_simple.R"%CWD
 vcf_strings_as_NaNs = ['', '#N/A', '#N/A N/A', '#NA', '-1.#IND', '-1.#QNAN', '-NaN', '-nan', '1.#IND', '1.#QNAN', 'N/A', 'NULL', 'NaN', 'n/a', 'nan', 'null']
 
 
-# define default parameters for gridss filtering
-default_filtersDict_gridss = {"min_Nfragments":0, "min_af":0.25, "wrong_FILTERtags":("",), "filter_polyGC":False, "filter_noSplitReads":False, "filter_noReadPairs":False, "maximum_strand_bias":1.0, "maximum_microhomology":1000000000, "maximum_lenght_inexactHomology":100000000, "range_filt_DEL_breakpoints":(0,1), "min_length_inversions":0, "dif_between_insert_and_del":0, "max_to_be_considered_small_event":1, "wrong_INFOtags":('IMPRECISE',), "min_size":50, "min_af_EitherSmallOrLargeEvent":0.25} # the minimum af is 0.25 to include both heterozygous and homozygous vars as default
-
-
+# define default parameters for gridss filtering. This has changed from v0
+default_filtersDict_gridss = {"min_Nfragments":5, "min_af":0.25, "wrong_FILTERtags":("NO_ASSEMBLY",), "filter_polyGC":True, "filter_noSplitReads":False, "filter_noReadPairs":False, "maximum_strand_bias":0.99, "maximum_microhomology":50, "maximum_lenght_inexactHomology":50, "range_filt_DEL_breakpoints":(0, 1), "min_length_inversions":40, "dif_between_insert_and_del":5, "max_to_be_considered_small_event":1000, "wrong_INFOtags":('IMPRECISE',), "min_size":50, "min_af_EitherSmallOrLargeEvent":0.25} # the minimum af is 0.25 to include both heterozygous and homozygous vars as default
 
 ####################################
 ####################################
@@ -1644,38 +1642,78 @@ def generate_nt_content_file(genome, target_nts="GC", replace=False):
 
 def get_df_with_GCcontent(df_windows, genome, gcontent_outfile, replace=False):
 
-    """This function takes a df with windows of the genome and adds the gc content for each window, writing a file under gcontent_outfile"""
+    """This function takes a df with windows of the genome and adds the gc content for each window, writing a file under gcontent_outfile. It will only do those that have been already measured"""
 
     print("Getting GC content")
 
     if file_is_empty(gcontent_outfile) or replace is True:
 
+        # define the initial index
+        initial_index = list(df_windows.index)
+
+        # define a file that has all the GC content per windows of the genome
+        all_gcontent_outfile = "%s.GCcontent_all_windows.py"%genome
+
+        # load the previously generated windows
+        GCcontent_cols = ["chromosome", "start", "end", "GCcontent"]
+        if file_is_empty(all_gcontent_outfile) or replace is True: 
+        #if True:
+            remove_file(all_gcontent_outfile)
+            previous_df_windows = pd.DataFrame(columns=GCcontent_cols)
+
+        else: previous_df_windows = load_object(all_gcontent_outfile)
+
+        # set as index the combination of each chrom, start and end
+        previous_df_windows = previous_df_windows.set_index(["chromosome", "start", "end"], drop=False)
+        all_previous_windows = set(previous_df_windows.index)
+
         # resort
-        df_windows = df_windows.sort_values(by=["chromosome", "start", "end"])
+        df_windows = df_windows.sort_values(by=["chromosome", "start", "end"]).set_index(["chromosome", "start", "end"], drop=False)
 
-        # get the GC content file for each position
-        gc_content_outfile_perPosition = generate_nt_content_file(genome, replace=replace, target_nts="GC")
-        gc_df = pd.read_csv(gc_content_outfile_perPosition, sep="\t")[["chromosome", "position", "is_in_GC"]].sort_values(by=["chromosome", "position"])
+        # get the new windows
+        new_windows = list(set(df_windows.index).difference(all_previous_windows))
+        df_windows_new = df_windows.loc[new_windows]
 
-        # define a df where each position is one row and it has the start_window as an add
-        df_windows["length"] = df_windows.end - df_windows.start
-        positions = make_flat_listOflists(list(df_windows.apply(lambda r: list(range(r["start"], r["end"])), axis=1)))
-        start_windows = make_flat_listOflists(list(df_windows.apply(lambda r: [r["start"]]*r["length"], axis=1)))
-        chromosomes = make_flat_listOflists(list(df_windows.apply(lambda r: [r["chromosome"]]*r["length"], axis=1)))
-        df_positions = pd.DataFrame({"position":positions, "chromosome":chromosomes, "start_window":start_windows})
+        if len(df_windows_new)>0:
+            print("adding %i new windows"%len(df_windows_new))
 
-        # add the positions to the gc df
-        gc_df = gc_df.merge(df_positions, on=["chromosome", "position"], how="right")        
+            # get the GC content file for each position
+            gc_content_outfile_perPosition = generate_nt_content_file(genome, replace=replace, target_nts="GC")
+            gc_df = pd.read_csv(gc_content_outfile_perPosition, sep="\t")[["chromosome", "position", "is_in_GC"]].sort_values(by=["chromosome", "position"])
 
-        # calculate the GC content and add to df
-        startWindow_to_gc = gc_df[["start_window", "is_in_GC"]].groupby("start_window").mean()["is_in_GC"]
-        df_windows["GCcontent"] = list(startWindow_to_gc.loc[df_windows.start])
+            # define a df where each position is one row and it has the start_window as an add
+            df_windows["length"] = df_windows.end - df_windows.start
+            positions = make_flat_listOflists(list(df_windows.apply(lambda r: list(range(r["start"], r["end"])), axis=1)))
+            start_windows = make_flat_listOflists(list(df_windows.apply(lambda r: [r["start"]]*r["length"], axis=1)))
+            end_windows = make_flat_listOflists(list(df_windows.apply(lambda r: [r["end"]]*r["length"], axis=1)))
+            chromosomes = make_flat_listOflists(list(df_windows.apply(lambda r: [r["chromosome"]]*r["length"], axis=1)))
+            df_positions = pd.DataFrame({"position":positions, "chromosome":chromosomes, "start_window":start_windows, "end_window":end_windows})
 
-        # at the end save
+            # add the positions to the gc df
+            gc_df = gc_df.merge(df_positions, on=["chromosome", "position"], how="right")        
+
+            # calculate the GC content and add to df
+            startWindow_to_gc = gc_df[["chromosome", "start_window", "end_window", "is_in_GC"]].groupby(["chromosome", "start_window", "end_window"]).mean()["is_in_GC"]
+
+        else: startWindow_to_gc = pd.Series()
+
+        # add the previously generated windows
+        startWindow_to_gc = startWindow_to_gc.append(previous_df_windows["GCcontent"])
+
+        # get into df_windows
+        df_windows["GCcontent"] = list(startWindow_to_gc.loc[df_windows.index])
+
+        # save the ultimate windows file
+        all_df_windows = previous_df_windows.append(df_windows[GCcontent_cols])
+        all_gcontent_outfile_tmp = "%s.%s"%(all_gcontent_outfile, id_generator(15))
+        save_object(all_df_windows, all_gcontent_outfile_tmp)
+        os.rename(all_gcontent_outfile_tmp, all_gcontent_outfile)
+
+        # at the end save the df windows
+        df_windows.index = initial_index
         save_object(df_windows, gcontent_outfile)
 
     else: df_windows = load_object(gcontent_outfile)
-
 
     return df_windows
 
@@ -1961,11 +1999,15 @@ def get_coverage_list_relative_to_predictedFromTelomereAndGCcontent(df_cov, geno
     if any(pd.isna(df["cov_rel_to_predFromFeats"])): raise ValueError("There was a problem with the prediction from features")
 
     # get the final list
-    return list(df.loc[initial_index, "cov_rel_to_predFromFeats"])
+    final_list = list(df.loc[initial_index, "cov_rel_to_predFromFeats"])
+
+    return final_list
 
 def get_clove_output_with_coverage_forTANDEL(outfile_clove, reference_genome, sorted_bam, distToTel_chrom_GC_to_coverage_fn, genome_graph, df_positions_graph, replace=False, run_in_parallel=False, delete_bams=False):
 
-    """Takes the output of clove and adds the coverage of the TAN and DEL, or -1"""
+    """Takes the output of clove and adds the coverage of the TAN and DEL, or -1.
+
+    If you set genome_graph to None it will skip adding the coverage relative to sequence features"""
 
     # first load clove into a df
     df_clove = get_clove_output(outfile_clove)
@@ -1984,8 +2026,12 @@ def get_clove_output_with_coverage_forTANDEL(outfile_clove, reference_genome, so
             coverage_df = get_coverage_per_window_df_without_repeating(reference_genome, sorted_bam, bed_TANDEL_regions, replace=replace, run_in_parallel=run_in_parallel, delete_bams=delete_bams)
 
             # get the coverage relative to prediction from features
-            outdir_rel_cov_calculation = "%s_calculatig_rel_coverage"%outfile_clove
-            coverage_df["coverage_rel_to_predFromFeats"] = get_coverage_list_relative_to_predictedFromTelomereAndGCcontent(coverage_df, reference_genome, distToTel_chrom_GC_to_coverage_fn, genome_graph, df_positions_graph, outdir_rel_cov_calculation, real_coverage_field="mediancov_1", replace=replace)
+            if genome_graph is not None:
+
+                outdir_rel_cov_calculation = "%s_calculatig_rel_coverage"%outfile_clove
+                coverage_df["coverage_rel_to_predFromFeats"] = get_coverage_list_relative_to_predictedFromTelomereAndGCcontent(coverage_df, reference_genome, distToTel_chrom_GC_to_coverage_fn, genome_graph, df_positions_graph, outdir_rel_cov_calculation, real_coverage_field="mediancov_1", replace=replace)
+
+            else: coverage_df["coverage_rel_to_predFromFeats"] = -1
 
         else: coverage_df = pd.DataFrame(columns=["chromosome", "end", "length", "mediancov_1", "nocoveragebp_1", "percentcovered_1", "start"])
 
@@ -2002,6 +2048,56 @@ def get_clove_output_with_coverage_forTANDEL(outfile_clove, reference_genome, so
     else: return pd.DataFrame()
 
 
+def get_df_with_coverage_per_windows_relative_to_neighbor_regions(df_windows, bed_windows, reference_genome, sorted_bam, df_clove, replace=True, run_in_parallel=True, delete_bams=True, max_relative_len_neighbors=2):
+
+    """Takes a """
+
+def get_clove_output_with_coverage(outfile_clove, reference_genome, sorted_bam, replace=False, run_in_parallel=True, delete_bams=True):
+
+    """Takes the output of clove and adds the coverage of the TAN, DEL and INS-like features or -1. The added coverage is the closest-to-1 relative coverage of the the 5' and 3' regions to each region. Each 5' or 3' regions spans from the end of the target region to the next breakpoint, given that the region is maximum 2x the target region.  """
+
+    # first load clove into a df
+    df_clove = get_clove_output(outfile_clove)
+
+    if len(df_clove)>0:
+
+        # now write a bed with the TANDELINS regions
+        bed_TANDELINS_regions = "%s.TANDELINS.bed"%outfile_clove
+
+        # get the regions of TANDEL and INS that should be renamed
+        df_TANDEL = df_clove[df_clove.SVTYPE.isin({"TAN", "DEL"})].rename(columns={"#CHROM":"chromosome", "POS":"start", "END":"end"})[["chromosome", "start", "end"]]
+
+        df_INS = df_clove[df_clove.SVTYPE.isin({"CID", "CIT", "DUP", "TRA"})].rename(columns={"CHR2":"chromosome", "START":"start", "END":"end"})[["chromosome", "start", "end"]]
+
+        df_TANDELINS = df_TANDEL.append(df_INS)
+        
+        if len(df_TANDELINS)>0:
+
+            df_TANDELINS.to_csv(bed_TANDELINS_regions, sep="\t", header=True, index=False)
+
+            print(df_TANDELINS)
+
+
+            ñkclkhlkdahljkhad
+
+            # get a file that has the coverage of these windows
+            coverage_df = get_coverage_per_window_df_without_repeating(reference_genome, sorted_bam, bed_TANDEL_regions, replace=replace, run_in_parallel=run_in_parallel, delete_bams=delete_bams)
+
+
+        else: coverage_df = pd.DataFrame(columns=["chromosome", "end", "length", "mediancov_1", "nocoveragebp_1", "percentcovered_1", "start"])
+
+        # merge
+        merged_df = df_clove.merge(coverage_df, how="left", left_on=["#CHROM", "POS", "END"], right_on=["chromosome", "start", "end"], validate="many_to_one")
+
+        # change types of fields
+        merged_df["POS"] = merged_df.POS.apply(get_int)
+        merged_df["END"] = merged_df.END.apply(get_int)
+        merged_df["START"] = merged_df.START.apply(get_int)
+
+        return merged_df 
+
+    else: return pd.DataFrame()
+
 def get_covfilter_cloveDF_row_according_to_SVTYPE(r, maxDELcoverage=0.1, minDUPcoverage=1.9, coverage_field="coverage_rel_to_predFromFeats"):
 
     # define a function that takes a row of the dataframe and does the filterinf can be any that is in coverage
@@ -2017,8 +2113,6 @@ def get_covfilter_cloveDF_row_according_to_SVTYPE(r, maxDELcoverage=0.1, minDUPc
         else: return "FAIL" 
 
     else: return "PASS"
-
-
 
 def get_bedpeDF_for_clovebalTRA_5with5_or_3with3(df_clove, tol_bp=50):
 
@@ -2084,13 +2178,36 @@ def get_bedpe_for_clovebalTRA_5with3(r, chr_to_len):
 
     return pd.Series({"ChrA":r["#CHROM"], "StartA":0, "EndA":r["POS"], "ChrB":r["CHR2"], "StartB":r["END"], "EndB":chr_to_len[r["CHR2"]]-1, "Balanced":True})
 
-def write_clove_df_into_bedORbedpe_files_like_RSVSim(df_clove, fileprefix, reference_genome, sorted_bam, tol_bp=50, replace=False, svtypes_to_consider={"insertions", "deletions", "inversions", "translocations", "tandemDuplications", "remaining"}, threshold_p_unbalTRA=0.1, run_in_parallel=False):
+
+
+
+def write_clove_df_into_bedORbedpe_files_like_RSVSim(df_clove, fileprefix, reference_genome, sorted_bam, tol_bp=50, replace=False, svtypes_to_consider={"insertions", "deletions", "inversions", "translocations", "tandemDuplications", "remaining"}, run_in_parallel=False, define_insertions_based_on_coverage=False):
 
     """Takes a clove dataframe and writes the different SV into several files, all starting with fileprefix. it returns a dict mapping each SVtype to the file with the bed or bedpe containing it. tol_bp indicates the basepairs that are considered as tolerated to be regarded as 'the same event' 
 
     consider_TANDEL indicates whether to write, it requires the coverage_FILTER to PASS.
 
-    only balanced translocations are considered """
+    only balanced translocations are considered.
+
+    Thesse are the SVTYPE fields:
+
+    DEL "Deletion"
+    TAN "Tandem Duplication"
+    INV "Inversion"
+    INS "Insertion" 
+    DUP "Complex Duplication"
+    TRA "Complex Translocation"
+    ##ALT=<ID=CIV,Description="Complex Inversion">
+    ##ALT=<ID=CVT,Description="Complex Inverted Translocation">
+    ##ALT=<ID=CVD,Description="Complex Inverted Duplication">
+    ##ALT=<ID=CIT,Description="Complex Interchromosomal Translocation">
+    ##ALT=<ID=CID,Description="Complex Interchromosomal Duplication">
+    ##ALT=<ID=IVT,Description="Complex Inverted Interchromosomal Translocation">
+    ##ALT=<ID=IVD,Description="Complex Inverted Interchromosomal Duplication">
+
+    define_insertions_based_on_coverage indicates whether to filter the insertions based on coverage. If so, it will set as copied insertions those that have a coverage above 
+
+    """
     print("getting SVs from clove")
 
     # initialize as a copy
@@ -2112,7 +2229,7 @@ def write_clove_df_into_bedORbedpe_files_like_RSVSim(df_clove, fileprefix, refer
     chr_to_len = {seq.id: len(seq.seq) for seq in SeqIO.parse(reference_genome, "fasta")}
 
     # define the svtypes that are straightforwardly classified
-    cloveSVtypes_easy_classification = {"CID", "CIT", "DUP", "TRA", "CIV", "IVD", "DEL", "TAN"}
+    cloveSVtypes_easy_classification = {"CID", "CIT", "DUP", "TRA", "CIV", "IVD"} # note that DEL and TAN are left out because they may not directly be assignable to DEL and TAN
 
     ###############################
 
@@ -2134,8 +2251,6 @@ def write_clove_df_into_bedORbedpe_files_like_RSVSim(df_clove, fileprefix, refer
 
         # merge both
         df_balTRA_5with3 = df_balTRA_5with3_IVD.append(df_balTRA_5with3_INVTXbps)
-
-        adfñijdiljfidljhilhfdihfadihadhl
 
         # merge together and add some fields
         important_fields = ["ChrA", "StartA", "EndA", "ChrB", "StartB", "EndB", "Balanced"]
@@ -2199,8 +2314,24 @@ def write_clove_df_into_bedORbedpe_files_like_RSVSim(df_clove, fileprefix, refer
         df_ins["EndB"] = df_ins.StartB + (df_ins.EndA - df_ins.StartA)
 
         # add whether it is copied
-        svtype_to_isCopied = {"CID":"TRUE", "CIT":"FALSE", "DUP":"TRUE", "TRA":"FALSE"}
-        df_ins["Copied"] = df_ins.SVTYPE.apply(lambda x: svtype_to_isCopied[x])
+        if define_insertions_based_on_coverage is False:
+            
+            svtype_to_isCopied = {"CID":"TRUE", "CIT":"FALSE", "DUP":"TRUE", "TRA":"FALSE"}
+            df_ins["Copied"] = df_ins.SVTYPE.apply(lambda x: svtype_to_isCopied[x])
+
+        # based on the coverage of the neighbors
+        else: 
+
+            print(df_ins)
+
+            lñkadnlkdlkh
+
+
+
+
+        min_coverage_for_duplicated_insertion=1.8
+        # get a file that has the coverage of these windows
+        #coverage_df = get_coverage_per_window_df_without_repeating(reference_genome, sorted_bam, bed_TANDEL_regions, replace=replace, run_in_parallel=run_in_parallel, delete_bams=delete_bams)
 
         # write as bedpe
         important_fields = ["ChrA", "StartA", "EndA", "ChrB", "StartB", "EndB", "Copied", "ID"]
@@ -2211,20 +2342,11 @@ def write_clove_df_into_bedORbedpe_files_like_RSVSim(df_clove, fileprefix, refer
         svtype_to_svfile["insertions"] = bedpe_insertions
         considered_idxs += list(df_ins.index); df_clove = df_clove.loc[set(df_clove.index).difference(set(considered_idxs))]
 
-        print("There are %i insertions"%len(df_ins))
+        print("There are %i insertions, %i of which are copy-and-paste"%(len(df_ins), sum(df_ins.Copied=="TRUE")))
 
     ############################
 
-    # write the remaining events which are not easily assignable
-    df_noTANDEL = df_clove[~(df_clove.SVTYPE.isin(cloveSVtypes_easy_classification))]
-    remaining_noTANDELfile = "%s.remaining_threshold_p_unbalTRA=%.2f.tab"%(fileprefix, threshold_p_unbalTRA)
-    df_noTANDEL[["ID", "#CHROM", "POS", "CHR2", "START", "END", "SVTYPE"]].to_csv(remaining_noTANDELfile, sep="\t", header=True, index=False)
-    svtype_to_svfile["remaining"] = remaining_noTANDELfile
-
-    print("There are %i remaining SVs"%len(df_noTANDEL))
-
-
-    ###### DEL and TAN. This is done at the end because some TAN and DEL are filtered before and included to be   #######
+    ###### DEL and TAN #######
 
     typeSV_to_tag = {"deletions":"DEL", "tandemDuplications":"TAN"}
     for typeSV, tag  in typeSV_to_tag.items():
@@ -2249,18 +2371,53 @@ def write_clove_df_into_bedORbedpe_files_like_RSVSim(df_clove, fileprefix, refer
     ###########################
 
 
+    # write the remaining events which are not easily assignable
+    df_notAssigned = df_clove[~(df_clove.SVTYPE.isin(cloveSVtypes_easy_classification))]
+    df_notAssigned_file = "%s.remaining.tab"%(fileprefix)
+    df_notAssigned[["ID", "#CHROM", "POS", "CHR2", "START", "END", "SVTYPE"]].to_csv(df_notAssigned_file, sep="\t", header=True, index=False)
+    svtype_to_svfile["remaining"] = df_notAssigned_file
+
+    print("There are %i remaining SVs"%len(df_notAssigned))
+
     # at the end make sure that the considered idxs are unique
     if len(considered_idxs)!=len(set(considered_idxs)): 
         print(fileprefix, considered_idxs)
-        #raise ValueError("ERROR: Some clove events are assigned to more than one cathegory. Check the insertions and translocations calling")
-        print("WARNING: Some clove events are assigned to more than one cathegory. Check the insertions and translocations calling")
+        raise ValueError("ERROR: Some clove events are assigned to more than one cathegory. Check the insertions and translocations calling")
+        #print("WARNING: Some clove events are assigned to more than one cathegory. Check the insertions and translocations calling")
+
+    lkjdalladh
 
     # return the df_clove and the remaining SVs
     return df_clove, svtype_to_svfile
 
+def merge_coverage_per_window_files_in_one(bamfile, bam_sufix=".coverage_per_window.tab"):
+
+    """This function takes all files that start with bamfile and end with coverage_per_window, """
+
+    print("merging coverage tables")
+
+    # define prefixes
+    bam_dir = get_dir(bamfile)
+    fileprefix = get_file(bamfile) + bam_sufix
+
+    # remove dirs
+    dirs_to_remove = ["%s/%s"%(bam_dir, f) for f in os.listdir(bam_dir) if os.path.isdir("%s/%s"%(bam_dir, f)) and f.startswith(fileprefix) and len(os.listdir("%s/%s"%(bam_dir, f)))==0] 
+    for f in dirs_to_remove: delete_folder(f)
+
+    # unite files
+    files_prefix = ["%s/%s"%(bam_dir, f) for f in os.listdir(bam_dir) if not file_is_empty("%s/%s"%(bam_dir, f)) and "temporary_file" not in f and f.startswith(fileprefix)]
+    df_all = pd.concat([pd.read_csv(f, sep="\t") for f in files_prefix])
+
+    # write into one
+    integrated_file = bamfile+bam_sufix
+    df_all.to_csv(integrated_file, sep="\t", header=True, index=False)
+
+    # remove other files
+    for f in files_prefix: 
+        if f!=integrated_file: remove_file(f)
 
 
-def run_gridssClove_given_filters(sorted_bam, reference_genome, working_dir, median_coverage, replace=True, threads=4, gridss_blacklisted_regions="", gridss_VCFoutput="", gridss_maxcoverage=50000, median_insert_size=500, median_insert_size_sd=0, gridss_filters_dict=default_filtersDict_gridss, tol_bp=50, run_in_parallel=True, max_rel_coverage_to_consider_del=0.1, min_rel_coverage_to_consider_dup=1.5, replace_FromGridssRun=False, include_breakpoints_in_genomeGraph=True, mitochondrial_chromosome="mito_C_glabrata_CBS138", type_coverage_to_filterTANDEL="coverage_rel_to_predFromFeats"):
+def run_gridssClove_given_filters(sorted_bam, reference_genome, working_dir, median_coverage, replace=True, threads=4, gridss_blacklisted_regions="", gridss_VCFoutput="", gridss_maxcoverage=50000, median_insert_size=250, median_insert_size_sd=0, gridss_filters_dict=default_filtersDict_gridss, tol_bp=50, run_in_parallel=True, max_rel_coverage_to_consider_del=0.2, min_rel_coverage_to_consider_dup=1.8, replace_FromGridssRun=False, mitochondrial_chromosome="mito_C_glabrata_CBS138", define_insertions_based_on_coverage=True):
 
     """This function runs gridss and clove with provided filtering and parameters. This can be run at the end of a parameter optimisation process. It returns a dict mapping each SV to a table, and a df with the gridss.
 
@@ -2272,6 +2429,8 @@ def run_gridssClove_given_filters(sorted_bam, reference_genome, working_dir, med
 
     - mediancov_1 indicates that it should be the abslute and raw coverage
     - coverage_rel_to_predFromFeats means that it should be  based on the coverage relative to the predicted from the features
+    - define_insertions_based_on_coverage indicates whether insertions should be defined as "Copied" if they have a coverage >min_rel_coverage_to_consider_dup relative to the nighbor regions
+
 
 
     """
@@ -2316,26 +2475,6 @@ def run_gridssClove_given_filters(sorted_bam, reference_genome, working_dir, med
     df_bedpe.to_csv(raw_bedpe_file, sep="\t", header=False, index=False)
     print("there are %i breakpoints"%len(df_bedpe))
 
-
-    ##### GRAPH GENOME OPERATIONS #####
-
-    # get a graph of the genome
-    genomeGraph_outfileprefix = "%s.genomeGraph_incluingBPs%s"%(raw_bedpe_file, include_breakpoints_in_genomeGraph)
-    if include_breakpoints_in_genomeGraph is True:
-        df_bedpe_arg = df_bedpe
-        df_gridss_filt_arg = df_gridss_filt
-    else:
-        df_bedpe_arg = None
-        df_gridss_filt_arg = None
-
-    genome_graph, df_positions_graph = get_genomeGraph_object(reference_genome, df_bedpe_arg, df_gridss_filt_arg, genomeGraph_outfileprefix, replace=replace)
-
-    # get a function that takes the GC content, chromosome and distance to the telomere and returns coverage. This is actually a lambda function
-    outdir_coverage_calculation = "%s/coverage_per_regions2kb_incluingBPs%s"%(working_dir, include_breakpoints_in_genomeGraph); make_folder(outdir_coverage_calculation)
-    df_coverage_train = pd.read_csv(generate_coverage_per_window_file_parallel(reference_genome, outdir_coverage_calculation, sorted_bam, windows_file="none", replace=replace, window_l=2000), sep="\t")
-
-    distToTel_chrom_GC_to_coverage_fn = get_distanceToTelomere_chromosome_GCcontent_to_coverage_fn(df_coverage_train, reference_genome, genome_graph, df_positions_graph, outdir_coverage_calculation, mitochondrial_chromosome=mitochondrial_chromosome, replace=replace)
-
     ###################################
 
     #################################################
@@ -2346,8 +2485,13 @@ def run_gridssClove_given_filters(sorted_bam, reference_genome, working_dir, med
     outfile_clove = "%s.clove.vcf"%(raw_bedpe_file)
     run_clove_filtered_bedpe(raw_bedpe_file, outfile_clove, sorted_bam, replace=replace_FromGridssRun, median_coverage=median_coverage, median_coverage_dev=1, check_coverage=False) #  REPLACE debug
 
+    replace_FromGridssRun = True # debug
+
     # add the filter of coverage to the clove output
-    df_clove = get_clove_output_with_coverage_forTANDEL(outfile_clove, reference_genome, sorted_bam, distToTel_chrom_GC_to_coverage_fn,  genome_graph, df_positions_graph, replace=replace_FromGridssRun, run_in_parallel=run_in_parallel, delete_bams=run_in_parallel)
+    df_clove = get_clove_output_with_coverage(outfile_clove, reference_genome, sorted_bam, replace=replace_FromGridssRun, run_in_parallel=run_in_parallel, delete_bams=run_in_parallel)
+
+
+    lkjjhkjhdfkjhsdjkhsdfkjhsdf
 
     # define the coverage filtering based on the type_coverage_to_filterTANDEL
     if type_coverage_to_filterTANDEL=="mediancov_1":
@@ -2358,13 +2502,12 @@ def run_gridssClove_given_filters(sorted_bam, reference_genome, working_dir, med
         maxDELcoverage = max_rel_coverage_to_consider_del
         minDUPcoverage = min_rel_coverage_to_consider_dup
 
-    df_clove["coverage_FILTER"] = df_clove.apply(lambda r: get_covfilter_cloveDF_row_according_to_SVTYPE(r, maxDELcoverage=maxDELcoverage, minDUPcoverage=minDUPcoverage, coverage_field="coverage_rel_to_predFromFeats"), axis=1)
+    df_clove["coverage_FILTER"] = df_clove.apply(lambda r: get_covfilter_cloveDF_row_according_to_SVTYPE(r, maxDELcoverage=maxDELcoverage, minDUPcoverage=minDUPcoverage, coverage_field=type_coverage_to_filterTANDEL), axis=1)
 
     # annotated clove 
     fileprefix = "%s.structural_variants"%outfile_clove
-    remaining_df_clove, svtype_to_SVtable = write_clove_df_into_bedORbedpe_files_like_RSVSim(df_clove, fileprefix, reference_genome, sorted_bam, tol_bp=tol_bp, replace=replace_FromGridssRun, svtypes_to_consider={"insertions", "deletions", "inversions", "translocations", "tandemDuplications"}, run_in_parallel=run_in_parallel)
 
-    lkjadldhaljhda
+    remaining_df_clove, svtype_to_SVtable = write_clove_df_into_bedORbedpe_files_like_RSVSim(df_clove, fileprefix, reference_genome, sorted_bam, tol_bp=tol_bp, replace=replace_FromGridssRun, svtypes_to_consider={"insertions", "deletions", "inversions", "translocations", "tandemDuplications", "remaining"}, run_in_parallel=run_in_parallel, define_insertions_based_on_coverage=define_insertions_based_on_coverage, min_rel_coverage_to_consider_dup=min_rel_coverage_to_consider_dup, )
 
     # merge the coverage files in one
     merge_coverage_per_window_files_in_one(sorted_bam)
@@ -2376,10 +2519,15 @@ def run_gridssClove_given_filters(sorted_bam, reference_genome, working_dir, med
 ###################################################################################################
 ###################################################################################################
 
-def generate_tables_of_SV_between_genomes_gridssClove(query_genome, reference_genome, replace=False, threads=4, coverage=10, insert_size=250, read_lengths=[kb*1000 for kb in [0.5, 0.7, 0.9, 1]], error_rate=0.0, gridss_min_af=0.25, mitochondrial_chromosome="mito_C_glabrata_CBS138"):
+def generate_tables_of_SV_between_genomes_gridssClove(query_genome, reference_genome, replace=False, threads=4, coverage=50, insert_size=250, read_lengths=[kb*1000 for kb in [0.5, 1, 1.5, 2]], error_rate=0.0, gridss_min_af=0.25, mitochondrial_chromosome="mito_C_glabrata_CBS138"):
 
     """Takes a bam file with aligned reads or genomes and generates calls, returning a dict that maps variation type to variants
-    - aligner can be minimap2 or ngmlr"""
+    - aligner can be minimap2 or ngmlr.
+
+    [0.5, 0.7, 0.9, 1]
+
+    """
+
 
     # first run svim under the outdir of the aligned reads
     working_dir = "%s/findingSVlongReadsSimulation_ouptut_%s_against_%s"%(get_dir(query_genome), get_file(query_genome), get_file(reference_genome))
@@ -2460,6 +2608,142 @@ def generate_tables_of_SV_between_genomes_gridssClove(query_genome, reference_ge
     return SV_dict
 
 
+
+def get_SVbenchmark_dict(df_predicted, df_known, equal_fields=["Chr"], approximate_fields=["Start", "End"], tolerance_bp=50, pct_overlap=75):
+
+    """Takes dfs for known and predicted SVs and returns a df with the benchmark. approximate_fields are fields that have to overlap at least by tolerance_bp. It returns a dict that maps each of the benchmark fields to the value. pct_overlap is the percentage of overlap between each of the features in approximate_fields  """
+
+    # define the ID fields 
+    if "Name" in df_known.keys(): known_IDfield = "Name"
+    else: known_IDfield = "ID"
+
+    predicted_IDfield = "ID"
+
+
+    workonget_SVbenchmark_dictisstilltodo
+
+    # get the predictedIDs as those that have the same equal_fields and overlap in all approximate_fields
+    if len(df_predicted)>0: df_known["predictedSV_IDs"] = df_known.apply(lambda rk: set(df_predicted[df_predicted.apply(lambda rp: all([rp[f]==rk[f] for f in equal_fields]) and all([abs(rp[f]-rk[f])<=tolerance_bp for f in approximate_fields]), axis=1)][predicted_IDfield]), axis=1)
+    else: df_known["predictedSV_IDs"] = [set()]*len(df_known)
+
+    # calculate the length
+    df_known["predictedSV_IDs_len"] = df_known["predictedSV_IDs"].apply(len)
+
+    # check that there is only 0 or 1 IDs matching
+    if any([x not in {0,1} for x in set(df_known.predictedSV_IDs_len)]): 
+        print("WARNING: There are some predictedIDs that match more than one variant")
+        print(df_known)
+
+    # define a df with the predicted events
+    df_known_matching = df_known[df_known.predictedSV_IDs_len>0]
+
+    # define sets of IDspredictedSV_IDs_len
+    all_known_IDs = set(df_known[known_IDfield])
+    if len(df_predicted)>0: all_predicted_IDs = set(df_predicted[predicted_IDfield])
+    else: all_predicted_IDs = set()
+
+    true_positives_knownIDs = set(df_known_matching[known_IDfield])
+    false_negatives_knownIDs = all_known_IDs.difference(true_positives_knownIDs)
+    
+    if len(df_known_matching)==0:  true_positives_predictedIDs = set()
+    else: true_positives_predictedIDs = set.union(*df_known_matching.predictedSV_IDs)
+    false_positives_predictedIDs = all_predicted_IDs.difference(true_positives_predictedIDs)
+
+    # calculate stats
+    TP = len(true_positives_knownIDs)
+    TP_predictedIDs = len(true_positives_predictedIDs)
+    FP = len(false_positives_predictedIDs)
+    FN = len(false_negatives_knownIDs)
+    nevents = len(all_known_IDs)
+    if nevents==0: precision=1.0; recall=1.0
+    else:
+        if TP==0 and FP==0: precision =  0.0
+        else: precision = TP/(TP + FP)
+        recall = TP/(TP + FN)
+        
+    if precision<=0.0 or recall<=0.0: Fvalue = 0.0
+    else: Fvalue = (2*precision*recall)/(precision+recall)
+
+    # convert set to str
+    def set_to_str(set_obj): return "||".join(set_obj)
+
+    # get dict
+    return {"TP":TP, "FP":FP, "FN":FN, "Fvalue":Fvalue, "nevents":nevents, "precision":precision, "recall":recall, "TP_predictedIDs":TP_predictedIDs, "true_positives_knownIDs":set_to_str(true_positives_knownIDs), "false_negatives_knownIDs":set_to_str(false_negatives_knownIDs), "true_positives_predictedIDs":set_to_str(true_positives_predictedIDs), "false_positives_predictedIDs":set_to_str(false_positives_predictedIDs)}
+
+
+def benchmark_processedSVs_against_knownSVs_inHouse(svtype_to_predsvfile, know_SV_dict, fileprefix, replace=False, tol_bp=50, add_integrated_benchmarking=False):
+
+    """Takes two dictionaries that map some SVfiles. It runs, for all the types in svtype_to_predsvfile, a benchmarking against the known ones, writing a file under fileprefix. It returns a df of this benchmark, created with functions written here. It returns as matching events those that have an overlap of at least 50 bp.
+
+    know_SV_dict marks the expected events. If they do not exist you have 0 accuracy.
+
+    add_integrated_benchmarking indicates whether to perform a global benchmarking (not only per svtype).
+
+    The 'analysis_benchmarking' feature was removed from this version """
+
+    # map cmplex events to a boolean field
+    complexEvt_to_boolField = {"translocations":"Balanced", "insertions":"Copied"}
+
+    # initialize benchmark dict
+    benchmark_dict = {}
+
+    # go through each type of event
+    for svtype in know_SV_dict:
+        print("benchmarking %s"%svtype)
+
+        # load dataframes
+        if svtype in svtype_to_predsvfile.keys(): 
+            df_predicted = pd.read_csv(svtype_to_predsvfile[svtype], sep="\t")
+        else: df_predicted = pd.DataFrame()
+
+        df_known = pd.read_csv(know_SV_dict[svtype], sep="\t")
+
+        # define the fields that have to be compared
+        if svtype in {"inversions", "tandemDuplications", "deletions"}:
+            equal_fields = ["Chr"]
+            approximate_fields = ["Start", "End"]
+
+        elif svtype in {"translocations", "insertions"}: 
+            equal_fields = ["ChrA", "ChrB", complexEvt_to_boolField[svtype]]
+            approximate_fields = ["StartA", "EndA", "StartB", "EndB"]
+
+        elif svtype in {"remaining"}:
+            equal_fields = ["#CHROM", "CHR2", "SVTYPE"]
+            approximate_fields = ["POS", "START", "END"]
+
+        else: raise ValueError("%s is not a valid svtype"%svtype)
+
+        # get the dict of the benchmark
+        dict_benchmark_svtype = get_SVbenchmark_dict(df_predicted, df_known, equal_fields=equal_fields, approximate_fields=approximate_fields, tolerance_bp=tolerance_bp)
+        dict_benchmark_svtype["svtype"] = svtype
+
+        # keep
+        benchmark_dict[svtype] = dict_benchmark_svtype
+
+    # get the benchmarking
+    df_benchmark = pd.DataFrame(benchmark_dict).transpose()
+
+    print(df_benchmark)
+
+
+    kjhdakjgadkjdakjda
+
+    ###### perform integrated benchmarking #####
+    if add_integrated_benchmarking is True:
+
+        # get a per-filt row
+        integrated_df_benchmark = pd.DataFrame({"integrated": get_integrated_benchmarking_fields_series_for_setFilters_df(df_benchmark)}).transpose()
+
+        # keep
+        df_benchmark = df_benchmark.append(integrated_df_benchmark[list(df_benchmark.keys())])
+    
+    ###########################################
+
+    return df_benchmark
+
+
+
+
 def run_GridssClove_optimising_parameters(sorted_bam, reference_genome, outdir, threads=4, replace=False, window_l=1000, n_simulated_genomes=2, mitochondrial_chromosome="mito_C_glabrata_CBS138", simulation_types=["uniform", "biased_towards_repeats"], target_ploidies=["haploid", "diploid_homo", "diploid_hetero", "ref:2_var:1", "ref:3_var:1", "ref:4_var:1", "ref:5_var:1", "ref:9_var:1", "ref:19_var:1", "ref:99_var:1"], replace_covModelObtention=False, range_filtering_benchmark="theoretically_meaningful", known_genomes_withSV_and_shortReads_table=True, expected_ploidy=1, nvars=100):
 
     """
@@ -2503,7 +2787,12 @@ def run_GridssClove_optimising_parameters(sorted_bam, reference_genome, outdir, 
         sim_svtype_to_svfile, rearranged_genome = rearrange_genomes_simulateSV(reference_genome, outdir_sim, replace=replace, nvars=nvars, mitochondrial_chromosome=mitochondrial_chromosome)
 
         # get the variants from simulating reads. Always ploidy 1 to get homozygous SVs
-        predicted_svtype_to_svfile = generate_tables_of_SV_between_genomes_gridssClove(rearranged_genome, reference_genome, replace=replace, threads=threads, mitochondrial_chromosome=mitochondrial_chromosome)
+        predicted_svtype_to_svfile, df_gridss = generate_tables_of_SV_between_genomes_gridssClove(rearranged_genome, reference_genome, replace=replace, threads=threads, mitochondrial_chromosome=mitochondrial_chromosome)
+
+        # get a df of benchmarking
+        fileprefix = "%s/rearranged_genome_benchmarking_SV"%outdir_sim
+        df_benchmark_longReads = benchmark_processedSVs_against_knownSVs_inHouse(predicted_svtype_to_svfile, sim_svtype_to_svfile, fileprefix, replace=replace, tol_bp=50)
+
 
         finsihedrunningGridssClove
 
