@@ -39,6 +39,7 @@ import inspect
 import collections
 from shutil import copyfile
 import igraph
+from ete3 import Tree
 
 warnings.simplefilter(action='ignore', category=pd.core.common.SettingWithCopyWarning) # avoid the slicing warning
 #pd.options.mode.chained_assignment = 'raise'
@@ -95,6 +96,7 @@ recon_dir = "%s/bin"%EnvDir
 rmblast_dir = "%s/bin"%EnvDir
 rscout_dir = "%s/bin"%EnvDir
 trf_prgm_dir = "%s/bin/trf"%EnvDir
+JolyTree_sh = "%s/bin/JolyTree.sh"%EnvDir
 
 # executables that are provided in the repository
 external_software = "%s/../installation/external_software"%CWD
@@ -125,6 +127,65 @@ vcf_strings_as_NaNs = ['', '#N/A', '#N/A N/A', '#NA', '-1.#IND', '-1.#QNAN', '-N
 
 # define default parameters for gridss filtering. This has changed from v0
 default_filtersDict_gridss = {"min_Nfragments":5, "min_af":0.25, "wrong_FILTERtags":("NO_ASSEMBLY",), "filter_polyGC":True, "filter_noSplitReads":False, "filter_noReadPairs":False, "maximum_strand_bias":0.99, "maximum_microhomology":50, "maximum_lenght_inexactHomology":50, "range_filt_DEL_breakpoints":(0, 1), "min_length_inversions":40, "dif_between_insert_and_del":5, "max_to_be_considered_small_event":1000, "wrong_INFOtags":('IMPRECISE',), "min_size":50, "min_af_EitherSmallOrLargeEvent":0.25} # the minimum af is 0.25 to include both heterozygous and homozygous vars as default
+
+# define lists of filters ordered from less conservative to most conservative
+g_all_FILTER_tags = ("ASSEMBLY_ONLY", "NO_ASSEMBLY", "ASSEMBLY_TOO_FEW_READ", "ASSEMBLY_TOO_SHORT", "INSUFFICIENT_SUPPORT", "LOW_QUAL", "REF", "SINGLE_ASSEMBLY")
+g_meaningful_FILTER_tags = ("NO_ASSEMBLY", "INSUFFICIENT_SUPPORT", "LOW_QUAL")
+
+g_min_Nfragments_l = [5, 8, 10, 15, 20, 30]
+g_min_af_l = [0.0, 0.05, 0.1, 0.2, 0.5, 0.9, 0.99]
+g_min_af_EitherSmallOrLargeEvent_l = [0.0, 0.05, 0.1, 0.2, 0.5, 0.9, 0.99]
+g_wrong_FILTERtags_l = [("",), ("NO_ASSEMBLY",), ("NO_ASSEMBLY", "INSUFFICIENT_SUPPORT"), ("NO_ASSEMBLY", "LOW_QUAL"), ("LOW_QUAL", "INSUFFICIENT_SUPPORT"), g_meaningful_FILTER_tags, g_all_FILTER_tags] 
+g_filter_polyGC_l = [False, True]
+g_filter_noSplitReads_l = [False, True]
+g_filter_noReadPairs_l = [False, True]
+g_maximum_strand_bias_l = [0.99, 0.95, 0.9]    
+g_maximum_microhomology_l = [200, 100, 50, 10]
+g_maximum_lenght_inexactHomology_l = [200, 100, 50, 10]
+g_range_filt_DEL_breakpoints_l = [(0,1), (200, 700), (100, 800), (50, 900)]
+g_min_length_inversions_l = [40, 50, 60, 70]
+g_dif_between_insert_and_del_l = [0, 5, 10, 20]
+g_max_to_be_considered_small_event_l = [100, 200, 500, 1000, 1500]
+g_wrong_INFOtags_l = [('NONE',), ("IMPRECISE",)]
+g_min_size_l = [50]
+
+# map each filter to the ordered list
+g_filterName_to_filtersList = {"min_Nfragments":g_min_Nfragments_l, "min_af":g_min_af_l, "wrong_FILTERtags":g_wrong_FILTERtags_l, "filter_polyGC":g_filter_polyGC_l, "filter_noSplitReads":g_filter_noSplitReads_l, "filter_noReadPairs":g_filter_noReadPairs_l, "maximum_strand_bias":g_maximum_strand_bias_l, "maximum_microhomology":g_maximum_microhomology_l, "maximum_lenght_inexactHomology":g_maximum_lenght_inexactHomology_l, "range_filt_DEL_breakpoints":g_range_filt_DEL_breakpoints_l, "min_length_inversions":g_min_length_inversions_l, "dif_between_insert_and_del":g_dif_between_insert_and_del_l, "max_to_be_considered_small_event":g_max_to_be_considered_small_event_l, "wrong_INFOtags":g_wrong_INFOtags_l, "min_size":g_min_size_l, "min_af_EitherSmallOrLargeEvent":g_min_af_EitherSmallOrLargeEvent_l}
+
+# map each value of each filter list to a value depending on the position
+g_filterName_to_filterValue_to_Number = {filterName : dict(zip(filtersList, range(len(filtersList)))) for filterName, filtersList in g_filterName_to_filtersList.items()}
+
+# define a dict that maps each svtype to the fields that are important to define the overlaps
+svtype_to_fieldsDict = {"inversions": {"equal_fields": ["Chr"], 
+                                        "approximate_fields": ["Start", "End"],
+                                        "chromField_to_posFields": {"Chr":{"start": "Start", "end": "End"}}
+                                        }, 
+
+                        "tandemDuplications": {"equal_fields": ["Chr"], 
+                                               "approximate_fields": ["Start", "End"],
+                                                "chromField_to_posFields": {"Chr":{"start": "Start", "end": "End"}}
+                                                }, 
+
+                        "deletions": {"equal_fields": ["Chr"], 
+                                      "approximate_fields": ["Start", "End"],
+                                      "chromField_to_posFields": {"Chr":{"start": "Start", "end": "End"}}
+                                     }, 
+
+                        "insertions": {"equal_fields": ["ChrA", "ChrB", "Copied"], 
+                                        "approximate_fields": ["StartA", "EndA", "StartB", "EndB"],
+                                        "chromField_to_posFields": {"ChrA":{"start": "StartA", "end": "EndA"}}
+                                        }, 
+
+                        "translocations": {"equal_fields": ["ChrA", "ChrB", "Balanced"], 
+                                           "approximate_fields": ["StartA", "EndA", "StartB", "EndB"],
+                                           "chromField_to_posFields": {}
+                                          }, 
+
+                        "remaining": {"equal_fields": ["#CHROM", "CHR2", "SVTYPE"], 
+                                      "approximate_fields": ["POS", "START", "END"],
+                                      "chromField_to_posFields": {"CHR2":{"start":"START", "end":"END"}}
+                                      }}
+
 
 ####################################
 ####################################
@@ -158,6 +219,13 @@ def find_nearest(a, a0):
         closest_in_a = min(a)        
 
     return closest_in_a
+
+def get_dict_as_tuple(dictionary):
+
+    """Takes a dict and converts it to a sorted tuple"""
+
+    return tuple([(k, dictionary[k]) for k in sorted(dictionary.keys())])
+
 
 def run_cmd(cmd):
 
@@ -568,115 +636,91 @@ def transform_cut_and_paste_to_copy_and_paste_insertions(reference_genome, rearr
 
     if len(df)>0:
 
-        # get the rearranged genome seq
-        chr_to_rearrangedSeq = {seq.id: str(seq.seq) for seq in SeqIO.parse(rearranged_genome, "fasta")}
+        # define an unmodified genome
+        rearranged_genome_unmodified = "%s.unmodified.fasta"%rearranged_genome
+        rearranged_genome_unmodified_tmp = "%s.tmp"%rearranged_genome_unmodified
 
-        # get the seq
-        chr_to_refSeq = {seq.id: str(seq.seq) for seq in SeqIO.parse(reference_genome, "fasta")}
+        if file_is_empty(rearranged_genome_unmodified):
 
-        # define the length of each chrom
-        chr_to_lenSeq = {chrom : len(seq) for chrom, seq in chr_to_refSeq.items()}
+            # if the unmodified tmps is writen, replace the rearranged_genome with it
+            if not file_is_empty(rearranged_genome_unmodified_tmp): os.rename(rearranged_genome_unmodified_tmp, rearranged_genome)
 
-        # define all the positions with breakpoints
-        df_positions = pd.concat([get_breakpoint_positions_df_in_svDF(svDF) for svtype, svDF in svtype_to_svDF.items()])
-        chr_to_bpPositions = dict(df_positions.groupby("Chr").apply(lambda df_c: set(df_c["Pos"])))
+            # get the rearranged genome seq
+            chr_to_rearrangedSeq = {seq.id: str(seq.seq) for seq in SeqIO.parse(rearranged_genome, "fasta")}
+            all_rearranged_chromosomes_together = "".join(chr_to_rearrangedSeq.values())
 
-        # add the ends of the chromosome, and convert to np array
-        for chrom, lenSeq in chr_to_lenSeq.items(): 
+            # get the seq
+            chr_to_refSeq = {seq.id: str(seq.seq) for seq in SeqIO.parse(reference_genome, "fasta")}
 
-            chr_to_bpPositions[chrom].update({1, lenSeq})
-            chr_to_bpPositions[chrom] = np.array(sorted(chr_to_bpPositions[chrom]))
+            # define the length of each chrom
+            chr_to_lenSeq = {chrom : len(seq) for chrom, seq in chr_to_refSeq.items()}
 
-        # add the closest breakpoint position of ChrA in the reference
-        df["closest_5'breakpoint_position"] = df.apply(lambda r: find_nearest(chr_to_bpPositions[r["ChrA"]][chr_to_bpPositions[r["ChrA"]]<(r["StartA"])], r["StartA"]), axis=1)
+            # define all the positions with breakpoints
+            df_positions = pd.concat([get_breakpoint_positions_df_in_svDF(svDF) for svtype, svDF in svtype_to_svDF.items()])
+            chr_to_bpPositions = dict(df_positions.groupby("Chr").apply(lambda df_c: set(df_c["Pos"])))
 
-        df["closest_3'breakpoint_position"] = df.apply(lambda r: find_nearest(chr_to_bpPositions[r["ChrA"]][chr_to_bpPositions[r["ChrA"]]>(r["EndA"])], r["EndA"]), axis=1)
+            # add the ends of the chromosome, and convert to np array
+            for chrom, lenSeq in chr_to_lenSeq.items(): 
 
-        # get the 5' sequence (from one position after the closest breakpoint to the position before the breakpoint)
-        df["5'sequence"] = df.apply(lambda r: chr_to_refSeq[r["ChrA"]][r["closest_5'breakpoint_position"]:r["StartA"]-1], axis=1)
+                chr_to_bpPositions[chrom].update({1, lenSeq})
+                chr_to_bpPositions[chrom] = np.array(sorted(chr_to_bpPositions[chrom]))
 
-        # get the 3' sequence (from the position after End to the position before the closest breakpoint)
-        df["3'sequence"] = df.apply(lambda r: chr_to_refSeq[r["ChrA"]][r["EndA"]:r["closest_3'breakpoint_position"]-1], axis=1)
+            # add the closest breakpoint position of ChrA in the reference
+            df["closest_5'breakpoint_position"] = df.apply(lambda r: find_nearest(chr_to_bpPositions[r["ChrA"]][chr_to_bpPositions[r["ChrA"]]<(r["StartA"])], r["StartA"]), axis=1)
 
-        # get the deleted sequence (from the start to the end)
-        df["deleted_sequence"] = df.apply(lambda r: chr_to_refSeq[r["ChrA"]][r["StartA"]-1:r["EndA"]], axis=1)
+            df["closest_3'breakpoint_position"] = df.apply(lambda r: find_nearest(chr_to_bpPositions[r["ChrA"]][chr_to_bpPositions[r["ChrA"]]>(r["EndA"])], r["EndA"]), axis=1)
 
-        # change the chromosome seq in the sequence 
-        for I, (chrA, seq5, seq3, del_seq) in enumerate(df[["ChrA", "5'sequence", "3'sequence", "deleted_sequence"]].values):
-            print("copy-paste-insertion %i.."%I)
+            # get the 5' sequence (from one position after the closest breakpoint to the position before the breakpoint)
+            df["5'sequence"] = df.apply(lambda r: chr_to_refSeq[r["ChrA"]][r["closest_5'breakpoint_position"]:r["StartA"]-1], axis=1)
 
-            # initialize a boolean that indicates if the seq has been found
-            n_chroms_found = 0
+            # get the 3' sequence (from the position after End to the position before the closest breakpoint)
+            df["3'sequence"] = df.apply(lambda r: chr_to_refSeq[r["ChrA"]][r["EndA"]:r["closest_3'breakpoint_position"]-1], axis=1)
 
-            # all seq
-            ref_seq = seq5+del_seq+seq3
+            # get the deleted sequence (from the start to the end)
+            df["deleted_sequence"] = df.apply(lambda r: chr_to_refSeq[r["ChrA"]][r["StartA"]-1:r["EndA"]], axis=1)
 
-            # conformation in the rearranged chromosome
-            rearranged_seq = seq5+seq3
+            # change the chromosome seq in the sequence 
+            for I, (chrA, seq5, seq3, del_seq) in enumerate(df[["ChrA", "5'sequence", "3'sequence", "deleted_sequence"]].values):
+                print("copy-paste-insertion %i.."%I)
 
-            # check that the rearranged genome has the sequence o
-            chrA_refSeq = chr_to_refSeq[chrA]
-            if not(chrA_refSeq.count(ref_seq)==1 and chrA_refSeq.count(rearranged_seq)==0): raise ValueError("The sequence is not unique")
+                # all seq
+                ref_seq = seq5+del_seq+seq3
 
-            # get the rearranged seqs
-            for chrom, seq in chr_to_rearrangedSeq.items():
+                # conformation in the rearranged chromosome
+                rearranged_seq = seq5+seq3
 
-                # if the rearrangement sequence is in this chromosome, change it
-                if rearranged_seq in seq: 
+                # check that the rearranged seq appears once in the genome and the ref seq in the ref genome. And they do not cross.
+                chrA_refSeq = chr_to_refSeq[chrA]
+                if not(chrA_refSeq.count(ref_seq)==1 and chrA_refSeq.count(rearranged_seq)==0 and all_rearranged_chromosomes_together.count(rearranged_seq)==1 and all_rearranged_chromosomes_together.count(ref_seq)==0): raise ValueError("The sequence is not unique")
 
-                    # update the chr_to_rearrangedSeq so that it contains the reference sequence (copied)
-                    chr_to_rearrangedSeq[chrom] = seq.replace(rearranged_seq, ref_seq)
+                # go through each chrom of the rearranged seqs
+                for chrom in chr_to_rearrangedSeq.keys():
 
-                    # record the number of lost chromosomes
-                    n_chroms_found+=1
+                    # get the rearranged sequence
+                    seq = cp.deepcopy(chr_to_rearrangedSeq[chrom])
 
-                # if the ref seq is found raise an error
-                if ref_seq in seq: raise ValueError("the rearranged genome contains the ref_seq")
+                    # if the rearrangement sequence is in this chromosome, change it
+                    if rearranged_seq in seq: 
 
-            # if you can't find this drop it
-            if n_chroms_found!=1: 
-                print(n_chroms_found)
-                raise ValueError("You could not find one of the insertions")
+                        # update the chr_to_rearrangedSeq so that it contains the reference sequence (copied)
+                        chr_to_rearrangedSeq[chrom] = seq.replace(rearranged_seq, ref_seq)
+                        break
 
+            # get the rearranged genome into the file
+            seq_records_list = [SeqRecord(Seq(seq), id=chrom, name=chrom, description=chrom) for chrom, seq in chr_to_rearrangedSeq.items()]
 
-        # get the rearranged genome into the file
-        seq_records_list = [ for chrom, seq in chr_to_rearrangedSeq.items()]
+            # write the unmodified one
+            print("writing")
+            run_cmd("cp %s %s.tmp"%(rearranged_genome, rearranged_genome_unmodified_tmp))
+            os.rename("%s.tmp"%rearranged_genome_unmodified_tmp, rearranged_genome_unmodified_tmp)
 
-        jhjhgfjfjffjf
+            # write the modified genome
+            SeqIO.write(seq_records_list, rearranged_genome, "fasta")
 
+            # write the modified genome
+            os.rename(rearranged_genome_unmodified_tmp, rearranged_genome_unmodified)
 
-
-        ñojdaihadlihlaidh
-
-
-
-
-
-        # get the joined sequences of the rearranged genome
-
-        print(df)
-
-
-        kjadkjdakjagdjg
-
-       
-
-
-
-        # add the
-
-        print(chr_to_bpPositions)
-
-        kamdaldkjadkl
-
-        # get the chromosome to length
-            
-
-        print(df)
-
-        dakjgadgad
-
-
+        else: print("the insertions have already been modified")
 
 def rearrange_genomes_simulateSV(reference_genome, outdir, replace=True, nvars=50, mitochondrial_chromosome="mito_C_glabrata_CBS138", simulated_svtype_to_svfile={}, svtypes={"insertions", "deletions", "inversions", "translocations", "tandemDuplications"}):
 
@@ -815,7 +859,7 @@ def rearrange_genomes_simulateSV(reference_genome, outdir, replace=True, nvars=5
             for svtype, svDF in final_svtype_to_svDF.items(): 
 
                 # shift the insertions by 15 bp so that they are not at the beginning of the chrom
-                if svtype=="insertions": svDF["Start"] = svDF["Start"] + 15
+                if svtype=="insertions": svDF["StartA"] = svDF["StartA"] + 15
 
                 # write file
                 svfile = "%s/%s.tab"%(final_simulated_SVs_dir, svtype)
@@ -826,7 +870,7 @@ def rearrange_genomes_simulateSV(reference_genome, outdir, replace=True, nvars=5
 
             # run the cmd
             std_rearranging_genome = "%s/simulation_std.txt"%final_simulated_SVs_dir
-            std_rearranging_genome = "stdout"
+            #std_rearranging_genome = "stdout"
 
             if std_rearranging_genome!="stdout": run_cmd("%s > %s 2>&1"%(targetSV_cmd, std_rearranging_genome))
             else: run_cmd(targetSV_cmd)
@@ -834,8 +878,6 @@ def rearrange_genomes_simulateSV(reference_genome, outdir, replace=True, nvars=5
         # transform the cut-and-paste insertions to copy-and-paste, whenever necessary
         insertions_file = "%s/insertions.tab"%final_simulated_SVs_dir
         transform_cut_and_paste_to_copy_and_paste_insertions(reference_genome, final_rearranged_genome, insertions_file, final_svtype_to_svDF)
-
-        lkndajhdakjhad
 
         # edit the insertions
         insertions_file = "%s/insertions.tab"%final_simulated_SVs_dir
@@ -2318,7 +2360,8 @@ def get_df_with_coverage_per_windows_relative_to_neighbor_regions(df_windows, be
             chrom_to_bpPositions[chrom].update(bpPositions)
 
     # initialize a df windows for the 5' and 3' regions
-    df_windows = df_windows.sort_values(by=["chromosome", "start", "end"])
+    df_windows = df_windows.sort_values(by=["chromosome", "start", "end"]).drop_duplicates(subset=["chromosome", "start", "end"])
+    all_sorted_chromosomes = list(df_windows.chromosome)
     all_df_windows = cp.deepcopy(df_windows)
 
     # go through each region and get a coverage df
@@ -2340,7 +2383,10 @@ def get_df_with_coverage_per_windows_relative_to_neighbor_regions(df_windows, be
         coverage_df = get_coverage_per_window_df_without_repeating(reference_genome, sorted_bam, bed_file, replace=replace, run_in_parallel=run_in_parallel, delete_bams=delete_bams)
 
         # add to df region
-        df_region = df_region.merge(coverage_df[["chromosome", "start", "end", "mediancov_1"]], on=["chromosome", "start", "end"], validate="one_to_one").sort_values(by=["chromosome", "start", "end"])
+        df_region = df_region.merge(coverage_df[["chromosome", "start", "end", "mediancov_1"]], on=["chromosome", "start", "end"], validate="many_to_one", how="left").sort_values(by=["chromosome", "start", "end"])
+
+        # check that the regions are the same
+        if all_sorted_chromosomes!=list(df_region.chromosome): raise ValueError("something went wrong with the merging of the line above")
 
         # add to all df
         median_coverage_list = list(df_region["mediancov_1"])
@@ -2738,7 +2784,7 @@ def merge_coverage_per_window_files_in_one(bamfile, bam_sufix=".coverage_per_win
         if f!=integrated_file: remove_file(f)
 
 
-def run_gridssClove_given_filters(sorted_bam, reference_genome, working_dir, median_coverage, replace=True, threads=4, gridss_blacklisted_regions="", gridss_VCFoutput="", gridss_maxcoverage=50000, median_insert_size=250, median_insert_size_sd=0, gridss_filters_dict=default_filtersDict_gridss, tol_bp=50, run_in_parallel=True, max_rel_coverage_to_consider_del=0.2, min_rel_coverage_to_consider_dup=1.0, replace_FromGridssRun=False, mitochondrial_chromosome="mito_C_glabrata_CBS138", define_insertions_based_on_coverage=True):
+def run_gridssClove_given_filters(sorted_bam, reference_genome, working_dir, median_coverage, replace=True, threads=4, gridss_blacklisted_regions="", gridss_VCFoutput="", gridss_maxcoverage=50000, median_insert_size=250, median_insert_size_sd=0, gridss_filters_dict=default_filtersDict_gridss, tol_bp=50, run_in_parallel=True, max_rel_coverage_to_consider_del=0.2, min_rel_coverage_to_consider_dup=1.8, replace_FromGridssRun=False, define_insertions_based_on_coverage=False):
 
     """This function runs gridss and clove with provided filtering and parameters. This can be run at the end of a parameter optimisation process. It returns a dict mapping each SV to a table, and a df with the gridss.
 
@@ -2814,21 +2860,10 @@ def run_gridssClove_given_filters(sorted_bam, reference_genome, working_dir, med
     # define the coverage filtering based on the type_coverage_to_filterTANDEL
     df_clove["coverage_FILTER"] = df_clove.apply(lambda r: get_covfilter_cloveDF_row_according_to_SVTYPE(r, max_rel_coverage_to_consider_del=max_rel_coverage_to_consider_del, min_rel_coverage_to_consider_dup=min_rel_coverage_to_consider_dup, coverage_field="mean_rel_coverage_to_neighbor"), axis=1)
 
-
-    # print the coverage for the insertions
-    df_clove = df_clove[df_clove.SVTYPE.isin({"CID", "CIT", "DUP", "TRA"})]
-    print(df_clove["target_coverage"], df_clove.keys())
-
-    lkhadladjh
-
-    # mean_rel_coverage_to_neighbor, closestTo1_rel_coverage_to_neighbor
-
     # annotated clove 
     fileprefix = "%s.structural_variants"%outfile_clove
 
     remaining_df_clove, svtype_to_SVtable = write_clove_df_into_bedORbedpe_files_like_RSVSim(df_clove, fileprefix, reference_genome, sorted_bam, tol_bp=tol_bp, replace=replace_FromGridssRun, svtypes_to_consider={"insertions", "deletions", "inversions", "translocations", "tandemDuplications", "remaining"}, run_in_parallel=run_in_parallel, define_insertions_based_on_coverage=define_insertions_based_on_coverage)
-
-    kjacsjkakjksjjashkjh
 
     # merge the coverage files in one
     merge_coverage_per_window_files_in_one(sorted_bam)
@@ -2840,7 +2875,7 @@ def run_gridssClove_given_filters(sorted_bam, reference_genome, working_dir, med
 ###################################################################################################
 ###################################################################################################
 
-def generate_tables_of_SV_between_genomes_gridssClove(query_genome, reference_genome, replace=False, threads=4, coverage=50, insert_size=250, read_lengths=[kb*1000 for kb in [0.5, 1, 1.5, 2]], error_rate=0.0, gridss_min_af=0.25, mitochondrial_chromosome="mito_C_glabrata_CBS138"):
+def generate_tables_of_SV_between_genomes_gridssClove(query_genome, reference_genome, replace=False, threads=4, coverage=40, insert_size=250, read_lengths=[kb*1000 for kb in [0.5, 1, 1.5, 2]], error_rate=0.0, gridss_min_af=0.25):
 
     """Takes a bam file with aligned reads or genomes and generates calls, returning a dict that maps variation type to variants
     - aligner can be minimap2 or ngmlr.
@@ -2926,13 +2961,13 @@ def generate_tables_of_SV_between_genomes_gridssClove(query_genome, reference_ge
 
         if filepath.startswith("%s."%sorted_bam) and filepath!=index_bam and filepath!="%s.coverage_per_window.tab"%sorted_bam: remove_file(filepath)
 
-    return SV_dict
+    return SV_dict, df_gridss
 
+def get_SVbenchmark_dict(df_predicted, df_known, equal_fields=["Chr"], approximate_fields=["Start", "End"], tol_bp=50, pct_overlap=0.75, chromField_to_posFields={}):
 
+    """Takes dfs for known and predicted SVs and returns a df with the benchmark. approximate_fields are fields that have to overlap at least by tolerance_bp. It returns a dict that maps each of the benchmark fields to the value. pct_overlap is the percentage of overlap between each of the features in approximate_fields.
 
-def get_SVbenchmark_dict(df_predicted, df_known, equal_fields=["Chr"], approximate_fields=["Start", "End"], tolerance_bp=50, pct_overlap=75):
-
-    """Takes dfs for known and predicted SVs and returns a df with the benchmark. approximate_fields are fields that have to overlap at least by tolerance_bp. It returns a dict that maps each of the benchmark fields to the value. pct_overlap is the percentage of overlap between each of the features in approximate_fields  """
+    chromField_to_posFields is a dict that maps each chromosome field to the start and end fields that need to be interrogated by pct_overlap"""
 
     # define the ID fields 
     if "Name" in df_known.keys(): known_IDfield = "Name"
@@ -2940,11 +2975,54 @@ def get_SVbenchmark_dict(df_predicted, df_known, equal_fields=["Chr"], approxima
 
     predicted_IDfield = "ID"
 
+    def get_is_matching_predicted_and_known_rows(rk, rp):
 
-    workonget_SVbenchmark_dictisstilltodo
+        """Takes a row of a knownID (rk) and a predictedID (rp) and returns a boolean indicating if they match"""
+
+        # ask if the equal fields match
+        equal_fields_match = all([rp[f]==rk[f] for f in equal_fields])
+
+        # ask if the approximate fields match
+        approximate_fields_match = all([abs(rp[f]-rk[f])<=tol_bp for f in approximate_fields])
+
+        # ask if all the chromField_to_posFields overlap by more than pct_overlap
+        overlapping_regions_list = [True] # stores tested regions overlap. It is initalized with a True so that if there are no chromField_to_posFields it is True
+        for chromField, posFields in chromField_to_posFields.items(): 
+
+            # define the regions
+            chrom_k = rk[chromField]
+            start_k = rk[posFields["start"]]
+            end_k = rk[posFields["end"]]
+            len_k = end_k-start_k
+
+            chrom_p = rp[chromField]
+            start_p = rp[posFields["start"]]
+            end_p = rp[posFields["end"]]
+            len_p = end_p-start_p
+
+            # make sure that the end is after the start
+            if len_k<=0 or len_p<=0: raise ValueError("start is after end")
+
+            # get the length of the longest region
+            longest_region_len = max([len_k, len_p])
+
+            # define the boundaries of the overlap
+            start_overlap_pos = max([start_p, start_k])
+            end_overlap_pos = min([end_p, end_k])
+            len_overlap = end_overlap_pos-start_overlap_pos
+
+            # add that the region overalps by more than pct_overlap
+            overlapping_regions_list.append( chrom_k==chrom_p and (len_overlap/longest_region_len)>=pct_overlap)
+
+        regions_overlap = all(overlapping_regions_list)
+
+        return  equal_fields_match and approximate_fields_match and regions_overlap
 
     # get the predictedIDs as those that have the same equal_fields and overlap in all approximate_fields
-    if len(df_predicted)>0: df_known["predictedSV_IDs"] = df_known.apply(lambda rk: set(df_predicted[df_predicted.apply(lambda rp: all([rp[f]==rk[f] for f in equal_fields]) and all([abs(rp[f]-rk[f])<=tolerance_bp for f in approximate_fields]), axis=1)][predicted_IDfield]), axis=1)
+    if len(df_predicted)>0: 
+
+        df_known["predictedSV_IDs"] = df_known.apply(lambda rk: set(df_predicted[df_predicted.apply(lambda rp: get_is_matching_predicted_and_known_rows(rk, rp), axis=1)][predicted_IDfield]), axis=1)
+
     else: df_known["predictedSV_IDs"] = [set()]*len(df_known)
 
     # calculate the length
@@ -2991,8 +3069,154 @@ def get_SVbenchmark_dict(df_predicted, df_known, equal_fields=["Chr"], approxima
     # get dict
     return {"TP":TP, "FP":FP, "FN":FN, "Fvalue":Fvalue, "nevents":nevents, "precision":precision, "recall":recall, "TP_predictedIDs":TP_predictedIDs, "true_positives_knownIDs":set_to_str(true_positives_knownIDs), "false_negatives_knownIDs":set_to_str(false_negatives_knownIDs), "true_positives_predictedIDs":set_to_str(true_positives_predictedIDs), "false_positives_predictedIDs":set_to_str(false_positives_predictedIDs)}
 
+def get_represenative_filtersDict_for_filtersDict_list(filtersDict_list, type_filters="most_conservative"):
 
-def benchmark_processedSVs_against_knownSVs_inHouse(svtype_to_predsvfile, know_SV_dict, fileprefix, replace=False, tol_bp=50, add_integrated_benchmarking=False):
+    """Takes a lis, each position with a list of filters like passed to get_tupleBreakpoints_for_filters_GRIDSS and returns a representative dict, according to less_conservative"""
+
+    # map a score for each dict
+    score_to_dict = {sum([g_filterName_to_filterValue_to_Number[fname][find_nearest(g_filterName_to_filtersList[fname], fvalue)] for fname, fvalue in filtersDict.items()]) : filtersDict for filtersDict in filtersDict_list}
+
+    # get the dict with the min or max score, depedning on the approach
+    type_filters_to_getPositionFun = {"less_conservative":min, "most_conservative":max}
+
+    return score_to_dict[type_filters_to_getPositionFun[type_filters](score_to_dict.keys())]
+
+def get_changing_fields_in_df_benchmark(df):
+
+    """This function takes a df such as the input of get_best_most_conservative_row_df_benchmark and returns a set with the keys that are different across rows"""
+
+    changing_fields = set()
+
+    # go through each field
+    for f in df.columns:
+
+        # filters dict are treated specially
+        if f=="filters_dict": 
+            if len(set(df[f].apply(get_dict_as_tuple)))>1: changing_fields.add(f)
+
+        elif len(set(df[f]))>1: changing_fields.add(f)
+
+    return changing_fields
+
+def get_best_most_conservative_row_df_benchmark(df_benchmark):
+
+    """Takes a df_benchmark, and returns the row with the most conservative row, given that it has the highest Fvalue. The least conservative is made in a step wise way filtering several things one after the other"""
+
+    # get the maximum df
+    df_best = df_benchmark[df_benchmark.Fvalue==max(df_benchmark.Fvalue)]
+    if len(df_best)==1: return df_best.iloc[0]
+    
+    # get the df with the highest precision
+    df_best = df_best[df_best.precision==max(df_best.precision)]
+    if len(df_best)==1: return df_best.iloc[0]
+
+    # get the one with the highest recall
+    df_best = df_best[df_best.recall==max(df_best.recall)]
+    if len(df_best)==1: return df_best.iloc[0]
+
+    # get the most conservative set of filters for gridss
+    most_conservative_filtersDict_tuple = get_dict_as_tuple(get_represenative_filtersDict_for_filtersDict_list(df_best.filters_dict, type_filters="most_conservative"))
+    df_best = df_best[df_best.filters_dict.apply(get_dict_as_tuple)==most_conservative_filtersDict_tuple]
+    if len(df_best)==1: return df_best.iloc[0]
+
+    # get the minimum clove_max_rel_coverage_to_consider_del
+    df_best = df_best[df_best.clove_max_rel_coverage_to_consider_del==min(df_best.clove_max_rel_coverage_to_consider_del)]
+    if len(df_best)==1: return df_best.iloc[0]
+
+    # get the max clove_min_rel_coverage_to_consider_dup
+    df_best = df_best[df_best.clove_min_rel_coverage_to_consider_dup==max(df_best.clove_min_rel_coverage_to_consider_dup)]
+    if len(df_best)==1: return df_best.iloc[0]
+
+    # get filters with min tolerated cov
+    if "gridss_maxcoverage" in df_best.keys():
+        df_best = df_best[df_best.gridss_maxcoverage==min(df_best.gridss_maxcoverage)]
+        if len(df_best)==1: return df_best.iloc[0]
+
+    # if any, take the ones filtering regions in gridss
+    if "gridss_regionsToIgnoreBed" in df_best.keys():
+        
+        if any(df_best.gridss_regionsToIgnoreBed!=""):    
+            df_best = df_best[df_best.gridss_regionsToIgnoreBed!=""]
+            if len(df_best)==1: return df_best.iloc[0]
+
+
+    # at the end just return the best one
+    print("Warning: there is no single type of filtering that can fullfill all the requirements") 
+
+
+    # if you didn't find a single best, raise error
+    print("\nthis is the best df:\n", df_best, "printing the non equal fields across all rows:\n")
+    changing_fields = get_changing_fields_in_df_benchmark(df_best)
+    for f in changing_fields:
+        print("\t", f)
+        for Irow in range(len(df_best)): print("\t\t", df_best[f].iloc[Irow])
+
+
+    raise ValueError("There is not a single best filtering")
+
+
+all_svs = {'translocations', 'insertions', 'deletions', 'inversions', 'tandemDuplications', 'remaining'}
+def get_integrated_benchmarking_fields_series_for_setFilters_df(df):
+
+    """This function takes a grouped per-filterSet df and returns a row with all the integrated accuracy measurements. The filters of gridss that are best for each SV may vary. If so we will take the most conservative filters of all of the fiters that are best for each SV."""
+
+    # get a df where each row is one df
+    df_best_filters = df.groupby("svtype").apply(get_best_most_conservative_row_df_benchmark)
+
+    # debug when there are filters_dict
+    if "filters_dict" in set(df_best_filters.keys()):
+
+        if len(set(df_best_filters["filters_dict"].apply(get_dict_as_tuple)))!=1: 
+            pass
+            #raise ValueError("There are more than 1 filtersDict")
+
+    # initialize a dict that will contain all the integrated filters
+    integrated_benchmarking_results_dict = {}
+
+    # get the numeric vals
+    for f in ["FN", "FP", "TP", "nevents"]: integrated_benchmarking_results_dict[f] = sum(df_best_filters[f])
+
+    # get through the event IDs 
+    for f in ['TP_predictedIDs', 'false_negatives_knownIDs', 'false_positives_predictedIDs', 'true_positives_knownIDs', 'true_positives_predictedIDs']:  integrated_benchmarking_results_dict[f] = "||".join(df_best_filters[f].apply(str))
+
+    # add the calculation of accuracy statistics
+    TP = integrated_benchmarking_results_dict["TP"]
+    FP = integrated_benchmarking_results_dict["FP"]
+    FN = integrated_benchmarking_results_dict["FN"]
+    nevents = integrated_benchmarking_results_dict["nevents"]
+
+    if nevents==0: precision=1.0; recall=1.0
+    else:
+        if TP==0 and FP==0: precision =  0.0
+        else: precision = TP/(TP + FP)
+        recall = TP/(TP + FN)
+        
+    if precision<=0.0 or recall<=0.0: Fvalue = 0.0
+    else: Fvalue = (2*precision*recall)/(precision+recall)
+
+    integrated_benchmarking_results_dict["precision"] = precision
+    integrated_benchmarking_results_dict["recall"] = recall
+    integrated_benchmarking_results_dict["Fvalue"] = Fvalue
+
+    # add other fields
+    integrated_benchmarking_results_dict["svtype"] = "integrated"
+
+    # add the fileds corresponding to when there are filters dicts
+    if "filters_dict" in set(df_best_filters.keys()): 
+
+        integrated_benchmarking_results_dict["filters_dict"] = get_represenative_filtersDict_for_filtersDict_list(list(df_best_filters["filters_dict"]), type_filters="most_conservative")
+        integrated_benchmarking_results_dict["clove_max_rel_coverage_to_consider_del"] = df_best_filters.loc["deletions", "clove_max_rel_coverage_to_consider_del"]
+        integrated_benchmarking_results_dict["clove_min_rel_coverage_to_consider_dup"] = df_best_filters.loc["tandemDuplications", "clove_min_rel_coverage_to_consider_dup"]
+        integrated_benchmarking_results_dict["threshold_p_unbalTRA"] = df_best_filters.loc["translocations", "threshold_p_unbalTRA"]
+
+        integrated_benchmarking_results_dict["median_insert_size"] = df_best_filters.loc["deletions", "median_insert_size"]
+        integrated_benchmarking_results_dict["median_insert_size_sd"] = df_best_filters.loc["deletions", "median_insert_size_sd"]
+        integrated_benchmarking_results_dict["sorted_bam"] = df_best_filters.loc["deletions", "sorted_bam"]
+        integrated_benchmarking_results_dict["median_coverage"] = df_best_filters.loc["deletions", "median_coverage"]
+
+    return pd.Series(integrated_benchmarking_results_dict)
+
+def benchmark_processedSVs_against_knownSVs_inHouse(svtype_to_predsvfile, know_SV_dict, fileprefix, replace=False, add_integrated_benchmarking=True):
 
     """Takes two dictionaries that map some SVfiles. It runs, for all the types in svtype_to_predsvfile, a benchmarking against the known ones, writing a file under fileprefix. It returns a df of this benchmark, created with functions written here. It returns as matching events those that have an overlap of at least 50 bp.
 
@@ -3004,6 +3228,7 @@ def benchmark_processedSVs_against_knownSVs_inHouse(svtype_to_predsvfile, know_S
 
     # map cmplex events to a boolean field
     complexEvt_to_boolField = {"translocations":"Balanced", "insertions":"Copied"}
+
 
     # initialize benchmark dict
     benchmark_dict = {}
@@ -3019,23 +3244,13 @@ def benchmark_processedSVs_against_knownSVs_inHouse(svtype_to_predsvfile, know_S
 
         df_known = pd.read_csv(know_SV_dict[svtype], sep="\t")
 
-        # define the fields that have to be compared
-        if svtype in {"inversions", "tandemDuplications", "deletions"}:
-            equal_fields = ["Chr"]
-            approximate_fields = ["Start", "End"]
-
-        elif svtype in {"translocations", "insertions"}: 
-            equal_fields = ["ChrA", "ChrB", complexEvt_to_boolField[svtype]]
-            approximate_fields = ["StartA", "EndA", "StartB", "EndB"]
-
-        elif svtype in {"remaining"}:
-            equal_fields = ["#CHROM", "CHR2", "SVTYPE"]
-            approximate_fields = ["POS", "START", "END"]
-
-        else: raise ValueError("%s is not a valid svtype"%svtype)
+        # define the fields to find overlaps
+        equal_fields = svtype_to_fieldsDict[svtype]["equal_fields"]
+        approximate_fields = svtype_to_fieldsDict[svtype]["approximate_fields"]
+        chromField_to_posFields = chromField_to_posFields[svtype]["approximate_fields"]
 
         # get the dict of the benchmark
-        dict_benchmark_svtype = get_SVbenchmark_dict(df_predicted, df_known, equal_fields=equal_fields, approximate_fields=approximate_fields, tolerance_bp=tolerance_bp)
+        dict_benchmark_svtype = get_SVbenchmark_dict(df_predicted, df_known, equal_fields=equal_fields, approximate_fields=approximate_fields, chromField_to_posFields=chromField_to_posFields)
         dict_benchmark_svtype["svtype"] = svtype
 
         # keep
@@ -3043,11 +3258,6 @@ def benchmark_processedSVs_against_knownSVs_inHouse(svtype_to_predsvfile, know_S
 
     # get the benchmarking
     df_benchmark = pd.DataFrame(benchmark_dict).transpose()
-
-    print(df_benchmark)
-
-
-    kjhdakjgadkjdakjda
 
     ###### perform integrated benchmarking #####
     if add_integrated_benchmarking is True:
@@ -3062,10 +3272,399 @@ def benchmark_processedSVs_against_knownSVs_inHouse(svtype_to_predsvfile, know_S
 
     return df_benchmark
 
+"""
+- known_genomes_withSV_and_shortReads_table is a file with a table that has three fields: ID,assembly,shoort_reads1,short_reads2 . This can be, for example a set of NANOPORE assemblies of Candida glabrata and the corresponding short reads' sequencing in YPD
+"""
+
+def plot_bars_single_df_benchmark(df_benchmark, filename):
+
+    """Takes a df_benchmark with different SV types and plots the results into benchmark"""
+
+    palette_dict = {"precision":"black", "recall":"magenta", "Fvalue":"cyan", "FN":"magenta", "FP": "black", "TP":"cyan", "nevents":"gray"}
+
+    # make a long df where you have a "value" field
+    df_long = pd.melt(df_benchmark, id_vars=["svtype"], value_vars=["precision", "recall", "Fvalue", "FN", "FP", "TP", "nevents"])
+
+    # make two subplots, one for each type of data
+    fig = plt.figure(figsize=(5, 7))
+
+    for I, variable_fields in enumerate([["precision", "recall", "Fvalue"], ["FP","FN","TP","nevents"]]):
+
+        # initialize subpplot
+        ax =  plt.subplot(2, 1, I+1)
+
+        # get df and get barplot
+        df = df_long[df_long.variable.isin(variable_fields)]
+        sns.barplot(x="svtype", y="value", data=df, hue="variable", palette=palette_dict)
+
+        # add a line
+        if I==0: 
+            for Y in [0.9, 0.95, 1.0]: plt.axhline(Y, color="gray", linewidth=0.9, linestyle="--")
+
+        # change rotation
+        for label in ax.get_xticklabels(): label.set_rotation(45)
+
+    #plt.show()
+    fig.tight_layout()  # otherwise the right y-label is slightly 
+    fig.savefig(filename, bbox_inches='tight');
+    plt.close(fig)
+
+def test_SVgeneration_from_assembly(reference_genome, outdir, threads=4, replace=False, n_simulated_genomes=2, mitochondrial_chromosome="mito_C_glabrata_CBS138", nvars=100):
+
+    """This function reports how well the finding of SV from a genome works from random simulations. Writing under outdir"""
+
+    # define the output
+    precision_and_recall_filename = "%s/precision_and_recall_SVgeneration_from_assembly.pdf"%outdir
+    if file_is_empty(precision_and_recall_filename) or replace is True:
+
+        # initialize the start time
+        pipeline_start_time = time.time()
+
+        # prepare files
+        make_folder(outdir)
+
+        print("WORKING ON THE VALIDATION THAT WE CAN FIND READS IN AN ASSEMBLY")
+
+        # initialize a df that will contain the benchmarking
+        all_df_benchmark_longReads = pd.DataFrame()
+
+        # go through each simulation
+        for simID in range(n_simulated_genomes):
+            print("working on simulation %i"%simID)
+
+            # define outdir 
+            outdir_sim = "%s/simulation_%i"%(outdir, simID); make_folder(outdir_sim)
+
+            # generate genome with simulated SVs
+            sim_svtype_to_svfile, rearranged_genome = rearrange_genomes_simulateSV(reference_genome, outdir_sim, replace=replace, nvars=nvars, mitochondrial_chromosome=mitochondrial_chromosome)
+
+            # get the variants from simulating reads. Always ploidy 1 to get homozygous SVs
+            predicted_svtype_to_svfile, df_gridss = generate_tables_of_SV_between_genomes_gridssClove(rearranged_genome, reference_genome, replace=replace, threads=threads, mitochondrial_chromosome=mitochondrial_chromosome)
+
+            # get a df of benchmarking
+            fileprefix = "%s/rearranged_genome_benchmarking_SV"%outdir_sim
+            df_benchmark_longReads = benchmark_processedSVs_against_knownSVs_inHouse(predicted_svtype_to_svfile, sim_svtype_to_svfile, fileprefix, replace=replace)
+
+            # keep
+            df_benchmark_longReads["simID"] = [simID]*len(df_benchmark_longReads)
+            all_df_benchmark_longReads = all_df_benchmark_longReads.append(df_benchmark_longReads)
+
+        # plot the benchmarking
+        plot_bars_single_df_benchmark(all_df_benchmark_longReads, precision_and_recall_filename)
+
+        # at the end clean the generation
+        clean_reference_genome_windows_files(reference_genome)
+
+        print("--- the testing of SV generation from an assembly took %s seconds in %i cores ---"%(time.time() - pipeline_start_time, threads))
+
+
+def get_speciesTree_multipleGenomes_JolyTree(input_dir_withGenomes, outdir, threads=4, replace=False):
+
+    """This function generates a species tree under outdir with all the genomes (files ending with fasta) in input_dir_withGenomes. It returns the newick file with the tree"""
+
+    # make the outdir
+    make_folder(outdir)
+
+
+    # define the outprefix and the expected species tree file
+    outprefix = "%s/outputJolyTree"%outdir
+    species_treefile = "%s.nwk"%outprefix
+
+    if file_is_empty(species_treefile) or replace is True:
+
+        # move all the fasta files in input_dir_withGenomes into input_dir
+        input_dir = "%s/input_genomes"%outdir; make_folder(input_dir)
+        for file in os.listdir(input_dir_withGenomes):
+            origin_file = "%s/%s"%(input_dir_withGenomes, file)
+
+            # if it is a fasta file, softlink to input_dir
+            if file.split(".")[-1] in {"fasta", "fa"} and os.path.isfile(origin_file):
+                dest_file = "%s/%s"%(input_dir, file)
+                if file_is_empty(dest_file): run_cmd("ln -s %s %s"%(origin_file, dest_file))
+
+
+        # run JolyTree
+        print("running JolyTree to get species tree")
+        run_cmd("%s -i %s -b %s -t %i"%(JolyTree_sh, input_dir, outprefix, threads))
+
+    return species_treefile
+
+def ask_if_overlapping_breakends_in_parents_withEqualChromosomes(r, parents_gridss_df, tol_bp):
+
+    """Returns a boolean that indicates whether ther is any breakend in parents that overlaps with the breakedn in r by less than tol_bp bp, where the orientation of the brekends is expected to be the same"""
+
+    # get the df in parents_gridss_df that fullfils the overlap conditions
+    df_parents_overlap = parents_gridss_df[(parents_gridss_df.other_orientation==r["other_orientation"]) 
+                                         & ((parents_gridss_df.POS-r["POS"]).apply(abs)<=tol_bp) 
+                                         & ((parents_gridss_df.other_position-r["other_position"]).apply(abs)<=tol_bp) ]
+
+    # return True if there is some overlap
+    if len(df_parents_overlap)>0: return True
+    else: return False
+
+def get_eventIDs_already_in_parents(sampleID, parentIDs, sampleID_to_dfGRIDSS, tol_bp=50):
+
+    """This function returns a set with the eventIDs that are in sample but also in any of the parents. The idea is that an event is considered to be in a parent if any of the breakends overlaps with a breakend in the parent, where the orientation is the same and the position is less or equal far appart than tol_bp """
+
+    # define the gridss df of the sample
+    sample_gridss_df = sampleID_to_dfGRIDSS[sampleID]
+    if len(parentIDs)==0: return set()
+
+    # stack all the parents' gridss 
+    parents_gridss_df = pd.concat([sampleID_to_dfGRIDSS[p] for p in parentIDs])[["#CHROM", "POS", "other_chromosome", "other_position", "other_orientation"]]
+
+    # add a boolean that indicates whether the breakend can be found in the parents, for set of pairs of chromosomes
+    all_chromosomal_combinations = sample_gridss_df[["#CHROM", "other_chromosome"]].sort_values(by=["#CHROM", "other_chromosome"]).drop_duplicates().values
+    final_sample_gridss_df = pd.DataFrame() # this will contain the boolean
+
+    # go through all chromosomal combinations appearing in the sample
+    print("getting overlaps in breakpoints between samples")
+    for I, (chrom, other_chromosome) in enumerate(all_chromosomal_combinations):
+
+        # get the dfs with these chromosomal combinations
+        chr_sample_gridss_df = sample_gridss_df[(sample_gridss_df["#CHROM"]==chrom) & (sample_gridss_df["other_chromosome"]==other_chromosome)]
+        chr_parents_gridss_df = parents_gridss_df[(parents_gridss_df["#CHROM"]==chrom) & (parents_gridss_df["other_chromosome"]==other_chromosome)][["POS", "other_position", "other_orientation"]]
+
+        # add the boolean that indicates whether the breakend is in the parents
+        chr_sample_gridss_df["is_in_parents"] = chr_sample_gridss_df[["POS", "other_position", "other_orientation"]].apply(lambda r: ask_if_overlapping_breakends_in_parents_withEqualChromosomes(r, chr_parents_gridss_df, tol_bp), axis=1)
+
+        # keep 
+        final_sample_gridss_df = final_sample_gridss_df.append(chr_sample_gridss_df)
+
+    # define the eventIDs
+    final_sample_gridss_df["eventID"] = final_sample_gridss_df.INFO_EVENT.apply(lambda x: x+"o")
+
+    # define the events that are in the parents
+    all_eventIDs = set(final_sample_gridss_df.eventID)
+    eventIDs_already_in_parents = set(final_sample_gridss_df[final_sample_gridss_df.is_in_parents].eventID)
+    print("There are %i of %i breakpoints already in the parents"%(len(eventIDs_already_in_parents), len(all_eventIDs)))
+
+    return eventIDs_already_in_parents
+
+def format_svDF(svDF, svtype="unknown", interesting_chromosomes="all", sampleName="sampleX"):
+
+    """Takes an svDF and formats the ID if suspicious. estimate_fn_af is the function that states which breakend af has to be taken"""
+
+
+    # return the same if empty
+    if len(svDF)==0: return svDF
+
+    if set(svDF.ID)=={""}: svDF["ID"] = svDF.Name
+
+    # add a uniqueID
+    svDF["uniqueID"] = ["%s_%s_%i"%(sampleName, svtype, I+1) for I in range(len(svDF))]
+
+    # filter and get only chromosomes that are in interesting_chromosomes
+    if interesting_chromosomes!="all":
+
+        # define the chromosomal fields
+        chromosome_fields = {"Chr", "ChrA", "ChrB", "#CHROM", "CHR2"}.intersection(set(svDF.keys()))
+
+        # get the df where the interesting_chromosomes are involved
+        svDF = svDF[svDF.apply(lambda r: all([r[c] in interesting_chromosomes for c in chromosome_fields]), axis=1)]
+
+    def get_estimate_AF_for_breakends(bends_metadata_dict, AF_field="real_AF", estimate_fn=min):
+
+        """Takes a dict that maps each breakpoints to a list of metadata of each breakend, and returns the estimate_fn AF observed in any breakpoint"""
+
+        estimate_AF =  estimate_fn([estimate_fn([bend_info[AF_field] for bend_info in list_breakend_info]) for list_breakend_info in bends_metadata_dict.values()])
+
+        return estimate_AF
+
+    # get the estimated minimum and maxium allele freq
+    for estimate_fn_name, estimate_fn in [("min", min), ("max", max), ("mean", np.mean)]:
+        svDF["estimate_AF_%s"%estimate_fn_name] = svDF.bends_metadata_dict.apply(get_estimate_AF_for_breakends, estimate_fn=estimate_fn)
+
+    return svDF
+
+def get_sampleID_to_svtype_to_svDF_filtered(sampleID_to_svtype_to_file, sampleID_to_dfGRIDSS, sampleID_to_parentIDs={}, breakend_info_to_keep=['#CHROM', 'POS', 'other_coordinates', 'allele_frequency', 'allele_frequency_SmallEvent', 'real_AF', 'FILTER', 'inserted_sequence', 'has_poly16GC', 'length_inexactHomology', 'length_microHomology']):
+
+    """This function takes a dictionary that maps sampleIDs to svtpes and the corresponding files (the ones returned in the SV-calling pipeline) and the corresponding gridss dataframes, returning a sampleID_to_svtype_to_svDF, after removal of the variants that are in sampleID_to_parentIDs. The idea is that if any breakend is shared between the sample and any of the parents it is removed and so does any sv that relies on this breakend. Other arguments:
+
+    All across this function, eventID reflects the INFO_EVENT with an extra fields
+
+    """
+
+    # debug empty 
+    if len(sampleID_to_parentIDs)==0: sampleID_to_parentIDs = {s:set() for s in sampleID_to_svtype_to_file}
+
+    # map each sampleID to the eventIDs (with a final o, as formated in the sampleID_to_svtype_to_file) that are already in the parents
+    all_samples = sorted(sampleID_to_parentIDs.keys())
+    get_eventIDs_already_in_parents_inputs = [(s, sampleID_to_parentIDs[s], sampleID_to_dfGRIDSS) for s in all_samples]
+
+    # get the overlapping events with a map
+    map_eventIDs_already_in_parents = list(map(lambda x: get_eventIDs_already_in_parents(x[0], x[1], x[2]), get_eventIDs_already_in_parents_inputs))    
+
+    sampleID_to_eventIDs_alreadyInParents = dict(zip(all_samples, map_eventIDs_already_in_parents))
+
+
+    # load the dfs of the sampleID_to_svtype_to_file and add the info from sampleID_to_dfGRIDSS, keeping the info of the breakpoints that are not in the parent
+    sampleID_to_svtype_to_svDF = {}
+    for sample, svtype_to_file in sampleID_to_svtype_to_file.items():
+        print(sample)
+
+        # get the gridss df
+        df_gridss = sampleID_to_dfGRIDSS[sample]
+
+        # add the eventID, as formated in the SVdict
+        df_gridss["eventID"] = df_gridss.INFO_EVENT.apply(lambda x: x+"o")
+
+        # define the events that are already in the parents
+        all_breakpoints = set(df_gridss["eventID"]).union({""})
+        breakpoints_already_in_parents = sampleID_to_eventIDs_alreadyInParents[sample]
+        print("There are %i of %i breakpoints already in the parents"%(len(breakpoints_already_in_parents), len(all_breakpoints)))
+
+        # go through each svtype
+        for svtype, file in svtype_to_file.items():
+
+            if file!="":
+
+                # get as df
+                df_sv = pd.read_csv(file, sep="\t")
+
+                # get for empty df
+                if "ID" not in df_sv.keys(): df_sv["ID"] = [""]*len(df_sv)
+
+                # get only the svs that are not in the parents
+                df_sv["IDs_set"] = df_sv.ID.apply(lambda x: set(re.split("\+|\-", x)))
+
+                if len(df_sv)>0:
+
+                    # check that all of them are in the breakpoints called by gridss
+                    all_breakpoints_in_sv = set.union(*df_sv.IDs_set)
+                    breakpoints_not_in_df_gridss = all_breakpoints_in_sv.difference(all_breakpoints)
+                    if len(breakpoints_not_in_df_gridss)>0: 
+                        print("These are breakpoints not in the df_gridss: %s"%(breakpoints_not_in_df_gridss))
+                        raise ValueError("There are breakpoints not in the df_gridss, suggesting some errors, such as the fact that you are loading ")
+
+                    # keep only the df with IDs that are not in the parents
+                    df_sv = df_sv[df_sv.IDs_set.apply(lambda ids: len(ids.intersection(breakpoints_already_in_parents))==0)]
+                    if len(df_sv)==0: 
+                        print("There are no new SVs in %s, %s"%(sample, svtype))
+                        continue
+
+                    # add the metadata of the breakends in breakend_info_to_keep from df_gridss
+                    if len(df_gridss)>0:
+                        df_gridss_sv = df_gridss[df_gridss.eventID.isin(set.union(*df_sv.IDs_set))].set_index("eventID", drop=False)
+                        df_gridss_sv["metadata_dict"] = df_gridss_sv.apply(lambda r: {col: r[col] for col in breakend_info_to_keep}, axis=1)
+
+                        df_sv["bends_metadata_dict"] = df_sv.IDs_set.apply(lambda ids: {I:[metadata_dict for metadata_dict in df_gridss_sv.loc[I, "metadata_dict"]] for I in ids})
+
+                    else: df_sv["bends_metadata_dict"] = [{}]*len(df_sv)
+
+            # empty, there are no such events
+            else: df_sv = pd.DataFrame()
+
+            # keep
+            sampleID_to_svtype_to_svDF.setdefault(sample ,{}).setdefault(svtype, df_sv)
+
+    # add the metadata that is necessary and also unique IDs and allele freqs
+    sampleID_to_svtype_to_svDF = {sID : {sv : format_svDF(df, svtype=sv, sampleName=sID) for sv, df in SV_dict.items()} for sID, SV_dict in sampleID_to_svtype_to_svDF.items()}
+
+    return sampleID_to_svtype_to_svDF
+
+def add_svID_to_IDtoSVTYPEtoDF(ID_to_svtype_to_svDF):
+
+    """Takes an ID_to_svtype_to_svDF and adds the cluste"""
+
+def prune_IDtoSVTYPEtoDF_keeping_HighConfidenceVars(ID_to_svtype_to_svDF, species_tree, min_af=0.75):
+
+    """This function takes a df that maps and ID to an svtypes to df and only keeps those that are High Confidence. These are vars that are either:
+
+    - found in >1 ID and follow the phylogeny of the species_tree 
+    - The minimum allele frequency of all breakends is above min_af and the filter is PASS"""
+
+    # first add the svID to each var. This is an ID that represents this variant 
+
+
+def get_compatible_real_svtype_to_file(genomes_withSV_and_shortReads_table, reference_genome, outdir, species_treefile=None, replace=False, threads=4, tol_bp=50):
+
+    """This function generates a dict of svtype to the file for SVs that are compatible and ready to insert into the reference_genome. All the files are written into outdir. Only a set of 'high-confidence' SVs are reported, which are those that have ether a minimum allele frequency above 0.75 and all breakpoints with 'PASS' or are found in >2 genomes and following the phylogeny of the species tree. This is inferred with JolyTree if not provided. At the end, this pipeline reports a set of compatible SVs, that are ready to insert into RSVsim (so that the coordinates are 1-based). """
+
+    # initialize the start time
+    pipeline_start_time = time.time()
+
+    # load the df
+    df_genomes = pd.read_csv(genomes_withSV_and_shortReads_table, sep="\t")
+
+    ###### GET ALL REAL VARIANTS ####
+
+    # define an outdir that will store all the real_vars
+    make_folder(outdir)
+    all_realVars_dir = "%s/all_realVars"%(outdir)
+    if replace is True: delete_folder(all_realVars_dir)
+    make_folder(all_realVars_dir)
+
+    # define the final object that contains them all
+    ID_to_svtype_to_svDF_file = "%s/ID_to_svtype_to_svDF.py"%all_realVars_dir
+
+    if file_is_empty(ID_to_svtype_to_svDF_file) or replace is True:
+
+        # initialize dicts that keep them all together
+        all_sampleID_to_svtype_to_file = {}
+        all_sampleID_to_dfGRIDSS = {}
+       
+        # generate all real vars
+        for ID, assembly in df_genomes[["ID", "assembly"]].values:
+            print("getting vars for %s"%ID)
+
+            # softlink the genome
+            dest_genomeFile = "%s/genome_%s.fasta"%(all_realVars_dir, ID)
+            if file_is_empty(dest_genomeFile): run_cmd("ln -s %s %s"%(assembly, dest_genomeFile))
+
+            # find the real vars
+            svtype_to_svfile, df_gridss = generate_tables_of_SV_between_genomes_gridssClove(dest_genomeFile, reference_genome, replace=replace, threads=threads)
+
+            # keep 
+            all_sampleID_to_svtype_to_file[ID] =  svtype_to_svfile
+            all_sampleID_to_dfGRIDSS[ID] = df_gridss
+
+        # get a df that has all the info for each SV, and then the df with allele freq, metadata and 
+        ID_to_svtype_to_svDF = get_sampleID_to_svtype_to_svDF_filtered(all_sampleID_to_svtype_to_file, all_sampleID_to_dfGRIDSS)
+
+        # save
+        save_object(ID_to_svtype_to_svDF, ID_to_svtype_to_svDF_file)
+
+    else: ID_to_svtype_to_svDF = load_object(ID_to_svtype_to_svDF_file)
+
+    ################################
+
+    # build the species tree
+    if species_treefile is None: 
+        outdir_species_tree = "%s/output_speciesTree_JolyTree"%outdir
+        species_treefile = get_speciesTree_multipleGenomes_JolyTree(all_realVars_dir, outdir_species_tree, threads=threads, replace=replace)
+
+    # get the names so that they are IDs
+    species_tree = Tree(species_treefile)
+    for l in species_tree.get_leaves(): l.name = l.name.split("_")[1]
+    print("This is the considered species tree:\n", species_tree)
+
+    # preseve only the high confidence vars from ID_to_svtype_to_svDF
+    prune_IDtoSVTYPEtoDF_keeping_HighConfidenceVars(ID_to_svtype_to_svDF, species_tree)
 
 
 
-def run_GridssClove_optimising_parameters(sorted_bam, reference_genome, outdir, threads=4, replace=False, window_l=1000, n_simulated_genomes=2, mitochondrial_chromosome="mito_C_glabrata_CBS138", simulation_types=["uniform", "biased_towards_repeats"], target_ploidies=["haploid", "diploid_homo", "diploid_hetero", "ref:2_var:1", "ref:3_var:1", "ref:4_var:1", "ref:5_var:1", "ref:9_var:1", "ref:19_var:1", "ref:99_var:1"], replace_covModelObtention=False, range_filtering_benchmark="theoretically_meaningful", known_genomes_withSV_and_shortReads_table=True, expected_ploidy=1, nvars=100):
+
+
+
+
+
+
+    alkashl
+
+
+
+
+
+
+
+
+
+    print("--- the generation of real SVs took %s seconds in %i cores ---"%(time.time() - pipeline_start_time, threads))
+
+    adkbjadkjbasdkbkabs
+
+def run_GridssClove_optimising_parameters(sorted_bam, reference_genome, outdir, threads=4, replace=False, window_l=1000, n_simulated_genomes=2, mitochondrial_chromosome="mito_C_glabrata_CBS138", simulation_types=["uniform", "biased_towards_repeats"], target_ploidies=["haploid", "diploid_homo", "diploid_hetero", "ref:2_var:1", "ref:3_var:1", "ref:4_var:1", "ref:5_var:1", "ref:9_var:1", "ref:19_var:1", "ref:99_var:1"], replace_covModelObtention=False, range_filtering_benchmark="theoretically_meaningful", expected_ploidy=1, nvars=100):
 
     """
     Takes some aligned reads and runs the GridssPipeline optimising the parameters of GRIDSS filtering. These are the different parameters of the function:
@@ -3080,9 +3679,9 @@ def run_GridssClove_optimising_parameters(sorted_bam, reference_genome, outdir, 
     - target_ploidies indicates which poplulations or ploidies have to be simulated. 2ref_1sv means that we will simulate a genome that has 2 reference genomes and 1 genome under structural variation (this can be a population sequencing)
     - replace_covModelObtention indicates whether the process of predicting coverage from seq features has to be replaced
     - range_filtering_benchmark indicates which type of simulation will be performed, it can be "large", "medium", "small", "single", "theoretically_meaningful". This is passed to benchmark_GridssClove_for_knownSV.
-    - known_genomes_withSV_and_shortReads_table is a file with a table that has three fields: ID,assembly,shoort_reads1,short_reads2 . This can be, for example a set of NANOPORE assemblies of Candida glabrata and the corresponding short reads' sequencing in YPD
     - expected_ploidy is a number that states the expected ploidy. 
     - nvars deteremines the number of SVs to simulate in each simulation of each type. The mtDNA will get 5% of these.
+    - test_SVgeneration_from_assembly is to test whether to test if the assembly works
 
     This is the workflow:
 
@@ -3090,32 +3689,6 @@ def run_GridssClove_optimising_parameters(sorted_bam, reference_genome, outdir, 
 
     """
 
-    # prepare files
-    make_folder(outdir)
-
-    ##### test how well the finding of SVs in an assembly works #####
-    outdir_test_FindSVinAssembly = "%s/test_FindSVinAssembly"%outdir; make_folder(outdir_test_FindSVinAssembly)
-
-    print("WORKING ON THE VALIDATION THAT WE CAN FIND READS IN AN ASSEMBLY")
-
-    # go through each simulation
-    for simID in range(n_simulated_genomes):
-
-        # define outdir 
-        outdir_sim = "%s/simulation_%i"%(outdir_test_FindSVinAssembly, simID); make_folder(outdir_sim)
-
-        # generate genome with simulated SVs
-        sim_svtype_to_svfile, rearranged_genome = rearrange_genomes_simulateSV(reference_genome, outdir_sim, replace=replace, nvars=nvars, mitochondrial_chromosome=mitochondrial_chromosome)
-
-        # get the variants from simulating reads. Always ploidy 1 to get homozygous SVs
-        predicted_svtype_to_svfile, df_gridss = generate_tables_of_SV_between_genomes_gridssClove(rearranged_genome, reference_genome, replace=replace, threads=threads, mitochondrial_chromosome=mitochondrial_chromosome)
-
-        # get a df of benchmarking
-        fileprefix = "%s/rearranged_genome_benchmarking_SV"%outdir_sim
-        df_benchmark_longReads = benchmark_processedSVs_against_knownSVs_inHouse(predicted_svtype_to_svfile, sim_svtype_to_svfile, fileprefix, replace=replace, tol_bp=50)
-
-
-        finsihedrunningGridssClove
 
 
 
