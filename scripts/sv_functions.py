@@ -3724,29 +3724,89 @@ def get_compatible_real_svtype_to_file(genomes_withSV_and_shortReads_table, refe
     highConfidenceVars_perGenome_dir = "%s/highConfidenceVars_perGenome"%all_realVars_dir
     make_folder(highConfidenceVars_perGenome_dir)
 
+    # create a folder where you have the set of compatible vars
+    SVs_compatible_to_insert_dir = "%s/SVs_compatible_to_insert"%outdir; make_folder(SVs_compatible_to_insert_dir)
+
     # initialize the dict that will contain the final files
     compatible_real_svtype_to_file = {}
 
     # initialize a bed_df with all the regions
     df_bed_allRegions = pd.DataFrame()
 
+    # define all chromosomes as interesting
+    all_chromosomes = {seq.id for seq in SeqIO.parse(reference_genome, "fasta")}
+
     # go through each svtype
-    all_svtypes = set.union(*[set(x.keys()) for x in ID_to_svtype_to_svDF.values()])
+    all_svtypes = set.union(*[set(x.keys()) for x in ID_to_svtype_to_svDF.values()]).difference({"remaining"})
 
     for svtype in all_svtypes:
         print("writing consensus %s"%svtype)
 
+        # initalize a df with all the compatible svDFs
+        compatible_svDF = pd.DataFrame()
+
         # go through each ID
-        for ID in ID_to_svtype_to_svDF:
+        for ID in ID_to_svtype_to_svDF.keys():
 
             # debug empty dfs
             if svtype not in ID_to_svtype_to_svDF[ID] or len(ID_to_svtype_to_svDF[ID][svtype])==0: continue
 
-            svDF = ID_to_svtype_to_svDF[ID][svtype]
+            svDF = ID_to_svtype_to_svDF[ID][svtype].set_index("uniqueID", drop=False)
 
             # write the svDF to the high-confidence dir
             sampleDir = "%s/%s"%(highConfidenceVars_perGenome_dir, ID); make_folder(sampleDir)
             svDF.to_csv("%s/%s.tab"%(sampleDir, svtype), sep="\t", header=True, index=False)
+
+            # go though each variant
+            for varID, sv_series in svDF.iterrows():
+
+                # define series as df
+                sv_series_df = pd.DataFrame({0 : sv_series}).transpose()
+
+                # get the bed of this var
+                sv_bed, nSVs = get_affected_region_bed_for_SVdf(sv_series_df, svtype, all_chromosomes)
+
+                # define the matching fields
+                equal_fields = ["chromosome"]
+                approximate_fields = ["start", "end"]
+                chromField_to_posFields = {"chromosome":{"start": "start", "end": "end"}}
+
+                # get if there is any overlap with df_bed_allRegions
+                regions_matching = df_bed_allRegions.apply(lambda rprevious: sv_bed.apply(lambda rnew: get_is_matching_predicted_and_known_rows(rprevious, rnew, equal_fields, approximate_fields, chromField_to_posFields), axis=1), axis=1)
+
+                # if there is any region matching with the previous, continue, if not, keep
+                if any(regions_matching): continue
+                else:
+
+                    # add the bed to the regions matching
+                    df_bed_allRegions = df_bed_allRegions.append(sv_bed)
+
+                    # add to the compatible SVs
+                    compatible_svDF = compatible_svDF.append(sv_series_df)
+
+
+
+
+                print(any(regions_matching))
+              
+
+                print(varID)
+                print(sv_bed, "\n\n")    
+
+
+            dajkbdakghjdkajda
+
+
+
+        # write the compatible svDF into the final set of vars
+        outfile_compatible_SVs = "%s/%s.tab"%(SVs_compatible_to_insert_dir, svtype)
+        compatible_svDF.to_csv(outfile_compatible_SVs, sep="\t", header=True, index=False)
+
+        # keep 
+        compatible_real_svtype_to_file[svtype] = outfile_compatible_SVs
+
+
+        dajadjkadkjbadkjb
 
 
 
