@@ -3585,7 +3585,7 @@ def get_svIDs_inMoreThan1species(ID_to_svtype_to_svDF):
     """This function takes an ID_to_svtype_to_svDF were there is an svID and adds a boolean to each df indicating whether the svID is in more than 1 species. """
 
     # get all svtypes
-    all_svtypes = all_svtypes = set.union(*[set(x.keys()) for x in ID_to_svtype_to_svDF.values()])
+    all_svtypes = set.union(*[set(x.keys()) for x in ID_to_svtype_to_svDF.values()])
 
     # initialize set
     svIDs_inMoreThan1species = set()
@@ -3616,7 +3616,7 @@ def get_svIDs_inMoreThan1species(ID_to_svtype_to_svDF):
     return svIDs_inMoreThan1species
 
     
-def prune_IDtoSVTYPEtoDF_keeping_HighConfidenceVars(ID_to_svtype_to_svDF, species_tree, min_af=0.75):
+def prune_IDtoSVTYPEtoDF_keeping_HighConfidenceVars(ID_to_svtype_to_svDF, species_tree, min_af=0.4):
 
     """This function takes a df that maps and ID to an svtypes to df and only keeps those that are High Confidence. These are vars that are either:
 
@@ -3696,9 +3696,6 @@ def get_compatible_real_svtype_to_file(genomes_withSV_and_shortReads_table, refe
         # get a df that has all the info for each SV, and then the df with allele freq, metadata and 
         ID_to_svtype_to_svDF = get_sampleID_to_svtype_to_svDF_filtered(all_sampleID_to_svtype_to_file, all_sampleID_to_dfGRIDSS)
 
-        # save
-        save_object(ID_to_svtype_to_svDF, ID_to_svtype_to_svDF_file)
-
         # build the species tree
         if species_treefile is None: 
             outdir_species_tree = "%s/output_speciesTree_JolyTree"%outdir
@@ -3712,14 +3709,61 @@ def get_compatible_real_svtype_to_file(genomes_withSV_and_shortReads_table, refe
         # preseve only the high confidence vars from ID_to_svtype_to_svDF
         prune_IDtoSVTYPEtoDF_keeping_HighConfidenceVars(ID_to_svtype_to_svDF, species_tree)
 
+        print(ID_to_svtype_to_svDF)
+
+        # save
+        save_object(ID_to_svtype_to_svDF, ID_to_svtype_to_svDF_file)
+
     else: ID_to_svtype_to_svDF = load_object(ID_to_svtype_to_svDF_file)
 
     ################################
 
     ########## GET THE FILES OF COMPATIBLE SVs ##########
 
+    # create a folder where to write the high-confidence vars
+    highConfidenceVars_perGenome_dir = "%s/highConfidenceVars_perGenome"%all_realVars_dir
+    make_folder(highConfidenceVars_perGenome_dir)
+
+    # initialize the dict that will contain the final files
+    compatible_real_svtype_to_file = {}
+
+    # initialize a bed_df with all the regions
+    df_bed_allRegions = pd.DataFrame()
+
+    # go through each svtype
+    all_svtypes = set.union(*[set(x.keys()) for x in ID_to_svtype_to_svDF.values()])
+
+    for svtype in all_svtypes:
+        print("writing consensus %s"%svtype)
+
+        # go through each ID
+        for ID in ID_to_svtype_to_svDF:
+
+            # debug empty dfs
+            if svtype not in ID_to_svtype_to_svDF[ID] or len(ID_to_svtype_to_svDF[ID][svtype])==0: continue
+
+            svDF = ID_to_svtype_to_svDF[ID][svtype]
+
+            # write the svDF to the high-confidence dir
+            sampleDir = "%s/%s"%(highConfidenceVars_perGenome_dir, ID); make_folder(sampleDir)
+            svDF.to_csv("%s/%s.tab"%(sampleDir, svtype), sep="\t", header=True, index=False)
+
+
+
+
+
+    #def get_affected_region_bed_for_SVdf(svDF, svtype, interesting_chromosomes, add_interval_bp=1000):
+
+ 
+
+
+    #return affected_region_bed_df[["chromosome", "start", "end"]], nSVs_in_interesting_chromosomes
+
+
 
     #####################################################
+
+    return compatible_real_svtype_to_file
 
 
 
