@@ -156,5 +156,74 @@ if type_coverage_to_filterTANDEL=="coverage_rel_to_predFromFeats":
 elif type_coverage_to_filterTANDEL=="mediancov_1": distToTel_chrom_GC_to_coverage_fn = genome_graph = df_positions_graph = None
 
 
+####### monophyly of vars
+
+    # add to the tree if it is there
+            for l in species_tree.get_leaves():
+
+                if svID in ID_to_svIDs[l.name]: l.svID = svID
+                else: l.svID = "none"
+
+            # ask if it is monophyletic
+            svID_is_monophyletic, type_phyly, nodes_monophyletic = species_tree.check_monophyly(values=[svID], target_attr="svID")
+
+            # length monophyletic nodes
+            max_len_monophyletic_nodes = {len(mn) for mn in nodes_monophyletic}
+
+
+
+            print(max_len_monophyletic_nodes)
+
+
+    adlkdalkad
+
+
+def get_clove_output_with_coverage_forTANDEL(outfile_clove, reference_genome, sorted_bam, distToTel_chrom_GC_to_coverage_fn, genome_graph, df_positions_graph, replace=False, run_in_parallel=False, delete_bams=False):
+
+    """Takes the output of clove and adds the coverage of the TAN and DEL, or -1.
+
+    If you set genome_graph to None it will skip adding the coverage relative to sequence features"""
+
+    # first load clove into a df
+    df_clove = get_clove_output(outfile_clove)
+
+    if len(df_clove)>0:
+
+        # now write a bed with the TANDEL regions
+        bed_TANDEL_regions = "%s.TANDEL.bed"%outfile_clove
+        df_TANDEL = df_clove[df_clove.SVTYPE.isin({"TAN", "DEL"})][["#CHROM", "POS", "END"]].rename(columns={"#CHROM":"chromosome", "POS":"start", "END":"end"})
+        
+        if len(df_TANDEL)>0:
+
+            df_TANDEL.to_csv(bed_TANDEL_regions, sep="\t", header=True, index=False)
+
+            # get a file that has the coverage of these windows
+            coverage_df = get_coverage_per_window_df_without_repeating(reference_genome, sorted_bam, bed_TANDEL_regions, replace=replace, run_in_parallel=run_in_parallel, delete_bams=delete_bams)
+
+            # get the coverage relative to prediction from features
+            if genome_graph is not None:
+
+                outdir_rel_cov_calculation = "%s_calculatig_rel_coverage"%outfile_clove
+                coverage_df["coverage_rel_to_predFromFeats"] = get_coverage_list_relative_to_predictedFromTelomereAndGCcontent(coverage_df, reference_genome, distToTel_chrom_GC_to_coverage_fn, genome_graph, df_positions_graph, outdir_rel_cov_calculation, real_coverage_field="mediancov_1", replace=replace)
+
+            else: coverage_df["coverage_rel_to_predFromFeats"] = -1
+
+        else: coverage_df = pd.DataFrame(columns=["chromosome", "end", "length", "mediancov_1", "nocoveragebp_1", "percentcovered_1", "start"])
+
+        # merge
+        merged_df = df_clove.merge(coverage_df, how="left", left_on=["#CHROM", "POS", "END"], right_on=["chromosome", "start", "end"], validate="many_to_one")
+
+        # change types of fields
+        merged_df["POS"] = merged_df.POS.apply(get_int)
+        merged_df["END"] = merged_df.END.apply(get_int)
+        merged_df["START"] = merged_df.START.apply(get_int)
+
+        return merged_df 
+
+    else: return pd.DataFrame()
+
+
+
+
 
 

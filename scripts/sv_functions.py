@@ -226,6 +226,11 @@ def get_dict_as_tuple(dictionary):
 
     return tuple([(k, dictionary[k]) for k in sorted(dictionary.keys())])
 
+def union_empty_sets(set_iterable):
+
+    """It returns the union of an iterable of empty sets"""
+
+    return set.union(*list(set_iterable) + [set()])
 
 def run_cmd(cmd):
 
@@ -2235,51 +2240,6 @@ def get_coverage_list_relative_to_predictedFromTelomereAndGCcontent(df_cov, geno
 
     return final_list
 
-def get_clove_output_with_coverage_forTANDEL(outfile_clove, reference_genome, sorted_bam, distToTel_chrom_GC_to_coverage_fn, genome_graph, df_positions_graph, replace=False, run_in_parallel=False, delete_bams=False):
-
-    """Takes the output of clove and adds the coverage of the TAN and DEL, or -1.
-
-    If you set genome_graph to None it will skip adding the coverage relative to sequence features"""
-
-    # first load clove into a df
-    df_clove = get_clove_output(outfile_clove)
-
-    if len(df_clove)>0:
-
-        # now write a bed with the TANDEL regions
-        bed_TANDEL_regions = "%s.TANDEL.bed"%outfile_clove
-        df_TANDEL = df_clove[df_clove.SVTYPE.isin({"TAN", "DEL"})][["#CHROM", "POS", "END"]].rename(columns={"#CHROM":"chromosome", "POS":"start", "END":"end"})
-        
-        if len(df_TANDEL)>0:
-
-            df_TANDEL.to_csv(bed_TANDEL_regions, sep="\t", header=True, index=False)
-
-            # get a file that has the coverage of these windows
-            coverage_df = get_coverage_per_window_df_without_repeating(reference_genome, sorted_bam, bed_TANDEL_regions, replace=replace, run_in_parallel=run_in_parallel, delete_bams=delete_bams)
-
-            # get the coverage relative to prediction from features
-            if genome_graph is not None:
-
-                outdir_rel_cov_calculation = "%s_calculatig_rel_coverage"%outfile_clove
-                coverage_df["coverage_rel_to_predFromFeats"] = get_coverage_list_relative_to_predictedFromTelomereAndGCcontent(coverage_df, reference_genome, distToTel_chrom_GC_to_coverage_fn, genome_graph, df_positions_graph, outdir_rel_cov_calculation, real_coverage_field="mediancov_1", replace=replace)
-
-            else: coverage_df["coverage_rel_to_predFromFeats"] = -1
-
-        else: coverage_df = pd.DataFrame(columns=["chromosome", "end", "length", "mediancov_1", "nocoveragebp_1", "percentcovered_1", "start"])
-
-        # merge
-        merged_df = df_clove.merge(coverage_df, how="left", left_on=["#CHROM", "POS", "END"], right_on=["chromosome", "start", "end"], validate="many_to_one")
-
-        # change types of fields
-        merged_df["POS"] = merged_df.POS.apply(get_int)
-        merged_df["END"] = merged_df.END.apply(get_int)
-        merged_df["START"] = merged_df.START.apply(get_int)
-
-        return merged_df 
-
-    else: return pd.DataFrame()
-
-
 def get_target_region_row(r, region, breakpoint_positions, maxPos, max_relative_len_neighbors=2):
 
     """This function takes a row of a df with windows and returns a row of the 'region', which can be 5 or 3. It will span to the next breakpoint or the max_relative_len_neighbors"""
@@ -2340,7 +2300,6 @@ def get_target_region_row(r, region, breakpoint_positions, maxPos, max_relative_
 
     # return a series of all important fields
     return pd.Series({"chromosome":r["chromosome"], "start":start, "end":end, "region_name":region_name})
-
 
 def get_df_with_coverage_per_windows_relative_to_neighbor_regions(df_windows, bed_windows_prefix, reference_genome, sorted_bam, df_clove, median_coverage, replace=True, run_in_parallel=True, delete_bams=True):
 
@@ -2524,8 +2483,6 @@ def get_bedpeDF_for_clovebalTRA_5with5_or_3with3(df_clove, tol_bp=50):
     df = pd.DataFrame(data_dict).transpose()
 
     return df
-
-
 
 def get_bedpeDF_for_clovebalTRA_5with3_or_3with5_INVTXbreakpoints(df_clove, chr_to_len, tol_bp=50):
 
@@ -2963,7 +2920,51 @@ def generate_tables_of_SV_between_genomes_gridssClove(query_genome, reference_ge
 
     return SV_dict, df_gridss
 
-def get_SVbenchmark_dict(df_predicted, df_known, equal_fields=["Chr"], approximate_fields=["Start", "End"], tol_bp=50, pct_overlap=0.75, chromField_to_posFields={}):
+
+def get_is_matching_predicted_and_known_rows(rk, rp, equal_fields, approximate_fields, chromField_to_posFields, tol_bp=50, pct_overlap=0.75):
+
+    """Takes a row of a knownID (rk) and a predictedID (rp) and returns a boolean indicating if they match. These rk and rp can be any dict-like structures that have the expected equal_fields and so."""
+
+    # ask if the equal fields match
+    equal_fields_match = all([rp[f]==rk[f] for f in equal_fields])
+
+    # ask if the approximate fields match
+    approximate_fields_match = all([abs(rp[f]-rk[f])<=tol_bp for f in approximate_fields])
+
+    # ask if all the chromField_to_posFields overlap by more than pct_overlap
+    overlapping_regions_list = [True] # stores tested regions overlap. It is initalized with a True so that if there are no chromField_to_posFields it is True
+    for chromField, posFields in chromField_to_posFields.items(): 
+
+        # define the regions
+        chrom_k = rk[chromField]
+        start_k = rk[posFields["start"]]
+        end_k = rk[posFields["end"]]
+        len_k = end_k-start_k
+
+        chrom_p = rp[chromField]
+        start_p = rp[posFields["start"]]
+        end_p = rp[posFields["end"]]
+        len_p = end_p-start_p
+
+        # make sure that the end is after the start
+        if len_k<=0 or len_p<=0: raise ValueError("start is after end")
+
+        # get the length of the longest region
+        longest_region_len = max([len_k, len_p])
+
+        # define the boundaries of the overlap
+        start_overlap_pos = max([start_p, start_k])
+        end_overlap_pos = min([end_p, end_k])
+        len_overlap = end_overlap_pos-start_overlap_pos
+
+        # add that the region overalps by more than pct_overlap
+        overlapping_regions_list.append( chrom_k==chrom_p and (len_overlap/longest_region_len)>=pct_overlap)
+
+    regions_overlap = all(overlapping_regions_list)
+
+    return  equal_fields_match and approximate_fields_match and regions_overlap
+
+def get_SVbenchmark_dict(df_predicted, df_known, equal_fields=["Chr"], approximate_fields=["Start", "End"], chromField_to_posFields={}):
 
     """Takes dfs for known and predicted SVs and returns a df with the benchmark. approximate_fields are fields that have to overlap at least by tolerance_bp. It returns a dict that maps each of the benchmark fields to the value. pct_overlap is the percentage of overlap between each of the features in approximate_fields.
 
@@ -2975,53 +2976,11 @@ def get_SVbenchmark_dict(df_predicted, df_known, equal_fields=["Chr"], approxima
 
     predicted_IDfield = "ID"
 
-    def get_is_matching_predicted_and_known_rows(rk, rp):
-
-        """Takes a row of a knownID (rk) and a predictedID (rp) and returns a boolean indicating if they match"""
-
-        # ask if the equal fields match
-        equal_fields_match = all([rp[f]==rk[f] for f in equal_fields])
-
-        # ask if the approximate fields match
-        approximate_fields_match = all([abs(rp[f]-rk[f])<=tol_bp for f in approximate_fields])
-
-        # ask if all the chromField_to_posFields overlap by more than pct_overlap
-        overlapping_regions_list = [True] # stores tested regions overlap. It is initalized with a True so that if there are no chromField_to_posFields it is True
-        for chromField, posFields in chromField_to_posFields.items(): 
-
-            # define the regions
-            chrom_k = rk[chromField]
-            start_k = rk[posFields["start"]]
-            end_k = rk[posFields["end"]]
-            len_k = end_k-start_k
-
-            chrom_p = rp[chromField]
-            start_p = rp[posFields["start"]]
-            end_p = rp[posFields["end"]]
-            len_p = end_p-start_p
-
-            # make sure that the end is after the start
-            if len_k<=0 or len_p<=0: raise ValueError("start is after end")
-
-            # get the length of the longest region
-            longest_region_len = max([len_k, len_p])
-
-            # define the boundaries of the overlap
-            start_overlap_pos = max([start_p, start_k])
-            end_overlap_pos = min([end_p, end_k])
-            len_overlap = end_overlap_pos-start_overlap_pos
-
-            # add that the region overalps by more than pct_overlap
-            overlapping_regions_list.append( chrom_k==chrom_p and (len_overlap/longest_region_len)>=pct_overlap)
-
-        regions_overlap = all(overlapping_regions_list)
-
-        return  equal_fields_match and approximate_fields_match and regions_overlap
 
     # get the predictedIDs as those that have the same equal_fields and overlap in all approximate_fields
     if len(df_predicted)>0: 
 
-        df_known["predictedSV_IDs"] = df_known.apply(lambda rk: set(df_predicted[df_predicted.apply(lambda rp: get_is_matching_predicted_and_known_rows(rk, rp), axis=1)][predicted_IDfield]), axis=1)
+        df_known["predictedSV_IDs"] = df_known.apply(lambda rk: set(df_predicted[df_predicted.apply(lambda rp: get_is_matching_predicted_and_known_rows(rk, rp, equal_fields, approximate_fields, chromField_to_posFields), axis=1)][predicted_IDfield]), axis=1)
 
     else: df_known["predictedSV_IDs"] = [set()]*len(df_known)
 
@@ -3565,19 +3524,134 @@ def get_sampleID_to_svtype_to_svDF_filtered(sampleID_to_svtype_to_file, sampleID
 
 def add_svID_to_IDtoSVTYPEtoDF(ID_to_svtype_to_svDF):
 
-    """Takes an ID_to_svtype_to_svDF and adds the cluste"""
+    """Takes an ID_to_svtype_to_svDF and adds the svID if it overlaps with other vars"""
 
+    # define all svtypes
+    all_svtypes = all_svtypes = set.union(*[set(x.keys()) for x in ID_to_svtype_to_svDF.values()])
+
+    # go through each svtype
+    for svtype in all_svtypes:
+        print("getting svID for %s"%svtype)
+
+        # define the fields to filter on
+        equal_fields = svtype_to_fieldsDict[svtype]["equal_fields"]
+        approximate_fields = svtype_to_fieldsDict[svtype]["approximate_fields"]
+        chromField_to_posFields = svtype_to_fieldsDict[svtype]["chromField_to_posFields"]
+
+        # initialize a dict that maps each svID to a row with its' coordinates
+        svID_to_svIDrow = {0:{}}
+
+        # go through each sample looking for 
+        for ID in ID_to_svtype_to_svDF:
+
+            # if the svtype exists
+            if svtype in ID_to_svtype_to_svDF[ID] and len(ID_to_svtype_to_svDF[ID][svtype])>0:
+
+                # get the df
+                df = ID_to_svtype_to_svDF[ID][svtype].set_index("uniqueID")
+
+                # initialize a dict that maps each uniqueID to a svID
+                uniqueID_to_svID = {}
+
+                # go through each SV of this df
+                for uniqueID, query_row in df.iterrows():
+
+                    # initialize the found svID
+                    svID_found = False
+
+                    # go through each row of the svIDs looking if any is matching
+                    for previous_svID, svID_row in svID_to_svIDrow.items():
+                        if len(svID_row)==0: continue
+
+                        # if there is an overlap with the svID_row, keep the previous_svID 
+                        if get_is_matching_predicted_and_known_rows(query_row, svID_row, equal_fields, approximate_fields, chromField_to_posFields): 
+
+                            uniqueID_to_svID[uniqueID] = previous_svID
+                            svID_found = True
+                            break
+
+                    # if there was no overlapping sv, initialize it
+                    if svID_found is False:
+
+                        svID = max(svID_to_svIDrow)+1
+                        uniqueID_to_svID[uniqueID] = svID
+                        svID_to_svIDrow[svID] = query_row
+
+                # add the svID to the df
+                ID_to_svtype_to_svDF[ID][svtype]["svID"] = ID_to_svtype_to_svDF[ID][svtype].uniqueID.apply(lambda x: "%s_%i"%(svtype, uniqueID_to_svID[x]))
+
+def get_svIDs_inMoreThan1species(ID_to_svtype_to_svDF):
+
+    """This function takes an ID_to_svtype_to_svDF were there is an svID and adds a boolean to each df indicating whether the svID is in more than 1 species. """
+
+    # get all svtypes
+    all_svtypes = all_svtypes = set.union(*[set(x.keys()) for x in ID_to_svtype_to_svDF.values()])
+
+    # initialize set
+    svIDs_inMoreThan1species = set()
+
+    # iterate through SVs
+    for svtype in all_svtypes:
+        print("assessing monophily for %s"%svtype)
+
+        # get the IDs 
+        ID_to_svIDs = {ID : set(ID_to_svtype_to_svDF[ID][svtype].svID)  for ID in ID_to_svtype_to_svDF if svtype in ID_to_svtype_to_svDF[ID] and len(ID_to_svtype_to_svDF[ID][svtype])>0}
+
+        # fill empty IDs
+        for ID in set(ID_to_svtype_to_svDF).difference(set(ID_to_svIDs)): ID_to_svIDs[ID] = set()
+
+        # get all the svIDs
+        all_svIDs = union_empty_sets(ID_to_svIDs.values())
+
+        # go through each ID
+        for svID in all_svIDs:
+
+            # calculate the number of IDs with this svID. If it is above 1, get
+            nIDs_with_svID = len({ID for ID, svIDs in ID_to_svIDs.items() if svID in svIDs})
+            if nIDs_with_svID>=2: svIDs_inMoreThan1species.add(svID)
+
+
+    print("There are %i vars in more than 1 species"%len(svIDs_inMoreThan1species))
+
+    return svIDs_inMoreThan1species
+
+    
 def prune_IDtoSVTYPEtoDF_keeping_HighConfidenceVars(ID_to_svtype_to_svDF, species_tree, min_af=0.75):
 
     """This function takes a df that maps and ID to an svtypes to df and only keeps those that are High Confidence. These are vars that are either:
 
-    - found in >1 ID and follow the phylogeny of the species_tree 
+    - found in >1 IDs
     - The minimum allele frequency of all breakends is above min_af and the filter is PASS"""
 
-    # first add the svID to each var. This is an ID that represents this variant 
+    # first add the svID to each var. This is an ID that represents this variant across all sampleIDs, so that if there is a var overlapping across 2 samples it will have the same svID
+
+    add_svID_to_IDtoSVTYPEtoDF(ID_to_svtype_to_svDF)
+
+    # get the svIDs that follow the species phylogeny
+    svIDs_inMoreThan1species = get_svIDs_inMoreThan1species(ID_to_svtype_to_svDF)
+
+    # prune the df to keep only high-confidence vars
+    for ID, svtype_to_svDF in ID_to_svtype_to_svDF.items():
+        for svtype, svDF in svtype_to_svDF.items():
+
+            if len(svDF)==0:  ID_to_svtype_to_svDF[ID][svtype] = svDF
+            else:   
+
+                # add whether the var is in more than 1 species
+                svDF["sv_in_more_than1_spp"] = svDF.svID.isin(svIDs_inMoreThan1species)
+
+                # add whether it is high confidence
+                svDF["all_bends_PASS"] = svDF.apply(lambda r: set.union(*[set([bend_info["FILTER"] for bend_info in list_breakend_info]) for list_breakend_info in r["bends_metadata_dict"].values()])=={"PASS"}, axis=1)
+
+                svDF["PASS_and_highAF"] = (svDF.estimate_AF_min>=min_af) & (svDF.all_bends_PASS)
+
+                svDF["high_confidence"] = (svDF.PASS_and_highAF) | (svDF.sv_in_more_than1_spp)
+
+                # keep the df that has high confidence
+                ID_to_svtype_to_svDF[ID][svtype] = svDF[svDF.high_confidence]
 
 
-def get_compatible_real_svtype_to_file(genomes_withSV_and_shortReads_table, reference_genome, outdir, species_treefile=None, replace=False, threads=4, tol_bp=50):
+def get_compatible_real_svtype_to_file(genomes_withSV_and_shortReads_table, reference_genome, outdir, species_treefile=None, replace=False, threads=4):
 
     """This function generates a dict of svtype to the file for SVs that are compatible and ready to insert into the reference_genome. All the files are written into outdir. Only a set of 'high-confidence' SVs are reported, which are those that have ether a minimum allele frequency above 0.75 and all breakpoints with 'PASS' or are found in >2 genomes and following the phylogeny of the species tree. This is inferred with JolyTree if not provided. At the end, this pipeline reports a set of compatible SVs, that are ready to insert into RSVsim (so that the coordinates are 1-based). """
 
@@ -3625,22 +3699,34 @@ def get_compatible_real_svtype_to_file(genomes_withSV_and_shortReads_table, refe
         # save
         save_object(ID_to_svtype_to_svDF, ID_to_svtype_to_svDF_file)
 
+        # build the species tree
+        if species_treefile is None: 
+            outdir_species_tree = "%s/output_speciesTree_JolyTree"%outdir
+            species_treefile = get_speciesTree_multipleGenomes_JolyTree(all_realVars_dir, outdir_species_tree, threads=threads, replace=replace)
+
+        # get the names so that they are IDs
+        species_tree = Tree(species_treefile)
+        for l in species_tree.get_leaves(): l.name = l.name.split("_")[1]
+        print("This is the considered species tree:\n", species_tree)
+
+        # preseve only the high confidence vars from ID_to_svtype_to_svDF
+        prune_IDtoSVTYPEtoDF_keeping_HighConfidenceVars(ID_to_svtype_to_svDF, species_tree)
+
     else: ID_to_svtype_to_svDF = load_object(ID_to_svtype_to_svDF_file)
 
     ################################
 
-    # build the species tree
-    if species_treefile is None: 
-        outdir_species_tree = "%s/output_speciesTree_JolyTree"%outdir
-        species_treefile = get_speciesTree_multipleGenomes_JolyTree(all_realVars_dir, outdir_species_tree, threads=threads, replace=replace)
+    ########## GET THE FILES OF COMPATIBLE SVs ##########
 
-    # get the names so that they are IDs
-    species_tree = Tree(species_treefile)
-    for l in species_tree.get_leaves(): l.name = l.name.split("_")[1]
-    print("This is the considered species tree:\n", species_tree)
 
-    # preseve only the high confidence vars from ID_to_svtype_to_svDF
-    prune_IDtoSVTYPEtoDF_keeping_HighConfidenceVars(ID_to_svtype_to_svDF, species_tree)
+    #####################################################
+
+
+
+
+    print(ID_to_svtype_to_svDF)
+
+    akdjbkjadjkad
 
 
 
