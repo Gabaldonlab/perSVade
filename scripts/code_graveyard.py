@@ -226,4 +226,140 @@ def get_clove_output_with_coverage_forTANDEL(outfile_clove, reference_genome, so
 
 
 
+########### CALCULATE GC CONTENT BASED ON PREVIOUSLY MEASURED REGIONS  ###########
+
+def get_df_with_GCcontent(df_windows, genome, gcontent_outfile, replace=False):
+
+    """This function takes a df with windows of the genome and adds the gc content for each window, writing a file under gcontent_outfile. It will only do those that have been already measured"""
+
+    print("Getting GC content")
+
+    if file_is_empty(gcontent_outfile) or replace is True:
+
+        # define the initial index
+        initial_index = list(df_windows.index)
+
+        # define a file that has all the GC content per windows of the genome
+        all_gcontent_outfile = "%s.GCcontent_all_windows.py"%genome
+
+        # load the previously generated windows
+        GCcontent_cols = ["chromosome", "start", "end", "GCcontent"]
+        if file_is_empty(all_gcontent_outfile) or replace is True: 
+        #if True:
+            remove_file(all_gcontent_outfile)
+            previous_df_windows = pd.DataFrame(columns=GCcontent_cols)
+
+        else: previous_df_windows = load_object(all_gcontent_outfile)
+
+        # set as index the combination of each chrom, start and end
+        previous_df_windows = previous_df_windows.set_index(["chromosome", "start", "end"], drop=False)
+        all_previous_windows = set(previous_df_windows.index)
+
+        # resort
+        df_windows = df_windows.sort_values(by=["chromosome", "start", "end"]).set_index(["chromosome", "start", "end"], drop=False)
+
+        # get the new windows
+        new_windows = list(set(df_windows.index).difference(all_previous_windows))
+        df_windows_new = df_windows.loc[new_windows]
+
+        if len(df_windows_new)>0:
+            print("adding %i new windows"%len(df_windows_new))
+
+            # get the GC content file for each position
+            gc_content_outfile_perPosition = generate_nt_content_file(genome, replace=replace, target_nts="GC")
+            gc_df = pd.read_csv(gc_content_outfile_perPosition, sep="\t")[["chromosome", "position", "is_in_GC"]].sort_values(by=["chromosome", "position"])
+
+            # define a df where each position is one row and it has the start_window as an add
+            df_windows["length"] = df_windows.end - df_windows.start
+            positions = make_flat_listOflists(list(df_windows.apply(lambda r: list(range(r["start"], r["end"])), axis=1)))
+            start_windows = make_flat_listOflists(list(df_windows.apply(lambda r: [r["start"]]*r["length"], axis=1)))
+            end_windows = make_flat_listOflists(list(df_windows.apply(lambda r: [r["end"]]*r["length"], axis=1)))
+            chromosomes = make_flat_listOflists(list(df_windows.apply(lambda r: [r["chromosome"]]*r["length"], axis=1)))
+            df_positions = pd.DataFrame({"position":positions, "chromosome":chromosomes, "start_window":start_windows, "end_window":end_windows})
+
+            # add the positions to the gc df
+            gc_df = gc_df.merge(df_positions, on=["chromosome", "position"], how="right")        
+
+            # calculate the GC content and add to df
+            startWindow_to_gc = gc_df[["chromosome", "start_window", "end_window", "is_in_GC"]].groupby(["chromosome", "start_window", "end_window"]).mean()["is_in_GC"]
+
+        else: startWindow_to_gc = pd.Series()
+
+        # add the previously generated windows
+        startWindow_to_gc = startWindow_to_gc.append(previous_df_windows["GCcontent"])
+
+        # get into df_windows
+        print(df_windows, startWindow_to_gc)
+        df_windows["GCcontent"] = list(startWindow_to_gc.loc[df_windows.index])
+
+        # save the ultimate windows file
+        all_df_windows = previous_df_windows.append(df_windows[GCcontent_cols])
+        all_gcontent_outfile_tmp = "%s.%s"%(all_gcontent_outfile, id_generator(15))
+        save_object(all_df_windows, all_gcontent_outfile_tmp)
+        os.rename(all_gcontent_outfile_tmp, all_gcontent_outfile)
+
+        # at the end save the df windows
+        df_windows.index = initial_index
+        save_object(df_windows, gcontent_outfile)
+
+    else: df_windows = load_object(gcontent_outfile)
+
+    return df_windows
+
+
+
+
+###### get compatible translocations ####
+
+
+def get_compatible_translocations_df(df, chr_to_len):
+
+    """Takes a df with translocations and returns those that are compatible with each other, so that two arms of a chromosome not have a translocation"""
+
+
+    # change the ID
+    df = df.set_index("ID", drop=False)
+
+    # define the vars that are real or simulated
+    real_df = df[df.ID.apply(lambda x: x.endswith("_realSV"))]
+    sim_df = df[~df.ID.apply(lambda x: x.endswith("_realSV"))]
+
+    # define all the chromosomes
+    all_chromosomes = set(df["ChrA"]).union(set(df["ChrB"]))
+
+    # initalize a bed with the interesting bed regions
+    df_bed_allRegions, nSVs = get_affected_region_bed_for_SVdf(real_df, "translocations", all_chromosomes) 
+
+    # initialize the interesting IDs
+    interesting_IDs = list(real_df.ID)
+
+    # go through each sv simulated and keep it if it does not overlap any of the regions in df_bed_allRegions
+    for ID, sv_series in sim_df.iterrows():
+
+        # define series as df
+        sv_series_df = pd.DataFrame({0 : sv_series}).transpose()
+
+        # get the affected regions
+        sv_bed, nSVs = get_affected_region_bed_for_SVdf(sv_series_df, "translocations", all_chromosomes)
+
+        # get if they are overlapinmg
+        any_regions_overlapping = any(df_bed_allRegions.apply(lambda rprevious: any(sv_bed.apply(lambda rnew: get_is_overlapping_query_vs_target_region(rprevious, rnew), axis=1)), axis=1))
+
+        if not any_regions_overlapping: interesting_IDs.append(ID)
+
+    # get the final df
+    df = df.loc[interesting_IDs]
+    #df = real_df
+    #df = sim_df
+
+
+    print(df[svtype_to_fieldsDict["translocations"]["all_fields"]])
+
+    # change the positions so that they do not exceed chr boundaries
+    posF_to_chrF = svtype_to_fieldsDict["translocations"]["positionField_to_chromosome"]
+
+    for f in svtype_to_fieldsDict["translocations"]["position_fields"]: df[f] = df.apply(lambda r: set_position_to_max(r[f], chr_to_len[r[posF_to_chrF[f]]]), axis=1)
+
+    return df 
+
 

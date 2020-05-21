@@ -61,6 +61,15 @@ parser.add_argument("--testRealDataAccuracy", dest="testRealDataAccuracy", actio
 
 parser.add_argument("--species_tree_closeGenomes", dest="species_tree_closeGenomes", type=str, default=None, help="The path to a newick file that contains the species tree (the leaf names should match the 'ID' field) of the genomes provided in  --genomes_withSV_and_shortReads_table. This is important because the sorting of 'high-confidence vars' out of genomes_withSV_and_shortReads_table requires the tree of the genomes. By default, this is calculated with JolyTree, which is fast but not the most accurate method.")
 
+# simulation parameter args
+parser.add_argument("--nvars", dest="nvars", default=50, type=int, help="Number of variants to simulate. Note that the number of balanced translocations inserted in simulations will be always as maximum the number of gDNA chromosome-pairs implicated.")
+
+parser.add_argument("--nsimulations", dest="nsimulations", default=2, type=int, help="The number of 'replicate' simulations that will be produced.")
+
+parser.add_argument("--simulation_ploidies", dest="simulation_ploidies", type=str, default="haploid,diploid_hetero", help='A comma-sepparated string of the ploidies to simulate for parameter optimisation. It can have any of "haploid", "diploid_homo", "diploid_hetero", "ref:2_var:1", "ref:3_var:1", "ref:4_var:1", "ref:5_var:1", "ref:9_var:1", "ref:19_var:1", "ref:99_var:1" ')
+
+parser.add_argument("--range_filtering_benchmark", dest="range_filtering_benchmark", type=str, default="theoretically_meaningful", help='The range of parameters that should be tested in the SV optimisation pipeline. It can be any of large, medium, small, theoretically_meaningful or single.')
+
 # alignment args
 parser.add_argument("-f1", "--fastq1", dest="fastq1", default=None, help="fastq_1 file. Option required to obtain bam files")
 parser.add_argument("-f2", "--fastq2", dest="fastq2", default=None, help="fastq_2 file. Option required to obtain bam files")
@@ -170,7 +179,7 @@ if fun.file_is_empty("%s.fai"%opt.ref) or opt.replace is True:
 if opt.testSVgen_from_assembly:
 
     outdir_test_FindSVinAssembly = "%s/test_FindSVinAssembly"%opt.outdir
-    if __name__ == '__main__': fun.test_SVgeneration_from_assembly(opt.ref, outdir_test_FindSVinAssembly, threads=opt.threads, replace=opt.replace, n_simulated_genomes=2, mitochondrial_chromosome=opt.mitochondrial_chromosome)
+    if __name__ == '__main__': fun.test_SVgeneration_from_assembly(opt.ref, outdir_test_FindSVinAssembly, threads=opt.threads, replace=opt.replace, n_simulated_genomes=opt.nsimulations, mitochondrial_chromosome=opt.mitochondrial_chromosome, nvars=opt.nvars)
 
 ###############################################################
 
@@ -188,10 +197,7 @@ elif opt.genomes_withSV_and_shortReads_table is not None and opt.fast_SVcalling 
 
     # if you provided a list of genomes with SV close to the ref genome
     outdir_finding_realVars = "%s/findingRealSVs"%opt.outdir
-    real_svtype_to_file = fun.get_compatible_real_svtype_to_file(opt.genomes_withSV_and_shortReads_table, opt.ref, outdir_finding_realVars, species_treefile=opt.species_tree_closeGenomes, replace=opt.replace, threads=opt.threads)
-
-    kjbdahjkadhkgadhghjgad
-
+    real_svtype_to_file = fun.get_compatible_real_svtype_to_file(opt.genomes_withSV_and_shortReads_table, opt.ref, outdir_finding_realVars, species_treefile=opt.species_tree_closeGenomes, replace=opt.replace, threads=opt.threads, max_nvars=opt.nvars)
 
 else: 
     print("Avoiding the simulation of real variants. Only inserting randomSV.")
@@ -201,19 +207,35 @@ else:
 
 ###################################################################################################
 
+#### parse cmd-line arguments for optimisation-based parameters ####
+
+simulation_ploidies = opt.simulation_ploidies.split(",")
+
+####################################################################
+
+### run the actual perSVade function optimising parameters ###
+
+SVdetection_outdir = "%s/SVdetection_output"%opt.outdir
+
+fun.run_GridssClove_optimising_parameters(sorted_bam, opt.ref, SVdetection_outdir, threads=opt.threads, replace=opt.replace, n_simulated_genomes=opt.nsimulations, mitochondrial_chromosome=opt.mitochondrial_chromosome, simulation_ploidies=simulation_ploidies, range_filtering_benchmark=opt.range_filtering_benchmark, expected_ploidy=opt.ploidy, nvars=opt.nvars, fast_SVcalling=opt.fast_SVcalling, real_svtype_to_file=real_svtype_to_file)
+
+kadkhdhkdhkd
+
+
+###############################################################
+
+
 ##### test the accuracy of the running on each of the 'real' genomes: #####
 if opt.testRealDataAccuracy is True: 
 
     if opt.genomes_withSV_and_shortReads_table is None: raise ValueError("You have to provide --genomes_withSV_and_shortReads_table with short reads if you want to validate real data.")
 
 
+    THISNEEDSTOBEDEVELOPED
+
+
 ###########################################################################
 
-### run the actual perSVade function optimising parameters ###
-
-
-
-###############################################################
 
 
 
