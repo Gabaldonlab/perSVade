@@ -35,31 +35,68 @@ argv = parse_args(argp)
 
 # load the regions into gr_objects
 
-# insertions
-insertions_df = read.table(argv$insertions_file, header=TRUE)[,c("ChrA","StartA","EndA","ChrB","StartB","EndB","Copied")]
-colnames(insertions_df) = c("chr","start","end","chrB","startB","endB","Copied")
-insertions_df$Copied = as.logical(insertions_df$Copied)
-regionsIns = GRanges(insertions_df)
-
-# change the name so that the insertions are kept
-
-# change trans to be 0-based
-tra_df = read.table(argv$translocations_file, header=TRUE)[,c("ChrA","StartA","EndA","ChrB","StartB","EndB", "Balanced")]
-colnames(tra_df) = c("chr","start","end","chrB","startB","endB","Balanced")
-tra_df$Balanced = as.logical(tra_df$Balanced)
-regionsTrans = GRanges(tra_df)
-
-# load the single-region vars
-regionsDels = GRanges(read.table(argv$deletions_file, header=TRUE)[,c("Chr","Start","End")])
-regionsInvs = GRanges(read.table(argv$inversions_file, header=TRUE)[,c("Chr","Start","End")])
-regionsDups = GRanges(read.table(argv$tandemDuplications_file, header=TRUE)[,c("Chr","Start","End","Duplications")])
-
 # get the genome as an object
 genome_obj = readDNAStringSet(argv$input_genome)
 names(genome_obj) = lapply(names(genome_obj), function(x) (strsplit(x, "(\t)|( )")[[1]][1]))
+all_chromosomes = names(genome_obj)
+
+# insertions
+print("reading insertions")
+if (!is.na(argv$insertions_file)){
+
+	insertions_df = read.table(argv$insertions_file, header=TRUE)[,c("ChrA","StartA","EndA","ChrB","StartB","EndB","Copied")]
+	colnames(insertions_df) = c("chr","start","end","chrB","startB","endB","Copied")
+	insertions_df$Copied = as.logical(insertions_df$Copied)
+	regionsIns = GRanges(insertions_df)
+	ins = length(insertions_df)
+
+} else { 
+
+	chr = c(all_chromosomes[1]); start = c(1); end = c(1); chrB = c(all_chromosomes[1]); startB = c(1); endB = c(1); Copied = c(TRUE)
+	regionsIns = GRanges(data.frame(chr, start, end, chrB, startB, endB, Copied))
+	ins = 0
+
+}
+
+
+print("reading translocations")
+if (!is.na(argv$translocations_file)) {
+
+	tra_df = read.table(argv$translocations_file, header=TRUE)[,c("ChrA","StartA","EndA","ChrB","StartB","EndB", "Balanced")]
+	colnames(tra_df) = c("chr","start","end","chrB","startB","endB","Balanced")
+	tra_df$Balanced = as.logical(tra_df$Balanced)
+	regionsTrans = GRanges(tra_df)
+	trans = length(tra_df)
+
+
+} else { 
+
+	chr = c(all_chromosomes[1]); start = c(1); end = c(1); chrB = c(all_chromosomes[1]); startB = c(1); endB = c(1); Balanced = c(TRUE)
+	regionsTrans = GRanges(data.frame(chr, start, end, chrB, startB, endB, Balanced))
+	trans = 0
+}
+
+# load the single-region vars
+print("reading small vars")
+
+if (!is.na(argv$deletions_file)) {
+	regionsDels = GRanges(read.table(argv$deletions_file, header=TRUE)[,c("Chr","Start","End")])
+} else { regionsDels=NA }
+
+if (!is.na(argv$inversions_file)) {
+	regionsInvs = GRanges(read.table(argv$inversions_file, header=TRUE)[,c("Chr","Start","End")])
+} else { regionsInvs=NA }
+
+if (!is.na(argv$tandemDuplications_file)) {
+	regionsDups = GRanges(read.table(argv$tandemDuplications_file, header=TRUE)[,c("Chr","Start","End")])
+} else { regionsDups=NA }
 
 # get the rearranged genome
-rearranged_genome = simulateSV(output=NA, genome=genome_obj, random=FALSE, verbose=TRUE, regionsDels=regionsDels, regionsInvs=regionsInvs, regionsIns=regionsIns, regionsTrans=regionsTrans, regionsDups=regionsDups, bpSeqSize=10000)
+rearranged_genome = simulateSV(output=NA, genome=genome_obj, random=FALSE, verbose=TRUE, regionsDels=regionsDels, regionsInvs=regionsInvs, regionsIns=regionsIns, regionsDups=regionsDups, regionsTrans=regionsTrans, bpSeqSize=50, maxDups=4, trans=trans, ins=ins)
+
+print(metadata(rearranged_genome))
+
+lajdbdakjdah
 
 
 # write the rearranged genome

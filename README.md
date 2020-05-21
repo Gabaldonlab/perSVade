@@ -23,11 +23,7 @@ This is essential so that all the dependencies of the pipeline are met.
 In addition, there are some dependencies that are included in the respository "installation/external_software" (only in the "release" packages). These are gridss (tested on version 2.8.1), clove (tested on version 0.17) and NINJA (we installed it from https://github.com/TravisWheelerLab/NINJA/releases/tag/0.95-cluster_only). 
 
 ## Comments for the installation of extra dependencies
-The conda environment can be exported to a .yml file with:
-
-`conda env export --no-builds -n perSVade_env --file perSVade_env.yml`
-
-The non-conda dependencies can be installed like this:
+The non-conda dependencies can be installed like this (if you wanted to reinstall them):
 
 1. change to the directory where you installed the perSVade repository:
 
@@ -60,6 +56,10 @@ The non-conda dependencies can be installed like this:
 `make`
 
 You may want to repeat this in case you have problems running any of the programs with the pipeline
+
+The conda environment can be exported to a .yml file with:
+
+`conda env export --no-builds -n perSVade_env --file perSVade_env.yml`
 
 ## Running
 Once you have installed all the dependencies, you can call the perSVade pipeline with:
