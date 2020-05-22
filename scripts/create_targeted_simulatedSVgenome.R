@@ -94,9 +94,7 @@ if (!is.na(argv$tandemDuplications_file)) {
 # get the rearranged genome
 rearranged_genome = simulateSV(output=NA, genome=genome_obj, random=FALSE, verbose=TRUE, regionsDels=regionsDels, regionsInvs=regionsInvs, regionsIns=regionsIns, regionsDups=regionsDups, regionsTrans=regionsTrans, bpSeqSize=50, maxDups=4, trans=trans, ins=ins)
 
-print(metadata(rearranged_genome))
-
-lajdbdakjdah
+#print(metadata(rearranged_genome))
 
 
 # write the rearranged genome
