@@ -695,3 +695,102 @@ def get_translocations_randomly_placed_in_target_regions(target_regions_bed, tra
 
     print(chr_to_len)
 
+
+def transform_cut_and_paste_to_copy_and_paste_insertions(reference_genome, rearranged_genome, insertions_file, svtype_to_svDF):
+
+    """ This function takes a rearranged genome and reinserts the copy-and-paste insertions where they should be """
+
+    print("reinserting-copy-and-paste insertions into %s"%insertions_file)
+
+    # load df and keep the copy-and-paste insertions
+    df = pd.read_csv(insertions_file, sep="\t")
+    df = df[df.Copied]
+
+    if len(df)>0:
+
+        # define an unmodified genome
+        rearranged_genome_unmodified = "%s.unmodified.fasta"%rearranged_genome
+        rearranged_genome_unmodified_tmp = "%s.tmp"%rearranged_genome_unmodified
+
+        if file_is_empty(rearranged_genome_unmodified):
+
+            # if the unmodified tmps is writen, replace the rearranged_genome with it
+            if not file_is_empty(rearranged_genome_unmodified_tmp): os.rename(rearranged_genome_unmodified_tmp, rearranged_genome)
+
+            # get the rearranged genome seq
+            chr_to_rearrangedSeq = {seq.id: str(seq.seq) for seq in SeqIO.parse(rearranged_genome, "fasta")}
+            all_rearranged_chromosomes_together = "".join(chr_to_rearrangedSeq.values())
+
+            # get the seq
+            chr_to_refSeq = {seq.id: str(seq.seq) for seq in SeqIO.parse(reference_genome, "fasta")}
+
+            # define the length of each chrom
+            chr_to_lenSeq = {chrom : len(seq) for chrom, seq in chr_to_refSeq.items()}
+
+            # define all the positions with breakpoints
+            df_positions = pd.concat([get_breakpoint_positions_df_in_svDF(svDF) for svtype, svDF in svtype_to_svDF.items()])
+            chr_to_bpPositions = dict(df_positions.groupby("Chr").apply(lambda df_c: set(df_c["Pos"])))
+
+            # add the ends of the chromosome, and convert to np array
+            for chrom, lenSeq in chr_to_lenSeq.items(): 
+
+                chr_to_bpPositions[chrom].update({1, lenSeq})
+                chr_to_bpPositions[chrom] = np.array(sorted(chr_to_bpPositions[chrom]))
+
+            # add the closest breakpoint position of ChrA in the reference
+            df["closest_5'breakpoint_position"] = df.apply(lambda r: find_nearest(chr_to_bpPositions[r["ChrA"]][chr_to_bpPositions[r["ChrA"]]<(r["StartA"])], r["StartA"]), axis=1)
+
+            df["closest_3'breakpoint_position"] = df.apply(lambda r: find_nearest(chr_to_bpPositions[r["ChrA"]][chr_to_bpPositions[r["ChrA"]]>(r["EndA"])], r["EndA"]), axis=1)
+
+            # get the 5' sequence (from one position after the closest breakpoint to the position before the breakpoint)
+            df["5'sequence"] = df.apply(lambda r: chr_to_refSeq[r["ChrA"]][r["closest_5'breakpoint_position"]:r["StartA"]-1], axis=1)
+
+            # get the 3' sequence (from the position after End to the position before the closest breakpoint)
+            df["3'sequence"] = df.apply(lambda r: chr_to_refSeq[r["ChrA"]][r["EndA"]:r["closest_3'breakpoint_position"]-1], axis=1)
+
+            # get the deleted sequence (from the start to the end)
+            df["deleted_sequence"] = df.apply(lambda r: chr_to_refSeq[r["ChrA"]][r["StartA"]-1:r["EndA"]], axis=1)
+
+            # change the chromosome seq in the sequence 
+            for I, (chrA, seq5, seq3, del_seq) in enumerate(df[["ChrA", "5'sequence", "3'sequence", "deleted_sequence"]].values):
+                print("copy-paste-insertion %i.."%I)
+
+                # all seq
+                ref_seq = seq5+del_seq+seq3
+
+                # conformation in the rearranged chromosome
+                rearranged_seq = seq5+seq3
+
+                # check that the rearranged seq appears once in the genome and the ref seq in the ref genome. And they do not cross.
+                chrA_refSeq = chr_to_refSeq[chrA]
+                if not(chrA_refSeq.count(ref_seq)==1 and chrA_refSeq.count(rearranged_seq)==0 and all_rearranged_chromosomes_together.count(rearranged_seq)==1 and all_rearranged_chromosomes_together.count(ref_seq)==0): raise ValueError("The sequence is not unique")
+
+                # go through each chrom of the rearranged seqs
+                for chrom in chr_to_rearrangedSeq.keys():
+
+                    # get the rearranged sequence
+                    seq = cp.deepcopy(chr_to_rearrangedSeq[chrom])
+
+                    # if the rearrangement sequence is in this chromosome, change it
+                    if rearranged_seq in seq: 
+
+                        # update the chr_to_rearrangedSeq so that it contains the reference sequence (copied)
+                        chr_to_rearrangedSeq[chrom] = seq.replace(rearranged_seq, ref_seq)
+                        break
+
+            # get the rearranged genome into the file
+            seq_records_list = [SeqRecord(Seq(seq), id=chrom, name=chrom, description=chrom) for chrom, seq in chr_to_rearrangedSeq.items()]
+
+            # write the unmodified one
+            print("writing")
+            run_cmd("cp %s %s.tmp"%(rearranged_genome, rearranged_genome_unmodified_tmp))
+            os.rename("%s.tmp"%rearranged_genome_unmodified_tmp, rearranged_genome_unmodified_tmp)
+
+            # write the modified genome
+            SeqIO.write(seq_records_list, rearranged_genome, "fasta")
+
+            # write the modified genome
+            os.rename(rearranged_genome_unmodified_tmp, rearranged_genome_unmodified)
+
+        else: print("the insertions have already been modified")
+
