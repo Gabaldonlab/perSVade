@@ -48,13 +48,11 @@ if (!is.na(argv$insertions_file)){
 	colnames(insertions_df) = c("chr","start","end","chrB","startB","endB","Copied")
 	insertions_df$Copied = as.logical(insertions_df$Copied)
 	regionsIns = GRanges(insertions_df)
-	ins = length(insertions_df)
 
 } else { 
 
 	chr = c(all_chromosomes[1]); start = c(1); end = c(1); chrB = c(all_chromosomes[1]); startB = c(1); endB = c(1); Copied = c(TRUE)
 	regionsIns = GRanges(data.frame(chr, start, end, chrB, startB, endB, Copied))
-	ins = 0
 
 }
 
@@ -66,14 +64,11 @@ if (!is.na(argv$translocations_file)) {
 	colnames(tra_df) = c("chr","start","end","chrB","startB","endB","Balanced")
 	tra_df$Balanced = as.logical(tra_df$Balanced)
 	regionsTrans = GRanges(tra_df)
-	trans = length(tra_df)
-
 
 } else { 
 
 	chr = c(all_chromosomes[1]); start = c(1); end = c(1); chrB = c(all_chromosomes[1]); startB = c(1); endB = c(1); Balanced = c(TRUE)
 	regionsTrans = GRanges(data.frame(chr, start, end, chrB, startB, endB, Balanced))
-	trans = 0
 }
 
 # load the single-region vars
@@ -81,18 +76,27 @@ print("reading small vars")
 
 if (!is.na(argv$deletions_file)) {
 	regionsDels = GRanges(read.table(argv$deletions_file, header=TRUE)[,c("Chr","Start","End")])
-} else { regionsDels=NA }
+} else { 
+	chr = c(all_chromosomes[1]); start = c(1); end = c(1);
+	regionsDels = GRanges(data.frame(chr, start, end))
+}
 
 if (!is.na(argv$inversions_file)) {
 	regionsInvs = GRanges(read.table(argv$inversions_file, header=TRUE)[,c("Chr","Start","End")])
-} else { regionsInvs=NA }
+} else { 
+	chr = c(all_chromosomes[1]); start = c(1); end = c(1);
+	regionsInvs = GRanges(data.frame(chr, start, end))
+ }
 
 if (!is.na(argv$tandemDuplications_file)) {
 	regionsDups = GRanges(read.table(argv$tandemDuplications_file, header=TRUE)[,c("Chr","Start","End")])
-} else { regionsDups=NA }
+} else { 
+	chr = c(all_chromosomes[1]); start = c(1); end = c(1);
+	regionsDups = GRanges(data.frame(chr, start, end))
+}
 
 # get the rearranged genome
-rearranged_genome = simulateSV(output=NA, genome=genome_obj, random=FALSE, verbose=TRUE, regionsDels=regionsDels, regionsInvs=regionsInvs, regionsIns=regionsIns, regionsDups=regionsDups, regionsTrans=regionsTrans, bpSeqSize=50, maxDups=4, trans=trans, ins=ins)
+rearranged_genome = simulateSV(output=NA, genome=genome_obj, random=FALSE, verbose=TRUE, regionsDels=regionsDels, regionsInvs=regionsInvs, regionsIns=regionsIns, regionsDups=regionsDups, regionsTrans=regionsTrans, bpSeqSize=50, maxDups=4)
 
 #print(metadata(rearranged_genome))
 

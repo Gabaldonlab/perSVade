@@ -593,3 +593,105 @@ def rearrange_genomes_simulateSV(reference_genome, outdir, replace=False, nvars=
     ljbadjkadjbad
 
     return final_svtype_to_svfile, final_rearranged_genome
+
+
+
+
+######## random generation of balanced translocatipns #####
+
+
+
+
+            # get the translocations randomly placed
+            get_translocations_randomly_placed_in_target_regions(noInsInvDelTan_bed, translocations_file, chrom_to_len, nvars=nvars)
+
+
+def get_translocations_randomly_placed_in_target_regions(target_regions_bed, translocations_file, chr_to_len, nvars=100):
+
+    """Writes nvars randomly placed translocations in target_regions_bed, and writes them to translocations_file. It will draw as maximum number of translocations as possbile. Half of them will be inverted and half in the same orientation. All of them are balanced."""
+
+
+    thisdoesnotwork
+
+    print("getting randomly inserted translocations")
+
+    # get the bed into a df
+    target_regions_df = pd.read_csv(target_regions_bed, sep="\t", names=["chromosome", "start", "end"], header=None).drop_duplicates()
+    target_regions_df.index = list(range(len(target_regions_df)))
+
+    # add the breakpoint region in the middle
+    target_regions_df["bp_pos"] = (target_regions_df.start + (target_regions_df.end-target_regions_df.start)/2).apply(int)
+
+    # initialize a dict that will be used for the tra df
+    varID_to_colName_to_value = {}
+
+    # initialize a dict that will take each chromosome and simulate it
+    chrom_to_nTRA = {chrom:0 for chrom in chr_to_len}
+
+    # keep simulating translocations until you have nvars
+    nvars_simulated = 0
+
+    while nvars_simulated<nvars:
+
+        # define the available chromosomes and their target regions
+        available_chroms = {chrom for chrom, nTRA in chrom_to_nTRA.items() if nTRA<2}
+        target_regions_df = target_regions_df[target_regions_df.chromosome.isin(available_chroms)]
+
+        # if the target df has less than 2 vars with a different chromosome, drop
+        if len(set(target_regions_df.chromosome))<2: break
+
+        # pick a regionA
+        all_regions = list(target_regions_df.index)
+        regionA = target_regions_df.loc[random.choice(all_regions)]
+
+        # get the regions from different chromosomes
+        target_regions_df_B = target_regions_df[target_regions_df.chromosome!=regionA["chromosome"]]
+        all_regions_B = list(target_regions_df_B.index)
+        regionB = target_regions_df_B.loc[random.choice(all_regions_B)]
+
+        # get the dict for this tra
+        tra_dict = {"ChrA":regionA["chromosome"], "StartA":1, "EndA":regionA["bp_pos"], "ChrB":regionB["chromosome"], "Balanced":True}
+
+        # define if inverted or not, which defines the orientation of chrB
+        is_inverted = bool(random.randrange(0, 2))
+        #is_inverted = False
+
+        if is_inverted is True: 
+            tra_dict["StartB"] = regionB["bp_pos"]
+            tra_dict["EndB"] = chr_to_len[regionB["chromosome"]]
+
+        else:
+            tra_dict["StartB"] = 1
+            tra_dict["EndB"] = regionB["bp_pos"]
+
+        # add the 
+        varID_to_colName_to_value[nvars_simulated] = tra_dict
+
+        # delete both regions from the possibilities
+        target_regions_df = target_regions_df.drop(regionA.name)
+        target_regions_df = target_regions_df.drop(regionB.name)
+
+        # update the number of times the chromosome is affected
+        for chrom in [tra_dict["ChrA"], tra_dict["ChrB"]]: chrom_to_nTRA[chrom] += 1
+
+        # update the number of simulated
+        nvars_simulated+=1
+
+    # get df
+    tra_df = pd.DataFrame(varID_to_colName_to_value).transpose()[["ChrA", "StartA", "EndA", "ChrB", "StartB", "EndB", "Balanced"]]
+    tra_df["Name"] = ["translocation_%i"%(I+1) for I in range(len(tra_df))]
+    tra_df["ID"] = tra_df["Name"]
+
+    print(tra_df)
+
+
+    # write a subset of the vars (with 5 it works)
+    #tra_df = tra_df.iloc[0:1] 
+
+
+
+
+    tra_df.to_csv(translocations_file, sep="\t")
+
+    print(chr_to_len)
+
