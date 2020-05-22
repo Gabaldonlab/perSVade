@@ -19,7 +19,6 @@ argp = arg_parser("Takes a genome and generates a simulated genome with rearrang
 argp = add_argument(argp, "--input_genome", help="Path to the genome where to generate the SV")
 argp = add_argument(argp, "--outdir", help="Path to the directory where to write all the files")
 argp = add_argument(argp, "--regions_bed", help="Path to the bed file where the simulations should be generated")
-argp = add_argument(argp, "--regions_tra_bed", help="Path to the bed file where the balanced translocations should be generated")
 
 argp = add_argument(argp, "--number_Ins", default=0, help="The number of insertions to generate")
 argp = add_argument(argp, "--number_Inv", default=0, help="The number of inversions to generate")
@@ -104,9 +103,12 @@ for (fraction_n_events in all_fraction_n_events) {
 
     # try to run simulations, depending on the provided bed file
     gr_regions = import(regions_bed)
-    gr_regions_tra = import(regions_tra_bed)
 
-    rearranged_genome = withTimeout(try(simulateSV(output=NA, genome=genome_obj, chrs=chromosomes, dels=number_Del, ins=number_Ins, invs=number_Inv, trans=number_Tra, dups=number_Dup, sizeDels=size_Del, sizeIns=size_Ins, sizeInvs=size_Inv,  sizeDups=size_Dup, percCopiedIns=argv$percCopiedIns, percBalancedTrans=argv$percBalancedTrans, bpFlankSize=0, percSNPs=0, indelProb=0, maxIndelSize=0, repeatBias=FALSE, bpSeqSize=100, random=TRUE, verbose=TRUE, regionsDels=gr_regions, regionsIns=gr_regions, regionsInvs=gr_regions, regionsTrans=gr_regions_tra)), timeout=argv$max_time_rearrangement, regionsDups=gr_regions, maxDups=3)
+    # adjust the number of tra according to the number of chromosomes in the 
+    max_tra = length(unique(seqnames(gr_regions)))-1
+    if (number_Tra>max_tra) {number_Tra = max_tra}
+
+    rearranged_genome = withTimeout(try(simulateSV(output=NA, genome=genome_obj, chrs=chromosomes, dels=number_Del, ins=number_Ins, invs=number_Inv, trans=number_Tra, dups=number_Dup, sizeDels=size_Del, sizeIns=size_Ins, sizeInvs=size_Inv,  sizeDups=size_Dup, percCopiedIns=argv$percCopiedIns, percBalancedTrans=argv$percBalancedTrans, bpFlankSize=0, percSNPs=0, indelProb=0, maxIndelSize=0, repeatBias=FALSE, bpSeqSize=100, random=TRUE, verbose=TRUE, regionsDels=gr_regions, regionsIns=gr_regions, regionsInvs=gr_regions, regionsTrans=gr_regions)), timeout=argv$max_time_rearrangement, regionsDups=gr_regions, maxDups=3)
 
     #rearranged_genome = simulateSV(output=NA, genome=genome_obj, chrs=chromosomes, dels=number_Del, ins=number_Ins, invs=number_Inv, dups=number_Dup, trans=number_Tra, sizeDels=size_Del, sizeIns=size_Ins, sizeInvs=size_Inv, sizeDups=size_Dup, maxDups=2, percCopiedIns=argv$percCopiedIns, percBalancedTrans=argv$percBalancedTrans, bpFlankSize=0, percSNPs=0, indelProb=0, maxIndelSize=0, repeatBias=FALSE, bpSeqSize=100, random=TRUE, verbose=TRUE, regionsDels=gr_regions, regionsIns=gr_regions, regionsInvs=gr_regions, regionsDups=gr_regions, regionsTrans=gr_regions)
       
