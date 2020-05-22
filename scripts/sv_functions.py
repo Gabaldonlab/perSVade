@@ -881,11 +881,91 @@ def check_consistency_of_svtype_to_svDF(svtype_to_svDF, all_chromosomes, chr_to_
             df_bed_allRegions = df_bed_allRegions.append(sv_bed)
 
 
-def insert_translocations_into_rearranged_genome(reference_genome, rearranged_genome, svDF, translocations_file, svtype_to_svDF):
+def get_ChrB_bp_pos_translocations(r, chr_to_len):
 
-    """This function takes a rearranged genome and insert the translocations. This substitutes the translocations_file in case that some translocations cannot be inserted. svtype_to_svDF should contain translocations. The svDF should have 1s on it."""
+    """Takes a row of a translocations df and returns the breakpoint position"""
+
+    if r["StartB"]==1: return r["EndB"]
+    elif r["EndB"]==chr_to_len[r["ChrB"]]: return r["StartB"]
+    else: raise ValueError("r is not properly formatted")
+
+def get_svDF_in_coords_of_rearranged_genome(svDF, reference_genome, rearranged_genome, svtype, svtype_to_svDF):
+
+    """Takes an svDF and returns it with the coordinates matching those of the rearranged genome (by unique sequence). Those events that can't be mapped will be discarded from the returned svDF. These should be 1-based and the chromosomes in one place should match the chromosomes in the other"""
+
+    # get the rearranged genome seq
+    chr_to_rearrangedSeq = {seq.id: str(seq.seq) for seq in SeqIO.parse(rearranged_genome, "fasta")}
+    all_rearranged_chromosomes_together = "".join(chr_to_rearrangedSeq.values())
+
+    # get the seq
+    chr_to_refSeq = {seq.id: str(seq.seq) for seq in SeqIO.parse(reference_genome, "fasta")}
+
+    # define the length of each chrom
+    chr_to_ref_lenSeq = {chrom : len(seq) for chrom, seq in chr_to_refSeq.items()}
+    chr_to_rearranged_lenSeq = {chrom : len(seq) for chrom, seq in chr_to_rearrangedSeq.items()}
+
+    # define all the positions with breakpoints (this also includes the breakpoints of this svDF). These are positions of the refGenome
+    df_positions = pd.concat([get_breakpoint_positions_df_in_svDF(df) for svtype, df in svtype_to_svDF.items()])
+    chr_to_bpPositions = dict(df_positions.groupby("Chr").apply(lambda df_c: set(df_c["Pos"])))
+
+    # add the ends of the chromosome, and convert to np array
+    for chrom, lenSeq in chr_to_ref_lenSeq.items(): 
+
+        chr_to_bpPositions[chrom].update({1, lenSeq})
+        chr_to_bpPositions[chrom] = np.array(sorted(chr_to_bpPositions[chrom]))
+
+    ##### PIPELINE DIFFERENTIAL FOR EACH SVTYPE #####
+
+    if svtype=="translocations":
+
+        # make sure that the format is correct
+        if set(svDF["StartA"])!={1}: raise ValueError("This svDF is not properly formatted")
+
+        # add the position of each breakpoint
+        svDF["ChrA_bp_pos"] = svDF["EndA"]
+        svDF["ChrB_bp_pos"] = svDF.apply(lambda r: get_ChrB_bp_pos_translocations(r, chr_to_ref_lenSeq), axis=1)
+
+        print(svDF)
+
+        kjhadjkdakhda
+
+
+
+
+        # add the closest breakpoint position of ChrA in the reference
+        svDF["closest_5'breakpoint_position"] = svDF.apply(lambda r: find_nearest(chr_to_bpPositions[r["ChrA"]][chr_to_bpPositions[r["ChrA"]]<(r["StartA"])], r["StartA"]), axis=1)
+
+        svDF["closest_3'breakpoint_position"] = df.apply(lambda r: find_nearest(chr_to_bpPositions[r["ChrA"]][chr_to_bpPositions[r["ChrA"]]>(r["EndA"])], r["EndA"]), axis=1)
+
+        print(chr_to_bpPositions)
+
+        aadjakc
+
+    else: raise ValueError("This has not been developed for %s"%svtype)
+
+
+
+
+    return svDF_rearrangedCoords
+
+
+
+def insert_translocations_into_rearranged_genome(reference_genome, input_rearranged_genome, output_rearranged_genome, svDF, translocations_file, svtype_to_svDF, replace=False):
+
+    """This function takes a rearranged genome and insert the translocations generating output_rearranged_genome. This substitutes the translocations_file in case that some translocations cannot be inserted. svtype_to_svDF should contain translocations. The svDF should have 1s on it. svDF has to be in 1-based coordinates"""
 
     print("inserting translocations inHouse")
+
+    # test that all are balanced translocations
+    if not all(svDF.Balanced): raise ValueError("This has not been developed for unbalanced translocations")
+
+    # get the svDF in coordinates of the rearranged genome
+    svDF_rearrangedCoords = get_svDF_in_coords_of_rearranged_genome(svDF, reference_genome, input_rearranged_genome, "translocations", svtype_to_svDF)
+
+
+
+
+
 
 
     print(svDF, translocations_file)
@@ -957,7 +1037,7 @@ def generate_rearranged_genome_from_svtype_to_svDF(reference_genome, svtype_to_s
 
         # generate translocations
         translocations_file = "%s/translocations.tab"%outdir
-        if "translocations" in svtype_to_svDF: insert_translocations_into_rearranged_genome(reference_genome, rearranged_genome, svtype_to_svDF["translocations"], translocations_file, svtype_to_svDF)
+        if "translocations" in svtype_to_svDF: insert_translocations_into_rearranged_genome(reference_genome, rearranged_genome_InsInvDelTan, rearranged_genome, svtype_to_svDF["translocations"], translocations_file, svtype_to_svDF)
 
         dakhgadhjkdhjdahggadjhjhga
 
