@@ -889,13 +889,21 @@ def get_ChrB_bp_pos_translocations(r, chr_to_len):
     elif r["EndB"]==chr_to_len[r["ChrB"]]: return r["StartB"]
     else: raise ValueError("r is not properly formatted")
 
+def get_orientation_translocation(r, chr_to_len):
+
+    """Gets the orientation of the translocation"""
+
+    if r["StartB"]==1: return "5_to_5"
+    elif r["EndB"]==chr_to_len[r["ChrB"]]: return "5_to_3"
+    else: raise ValueError("r is not properly formatted")
+
 def get_svDF_in_coords_of_rearranged_genome(svDF, reference_genome, rearranged_genome, svtype, svtype_to_svDF):
 
     """Takes an svDF and returns it with the coordinates matching those of the rearranged genome (by unique sequence). Those events that can't be mapped will be discarded from the returned svDF. These should be 1-based and the chromosomes in one place should match the chromosomes in the other"""
 
     # get the rearranged genome seq
     chr_to_rearrangedSeq = {seq.id: str(seq.seq) for seq in SeqIO.parse(rearranged_genome, "fasta")}
-    all_rearranged_chromosomes_together = "".join(chr_to_rearrangedSeq.values())
+    #all_rearranged_chromosomes_together = "".join(chr_to_rearrangedSeq.values())
 
     # get the seq
     chr_to_refSeq = {seq.id: str(seq.seq) for seq in SeqIO.parse(reference_genome, "fasta")}
@@ -914,6 +922,10 @@ def get_svDF_in_coords_of_rearranged_genome(svDF, reference_genome, rearranged_g
         chr_to_bpPositions[chrom].update({1, lenSeq})
         chr_to_bpPositions[chrom] = np.array(sorted(chr_to_bpPositions[chrom]))
 
+
+    # check that the ID is unique 
+    if len(set(svDF.ID))!=len(svDF): raise ValueError("IDs are not unique")
+
     ##### PIPELINE DIFFERENTIAL FOR EACH SVTYPE #####
 
     if svtype=="translocations":
@@ -921,34 +933,170 @@ def get_svDF_in_coords_of_rearranged_genome(svDF, reference_genome, rearranged_g
         # make sure that the format is correct
         if set(svDF["StartA"])!={1}: raise ValueError("This svDF is not properly formatted")
 
+        # set the index to be the ID
+        svDF = svDF.set_index("ID", drop=False)
+
+        # add if it is 5_to_5 or 5_t_3
+        svDF["orientation"] = svDF.apply(lambda r: get_orientation_translocation(r, chr_to_ref_lenSeq), axis=1) 
+
         # add the position of each breakpoint
         svDF["ChrA_bp_pos"] = svDF["EndA"]
         svDF["ChrB_bp_pos"] = svDF.apply(lambda r: get_ChrB_bp_pos_translocations(r, chr_to_ref_lenSeq), axis=1)
 
-        print(svDF)
+        # at the positions of the closest breakpoints and the corresponding sequences arround the breakpoints
+        for chrom in ["ChrA", "ChrB"]:
 
-        kjhadjkdakhda
+            # define the breakpoint position field and the sequences
+            bp_pos_fiel = "%s_bp_pos"%chrom
+            seq_5_field = "%s_5seq"%chrom # this will include until the position before the breakpoint
+            seq_3_field = "%s_3seq"%chrom # this will start on the position of the breakpoint
+            seq_field = "%s_seq"%chrom # the whole sequence
+
+            # add the closest breakpoint position of chrom in the reference
+            svDF["%s_closest_5'bp_pos"%chrom] = svDF.apply(lambda r: find_nearest(chr_to_bpPositions[r[chrom]][chr_to_bpPositions[r[chrom]]<(r[bp_pos_fiel])], r[bp_pos_fiel]), axis=1)
+
+            svDF["%s_closest_3'bp_pos"%chrom] = svDF.apply(lambda r: find_nearest(chr_to_bpPositions[r[chrom]][chr_to_bpPositions[r[chrom]]>(r[bp_pos_fiel])], r[bp_pos_fiel]), axis=1)
+
+            # add the sequences 
+
+            # 5' seq starts at the position after the breakpoint and ends including the breakpoint position
+            svDF[seq_5_field] = svDF.apply(lambda r: chr_to_refSeq[r[chrom]][r["%s_closest_5'bp_pos"%chrom] : (r[bp_pos_fiel]-1)], axis=1)
+
+            # 3' seq starts right after the breakpoint and spans until the position before the nex breakpoint
+            svDF[seq_3_field] = svDF.apply(lambda r: chr_to_refSeq[r[chrom]][(r[bp_pos_fiel]-1) : (r["%s_closest_3'bp_pos"%chrom]-1)], axis=1)
+
+            # the merged seqs
+            svDF[seq_field] = svDF[seq_5_field] + svDF[seq_3_field]
 
 
+        # initialize the df svDF_rearrangedCoords
+        svDF_rearrangedCoords = pd.DataFrame(columns=svtype_to_fieldsDict[svtype]["all_fields"])
 
+        # go through each SVdf and add to svDF_rearrangedCoords if the sequences are unique
+        for ID, sv_row  in svDF.iterrows():
 
-        # add the closest breakpoint position of ChrA in the reference
-        svDF["closest_5'breakpoint_position"] = svDF.apply(lambda r: find_nearest(chr_to_bpPositions[r["ChrA"]][chr_to_bpPositions[r["ChrA"]]<(r["StartA"])], r["StartA"]), axis=1)
+            # check that the 3' seq is unique
+            if not ( chr_to_rearrangedSeq[sv_row["ChrA"]].count(sv_row["ChrA_3seq"])==1 and chr_to_rearrangedSeq[sv_row["ChrB"]].count(sv_row["ChrB_3seq"])==1 ): 
 
-        svDF["closest_3'breakpoint_position"] = df.apply(lambda r: find_nearest(chr_to_bpPositions[r["ChrA"]][chr_to_bpPositions[r["ChrA"]]>(r["EndA"])], r["EndA"]), axis=1)
+                print("WARNING: The sequences for %s are not unique enough to find the position of the bp in the rearranged genome"%ID)
+                continue
 
-        print(chr_to_bpPositions)
+            # define general parameters of the rearranged genome
+            ChrA = sv_row["ChrA"]
+            ChrB = sv_row["ChrB"]
+            Balanced = sv_row["Balanced"]
+            StartA = 1
 
-        aadjakc
+            # define the breakpoint positions in 1-based coordinates (the find() returns 0 if not found)
+            ChrA_bp_pos = chr_to_rearrangedSeq[ChrA].find(sv_row["ChrA_3seq"]) + 1
+            ChrB_bp_pos = chr_to_rearrangedSeq[ChrB].find(sv_row["ChrB_3seq"]) + 1
+
+            if any([x==0 for x in {ChrA_bp_pos, ChrB_bp_pos}]): raise ValueError("The breakpoints can't be at 0")
+
+            # define the other coordinates
+            EndA = ChrA_bp_pos
+
+            if sv_row["orientation"]=="5_to_5": 
+                StartB = 1
+                EndB = ChrB_bp_pos
+
+            elif sv_row["orientation"]=="5_to_3":
+                StartB = ChrB_bp_pos
+                EndB = chr_to_rearranged_lenSeq[ChrB]
+
+            else: raise ValueError('sv_row["orientation"] is incorrect') 
+
+            # add to df
+            dict_var = {"ChrA":ChrA, "StartA":StartA, "EndA":EndA, "ChrB":ChrB, "StartB":StartB, "EndB":EndB, "Balanced":Balanced, "ID":ID}
+            svDF_rearrangedCoords = svDF_rearrangedCoords.append(pd.DataFrame({ID: dict_var}).transpose()[svtype_to_fieldsDict[svtype]["all_fields"]])
+
+        print("You have been able to remap the positions for %i/%i translocations"%(len(svDF), len(svDF_rearrangedCoords)))
 
     else: raise ValueError("This has not been developed for %s"%svtype)
-
-
-
 
     return svDF_rearrangedCoords
 
 
+def get_genomeGraph_object_5to3_noBreakpoints(genome, genomeGraph_outfileprefix, replace=False, check_genome=False):
+
+    """This function takes a genome and generates a directed graph where each node is a position in the genome and the edges are 5->3 relationships. It is saved under genomeGraph_outfileprefix"""
+
+    # define the files
+    genomeGraph_outfile = "%s.graph.py"%genomeGraph_outfileprefix
+    genomeGraph_positions_df = "%s.df_positions.py"%genomeGraph_outfileprefix
+
+    if any([file_is_empty(x) for x in {genomeGraph_outfile, genomeGraph_positions_df}]) or replace is True:
+    #if True: # debug
+        print("getting genome graph")
+
+        # map each chromosome to an offset
+        chrom_to_lenSeq = get_chr_to_len(genome)
+
+        # deffine an offset for each chromosome, which is necessary to keep all the positions of the genome as independent numbers
+        chrom_to_offset = {}
+        current_offset = 0
+        for chrom, seqLen in chrom_to_lenSeq.items():
+            chrom_to_offset[chrom] = current_offset
+            current_offset+=seqLen
+
+        # create the graph
+        genome_graph = igraph.Graph(directed=True)
+
+        # add one vertex (node) for each position in the genome
+        npositions = sum(chrom_to_lenSeq.values())
+        genome_graph.add_vertices(npositions)
+
+        # define the edges that are the end of chromosomes
+        chromosome_start_nodes = {offset for chrom, offset in chrom_to_offset.items()}
+        chromosome_end_nodes = {(offset + chrom_to_lenSeq[chrom] - 1) for chrom, offset in chrom_to_offset.items()}
+
+        # define the edges mappping each position to the next one, but not the chromosome_end ones
+        all_positions = set(range(npositions))
+        non_end_positons = all_positions.difference(chromosome_end_nodes)
+        all_edges = [(pos, pos+1) for pos in non_end_positons]
+
+        # add the edges to the graph
+        genome_graph.add_edges(all_edges)
+        print("genome graph got")
+
+        # get the real ends of the chromosomes (regardless of the connected regions)
+        if check_genome is True:
+
+            sorted_positions = sorted(all_positions)
+            pos_to_nNeighbors = pd.Series(dict(zip(sorted_positions, map(lambda x: len(genome_graph.neighbors(x, mode="ALL")), sorted_positions))))
+
+            real_chromosome_end_nodes = set(pos_to_nNeighbors[pos_to_nNeighbors==1].index)
+            print("There are %i telomeric nodes in the graph genome"%len(real_chromosome_end_nodes))
+
+        print("getting positions df")
+        
+        # generate a df that maps each position to the real position
+        positions_real = []
+        chromosomes_real = []
+        for chrom, lenChrom in chrom_to_lenSeq.items():
+            positions_real += list(range(lenChrom))
+            chromosomes_real += [chrom]*lenChrom
+
+        df_positions = pd.DataFrame()
+        df_positions["chromosome"] =  chromosomes_real
+        df_positions["real_position"] =  positions_real
+        df_positions["offset"] = df_positions.chromosome.apply(lambda x: chrom_to_offset[x])
+        df_positions["graph_position"] = df_positions.real_position + df_positions.offset
+        df_positions["is_start_of_chr"] = df_positions.graph_position.isin(chromosome_start_nodes)
+        df_positions["is_end_of_chr"] = df_positions.graph_position.isin(chromosome_end_nodes)
+
+        if set(df_positions.graph_position)!=all_positions: raise ValueError("There is a bad graph calculation of the positions")
+
+        # save
+        save_object(genome_graph, genomeGraph_outfile)
+        save_object(df_positions, genomeGraph_positions_df)
+
+    else:
+        print("loading graph genome")
+        genome_graph = load_object(genomeGraph_outfile)
+        df_positions = load_object(genomeGraph_positions_df)
+
+    return genome_graph, df_positions
 
 def insert_translocations_into_rearranged_genome(reference_genome, input_rearranged_genome, output_rearranged_genome, svDF, translocations_file, svtype_to_svDF, replace=False):
 
@@ -962,13 +1110,145 @@ def insert_translocations_into_rearranged_genome(reference_genome, input_rearran
     # get the svDF in coordinates of the rearranged genome
     svDF_rearrangedCoords = get_svDF_in_coords_of_rearranged_genome(svDF, reference_genome, input_rearranged_genome, "translocations", svtype_to_svDF)
 
+    # write into translocations file (this is important so that in case any of the translocations could not be mapped from the sequence)
+    svDF = svDF[svDF.ID.isin(set(svDF_rearrangedCoords.ID))][svtype_to_fieldsDict["translocations"]["all_fields"]]
+    svDF.to_csv(translocations_file, sep="\t", header=True, index=False)
+
+    # add fields to the rearrangedCoords df
+    chr_to_rearranged_len = get_chr_to_len(input_rearranged_genome)
+    svDF_rearrangedCoords["orientation"] = svDF_rearrangedCoords.apply(lambda r: get_orientation_translocation(r, chr_to_rearranged_len), axis=1) 
+    svDF_rearrangedCoords["ChrA_bp_pos"] = svDF_rearrangedCoords["EndA"]
+    svDF_rearrangedCoords["ChrB_bp_pos"] = svDF_rearrangedCoords.apply(lambda r: get_ChrB_bp_pos_translocations(r, chr_to_rearranged_len), axis=1)
+
+    # rewrite positions so that they are 0-based (so that each position is the real one)
+    for pos_f in ["StartA", "EndA", "StartB", "EndB", "ChrA_bp_pos", "ChrB_bp_pos"]: svDF_rearrangedCoords[pos_f] = svDF_rearrangedCoords[pos_f] - 1
+
+    # get the rearranged genome as a directed liner graph
+    genomeGraph_outfileprefix = "%s.linearDirectedGraph"%input_rearranged_genome
+    genome_graph, df_positions = get_genomeGraph_object_5to3_noBreakpoints(input_rearranged_genome, genomeGraph_outfileprefix, replace=replace) # everything here is 0-based
+
+    # define the index of the positons df as the chromosome and real_position
+    df_positions = df_positions.set_index(["chromosome", "real_position"], drop=False)
+
+    # define the telomere positions. These are always the same ones (unless interconnected)
+    telomeric_positions = set(df_positions[(df_positions.is_start_of_chr) | (df_positions.is_end_of_chr)]["graph_position"])
+    print("There are %i telomeric positions"%len(telomeric_positions))
+
+    print(svDF_rearrangedCoords)
+ 
+    # go through each translocation and modify the corresponding edges in the genome graph
+    for ID, r in svDF_rearrangedCoords.iterrows():
+        print("generating %s in the graph"%ID)
+
+        # define coords in the location of the graph
+        chrA_bp = df_positions.loc[(r["ChrA"], r["ChrA_bp_pos"]), "graph_position"]
+        chrB_bp = df_positions.loc[(r["ChrB"], r["ChrB_bp_pos"]), "graph_position"]
+
+        # define the next positions and before ones
+        chrA_bp_3pos = genome_graph.successors(chrA_bp)[0]
+        chrA_bp_5pos = genome_graph.predecessors(chrA_bp)[0]
+
+        chrB_bp_3pos = genome_graph.successors(chrB_bp)[0]
+        chrB_bp_5pos = genome_graph.predecessors(chrB_bp)[0]
+
+        ##### 5_to_5 positions are straightforward because they don't alter the order of anything #####
+        if r["orientation"]=="5_to_5":
+
+            # delete the WT unions in chromosome A and chromosome B
+            genome_graph.delete_edges([(chrA_bp, chrA_bp_3pos), (chrB_bp, chrB_bp_3pos)])
+
+            # add the union between chrA and the position after chromosome B
+            genome_graph.add_edges([(chrA_bp, chrB_bp_3pos)])
+
+            # add the union between chromosome B and the next position of chrA
+            genome_graph.add_edges([(chrB_bp, chrA_bp_3pos)])
+
+        ###############################################################################################
+
+        ####### 5_to_3 orientations require changing the orientation of many nodes #######
+        elif r["orientation"]=="5_to_3":
+
+            print("inverted translocation")
+
+            ngvgvnvbnvbvnbv
+            continue
+
+            # chrA 5' is united with chromB 5' and chrB 3' is united with chrB 3'. We will change the orientation of the connections in chromosome B so that they follow this
+
+            # get the connection bewteen each chrB node and its positions
+            all_chrB_positions = set(genome_graph.subcomponent(chrB_bp, mode="ALL"))
+            pos_to_pos5 = {pos : genome_graph.predecessors(pos)[0] for pos in all_chrB_positions if len(genome_graph.predecessors(pos))>0}
+            pos_to_pos3 = {pos5 : pos for pos, pos5 in pos_to_pos5.items()}
+
+            # check that the length
+            if not len(all_chrB_positions)==(len(pos_to_pos5)+1): raise ValueError("something went wrong with the graph")
+
+            #### delete edges ####
+
+            # delete all the connections in chromosome B
+            genome_graph.delete_edges([(pos, pos3) for pos, pos3 in pos_to_pos3.items()])
+
+            # delete the edge in chrA
+            genome_graph.delete_edges([(chrA_bp, chrA_bp_3pos)])
+
+            #######################
+
+            #### add simple edges ####
+
+            # add the edge between the ChrA pos and the ChrB pos
+            genome_graph.add_edges([(chrA_bp, chrB_bp)])
+
+            # add the edge between ChrB+1 and ChrA+1
+            genome_graph.add_edges([(chrB_bp_3pos, chrA_bp_3pos)])
+
+            ###########################
+
+
+            #### add inverted edges chroms #### 
+
+
+
+            ###################################
 
 
 
 
 
 
-    print(svDF, translocations_file)
+
+
+
+
+
+            
+
+            # find the start and end nodes of chromsome B
+            #chrB_start = 
+
+
+            # delete all the connections from the chr  
+
+
+
+
+
+
+
+
+
+
+        ##################################################################################
+
+        else: raise ValueError("orientation is not correct")
+
+
+
+
+
+
+
+
+    print(svDF_rearrangedCoords)
 
 
     thisneedstobedeveloped
@@ -1042,9 +1322,9 @@ def generate_rearranged_genome_from_svtype_to_svDF(reference_genome, svtype_to_s
         dakhgadhjkdhjdahggadjhjhga
 
 
-        # rewrite the variants so that they are optimal for comparison 
-        #translocations_file = "%s/translocations.tab"%outdir
-        #if not file_is_empty(translocations_file): rewrite_translocations_uniformizedFormat_simulateSV(translocations_file, reference_genome)
+        # rewrite the variants so that they are optimal for comparison. This is important to re-sort the chromosomes if necessary
+        translocations_file = "%s/translocations.tab"%outdir
+        if not file_is_empty(translocations_file): rewrite_translocations_uniformizedFormat_simulateSV(translocations_file, reference_genome)
 
         # write a file that indicates that this has finsihed
         open(rearranged_genome_finalFile, "w").write("finsihed")
