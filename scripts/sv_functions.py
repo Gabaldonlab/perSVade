@@ -1016,7 +1016,6 @@ def get_svDF_in_coords_of_rearranged_genome(svDF, reference_genome, rearranged_g
 
     return svDF_rearrangedCoords
 
-
 def get_genomeGraph_object_5to3_noBreakpoints(genome, genomeGraph_outfileprefix, replace=False, check_genome=False):
 
     """This function takes a genome and generates a directed graph where each node is a position in the genome and the edges are 5->3 relationships. It is saved under genomeGraph_outfileprefix"""
@@ -1069,7 +1068,7 @@ def get_genomeGraph_object_5to3_noBreakpoints(genome, genomeGraph_outfileprefix,
             print("There are %i telomeric nodes in the graph genome"%len(real_chromosome_end_nodes))
 
         print("getting positions df")
-        
+
         # generate a df that maps each position to the real position
         positions_real = []
         chromosomes_real = []
@@ -1085,7 +1084,26 @@ def get_genomeGraph_object_5to3_noBreakpoints(genome, genomeGraph_outfileprefix,
         df_positions["is_start_of_chr"] = df_positions.graph_position.isin(chromosome_start_nodes)
         df_positions["is_end_of_chr"] = df_positions.graph_position.isin(chromosome_end_nodes)
 
+        print("getting nucleotide")
+
+        # map each chromosome to a sequence
+        chr_to_seq = {seq.id: str(seq.seq) for seq in SeqIO.parse(genome, "fasta")}
+
+        # map each chrom to each position to a seq
+        print("getting positions dict")
+        chrom_to_pos_to_seq = {chrom : dict(zip(range(len(seq)) , seq)) for chrom, seq in chr_to_seq.items()}
+
+        chrom_AND_pos_to_seq = {}
+        for chrom, pos_to_seq in chrom_to_pos_to_seq.items():
+            for pos, seq in pos_to_seq.items(): chrom_AND_pos_to_seq["%s_%i"%(chrom, pos)] = seq
+
+        print("adding to df")
+        df_positions["chrom_AND_pos"] = df_positions.chromosome + "_" + df_positions.real_position.apply(str)
+        df_positions["nucleotide"] = df_positions.chrom_AND_pos.map(chrom_AND_pos_to_seq)
+
         if set(df_positions.graph_position)!=all_positions: raise ValueError("There is a bad graph calculation of the positions")
+
+        if any(pd.isna(df_positions.nucleotide)): raise ValueError("There should be no NaNs in the sequence")
 
         # save
         save_object(genome_graph, genomeGraph_outfile)
@@ -1097,6 +1115,19 @@ def get_genomeGraph_object_5to3_noBreakpoints(genome, genomeGraph_outfileprefix,
         df_positions = load_object(genomeGraph_positions_df)
 
     return genome_graph, df_positions
+
+
+def write_genome_graph_to_fasta(genome_graph, df_positions, outfile_fasta):
+
+    """This function writes a  genome graoh and the associated df_positions into the outfile fasta. It makes some prints to validate that it is correct"""
+
+    print("writing genome graph to %s "%outfile_fasta)
+
+    print(df_positions)
+
+    jkhghjhggj
+
+
 
 def insert_translocations_into_rearranged_genome(reference_genome, input_rearranged_genome, output_rearranged_genome, svDF, translocations_file, svtype_to_svDF, replace=False):
 
@@ -1110,9 +1141,11 @@ def insert_translocations_into_rearranged_genome(reference_genome, input_rearran
     # get the svDF in coordinates of the rearranged genome
     svDF_rearrangedCoords = get_svDF_in_coords_of_rearranged_genome(svDF, reference_genome, input_rearranged_genome, "translocations", svtype_to_svDF)
 
-    # write into translocations file (this is important so that in case any of the translocations could not be mapped from the sequence)
-    svDF = svDF[svDF.ID.isin(set(svDF_rearrangedCoords.ID))][svtype_to_fieldsDict["translocations"]["all_fields"]]
-    svDF.to_csv(translocations_file, sep="\t", header=True, index=False)
+    # keep the svDF with the rearranged coords with position 1
+    svDF_rearrangedCoords_1basedCoordinates = cp.deepcopy(svDF_rearrangedCoords)
+
+    # debug
+    svDF_rearrangedCoords = svDF_rearrangedCoords.iloc[0:3]
 
     # add fields to the rearrangedCoords df
     chr_to_rearranged_len = get_chr_to_len(input_rearranged_genome)
@@ -1125,7 +1158,7 @@ def insert_translocations_into_rearranged_genome(reference_genome, input_rearran
 
     # get the rearranged genome as a directed liner graph
     genomeGraph_outfileprefix = "%s.linearDirectedGraph"%input_rearranged_genome
-    genome_graph, df_positions = get_genomeGraph_object_5to3_noBreakpoints(input_rearranged_genome, genomeGraph_outfileprefix, replace=replace) # everything here is 0-based
+    genome_graph, df_positions = get_genomeGraph_object_5to3_noBreakpoints(input_rearranged_genome, genomeGraph_outfileprefix, replace=replace) # everything here is 0-based locations
 
     # define the index of the positons df as the chromosome and real_position
     df_positions = df_positions.set_index(["chromosome", "real_position"], drop=False)
@@ -1134,8 +1167,12 @@ def insert_translocations_into_rearranged_genome(reference_genome, input_rearran
     telomeric_positions = set(df_positions[(df_positions.is_start_of_chr) | (df_positions.is_end_of_chr)]["graph_position"])
     print("There are %i telomeric positions"%len(telomeric_positions))
 
-    print(svDF_rearrangedCoords)
- 
+    # initialize the set of feasible IDs
+    feasible_translocation_IDs = set()
+
+    # delete the translocations file because it has to be rewritten as the end point of this function
+    remove_file(translocations_file)
+
     # go through each translocation and modify the corresponding edges in the genome graph
     for ID, r in svDF_rearrangedCoords.iterrows():
         print("generating %s in the graph"%ID)
@@ -1150,6 +1187,17 @@ def insert_translocations_into_rearranged_genome(reference_genome, input_rearran
 
         chrB_bp_3pos = genome_graph.successors(chrB_bp)[0]
         chrB_bp_5pos = genome_graph.predecessors(chrB_bp)[0]
+
+        # check that the chrA and chrB are different, and skip if it is not the case. Sometimes successive balanced translocations make others being in the same chromosome
+        all_chrA_positions = set(genome_graph.subcomponent(chrA_bp, mode="ALL"))
+        all_chrB_positions = set(genome_graph.subcomponent(chrB_bp, mode="ALL"))
+
+        if len(all_chrA_positions.intersection(all_chrB_positions)): 
+            print("%s is not between different chromosomes, skipping..."%ID)
+            continue
+
+        # keep the translocation for further printing
+        feasible_translocation_IDs.add(ID)
 
         ##### 5_to_5 positions are straightforward because they don't alter the order of anything #####
         if r["orientation"]=="5_to_5":
@@ -1167,11 +1215,8 @@ def insert_translocations_into_rearranged_genome(reference_genome, input_rearran
 
         ####### 5_to_3 orientations require changing the orientation of many nodes #######
         elif r["orientation"]=="5_to_3":
-
             print("inverted translocation")
 
-            ngvgvnvbnvbvnbv
-            continue
 
             # chrA 5' is united with chromB 5' and chrB 3' is united with chrB 3'. We will change the orientation of the connections in chromosome B so that they follow this
 
@@ -1189,7 +1234,7 @@ def insert_translocations_into_rearranged_genome(reference_genome, input_rearran
             genome_graph.delete_edges([(pos, pos3) for pos, pos3 in pos_to_pos3.items()])
 
             # delete the edge in chrA
-            genome_graph.delete_edges([(chrA_bp, chrA_bp_3pos)])
+            genome_graph.delete_edges([(chrA_bp, chrA_bp_3pos)]) # this does not work sometimes
 
             #######################
 
@@ -1203,56 +1248,25 @@ def insert_translocations_into_rearranged_genome(reference_genome, input_rearran
 
             ###########################
 
-
-            #### add inverted edges chroms #### 
-
-
-
-            ###################################
-
-
-
-
-
-
-
-
-
-
-
-            
-
-            # find the start and end nodes of chromsome B
-            #chrB_start = 
-
-
-            # delete all the connections from the chr  
-
-
-
-
-
-
-
-
-
+            # add the 3'->5' connections in chrB, unless it is chrB_bp_3pos
+            genome_graph.add_edges([(pos, pos5) for pos, pos5 in pos_to_pos5.items() if pos!=chrB_bp_3pos])
 
         ##################################################################################
 
         else: raise ValueError("orientation is not correct")
 
+    # write fasta for the rearranged genome
+    #write_genome_graph_to_fasta(genome_graph, df_positions, output_rearranged_genome)
+ 
+    # write into translocations file (this is important so that in case any of the translocations could not be mapped from the sequence)
+    svDF_final = svDF[svDF.ID.isin(feasible_translocation_IDs)][svtype_to_fieldsDict["translocations"]["all_fields"]]
+    svDF_final.to_csv(translocations_file, sep="\t", header=True, index=False)
 
+    print("There are %i/%i translocations that are feasible"%(len(svDF_final), len(svDF)))
 
-
-
-
-
-
-    print(svDF_rearrangedCoords)
-
-
-    thisneedstobedeveloped
-
+    # write the translocations with the coordinates for the rearranged genome
+    svDF_rearrangedCoords_1basedCoordinates_final = svDF_rearrangedCoords_1basedCoordinates[svDF_rearrangedCoords_1basedCoordinates.ID.isin(feasible_translocation_IDs)][svtype_to_fieldsDict["translocations"]["all_fields"]]
+    svDF_rearrangedCoords_1basedCoordinates_final.to_csv("%s.%s_coords.tab"%(translocations_file, get_file(input_rearranged_genome)), sep="\t", header=True, index=False)
 
 
 def generate_rearranged_genome_from_svtype_to_svDF(reference_genome, svtype_to_svDF, outdir, replace=False):
@@ -1318,6 +1332,34 @@ def generate_rearranged_genome_from_svtype_to_svDF(reference_genome, svtype_to_s
         # generate translocations
         translocations_file = "%s/translocations.tab"%outdir
         if "translocations" in svtype_to_svDF: insert_translocations_into_rearranged_genome(reference_genome, rearranged_genome_InsInvDelTan, rearranged_genome, svtype_to_svDF["translocations"], translocations_file, svtype_to_svDF)
+
+
+        ###### testing things that may not work ######
+
+        #### get the correct translocations together with all the simulations ####
+        print("inserting final list of translocations...")
+
+        # initialize a cmd to create the simulated genome
+        #targetSV_cmd = "%s --input_genome %s --output_genome %s"%(create_targeted_simulatedSVgenome_R, reference_genome, rearranged_genome)
+
+        # add all the positions of the different CMDs
+        #for svtype in svtype_to_svDF.keys(): targetSV_cmd += " --%s_file %s/%s.tab"%(svtype, outdir, svtype)
+
+        # run
+        #run_cmd(targetSV_cmd)
+
+        # not working
+
+        ## #########################################################################
+
+        
+
+
+        ################################################
+
+
+
+
 
         dakhgadhjkdhjdahggadjhjhga
 
