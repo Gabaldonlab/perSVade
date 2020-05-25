@@ -794,3 +794,19 @@ def transform_cut_and_paste_to_copy_and_paste_insertions(reference_genome, rearr
 
         else: print("the insertions have already been modified")
 
+
+   #### get the correct translocations together with all the simulations ####
+        print("inserting final list of translocations...")
+
+        # initialize a cmd to create the simulated genome
+        #targetSV_cmd = "%s --input_genome %s --output_genome %s"%(create_targeted_simulatedSVgenome_R, reference_genome, rearranged_genome)
+
+        # add all the positions of the different CMDs
+        #for svtype in svtype_to_svDF.keys(): targetSV_cmd += " --%s_file %s/%s.tab"%(svtype, outdir, svtype)
+
+        # run
+        #run_cmd(targetSV_cmd)
+
+        # not working
+
+        ## #########################################################################
