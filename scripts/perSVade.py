@@ -62,7 +62,7 @@ parser.add_argument("--testRealDataAccuracy", dest="testRealDataAccuracy", actio
 parser.add_argument("--species_tree_closeGenomes", dest="species_tree_closeGenomes", type=str, default=None, help="The path to a newick file that contains the species tree (the leaf names should match the 'ID' field) of the genomes provided in  --genomes_withSV_and_shortReads_table. This is important because the sorting of 'high-confidence vars' out of genomes_withSV_and_shortReads_table requires the tree of the genomes. By default, this is calculated with JolyTree, which is fast but not the most accurate method.")
 
 # simulation parameter args
-parser.add_argument("--nvars", dest="nvars", default=50, type=int, help="Number of variants to simulate. Note that the number of balanced translocations inserted in simulations will be always as maximum the number of gDNA chromosome-pairs implicated.")
+parser.add_argument("--nvars", dest="nvars", default=100, type=int, help="Number of variants to simulate. Note that the number of balanced translocations inserted in simulations will be always as maximum the number of gDNA chromosome-pairs implicated.")
 
 parser.add_argument("--nsimulations", dest="nsimulations", default=2, type=int, help="The number of 'replicate' simulations that will be produced.")
 
