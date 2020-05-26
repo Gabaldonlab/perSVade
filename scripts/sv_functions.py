@@ -39,7 +39,8 @@ import inspect
 import collections
 from shutil import copyfile
 import igraph
-from ete3 import Tree
+from ete3 import Tree, NCBITaxa
+import urllib
 
 warnings.simplefilter(action='ignore', category=pd.core.common.SettingWithCopyWarning) # avoid the slicing warning
 #pd.options.mode.chained_assignment = 'raise'
@@ -97,6 +98,8 @@ rmblast_dir = "%s/bin"%EnvDir
 rscout_dir = "%s/bin"%EnvDir
 trf_prgm_dir = "%s/bin/trf"%EnvDir
 JolyTree_sh = "%s/bin/JolyTree.sh"%EnvDir
+esearch = "%s/bin/esearch"%EnvDir
+efetch = "%s/bin/efetch"%EnvDir
 
 # executables that are provided in the repository
 external_software = "%s/../installation/external_software"%CWD
@@ -1579,7 +1582,9 @@ def get_translocations_randomly_placed_in_target_regions(target_regions_bed, tra
 
         # define if inverted or not, which defines the orientation of chrB
         if only_5_to_3 is True: is_inverted = False
-        else: is_inverted = bool(random.randrange(0, 2))
+        else: 
+            # is_inverted = bool(random.randrange(0, 2)) 50% each
+            is_inverted = random.uniform(0, 1)>=0.8 # 80% inverted translocations
 
         if is_inverted is True: 
             tra_dict["StartB"] = regionB["bp_pos"]
@@ -3021,6 +3026,8 @@ def get_clove_output(output_vcf_clove):
     # load df
     df = pd.read_csv(output_vcf_clove, skiprows=list(range(len([line for line in open(output_vcf_clove, "r", encoding='utf-8', errors='ignore') if line.startswith("##")]))), sep="\t", na_values=vcf_strings_as_NaNs, keep_default_na=False)
 
+    if len(df)==0: return df
+
     # get FORMAT into several cells
     INFOfields_data = pd.DataFrame(dict(df.INFO.apply(lambda x: {content.split("=")[0] : content.split("=")[1]  for content in  make_flat_listOflists([y.split(";") for y in x.split("; ")])}))).transpose()
     df = df.merge(INFOfields_data, left_index=True, right_index=True, validate="one_to_one")
@@ -3301,7 +3308,9 @@ def get_clove_output_with_coverage(outfile_clove, reference_genome, sorted_bam, 
     df_clove = get_clove_output(outfile_clove)
 
     # define the SVtypes
-    all_svtypes = set(df_clove.SVTYPE)
+    if len(df_clove)>0: all_svtypes = set(df_clove.SVTYPE)
+    else: all_svtypes = set()
+
     tanDEL_svtypes = {"TAN", "DEL"}
     ins_svtypes = {"CID", "CIT", "DUP", "TRA"}
     remaining_svtypes = all_svtypes.difference(tanDEL_svtypes.union(ins_svtypes))
@@ -3744,6 +3753,8 @@ def run_gridssClove_given_filters(sorted_bam, reference_genome, working_dir, med
     # add the filter of coverage to the clove output
     df_clove = get_clove_output_with_coverage(outfile_clove, reference_genome, sorted_bam, median_coverage, replace=replace_FromGridssRun, run_in_parallel=run_in_parallel, delete_bams=run_in_parallel)
 
+    if len(df_clove)==0: return {}, df_gridss
+
     # define the coverage filtering based on the type_coverage_to_filterTANDEL
     df_clove["coverage_FILTER"] = df_clove.apply(lambda r: get_covfilter_cloveDF_row_according_to_SVTYPE(r, max_rel_coverage_to_consider_del=max_rel_coverage_to_consider_del, min_rel_coverage_to_consider_dup=min_rel_coverage_to_consider_dup, coverage_field="mean_rel_coverage_to_neighbor"), axis=1)
 
@@ -3762,7 +3773,181 @@ def run_gridssClove_given_filters(sorted_bam, reference_genome, working_dir, med
 ###################################################################################################
 ###################################################################################################
 
-def generate_tables_of_SV_between_genomes_gridssClove(query_genome, reference_genome, replace=False, threads=4, coverage=5, insert_size=500, read_lengths=[kb*1000 for kb in [0.3, 0.5, 1, 1.5, 2, 2.5]], error_rate=0.0, gridss_min_af=0.25):
+def get_GenBank_assembly_statistics_df(file, assembly_summary_genbank_url="ftp://ftp.ncbi.nih.gov/genomes/genbank/assembly_summary_genbank.txt", replace=False):
+
+    """
+    Downloads the assembly summary statistics into file and returns a df.
+
+    Index(['# assembly_accession', 'bioproject', 'biosample', 'wgs_master',
+       'refseq_category', 'taxid', 'species_taxid', 'organism_name',
+       'infraspecific_name', 'isolate', 'version_status', 'assembly_level',
+       'release_type', 'genome_rep', 'seq_rel_date', 'asm_name', 'submitter',
+       'gbrs_paired_asm', 'paired_asm_comp', 'ftp_path',
+       'excluded_from_refseq', 'relation_to_type_material'],
+      dtype='object')
+    """
+
+    df_file = "%s.df.py"%file
+
+    if file_is_empty(df_file) or replace is True:
+        print("getting GeneBank genomes")
+
+        # download the file 
+        urllib.request.urlretrieve(assembly_summary_genbank_url, file)
+
+        # get into df and save
+        df = pd.read_csv(file, header=1, sep="\t").rename(columns={"# assembly_accession":"assembly_accession"}) 
+
+        save_object(df, df_file)
+
+    else: df = load_object(df_file)
+
+    return df
+
+
+def get_taxid2name(taxIDs):
+
+    """Takes an iterable of taxIDs and returns a dict mapping each of them to the scientific name"""
+
+    taxIDs = list(taxIDs)
+
+    ncbi = NCBITaxa()
+    taxid2name = ncbi.get_taxid_translator(taxIDs)
+
+    return taxid2name
+
+def get_allWGS_runInfo_fromSRA_forTaxIDs(fileprefix, taxIDs, replace=False):
+
+    """This function tages all the SRRs that have WGS for the required taxIDs"""
+
+    SRA_runInfo_df_file = "%s.SRA_runInfo_df.py"%fileprefix
+
+    if file_is_empty(SRA_runInfo_df_file) or replace is True:
+
+        # define the WGS fastq filters
+        WGS_filters = '("biomol dna"[Properties] AND "strategy wgs"[Properties] AND "library layout paired"[Properties] AND "platform illumina"[Properties] AND "strategy wgs"[Properties] OR "strategy wga"[Properties] OR "strategy wcs"[Properties] OR "strategy clone"[Properties] OR "strategy finishing"[Properties] OR "strategy validation"[Properties] AND "filetype fastq"[Properties])'
+
+        # get the name of these taxIDs
+        taxid2name = get_taxid2name(taxIDs)
+
+        # define the esearch query
+        organism_filters = " OR ".join(['"%s"[orgn:__txid%i]'%(name.split()[0], taxID) for taxID, name in taxid2name.items()])
+        esearch_query = "(%s) AND %s"%(organism_filters, WGS_filters) 
+
+        # get esearch
+        efetch_outfile = "%s.efetch_output.txt"%fileprefix
+        run_cmd("%s -db sra -query '%s' | %s -db sra --format runinfo | grep -v '^Run' | grep 'https' > %s"%(esearch, esearch_query, efetch, efetch_outfile))
+
+        columns_efetch = "Run,ReleaseDate,LoadDate,spots,bases,spots_with_mates,avgLength,size_MB,AssemblyName,download_path,Experiment,LibraryName,LibraryStrategy,LibrarySelection,LibrarySource,LibraryLayout,InsertSize,InsertDev,Platform,Model,SRAStudy,BioProject,Study_Pubmed_id,ProjectID,Sample,BioSample,SampleType,TaxID,ScientificName,SampleName,g1k_pop_code,source,g1k_analysis_group,Subject_ID,Sex,Disease,Tumor,Affection_Status,Analyte_Type,Histological_Type,Body_Site,CenterName,Submission,dbgap_study_accession,Consent,RunHash,ReadHash".split(",")
+
+        SRA_runInfo_df = pd.read_csv(efetch_outfile, sep=",", header=None, names=columns_efetch)
+
+        save_object(SRA_runInfo_df, SRA_runInfo_df_file)
+
+    else: SRA_runInfo_df = load_object(SRA_runInfo_df_file)
+
+    for field in ["TaxID", "ScientificName", "SampleName"]:
+        print("These are the %s: "%field, set(SRA_runInfo_df[field]))
+
+
+
+
+    print(SRA_runInfo_df)
+
+    adkjghadkhhg
+
+    return SRA_runInfo_df
+
+
+def get_genomes_withSV_and_shortReads_table_close_to_taxID(target_taxID, outdir, n_close_taxIDs=5, realSV_calling_on="assembly,reads", testRealDataAccuracy=True, replace=False):
+
+    """This function takes a taxID and returns the genomes_withSV_and_shortReads_table that is required to do optimisation of parameters.
+
+    - realSV_calling_on can be reads, assembly or both (reads,assembly). If it is only assembly, the final table will have the fields ID,assembly. If it is 'reads' it will have ID,short_reads_real1,short_reads_real2. If it is both it will have all of these fields. 
+
+    - If testRealDataAccuracy is True, only those taxIDs where we can find at least two datasets will be considered. One of the datasets will be added to the table as short_reads_1,short_reads_2. """
+
+    print("Getting genomes for taxID into %s for configuration:\n"%(outdir), target_taxID, n_close_taxIDs, realSV_calling_on, testRealDataAccuracy)
+
+
+    # load the NCBI taxonomy database and upgrade it if not already done
+    print("getting NCBI taxonomy database")
+
+    ncbi = NCBITaxa()
+    ncbiTaxa_updated_file = "%s/ncbiTaxa_updated.txt"%outdir
+    if file_is_empty(ncbiTaxa_updated_file) or replace is True: 
+
+        # update
+        ncbi.update_taxonomy_database()
+
+        # write file
+        open(ncbiTaxa_updated_file, "w").write("NCBItaxa updated\n")
+
+    # load the GenBank assembly statistics
+    GeneBank_file = "%s/GeneBank_data_summary.txt"%outdir
+    GeneBank_df = get_GenBank_assembly_statistics_df(GeneBank_file, replace=replace)
+
+    # define all potentially interesting taxIDs close to the target_taxIDs
+    for nancestorNodes in [4, 5]: # one would mean to consider only IDs that are under the current species
+        print("Considering %i ancestor nodes"%nancestorNodes)
+
+        # get the ancestor
+        ancestor_taxID = ncbi.get_lineage(target_taxID)[-nancestorNodes]
+
+        # get the tree
+        tree = ncbi.get_descendant_taxa(ancestor_taxID, collapse_subspecies=False, return_tree=True, intermediate_nodes=True)
+
+        # define interesting taxIDs (the leafs and the species names that may be intermediate)
+        interesting_taxIDs = {int(x) for x in set(tree.get_leaf_names()).union({n.name for n in tree.traverse() if n.rank=="species"})}.difference({target_taxID})
+
+        # map the distance between each leave and the target
+        taxID_to_distanceToTarget = {taxID : tree.get_distance(str(target_taxID), str(taxID)) for taxID in interesting_taxIDs}
+
+        # get the taxIDs sorted by the distance (so that the closest )
+        interesting_taxIDs_sorted = sorted(interesting_taxIDs, key=(lambda x: taxID_to_distanceToTarget[x]))
+
+        # get the run info of all WGS datasets from SRA
+        print("Getting WGS info")
+        fileprefix = "%s/all_runsWithWGS_arround_target_taxID_%i_considering%iAncestors"%(outdir, target_taxID, nancestorNodes)
+        SRA_runInfo_df = get_allWGS_runInfo_fromSRA_forTaxIDs(fileprefix, interesting_taxIDs_sorted, replace=replace)
+
+        print(SRA_runInfo_df)
+
+
+
+
+
+
+
+        kdghhdhadkjd
+
+    khjagkhgashgas
+
+
+    interesting_taxIDs = {5478, 1308528}
+
+
+
+
+
+    print(SRA_runInfo_df)
+
+
+
+    khgashjgahjsaggas
+
+
+
+
+
+
+
+    return genomes_withSV_and_shortReads_table
+
+
+
+
+def generate_tables_of_SV_between_genomes_gridssClove(query_genome, reference_genome, replace=False, threads=4, coverage=30, insert_size=500, read_lengths=[kb*1000 for kb in [0.3, 0.5, 1, 1.5, 2, 2.5]], error_rate=0.0, gridss_min_af=0.25):
 
     """Takes a bam file with aligned reads or genomes and generates calls, returning a dict that maps variation type to variants
     - aligner can be minimap2 or ngmlr.
@@ -4195,14 +4380,65 @@ def plot_bars_single_df_benchmark(df_benchmark, filename):
     fig.savefig(filename, bbox_inches='tight');
     plt.close(fig)
 
-def test_SVgeneration_from_assembly(reference_genome, outdir, threads=4, replace=False, n_simulated_genomes=2, mitochondrial_chromosome="mito_C_glabrata_CBS138", nvars=100):
 
-    """This function reports how well the finding of SV from a genome works from random simulations. Writing under outdir"""
+def plot_boxplots_allele_freqs(sampleID_to_svtype_to_svDF, filename):
+
+    """This function takes a sampleID_to_svtype_to_svDF and draws a boxplot were the x is the svtype and the y is the allele frequency, for different allele frequencies as hue. Different plots are several IDs """
+
+    print("getting boxplot allele frequencies for sampleID_to_svtype_to_svDF")
+
+    sampleID_to_svtype_to_svDF = cp.deepcopy(sampleID_to_svtype_to_svDF)
+
+    # make two subplots, one for each type of data
+    fig = plt.figure(figsize=(10, 4*len(sampleID_to_svtype_to_svDF)))
+
+    # go through each ID
+    for I, (ID, svtype_to_svDF) in enumerate(sampleID_to_svtype_to_svDF.items()):
+
+        # sepparate insertions into copy-paste and cut-paste
+        svDF_insertions = svtype_to_svDF["insertions"]
+        svtype_to_svDF["insertions_copy"] = svDF_insertions[svDF_insertions.Copied]
+        svtype_to_svDF["insertions_cut"] = svDF_insertions[~svDF_insertions.Copied]
+        del svtype_to_svDF["insertions"]
+
+        # initialize subpplot
+        ax =  plt.subplot(len(sampleID_to_svtype_to_svDF), 1, I+1)
+
+        # initialize a df that will contain the allele freqs and the svtype
+        df = pd.DataFrame()
+
+        for svtype, svDF in svtype_to_svDF.items():
+            for afEstimate in ["estimate_AF_min", "estimate_AF_max", "estimate_AF_mean"]:
+
+                df_af = svDF[[afEstimate]].rename(columns={afEstimate:"af"})
+
+                df_af["svtype"] = svtype
+                df_af["af_estimate"] = afEstimate
+
+                df = df.append(df_af, sort=False)
+
+        # get boxplot
+        #bp = sns.boxplot(x="svtype", y="af", data=df, hue="af_estimate", notch=True, boxprops=dict(alpha=.99), linewidth=0.5)
+        jit = sns.swarmplot(x="svtype", y="af", data=df, hue="af_estimate", dodge=True, size=5, edgecolor="black", linewidth=0.5)
+
+        ax.set_title(ID)
+
+        # add hlines
+        for y in [0.25, 0.5, 0.75, 0.9, 1]: plt.axhline(y, color="k", linewidth=.2, linestyle="--")
+
+    # get figure
+    fig.tight_layout() 
+    fig.savefig(filename, bbox_inches='tight');
+    plt.close(fig)
+
+def test_SVgeneration_from_DefaultParms(reference_genome, outdir, sample_sorted_bam, threads=4, replace=False, n_simulated_genomes=2, mitochondrial_chromosome="mito_C_glabrata_CBS138", nvars=100, type_data="assembly"):
+
+    """This function reports how well the finding of SV from a genome assembly (type_data=="assembly") or reads (type_data=="reads") works from random simulations. Writing under outdir"""
 
     # define the output
-    precision_and_recall_filename = "%s/precision_and_recall_SVgeneration_from_assembly.pdf"%outdir
-    #if file_is_empty(precision_and_recall_filename) or replace is True:
-    if True: # debug
+    precision_and_recall_filename = "%s/precision_and_recall_SVgeneration_from_%s.pdf"%(outdir, type_data)
+    allele_frequency_boxplots_filename = "%s/allele_frequency_boxplots_SVgeneration_from_%s.pdf"%(outdir, type_data)
+    if file_is_empty(precision_and_recall_filename) or file_is_empty(allele_frequency_boxplots_filename) or replace is True:
 
         # initialize the start time
         pipeline_start_time = time.time()
@@ -4215,6 +4451,10 @@ def test_SVgeneration_from_assembly(reference_genome, outdir, threads=4, replace
         # initialize a df that will contain the benchmarking
         all_df_benchmark_longReads = pd.DataFrame()
 
+        # iniialize dicts
+        sampleID_to_svtype_to_file = {}
+        sampleID_to_dfGRIDSS = {}
+
         # go through each simulation
         for simID in range(n_simulated_genomes):
             print("working on simulation %i"%simID)
@@ -4225,8 +4465,37 @@ def test_SVgeneration_from_assembly(reference_genome, outdir, threads=4, replace
             # generate genome with simulated SVs
             sim_svtype_to_svfile, rearranged_genome = rearrange_genomes_simulateSV(reference_genome, outdir_sim, replace=replace, nvars=nvars, mitochondrial_chromosome=mitochondrial_chromosome)
 
-            # get the variants from simulating reads. Always ploidy 1 to get homozygous SVs
-            predicted_svtype_to_svfile, df_gridss = generate_tables_of_SV_between_genomes_gridssClove(rearranged_genome, reference_genome, replace=replace, threads=threads)
+            # get the variants from simulating reads from an assembly. Always ploidy 1 to get homozygous SVs
+            if type_data=="assembly":
+                print("getting SVs from assemblies")
+
+                predicted_svtype_to_svfile, df_gridss = generate_tables_of_SV_between_genomes_gridssClove(rearranged_genome, reference_genome, replace=replace, threads=threads)
+
+            # get the variants by simulating short reads from the genome
+            elif type_data=="reads": 
+                print("getting SVs from reads")
+
+                # define properties of the run
+                chr_to_len = get_chr_to_len(reference_genome)
+                median_insert_size, median_insert_size_sd  = get_insert_size_distribution(sample_sorted_bam, replace=replace, threads=threads)
+                read_length = get_read_length(sample_sorted_bam, threads=threads, replace=replace)
+                total_nread_pairs = count_number_read_pairs(sample_sorted_bam, replace=replace, threads=threads)
+                expected_coverage_per_bp = int((total_nread_pairs*read_length) / sum(chr_to_len.values())) +  1 
+
+                # define the function that gets coverage from seq properties
+                distToTel_chrom_GC_to_coverage_fn = (lambda x,y,z: expected_coverage_per_bp)
+
+                # get the info of the reference genome with predictions of coverage per window
+                df_genome_info = get_windows_infoDF_with_predictedFromFeatures_coverage(rearranged_genome, distToTel_chrom_GC_to_coverage_fn, expected_coverage_per_bp, replace=replace, window_l=10000, threads=threads)
+
+                # simulate reads and align them to the reference genome
+                outdir_simulation_short_reads = "%s/simulation_shortReads"%(outdir_sim); make_folder(outdir_simulation_short_reads)
+                simulated_bam_file = simulate_and_align_PairedReads_perWindow(df_genome_info, rearranged_genome, reference_genome, total_nread_pairs, read_length, outdir_simulation_short_reads, median_insert_size, median_insert_size_sd, replace=replace, threads=threads)
+
+                # call GRIDSS and CLOVE for the simulated reads
+                final_run_dir = "%s/final_run_dir"%(outdir_simulation_short_reads); make_folder(final_run_dir)
+
+                predicted_svtype_to_svfile, df_gridss = run_GridssClove_optimising_parameters(simulated_bam_file, reference_genome, final_run_dir, threads=threads, replace=replace, window_l=10000, mitochondrial_chromosome=mitochondrial_chromosome, fast_SVcalling=True)
 
             # get a df of benchmarking
             fileprefix = "%s/rearranged_genome_benchmarking_SV"%outdir_sim
@@ -4236,17 +4505,23 @@ def test_SVgeneration_from_assembly(reference_genome, outdir, threads=4, replace
             df_benchmark_longReads["simID"] = [simID]*len(df_benchmark_longReads)
             all_df_benchmark_longReads = all_df_benchmark_longReads.append(df_benchmark_longReads)
 
-            break
-
+            # keep the gridss df and files
+            sampleID_to_svtype_to_file[simID] = predicted_svtype_to_svfile
+            sampleID_to_dfGRIDSS[simID] = df_gridss
+ 
         # plot the benchmarking
         plot_bars_single_df_benchmark(all_df_benchmark_longReads, precision_and_recall_filename)
+
+        # get the sampleID_to_svtype_to_svDF
+        sampleID_to_svtype_to_svDF = get_sampleID_to_svtype_to_svDF_filtered(sampleID_to_svtype_to_file, sampleID_to_dfGRIDSS)
+
+        # get the boxplots of the allele frequencies
+        plot_boxplots_allele_freqs(sampleID_to_svtype_to_svDF, allele_frequency_boxplots_filename)
 
         # at the end clean the generation
         clean_reference_genome_windows_files(reference_genome)
 
         print("--- the testing of SV generation from an assembly took %s seconds in %i cores ---"%(time.time() - pipeline_start_time, threads))
-
-        kjadjkdjkjkadhdhkajhjad
 
 
 def get_speciesTree_multipleGenomes_JolyTree(input_dir_withGenomes, outdir, threads=4, replace=False):
@@ -4588,12 +4863,14 @@ def get_is_overlapping_query_vs_target_region(q, r):
 
     return (q["chromosome"]==r["chromosome"]) and ((r["start"]<=q["start"]<=r["end"]) or (r["start"]<=q["end"]<=r["end"]) or (q["start"]<=r["start"]<=q["end"]) or (q["start"]<=r["end"]<=q["end"]))
 
-def get_ID_to_svtype_to_svDF_for_setOfGenomes_highConfidence(genomes_withSV_and_shortReads_table, reference_genome, outdir, species_treefile=None, replace=False, threads=4):
+def get_ID_to_svtype_to_svDF_for_setOfGenomes_highConfidence(genomes_withSV_and_shortReads_table, reference_genome, outdir, species_treefile=None, replace=False, threads=4, realSV_calling_on="assembly", mitochondrial_chromosome="mito_C_glabrata_CBS138"):
 
-    """Generates a dict that maps each sample in genomes_withSV_and_shortReads_table to an svtype and a DF with all the info about several vars. It only gets the high-confidence vars"""
+    """Generates a dict that maps each sample in genomes_withSV_and_shortReads_table to an svtype and a DF with all the info about several vars. It only gets the high-confidence vars.
+
+    realSV_calling_on can be reads or assembly"""
 
     # load the df
-    df_genomes = pd.read_csv(genomes_withSV_and_shortReads_table, sep="\t")
+    df_genomes = pd.read_csv(genomes_withSV_and_shortReads_table, sep="\t").set_index("ID")
 
     # define an outdir that will store all the real_vars
     make_folder(outdir)
@@ -4611,19 +4888,45 @@ def get_ID_to_svtype_to_svDF_for_setOfGenomes_highConfidence(genomes_withSV_and_
         all_sampleID_to_dfGRIDSS = {}
        
         # generate all real vars
-        for ID, assembly in df_genomes[["ID", "assembly"]].values:
+        for ID, row in df_genomes.iterrows():
             print("getting vars for %s"%ID)
 
-            # softlink the genome
-            dest_genomeFile = "%s/genome_%s.fasta"%(all_realVars_dir, ID)
-            if file_is_empty(dest_genomeFile): run_cmd("ln -s %s %s"%(assembly, dest_genomeFile))
+            # get the real vars on a different way depending on the type of 
+            if realSV_calling_on=="assembly":
+                print("getting real variants based on the genome assemblies")
 
-            # find the real vars
-            svtype_to_svfile, df_gridss = generate_tables_of_SV_between_genomes_gridssClove(dest_genomeFile, reference_genome, replace=replace, threads=threads)
+                # softlink the genome
+                dest_genomeFile = "%s/genome_%s.fasta"%(all_realVars_dir, ID)
+                if file_is_empty(dest_genomeFile): run_cmd("ln -s %s %s"%(row["assembly"], dest_genomeFile))
+
+                # find the real vars
+                svtype_to_svfile, df_gridss = generate_tables_of_SV_between_genomes_gridssClove(dest_genomeFile, reference_genome, replace=replace, threads=threads)
+
+            elif realSV_calling_on=="reads":
+                print("getting real variants based on short_reads_real1 and short_reads_real2")
+
+                # run in the gridss and clove with the fast parameters
+                outdir_gridssClove = "%s/shortReads_realVarsDiscovery_%s"%(all_realVars_dir,ID); make_folder(outdir_gridssClove)
+
+                # get a bam file for these reads
+                bamfile = "%s/aligned_reads.bam"%outdir_gridssClove
+                sorted_bam = "%s.sorted"%bamfile
+                index_bam = "%s.bai"%sorted_bam
+
+                run_bwa_mem(row["short_reads_real1"], row["short_reads_real2"], reference_genome, outdir_gridssClove, bamfile, sorted_bam, index_bam, name_sample=ID, threads=threads, replace=replace)
+
+                # run fast pipeline GridssClove
+                svtype_to_svfile, df_gridss = run_GridssClove_optimising_parameters(sorted_bam, reference_genome, outdir_gridssClove, threads=threads, replace=replace, window_l=10000, mitochondrial_chromosome=mitochondrial_chromosome, fast_SVcalling=True)
+
+            else: raise ValueError("%s is not a valid realSV_calling_on"%realSV_calling_on)
 
             # keep 
             all_sampleID_to_svtype_to_file[ID] =  svtype_to_svfile
             all_sampleID_to_dfGRIDSS[ID] = df_gridss
+
+
+
+        finsihedWithShortReadCallingOfRealSVs
 
         # get a df that has all the info for each SV, and then the df with allele freq, metadata and 
         ID_to_svtype_to_svDF = get_sampleID_to_svtype_to_svDF_filtered(all_sampleID_to_svtype_to_file, all_sampleID_to_dfGRIDSS)
@@ -4664,7 +4967,7 @@ def set_position_to_max(pos, maxPos):
     if pos>maxPos: return maxPos
     else: return pos
 
-def get_compatible_real_svtype_to_file(genomes_withSV_and_shortReads_table, reference_genome, outdir, species_treefile=None, replace=False, threads=4, max_nvars=100):
+def get_compatible_real_svtype_to_file(genomes_withSV_and_shortReads_table, reference_genome, outdir, species_treefile=None, replace=False, threads=4, max_nvars=100, realSV_calling_on="assembly", mitochondrial_chromosome="mito_C_glabrata_CBS138"):
 
     """This function generates a dict of svtype to the file for SVs that are compatible and ready to insert into the reference_genome. All the files are written into outdir. Only a set of 'high-confidence' SVs are reported, which are those that have ether a minimum allele frequency above 0.75 and all breakpoints with 'PASS' or are found in >2 genomes and following the phylogeny of the species tree. This is inferred with JolyTree if not provided. At the end, this pipeline reports a set of compatible SVs, that are ready to insert into RSVsim (so that the coordinates are 1-based). 
 
@@ -4673,13 +4976,15 @@ def get_compatible_real_svtype_to_file(genomes_withSV_and_shortReads_table, refe
     For transloctaions, there will only be one translocation allowed for each arm. This is how RSVSim allows the simulation.
 
     max_nvars is the maximum number of variants of each type that will be generated
+
+    realSV_calling_on can be assembly or reads and determines from where the 'realSVs' are predicted
     """
 
     # initialize the start time
     pipeline_start_time = time.time()
 
     # get all the high-confidence real variants
-    ID_to_svtype_to_svDF = get_ID_to_svtype_to_svDF_for_setOfGenomes_highConfidence(genomes_withSV_and_shortReads_table, reference_genome, outdir, species_treefile=species_treefile, replace=replace, threads=threads)
+    ID_to_svtype_to_svDF = get_ID_to_svtype_to_svDF_for_setOfGenomes_highConfidence(genomes_withSV_and_shortReads_table, reference_genome, outdir, species_treefile=species_treefile, replace=replace, threads=threads, realSV_calling_on=realSV_calling_on, mitochondrial_chromosome=mitochondrial_chromosome)
 
     # define the df with the realVars info
     all_realVars_dir = "%s/all_realVars"%(outdir)
@@ -4814,6 +5119,9 @@ def get_windows_infoDF_with_predictedFromFeatures_coverage(genome, distToTel_chr
 
     if file_is_empty(windows_infoDF_file) or replace is True:
         print("getting relCov predicted from feats")
+
+        # index the genome of interest if not already done
+        if file_is_empty("%s.fai"%genome) or replace is True: run_cmd("%s faidx %s"%(samtools, genome))
 
         ##### get the windows df ####
 
@@ -5412,7 +5720,7 @@ def run_GridssClove_optimising_parameters(sorted_bam, reference_genome, outdir, 
 
     # run the pipeline
     print("running final gridss with parameters...")
-    run_gridssClove_given_filters(sorted_bam, reference_genome, outdir_gridss_final, median_coverage, replace=replace, threads=threads, gridss_blacklisted_regions=gridss_blacklisted_regions, gridss_VCFoutput=final_gridss_vcf, gridss_maxcoverage=gridss_maxcoverage, median_insert_size=median_insert_size, median_insert_size_sd=median_insert_size_sd, gridss_filters_dict=gridss_filters_dict, run_in_parallel=True, max_rel_coverage_to_consider_del=max_rel_coverage_to_consider_del, min_rel_coverage_to_consider_dup=min_rel_coverage_to_consider_dup, replace_FromGridssRun=replace, define_insertions_based_on_coverage=False)
+    final_sv_dict, df_gridss = run_gridssClove_given_filters(sorted_bam, reference_genome, outdir_gridss_final, median_coverage, replace=replace, threads=threads, gridss_blacklisted_regions=gridss_blacklisted_regions, gridss_VCFoutput=final_gridss_vcf, gridss_maxcoverage=gridss_maxcoverage, median_insert_size=median_insert_size, median_insert_size_sd=median_insert_size_sd, gridss_filters_dict=gridss_filters_dict, run_in_parallel=True, max_rel_coverage_to_consider_del=max_rel_coverage_to_consider_del, min_rel_coverage_to_consider_dup=min_rel_coverage_to_consider_dup, replace_FromGridssRun=replace, define_insertions_based_on_coverage=False)
 
     ########################################
 
@@ -5438,6 +5746,8 @@ def run_GridssClove_optimising_parameters(sorted_bam, reference_genome, outdir, 
     #open(final_file, "w").write("gridss finished...")
 
     ######################################
+
+    return final_sv_dict, df_gridss
 
 
 
