@@ -100,6 +100,9 @@ trf_prgm_dir = "%s/bin/trf"%EnvDir
 JolyTree_sh = "%s/bin/JolyTree.sh"%EnvDir
 esearch = "%s/bin/esearch"%EnvDir
 efetch = "%s/bin/efetch"%EnvDir
+prefetch = "%s/bin/prefetch"%EnvDir
+fastqdump = "%s/bin/fastq-dump"%EnvDir
+FASTQC = "%s/bin/fastqc"%EnvDir
 
 # executables that are provided in the repository
 external_software = "%s/../installation/external_software"%CWD
@@ -111,11 +114,10 @@ ninja_dir = "%s/NINJA-0.95-cluster_only/NINJA"%external_software
 # scripts that are of this pipeline
 create_random_simulatedSVgenome_R = "%s/create_random_simulatedSVgenome.R"%CWD
 create_targeted_simulatedSVgenome_R = "%s/create_targeted_simulatedSVgenome.R"%CWD
-
 annotate_simpleEvents_gridssVCF_R = "%s/annotate_simpleEvents_gridssVCF.R"%CWD
 analyze_svVCF = "%s/generate_files_from_svVCF.R"%CWD
 analyze_svVCF_simple = "%s/generate_files_from_svVCF_simple.R"%CWD
-
+TRIMMOMATIC = "%s/run_trimmomatic.py"%CWD 
 
 ######################################################
 ######################################################
@@ -3816,7 +3818,7 @@ def get_taxid2name(taxIDs):
 
     return taxid2name
 
-def get_allWGS_runInfo_fromSRA_forTaxIDs(fileprefix, taxIDs, replace=False):
+def get_allWGS_runInfo_fromSRA_forTaxIDs(fileprefix, taxIDs, replace=False, min_million_reads=10):
 
     """This function tages all the SRRs that have WGS for the required taxIDs"""
 
@@ -3825,7 +3827,7 @@ def get_allWGS_runInfo_fromSRA_forTaxIDs(fileprefix, taxIDs, replace=False):
     if file_is_empty(SRA_runInfo_df_file) or replace is True:
 
         # define the WGS fastq filters
-        WGS_filters = '("biomol dna"[Properties] AND "strategy wgs"[Properties] AND "library layout paired"[Properties] AND "platform illumina"[Properties] AND "strategy wgs"[Properties] OR "strategy wga"[Properties] OR "strategy wcs"[Properties] OR "strategy clone"[Properties] OR "strategy finishing"[Properties] OR "strategy validation"[Properties] AND "filetype fastq"[Properties])'
+        WGS_filters = '("biomol dna"[Properties] AND "strategy wgs"[Properties] AND "library layout paired"[Properties] AND "platform illumina"[Properties] AND "strategy wgs"[Properties] OR "strategy wga"[Properties] OR "strategy wcs"[Properties] OR "strategy clone"[Properties] OR "strategy finishing"[Properties] OR "strategy validation"[Properties])'
 
         # get the name of these taxIDs
         taxid2name = get_taxid2name(taxIDs)
@@ -3836,38 +3838,427 @@ def get_allWGS_runInfo_fromSRA_forTaxIDs(fileprefix, taxIDs, replace=False):
 
         # get esearch
         efetch_outfile = "%s.efetch_output.txt"%fileprefix
-        run_cmd("%s -db sra -query '%s' | %s -db sra --format runinfo | grep -v '^Run' | grep 'https' > %s"%(esearch, esearch_query, efetch, efetch_outfile))
 
         columns_efetch = "Run,ReleaseDate,LoadDate,spots,bases,spots_with_mates,avgLength,size_MB,AssemblyName,download_path,Experiment,LibraryName,LibraryStrategy,LibrarySelection,LibrarySource,LibraryLayout,InsertSize,InsertDev,Platform,Model,SRAStudy,BioProject,Study_Pubmed_id,ProjectID,Sample,BioSample,SampleType,TaxID,ScientificName,SampleName,g1k_pop_code,source,g1k_analysis_group,Subject_ID,Sex,Disease,Tumor,Affection_Status,Analyte_Type,Histological_Type,Body_Site,CenterName,Submission,dbgap_study_accession,Consent,RunHash,ReadHash".split(",")
 
-        SRA_runInfo_df = pd.read_csv(efetch_outfile, sep=",", header=None, names=columns_efetch)
+        # if there are no runs, it will run an error
+        try:
+            
+            run_cmd("%s -db sra -query '%s' | %s -db sra --format runinfo | grep -v '^Run' | grep 'https' > %s"%(esearch, esearch_query, efetch, efetch_outfile))
+
+            SRA_runInfo_df = pd.read_csv(efetch_outfile, sep=",", header=None, names=columns_efetch)
+
+        except: SRA_runInfo_df = pd.DataFrame(columns=columns_efetch)
 
         save_object(SRA_runInfo_df, SRA_runInfo_df_file)
 
     else: SRA_runInfo_df = load_object(SRA_runInfo_df_file)
 
-    for field in ["TaxID", "ScientificName", "SampleName"]:
+    # plot the number of spots
+    filename = "%s.distribution_parameters.pdf"%fileprefix
+    print("getting parm distribution into %s"%filename)
+    fig = plt.figure(figsize=(5,12))
+    for I, field in enumerate(["spots", "spots_with_mates", "avgLength", "InsertSize", "size_MB"]):
+        ax = plt.subplot(5, 1, I+1)
+        sns.distplot(SRA_runInfo_df[field], kde=False, rug=True)
+        ax.set_xlabel(field)
+
+    fig.tight_layout()  # otherwise the right y-label is slightly 
+    fig.savefig(filename, bbox_inches='tight');
+    plt.close(fig)
+
+    # keep only those that have at least 5M reads
+    SRA_runInfo_df = SRA_runInfo_df[SRA_runInfo_df["spots_with_mates"]>=(min_million_reads*1000000)]
+
+    for field in ["AssemblyName", "SampleType", "TaxID"]:
         print("These are the %s: "%field, set(SRA_runInfo_df[field]))
 
-
-
-
-    print(SRA_runInfo_df)
-
-    adkjghadkhhg
+    print("There are %i SRRs ready to use with at least %iM reads"%(len(SRA_runInfo_df), min_million_reads))
 
     return SRA_runInfo_df
 
+def download_srr_subsetReads_onlyFastqDump(srr, download_dir, subset_n_reads=1000000):
 
-def get_genomes_withSV_and_shortReads_table_close_to_taxID(target_taxID, outdir, n_close_taxIDs=5, realSV_calling_on="assembly,reads", testRealDataAccuracy=True, replace=False):
+    """This function downloads a subset of reads with fastqdump"""
+
+    # define a tmp_folder
+    download_dir_tmp = "%s_tmp"%download_dir
+    make_folder(download_dir_tmp)
+
+    print("downloading %s for %s reads"%(srr, str(subset_n_reads)))
+
+    # define the reads
+    reads1 = "%s/%s_1.fastq.gz"%(download_dir, srr)
+    reads2 = "%s/%s_2.fastq.gz"%(download_dir, srr)
+
+    if file_is_empty(reads1) or file_is_empty(reads2):
+
+        # define previous runs
+        delete_folder(download_dir_tmp)
+
+        # run dump
+        run_cmd("%s --split-files --gzip --maxSpotId %i --outdir %s %s"%(fastqdump, subset_n_reads, download_dir_tmp, srr))
+
+        # move the tmp to the final
+        run_cmd("mv %s %s"%(download_dir_tmp, download_dir))
+
+    return reads1, reads2
+
+
+
+def run_freebayes_withoutFiltering(outdir_freebayes, ref, sorted_bam, ploidy, threads, coverage, replace=False):
+
+    # make the dir if not already done
+    make_folder(outdir_freebayes)
+
+    #run freebayes
+    freebayes_output ="%s/output.raw.vcf"%outdir_freebayes; freebayes_output_tmp = "%s.tmp"%freebayes_output
+    if file_is_empty(freebayes_output) or replace is True:
+        print("running freebayes")
+        cmd_freebayes = "%s -f %s -p %i --min-coverage %i -b %s --haplotype-length -1 -v %s"%(freebayes, ref, ploidy, coverage, sorted_bam, freebayes_output_tmp); run_cmd(cmd_freebayes)
+        os.rename(freebayes_output_tmp, freebayes_output)
+
+    return freebayes_output
+
+def get_set_adapter_fastqc_report(fastqc_report):
+
+    """Takes a fastqc report and returns a set with the adapters"""
+    with open(fastqc_report, "r") as fd:
+
+        # look for the line with the content of the table
+        for line in fd:
+            if line.startswith("</style>"):
+
+                if "No overrepresented sequences" in line: overrepresented_seqs = set()
+                else:
+                    # split by overrepresented seqs
+                    after_OR_seqs = line.split("Overrepresented sequences")[2]
+                    overrepresented_seqs = set([x for x in re.split("</?td>", after_OR_seqs) if all([char in {"A", "C", "T", "G"} for char in x]) and len(x)>0])
+                break
+
+    return overrepresented_seqs
+
+def run_trimmomatic(reads1, reads2, replace=False, threads=1):
+
+    """Trims the reads and returns the paths to the trimmed reads"""
+
+    # define the trimmmed reads dir
+    trimmed_reads1 = "%s.trimmed.fastq.gz"%reads1
+    trimmed_reads2 = "%s.trimmed.fastq.gz"%reads2
+
+    if file_is_empty(trimmed_reads1) or file_is_empty(trimmed_reads2) or replace is True:
+
+        print("running trimmomatic to get the trimmed reads")
+
+        # initialize all the html files
+        all_html_files = []
+
+        # run fastqc to get the adapters
+        for reads in [reads1, reads2]:
+
+            fastqc_dir = "%s_fastqc_dir"%(reads); make_folder(fastqc_dir)
+            html_files = ["%s/%s"%(fastqc_dir, x) for x in os.listdir(fastqc_dir) if x.endswith(".html")]
+
+            if len(html_files)==0 or replace is True:
+
+                print("running fastqc")
+                run_cmd("%s -o %s --threads %i --extract --java %s %s"%(FASTQC, fastqc_dir, threads, JAVA, reads))
+
+            # get again the html files
+            html_files = ["%s/%s"%(fastqc_dir, x) for x in os.listdir(fastqc_dir) if x.endswith(".html")]
+
+            all_html_files.append(html_files[0])
+
+
+        # get the adapters from the fastqc report
+        adapters = set.union(*[get_set_adapter_fastqc_report(x) for x in all_html_files])
+
+        # write adapters to fasta
+        all_seqs = []
+        existing_ids = set()
+        for adapter in adapters:
+            ID = id_generator(already_existing_ids=existing_ids); existing_ids.add(ID)
+            all_seqs.append(SeqRecord(Seq(adapter), id=ID, name="", description=""))
+
+        adapters_filename = "%s/adapters.fasta"%get_dir(reads1)
+        SeqIO.write(all_seqs, adapters_filename, "fasta")
+
+        # run trimmomatic
+        if file_is_empty(trimmed_reads1) or file_is_empty(trimmed_reads2) or replace is True:
+
+            print("running trimmomatic")
+
+            trim_cmd = "%s --number_threads %i -rr1 %s -rr2 %s -tr1 %s -tr2 %s -ad %s"%(TRIMMOMATIC, threads, reads1, reads2, trimmed_reads1, trimmed_reads2, adapters_filename)
+
+            run_cmd(trim_cmd)
+
+    return trimmed_reads1, trimmed_reads2
+
+
+def get_SNPs_from_bam(sorted_bam, outdir, reference_genome, replace=False, threads=4):
+
+    """Runs freebayes on the sorted bam and returns a set with the SNPs found with a fast freebayes for ploidy 1"""
+
+    make_folder(outdir)
+
+    # read calling with freebayes
+    vcf = run_freebayes_withoutFiltering(outdir, reference_genome, sorted_bam, 1, threads, 2, replace=replace)
+
+    # get the vcf as a df
+    df = pd.read_csv(vcf, skiprows=list(range(len([line for line in open(vcf, "r", encoding='utf-8', errors='ignore') if line.startswith("##")]))), sep="\t", na_values=vcf_strings_as_NaNs, keep_default_na=False)
+
+
+    # kepp only snps
+    df["is_snp"] = (df.REF.isin({"A", "C", "T", "G"})) & (df.ALT.isin({"A", "C", "T", "G"}))
+    df  = df[df["is_snp"]]
+
+    # add the var
+    df["variant"] = df["#CHROM"] + "_" + df.POS.apply(str) + "_" + df.REF + "_" + df.ALT
+
+    return set(df.variant)
+
+def getSNPs_for_SRR(srr, reference_genome, outdir, subset_n_reads=100000, threads=1, replace=False):
+
+    """This function runs fast SNP calling for an SRR, saving data into outdir an srr. It returns the path to the VCF file. By default it runs on one core"""
+
+
+    # make the outdir 
+    make_folder(outdir)
+
+    # first get the reads into a downloading dir
+    reads_dir = "%s/reads_dir"%outdir
+    reads1, reads2 = download_srr_subsetReads_onlyFastqDump(srr, reads_dir, subset_n_reads=subset_n_reads)
+
+    # get the trimmed reads
+    trimmed_reads1, trimmed_reads2 = run_trimmomatic(reads1, reads2, replace=replace, threads=threads)
+
+    # get the aligned reads
+    print("running bwa mem")
+    bamfile = "%s/aligned_reads.bam"%outdir
+    sorted_bam = "%s.sorted"%bamfile
+    index_bam = "%s.bai"%sorted_bam
+
+    run_bwa_mem(trimmed_reads1, trimmed_reads2, reference_genome, outdir, bamfile, sorted_bam, index_bam, srr, threads=threads, replace=replace)
+
+    return get_SNPs_from_bam(sorted_bam, outdir, reference_genome, replace=replace, threads=threads)
+
+
+def get_fraction_differing_positions_AvsB(snpsA, snpsB, length_genome):
+
+    """Takes two sets of SNPs and returns the fraction of variable positions in the genome"""
+
+    fraction_different_positions = max([len(snpsA.difference(snpsB)), len(snpsB.difference(snpsA))]) / length_genome
+
+    return fraction_different_positions
+
+def get_fraction_readPairsMapped(bamfile, replace=False, threads=4):
+
+    """Returns the fraction of reads mappend for a bam file"""
+
+    # get the npairs, which already generates the flagstat
+    npairs = count_number_read_pairs(bamfile, replace=replace, threads=threads)
+
+    # get the fraction mapped
+    flagstat_file = "%s.flagstat"%bamfile
+
+    fraction_mapped = [float(l.split("mapped (")[1].split("%")[0])/100 for l in open(flagstat_file, "r").readlines() if "mapped (" in l][0]
+
+    return fraction_mapped
+
+def get_SRA_runInfo_df_with_sampleID(SRA_runInfo_df, reference_genome, outdir, replace=False, threads=4, SNPthreshold=0.0001, subset_n_reads=500000):
+
+    """This function takes an SRA_runInfo_df and adds the sampleID. samples with the sample sampleID are those that have less tha SNPthreshold fraction of positions of the reference genome with SNPs. By default it is 0.01%. """
+
+    make_folder(outdir)
+
+    # change index
+    SRA_runInfo_df = SRA_runInfo_df.set_index("Run", drop=False)
+
+
+    ##### GET THE SNPS #####
+
+    # get the SNPs for each run
+    inputs_getSNPs_for_SRR = [(srr, reference_genome, "%s/%s"%(outdir, srr), subset_n_reads, 1, replace) for srr in SRA_runInfo_df.Run]
+
+    with multiproc.Pool(threads) as pool:
+        list_vars = pool.starmap(getSNPs_for_SRR, inputs_getSNPs_for_SRR)
+        pool.close()
+
+    # add to the df
+    SRA_runInfo_df["vars_set"] = list_vars
+
+    #########################
+
+    # add the fraction of mapping reads
+    print("calculating fraction of mapped reads")
+    SRA_runInfo_df["fraction_reads_mapped"] = SRA_runInfo_df.Run.apply(lambda run: get_fraction_readPairsMapped("%s/%s/aligned_reads.bam.sorted"%(outdir, run), replace=replace, threads=threads))
+
+    # calculate the length of the genome
+    length_genome = sum(get_chr_to_len(reference_genome).values())
+
+    # initialize vars
+    sampleID = 0
+    run_to_sampleID = {}
+
+    # assign the  ID based on the comparison of SNPs 
+    for runA in SRA_runInfo_df.Run:
+
+        # get the snps
+        snpsA = SRA_runInfo_df.loc[runA, "vars_set"]
+
+        # initialize that the sample does not match any other sample
+        match_in_runB = False
+
+        for runB in SRA_runInfo_df.Run:
+            if runA==runB: continue
+
+            # get the snps
+            snpsB = SRA_runInfo_df.loc[runB, "vars_set"]
+
+            # calculate the fraction of positions of the genome that are different
+            fraction_different_positions = get_fraction_differing_positions_AvsB(snpsA, snpsB, length_genome)
+
+            # set that they are the same species
+            if fraction_different_positions<SNPthreshold: 
+
+                # get the sampleID of runB if it was there
+                if runB in run_to_sampleID: 
+                    run_to_sampleID[runA] = run_to_sampleID[runB]
+                    match_in_runB = True
+                    break
+
+        
+        # if there was no match in runB, just initialize
+        if match_in_runB is False:
+            sampleID += 1
+            run_to_sampleID[runA] = sampleID
+
+    SRA_runInfo_df["sampleID"] = SRA_runInfo_df.Run.apply(lambda x: run_to_sampleID[x])
+
+    # go through each sampleID and print the sample names
+    for s in set(SRA_runInfo_df.sampleID): print("Sample %i has these names: "%s, set(SRA_runInfo_df[SRA_runInfo_df.sampleID==s].SampleName))
+
+    # add the divergence from the reference genome
+    SRA_runInfo_df["fraction_genome_different_than_reference"] = SRA_runInfo_df.vars_set.apply(lambda x: len(x)/length_genome)
+
+    # drop the vars
+    SRA_runInfo_df = SRA_runInfo_df.drop("vars_set", axis=1)
+
+
+    return SRA_runInfo_df
+
+def downsample_bamfile_keeping_pairs(bamfile, fraction_reads=0.1, replace=True, threads=4, name="sampleX", sampled_bamfile=None):
+
+    """Takes a sorted and indexed bam and samples a fraction_reads randomly. This is a fast process so that it can be repeated many times"""
+
+    # define the outfile
+    seed =  random.choice(list(range(300)))
+
+    # define sampled_bamfile if not provided
+    if sampled_bamfile is None:
+        sampled_bamfile = "%s.%ipct_reads_seed%i_%s.bam"%(bamfile, int(fraction_reads*100), seed, name); remove_file(sampled_bamfile)
+
+
+    # get fraction as str
+    fraction_str = str(fraction_reads).split(".")[1]
+
+    # run the sampling
+    sampled_bamfile_unedited = "%s.unedited"%sampled_bamfile
+    run_cmd("%s view -o %s -s %i.%s --threads %i -b %s"%(samtools, sampled_bamfile_unedited, seed, fraction_str, threads, bamfile))
+
+    # now rename the reads, so that the read name gets a prefix called name
+    run_cmd("%s view -h --threads %i %s | sed -e 's/^/%s_/' | sed 's/^%s_@/@/' | %s view --threads %i -bSh > %s"%(samtools, threads, sampled_bamfile_unedited, name, name, samtools, threads, sampled_bamfile))
+
+    # at the end remove the unedited
+    remove_file(sampled_bamfile_unedited)
+
+    return sampled_bamfile
+
+
+def get_SNPs_for_a_sample_of_a_bam(sorted_bam, outdir, reference_genome, fraction_reads=0.1, replace=False, threads=4):
+
+    """This function samples a bam and gets a subsample and the SNPs on this Subsample """
+
+    print("getting SNPs")
+
+    make_folder(outdir)
+
+    # define the sampled bamfile
+    sampled_bamfile = "%s/sampled_bamfile.bam"%outdir
+    sampled_bamfile_tmp = "%s.tmp"%sampled_bamfile
+
+    if file_is_empty(sampled_bamfile) or replace is True:
+
+        remove_file(sampled_bamfile_tmp)
+
+        # get the subsampled bam
+        downsample_bamfile_keeping_pairs(sorted_bam, fraction_reads=fraction_reads, replace=replace, threads=threads, sampled_bamfile=sampled_bamfile_tmp)
+
+        os.rename(sampled_bamfile_tmp, sampled_bamfile)
+
+    # index the bam
+    index_bam = "%s.bai"%sampled_bamfile
+    if file_is_empty(index_bam) or replace is True:
+        print("Indexing bam")
+        run_cmd("%s index -@ %i %s"%(samtools, threads, sampled_bamfile))
+
+    # get the snps
+    snps = get_SNPs_from_bam(sampled_bamfile, outdir, reference_genome, replace=replace, threads=threads)
+
+    return snps
+
+def get_fractionGenome_different_samplings_from_sorted_bam(sorted_bam, reference_genome, outdir, replace=False, threads=4, subset_n_reads=500000, nsamples=3):
+
+    """ This function makes nsamples (of subset_n_reads each) of a sorted bam and calculates the fraction of positions of the genome that are different between the different samples. It returns the mean of all the measurements. """
+
+    make_folder(outdir)
+
+    print(sorted_bam)
+
+    # count number of reads
+    npairs = count_number_read_pairs(sorted_bam, replace=replace, threads=threads)
+
+    # calculate the fraction of reads that each sample should have
+    fraction_reads_per_sample = subset_n_reads/npairs
+    print("Subsampling %.4f of reads"%fraction_reads_per_sample)
+
+    # run for each sample in parallel
+    inputs_get_SNPs_for_a_sample_of_a_bam = [(sorted_bam, "%s/sample%i"%(outdir, sample), reference_genome, fraction_reads_per_sample, replace, 1) for sample in range(nsamples)]
+
+    # run in parallel
+    with multiproc.Pool(threads) as pool:
+        list_vars = pool.starmap(get_SNPs_for_a_sample_of_a_bam, inputs_get_SNPs_for_a_sample_of_a_bam)
+        pool.close()
+
+    # get the length of the reference genome
+    length_genome = sum(get_chr_to_len(reference_genome).values())
+
+    all_fraction_different_positions = []
+
+    # go through each combination of vars
+    for snpsA in list_vars:
+        for snpsB in list_vars:
+            if snpsA==snpsB: continue
+
+            # get the fraction of SNPs that are different
+            fraction_different_positions = get_fraction_differing_positions_AvsB(snpsA, snpsB, length_genome)
+            all_fraction_different_positions.append(fraction_different_positions) 
+
+    return max(all_fraction_different_positions)
+
+def get_genomes_withSV_and_shortReads_table_close_to_taxID(target_taxID, reference_genome, outdir, sorted_bam, n_close_samples=5, realSV_calling_on="reads", testRealDataAccuracy=True, replace=False, threads=4, subset_n_reads=500000, max_fraction_genome_different_than_reference=0.1, min_fraction_reads_mapped=0.95):
 
     """This function takes a taxID and returns the genomes_withSV_and_shortReads_table that is required to do optimisation of parameters.
 
-    - realSV_calling_on can be reads, assembly or both (reads,assembly). If it is only assembly, the final table will have the fields ID,assembly. If it is 'reads' it will have ID,short_reads_real1,short_reads_real2. If it is both it will have all of these fields. 
+    - realSV_calling_on can be reads, assembly. If it is only assembly, the final table will have the fields ID,assembly. If it is 'reads' it will have ID,short_reads_real1,short_reads_real2. It is only thought to be useful for  realSV_calling_on reads
 
-    - If testRealDataAccuracy is True, only those taxIDs where we can find at least two datasets will be considered. One of the datasets will be added to the table as short_reads_1,short_reads_2. """
+    - If testRealDataAccuracy is True, only those taxIDs where we can find at least two datasets will be considered. One of the datasets will be added to the table as short_reads_1,short_reads_2.
 
-    print("Getting genomes for taxID into %s for configuration:\n"%(outdir), target_taxID, n_close_taxIDs, realSV_calling_on, testRealDataAccuracy)
+    - all the datasets that have a divergence above (max_fraction_genome_different_than_reference) vs the reference will never be considered
+
+    fraction_genome_different_than_reference>0.1 will not  """
+
+    print("Getting genomes for taxID into %s for configuration:\n"%(outdir), target_taxID, n_close_samples, realSV_calling_on, testRealDataAccuracy)
 
 
     # load the NCBI taxonomy database and upgrade it if not already done
@@ -3883,13 +4274,24 @@ def get_genomes_withSV_and_shortReads_table_close_to_taxID(target_taxID, outdir,
         # write file
         open(ncbiTaxa_updated_file, "w").write("NCBItaxa updated\n")
 
-    # load the GenBank assembly statistics
-    GeneBank_file = "%s/GeneBank_data_summary.txt"%outdir
-    GeneBank_df = get_GenBank_assembly_statistics_df(GeneBank_file, replace=replace)
+
+    if realSV_calling_on=="assembly": raise ValueError("This has not been tested fro 'assembly' obtention")
+
+    # calculate the expected difference between two runs of the same sample from the given sample
+    outdir_resamplingBam = "%s/resampling_bam_andGetting_fractionDifPositions"%outdir
+    SNPthreshold_sameSample = get_fractionGenome_different_samplings_from_sorted_bam(sorted_bam, reference_genome, outdir_resamplingBam, replace=replace, threads=threads, subset_n_reads=subset_n_reads)
+
+    print("We will say that if two samples differ by less than %.4f pct of the genome they are from the same sample. This has been calculated by resampling the input sorted bam with %i reads many times, and taking the maximum value"%(SNPthreshold_sameSample*100, subset_n_reads))
+
+    # get sampleID 
+    outdir_gettingID = "%s/getting_sample_IDs"%outdir; make_folder(outdir_gettingID)
 
     # define all potentially interesting taxIDs close to the target_taxIDs
-    for nancestorNodes in [4, 5]: # one would mean to consider only IDs that are under the current species
+    for nancestorNodes in range(1, 100): # one would mean to consider only IDs that are under the current species
         print("Considering %i ancestor nodes"%nancestorNodes)
+
+        # create a folder for this number of ancestors
+        outdir_ancestors = "%s/all_runsWithWGS_arround_target_taxID_%i_considering%iAncestors"%(outdir, target_taxID, nancestorNodes); make_folder(outdir_ancestors)
 
         # get the ancestor
         ancestor_taxID = ncbi.get_lineage(target_taxID)[-nancestorNodes]
@@ -3898,33 +4300,46 @@ def get_genomes_withSV_and_shortReads_table_close_to_taxID(target_taxID, outdir,
         tree = ncbi.get_descendant_taxa(ancestor_taxID, collapse_subspecies=False, return_tree=True, intermediate_nodes=True)
 
         # define interesting taxIDs (the leafs and the species names that may be intermediate)
-        interesting_taxIDs = {int(x) for x in set(tree.get_leaf_names()).union({n.name for n in tree.traverse() if n.rank=="species"})}.difference({target_taxID})
+        interesting_taxIDs = {int(x) for x in set(tree.get_leaf_names()).union({n.name for n in tree.traverse() if n.rank=="species"})}
 
         # map the distance between each leave and the target
-        taxID_to_distanceToTarget = {taxID : tree.get_distance(str(target_taxID), str(taxID)) for taxID in interesting_taxIDs}
+        taxID_to_distanceToTarget = {taxID : tree.get_distance(str(target_taxID), str(taxID)) for taxID in interesting_taxIDs.difference({target_taxID})}
+        taxID_to_distanceToTarget[target_taxID] = 0.0
 
         # get the taxIDs sorted by the distance (so that the closest )
         interesting_taxIDs_sorted = sorted(interesting_taxIDs, key=(lambda x: taxID_to_distanceToTarget[x]))
 
         # get the run info of all WGS datasets from SRA
         print("Getting WGS info")
-        fileprefix = "%s/all_runsWithWGS_arround_target_taxID_%i_considering%iAncestors"%(outdir, target_taxID, nancestorNodes)
+        fileprefix = "%s/output"%(outdir_ancestors)
         SRA_runInfo_df = get_allWGS_runInfo_fromSRA_forTaxIDs(fileprefix, interesting_taxIDs_sorted, replace=replace)
 
-        print(SRA_runInfo_df)
+        # if you did not find anything get to farther ancestors
+        if len(SRA_runInfo_df)<n_close_samples: continue
+
+        print(outdir_gettingID)
+        SRA_runInfo_df = get_SRA_runInfo_df_with_sampleID(SRA_runInfo_df, reference_genome, outdir_gettingID, replace=replace, threads=threads, subset_n_reads=subset_n_reads, SNPthreshold=SNPthreshold_sameSample)
+
+        # filter out samples that have a divergence above the max_fraction_genome_different_than_reference
+        SRA_runInfo_df = SRA_runInfo_df[(SRA_runInfo_df.fraction_genome_different_than_reference<=max_fraction_genome_different_than_reference) & (SRA_runInfo_df.fraction_reads_mapped>=min_fraction_reads_mapped)]
+
+        # add the number of runs that each sample has
+        sampleID_to_nRuns = Counter(SRA_runInfo_df.sampleID)
+        SRA_runInfo_df["nRuns_with_sampleID"] = SRA_runInfo_df.sampleID.apply(lambda x: sampleID_to_nRuns[x])
+
+        # filter the number of runs that each sample should have to be correct. When you want to use this data to test 'real data' accuracy you want 2 runs of each sample
+        if testRealDataAccuracy is True: min_nRuns_with_sampleID = 2
+        else: min_nRuns_with_sampleID = 1
+
+        SRA_runInfo_df = SRA_runInfo_df[SRA_runInfo_df.nRuns_with_sampleID>=min_nRuns_with_sampleID]
+
+        # if you could find enough datasets, break the loop
+        if len(SRA_runInfo_df)>=n_close_samples: break
 
 
+    if len(SRA_runInfo_df)<n_close_samples: raise ValueError("You could not find any datasets in SRA that would be useful")
+        
 
-
-
-
-
-        kdghhdhadkjd
-
-    khjagkhgashgas
-
-
-    interesting_taxIDs = {5478, 1308528}
 
 
 
