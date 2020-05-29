@@ -42,7 +42,7 @@ Runs perSVade pipeline on an input set of paired end short ends. It is expected 
 parser = argparse.ArgumentParser(description=description, formatter_class=RawTextHelpFormatter)
 
 # general args
-parser.add_argument("-r", "--ref", dest="ref", required=True, help="Reference genome. Has to end with .fasta")
+parser.add_argument("-r", "--ref", dest="ref", required=True, help="Reference genome. Has to end with .fasta. It can also be 'auto', in which case the pipeline will download the reference genome from GenBank, if the taxID is specified with --target_taxID")
 parser.add_argument("-thr", "--threads", dest="threads", default=16, type=int, help="Number of threads, Default: 16")
 parser.add_argument("-o", "--outdir", dest="outdir", action="store", required=True, help="Directory where the data will be stored")
 parser.add_argument("--replace", dest="replace", action="store_true", help="Replace existing files")
@@ -73,7 +73,7 @@ parser.add_argument("--nsimulations", dest="nsimulations", default=2, type=int, 
 
 parser.add_argument("--simulation_ploidies", dest="simulation_ploidies", type=str, default="haploid,diploid_hetero", help='A comma-sepparated string of the ploidies to simulate for parameter optimisation. It can have any of "haploid", "diploid_homo", "diploid_hetero", "ref:2_var:1", "ref:3_var:1", "ref:4_var:1", "ref:5_var:1", "ref:9_var:1", "ref:19_var:1", "ref:99_var:1" ')
 
-parser.add_argument("--range_filtering_benchmark", dest="range_filtering_benchmark", type=str, default="theoretically_meaningful", help='The range of parameters that should be tested in the SV optimisation pipeline. It can be any of large, medium, small, theoretically_meaningful or single.')
+parser.add_argument("--range_filtering_benchmark", dest="range_filtering_benchmark", type=str, default="small", help='The range of parameters that should be tested in the SV optimisation pipeline. It can be any of large, medium, small, theoretically_meaningful or single.')
 
 # alignment args
 parser.add_argument("-f1", "--fastq1", dest="fastq1", default=None, help="fastq_1 file. Option required to obtain bam files")
@@ -94,11 +94,19 @@ fun.make_folder(opt.outdir)
 # define the name that will be used as tag, it is the name of the outdir, without the full path
 name_sample = opt.outdir.split("/")[-1]; print("working on %s"%name_sample)
 
-# move the reference genome into the outdir, so that every file is written under outdir
+# define where the reference genome will be stored
 reference_genome_dir = "%s/reference_genome_dir"%(opt.outdir); fun.make_folder(reference_genome_dir)
 new_reference_genome_file = "%s/reference_genome.fasta"%reference_genome_dir
-fun.run_cmd("cp %s %s"%(opt.ref, new_reference_genome_file))
-opt.ref = new_reference_genome_file
+
+# download the reference genome from GenBank given the taxID
+if opt.ref=="auto": fun.get_reference_genome_from_GenBank(opt.target_taxID, new_reference_genome_file, replace=opt.replace)
+
+# just move the ref genome in the outdir
+else:
+
+    # move the reference genome into the outdir, so that every file is written under outdir
+    fun.run_cmd("cp %s %s"%(opt.ref, new_reference_genome_file))
+    opt.ref = new_reference_genome_file
 
 # define files that may be used in many steps of the pipeline
 if opt.sortedbam is None:
@@ -222,18 +230,9 @@ elif opt.fast_SVcalling is False and (opt.close_shortReads_table is not None or 
         opt.close_shortReads_table = fun.get_close_shortReads_table_close_to_taxID(opt.target_taxID, opt.ref, outdir_getting_closeReads, sorted_bam, n_close_samples=opt.n_close_samples, nruns_per_sample=opt.nruns_per_sample, replace=opt.replace, threads=opt.threads)
 
         ljahdjkdahk 
-        # assembly,reads needs to be changed
-
-
-
-
-    lajddjjdahh
 
     # get the real SVs
-    real_svtype_to_file = fun.get_compatible_real_svtype_to_file(opt.genomes_withSV_and_shortReads_table, opt.ref, outdir_finding_realVars, species_treefile=opt.species_tree_closeGenomes, replace=opt.replace, threads=opt.threads, max_nvars=opt.nvars, realSV_calling_on=opt.realSV_calling_on, mitochondrial_chromosome=opt.mitochondrial_chromosome)
-
-
-
+    real_svtype_to_file = fun.get_compatible_real_svtype_to_file(opt.close_shortReads_table, opt.ref, outdir_finding_realVars, replace=opt.replace, threads=opt.threads, max_nvars=opt.nvars, mitochondrial_chromosome=opt.mitochondrial_chromosome)
 
 else: 
     print("Avoiding the simulation of real variants. Only inserting randomSV.")
