@@ -102,6 +102,7 @@ esearch = "%s/bin/esearch"%EnvDir
 efetch = "%s/bin/efetch"%EnvDir
 prefetch = "%s/bin/prefetch"%EnvDir
 fastqdump = "%s/bin/fastq-dump"%EnvDir
+parallel_fastq_dump = "%s/bin/parallel-fastq-dump"%EnvDir
 FASTQC = "%s/bin/fastqc"%EnvDir
 
 # executables that are provided in the repository
@@ -2207,7 +2208,7 @@ def simulate_pairedEndReads_per_chromosome_uniform(chr_obj, coverage, insert_siz
 ################################## RUN GRIDSS AND CLOVE PIPELINE ##################################
 ###################################################################################################
 
-def run_gridss_and_annotateSimpleType(sorted_bam, reference_genome, outdir, replace=False, threads=4, blacklisted_regions="", maxcoverage=50000, max_threads=16):
+def run_gridss_and_annotateSimpleType(sorted_bam, reference_genome, outdir, replace=False, threads=4, blacklisted_regions="", maxcoverage=50000, max_threads=8):
 
     """Runs gridss for the sorted_bam in outdir, returning the output vcf. blacklisted_regions is a bed with regions to blacklist"""
 
@@ -3807,6 +3808,60 @@ def get_GenBank_assembly_statistics_df(file, assembly_summary_genbank_url="ftp:/
     return df
 
 
+
+def get_reference_genome_from_GenBank(taxID, dest_genome_file, replace=False):
+
+    """Downloads the reference genome for a given taxID into dest_genome_file from genBank """
+
+    # get the genBank df
+    gb_file = "%s.GenBankAssemblySummary.txt"%dest_genome_file
+    df_assemblies = get_GenBank_assembly_statistics_df(gb_file, replace=replace)
+
+    print(taxID)
+
+    rep_genomes = df_assemblies[(df_assemblies.taxid==taxID) & (df_assemblies.refseq_category.isin({"reference genome", "representative genome"}))]
+
+    if len(rep_genomes)==0: raise ValueError("There are no representative genomes in GenBank for this taxID")
+    if len(rep_genomes)>1: print("WARNING: There are more than 1 refeernce genomes for this taxID")
+
+    # download genome and annotations
+    ftp_site = rep_genomes.iloc[0]["ftp_path"]
+
+    # get the full_ftp_direction
+    ftp_last = ftp_site.split("/")[-1]# something that has to be added for the ftp direction
+    full_ftp_direction = ftp_site+"/"+ftp_last
+
+    # map each file type to the final file
+    file_type_to_finalFile = {"report":"%s.assembly_report.txt"%dest_genome_file, "genome":dest_genome_file, "gff":"%s.features.gff"%dest_genome_file}
+
+    # download the genome and annotations 
+    for file_type, file_name in [("report", "assembly_report.txt"), ("genome", "genomic.fna.gz"), ("gff", "genomic.gff.gz")]:
+
+        # define the files
+        origin_file = "%s_%s"%(full_ftp_direction, file_name)
+        dest_file = "%s.%s"%(dest_genome_file, file_name)
+        dest_file_unzipped = dest_file.rstrip(".gz")
+        final_file = file_type_to_finalFile[file_type]
+
+        if file_is_empty(final_file) or replace is True:
+            print("getting", file_type, "from genBank")
+
+        
+            try:
+
+                # print getting file
+                urllib.request.urlretrieve(origin_file, dest_file)
+
+                # unzip if necessary
+                if file_type in {"genome", "gff"}: run_cmd("gunzip --force %s"%dest_file)
+
+                # move to the final file
+                os.rename(dest_file_unzipped, final_file)
+
+            except: print("WARNING: %s could not be found"%file_type)
+
+
+
 def get_taxid2name(taxIDs):
 
     """Takes an iterable of taxIDs and returns a dict mapping each of them to the scientific name"""
@@ -4315,6 +4370,52 @@ def get_fractionGenome_different_samplings_from_sorted_bam(sorted_bam, reference
 
     return max(all_fraction_different_positions)
 
+
+def download_srr_parallelFastqDump(srr, destination_dir, is_paired=True, threads=4, replace=False):
+
+    """Takes an SRR accession and downloads the fastq files into destination_dir with prefetch"""
+
+    isPaired_to_fastqIDXs = {True: [1,2], False: [1]}
+
+    make_folder(destination_dir)
+
+    # define a tmp dir
+    downloading_dir= "%s/downloading"%destination_dir # this is temporary and will be empty
+    tmp_dir = "%s/tmp"%downloading_dir
+
+    # define the expected files
+    expected_files = ["%s/%s_%i.fastq.gz"%(destination_dir, srr, N) for N in isPaired_to_fastqIDXs[is_paired]]
+
+    # download into downloading_dir
+    if any([file_is_empty(x) for x in expected_files]) or replace is True: 
+        print("downloading %s"%srr)
+
+        # remove the tmp dir if it exists
+        delete_folder(tmp_dir)
+
+        # make the dirs newly
+        for f in [downloading_dir, tmp_dir]: make_folder(f)
+
+        # first run prefetch if not already done
+        SRRfile = "%s/%s.srr"%(downloading_dir, srr)
+        if file_is_empty(SRRfile):
+
+            # remove the locks of previous runs
+            for file in ["%s/%s"%(downloading_dir, f) for f in os.listdir(downloading_dir) if ".lock" in f or ".tmp." in f]: remove_file(file)
+
+            # run prefetch
+            run_cmd("%s -o %s %s"%(prefetch, SRRfile, srr))
+
+        # download into fastq split files
+        run_cmd("%s -s %s -t %i -O %s --tmpdir %s --split-files --gzip"%(parallel_fastq_dump, SRRfile, threads, downloading_dir, tmp_dir))
+
+        # move the fastq files into destination
+        for N in isPaired_to_fastqIDXs[is_paired]: os.rename("%s/%s.srr_%i.fastq.gz"%(downloading_dir, srr, N), "%s/%s_%i.fastq.gz"%(destination_dir, srr, N))
+
+    # at the end remove the downloading dir
+    delete_folder(downloading_dir)
+
+
 def get_close_shortReads_table_close_to_taxID(target_taxID, reference_genome, outdir, sorted_bam, n_close_samples=3, nruns_per_sample=3, replace=False, threads=4, max_fraction_genome_different_than_reference=0.15, min_fraction_reads_mapped=0.9, min_fraction_genome_covered=0.9, coverage_subset_reads=5, min_coverage=150, min_fraction_coverage_subset_reads=0.5):
 
     """
@@ -4339,9 +4440,9 @@ def get_close_shortReads_table_close_to_taxID(target_taxID, reference_genome, ou
 
     # calculate the expected difference between two runs of the same sample from the given sample
     outdir_resamplingBam = "%s/resampling_bam_andGetting_fractionDifPositions"%outdir
-    SNPthreshold_sameSample = get_fractionGenome_different_samplings_from_sorted_bam(sorted_bam, reference_genome, outdir_resamplingBam, replace=replace, threads=threads, coverage_subset_reads=coverage_subset_reads)
+    SNPthreshold_sameSample = get_fractionGenome_different_samplings_from_sorted_bam(sorted_bam, reference_genome, outdir_resamplingBam, replace=replace, threads=threads, coverage_subset_reads=coverage_subset_reads)*2
 
-    print("We will say that if two samples differ by less than %.4f pct of the genome they are from the same sample. This has been calculated by resampling the input sorted bam with %ix coverage many times"%(SNPthreshold_sameSample*100, coverage_subset_reads))
+    print("We will say that if two samples differ by less than %.4f pct of the genome they are from the same sample. This has been calculated by resampling the input sorted bam with %ix coverage many times. We take twice the value of maxium divergence observed from these value."%(SNPthreshold_sameSample*100, coverage_subset_reads))
 
     # get sampleID 
     outdir_gettingID = "%s/getting_sample_IDs"%outdir; make_folder(outdir_gettingID)
@@ -4350,128 +4451,209 @@ def get_close_shortReads_table_close_to_taxID(target_taxID, reference_genome, ou
     total_nruns = n_close_samples*nruns_per_sample
     print("Looking for %i runs"%total_nruns)
 
-    # define all potentially interesting taxIDs close to the target_taxIDs
-    for nancestorNodes in range(1, 100): # one would mean to consider only IDs that are under the current species
-        print("Considering %i ancestor nodes"%nancestorNodes)
+    SRA_runInfo_df_file = "%s/final_SRA_runInfo_df.py"%outdir
 
-        # create a folder for this number of ancestors
-        outdir_ancestors = "%s/all_runsWithWGS_arround_target_taxID_%i_considering%iAncestors"%(outdir, target_taxID, nancestorNodes); make_folder(outdir_ancestors)
+    if file_is_empty(SRA_runInfo_df_file) or replace is True:
+        print("getting SRRs")
 
-        # get the ancestor
-        ancestor_taxID = ncbi.get_lineage(target_taxID)[-nancestorNodes]
+        # define all potentially interesting taxIDs close to the target_taxIDs
+        for nancestorNodes in range(1, 100): # one would mean to consider only IDs that are under the current species
+            print("Considering %i ancestor nodes"%nancestorNodes)
 
-        # get the tree
-        tree = ncbi.get_descendant_taxa(ancestor_taxID, collapse_subspecies=False, return_tree=True, intermediate_nodes=True)
+            # create a folder for this number of ancestors
+            outdir_ancestors = "%s/all_runsWithWGS_arround_target_taxID_%i_considering%iAncestors"%(outdir, target_taxID, nancestorNodes); make_folder(outdir_ancestors)
 
-        # define interesting taxIDs (the leafs and the species names that may be intermediate)
-        interesting_taxIDs = {int(x) for x in set(tree.get_leaf_names()).union({n.name for n in tree.traverse() if n.rank=="species"})}
+            # get the ancestor
+            ancestor_taxID = ncbi.get_lineage(target_taxID)[-nancestorNodes]
 
-        # map the distance between each leave and the target
-        taxID_to_distanceToTarget = {taxID : tree.get_distance(str(target_taxID), str(taxID)) for taxID in interesting_taxIDs.difference({target_taxID})}
-        taxID_to_distanceToTarget[target_taxID] = 0.0
+            # get the tree
+            tree = ncbi.get_descendant_taxa(ancestor_taxID, collapse_subspecies=False, return_tree=True, intermediate_nodes=True)
 
-        # get the taxIDs sorted by the distance (so that the closest )
-        interesting_taxIDs_sorted = sorted(interesting_taxIDs, key=(lambda x: taxID_to_distanceToTarget[x]))
+            # define interesting taxIDs (the leafs and the species names that may be intermediate)
+            interesting_taxIDs = {int(x) for x in set(tree.get_leaf_names()).union({n.name for n in tree.traverse() if n.rank=="species"})}
 
-        # get the run info of all WGS datasets from SRA
-        print("Getting WGS info")
-        fileprefix = "%s/output"%(outdir_ancestors)
-        all_SRA_runInfo_df = get_allWGS_runInfo_fromSRA_forTaxIDs(fileprefix, interesting_taxIDs_sorted, reference_genome, replace=replace, min_coverage=min_coverage).set_index("Run", drop=False)
+            # map the distance between each leave and the target
+            taxID_to_distanceToTarget = {taxID : tree.get_distance(str(target_taxID), str(taxID)) for taxID in interesting_taxIDs.difference({target_taxID})}
+            taxID_to_distanceToTarget[target_taxID] = 0.0
 
-        # if you did not find anything get to farther ancestors
-        if len(all_SRA_runInfo_df)<total_nruns: continue
+            # get the taxIDs sorted by the distance (so that the closest )
+            interesting_taxIDs_sorted = sorted(interesting_taxIDs, key=(lambda x: taxID_to_distanceToTarget[x]))
 
-        # reshufle rows
-        all_SRA_runInfo_df = all_SRA_runInfo_df.sample(frac=1)
+            # get the run info of all WGS datasets from SRA
+            print("Getting WGS info")
+            fileprefix = "%s/output"%(outdir_ancestors)
+            all_SRA_runInfo_df = get_allWGS_runInfo_fromSRA_forTaxIDs(fileprefix, interesting_taxIDs_sorted, reference_genome, replace=replace, min_coverage=min_coverage).set_index("Run", drop=False)
 
-        # go throough several fractions of all_SRA_runInfo_df
-        inital_fraction_runs = min([(total_nruns*2)/len(all_SRA_runInfo_df) , 1])
+            # if you did not find anything get to farther ancestors
+            if len(all_SRA_runInfo_df)<total_nruns: continue
 
-        # keep growing the all_SRA_runInfo_df until you find the desired number of runs
-        for fraction_runs in np.linspace(inital_fraction_runs, 1, 3):
-            print("Getting %.2f of the runs "%fraction_runs)
+            # reshufle rows
+            all_SRA_runInfo_df = all_SRA_runInfo_df.sample(frac=1)
 
-            # get the number of runs
-            nruns = int(len(all_SRA_runInfo_df)*fraction_runs)
-            SRA_runInfo_df = all_SRA_runInfo_df.iloc[0:nruns]
+            # go throough several fractions of all_SRA_runInfo_df
+            inital_fraction_runs = min([(total_nruns*2)/len(all_SRA_runInfo_df) , 1])
 
-            # get the sra info of this chunk
-            SRA_runInfo_df, df_divergence = get_SRA_runInfo_df_with_sampleID(SRA_runInfo_df, reference_genome, outdir_gettingID, replace=replace, threads=threads, coverage_subset_reads=coverage_subset_reads, SNPthreshold=SNPthreshold_sameSample)
+            # keep growing the all_SRA_runInfo_df until you find the desired number of runs
+            for fraction_runs in np.linspace(inital_fraction_runs, 1, 10):
+                print("Getting %.2f of the runs "%fraction_runs)
 
-            # define the min_fraction_genome_different_than_reference as twice the SNPthreshold_sameSample. This is to discard samples that are the same as the reference
-            min_fraction_genome_different_than_reference = 1.5*SNPthreshold_sameSample
+                # get the number of runs
+                nruns = int(len(all_SRA_runInfo_df)*fraction_runs)
+                SRA_runInfo_df = all_SRA_runInfo_df.iloc[0:nruns]
 
-            # define the minimum coverage that the sample should have in order to pass, as afraction of the expected coverage
-            min_mean_coverage = min_fraction_coverage_subset_reads*coverage_subset_reads
+                # get the sra info of this chunk
+                SRA_runInfo_df, df_divergence = get_SRA_runInfo_df_with_sampleID(SRA_runInfo_df, reference_genome, outdir_gettingID, replace=replace, threads=threads, coverage_subset_reads=coverage_subset_reads, SNPthreshold=SNPthreshold_sameSample)
 
-            # apply all the filters
-            idx = ((SRA_runInfo_df.fraction_genome_different_than_reference<=max_fraction_genome_different_than_reference) &
-                  (SRA_runInfo_df.fraction_genome_different_than_reference>=min_fraction_genome_different_than_reference) & 
-                  (SRA_runInfo_df.fraction_reads_mapped>=min_fraction_reads_mapped) &
-                  (SRA_runInfo_df.fraction_genome_covered>=min_fraction_genome_covered) &
-                  (SRA_runInfo_df.mean_coverage>=min_mean_coverage))
+                # define the minimum coverage that the sample should have in order to pass, as afraction of the expected coverage
+                min_mean_coverage = min_fraction_coverage_subset_reads*coverage_subset_reads
 
-            SRA_runInfo_df = SRA_runInfo_df[idx]
+                # apply all the filters
+                idx = ((SRA_runInfo_df.fraction_genome_different_than_reference<=max_fraction_genome_different_than_reference) &
+                      (SRA_runInfo_df.fraction_genome_different_than_reference>=SNPthreshold_sameSample) & 
+                      (SRA_runInfo_df.fraction_reads_mapped>=min_fraction_reads_mapped) &
+                      (SRA_runInfo_df.fraction_genome_covered>=min_fraction_genome_covered) &
+                      (SRA_runInfo_df.mean_coverage>=min_mean_coverage))
 
-            print("There are %i/%i runs that pass the filters"%(sum(idx), len(idx)))
+                SRA_runInfo_df = SRA_runInfo_df[idx]
 
-            # add the number of runs that each sample has
-            sampleID_to_nRuns = Counter(SRA_runInfo_df.sampleID)
-            SRA_runInfo_df["nRuns_with_sampleID"] = SRA_runInfo_df.sampleID.apply(lambda x: sampleID_to_nRuns[x])
+                print("There are %i/%i runs that pass the filters"%(sum(idx), len(idx)))
 
-            print(sorted(sampleID_to_nRuns.values()))
+                # add the number of runs that each sample has
+                sampleID_to_nRuns = Counter(SRA_runInfo_df.sampleID)
+                SRA_runInfo_df["nRuns_with_sampleID"] = SRA_runInfo_df.sampleID.apply(lambda x: sampleID_to_nRuns[x])
 
-            # keep only the SRA_runInfo_df that has above 
-            SRA_runInfo_df = SRA_runInfo_df[SRA_runInfo_df.nRuns_with_sampleID>=nruns_per_sample]
+                print(sorted(sampleID_to_nRuns.values()))
 
-            # debug
-            if len(SRA_runInfo_df)<total_nruns: continue
+                # keep only the SRA_runInfo_df that has above 
+                SRA_runInfo_df = SRA_runInfo_df[SRA_runInfo_df.nRuns_with_sampleID>=nruns_per_sample]
 
-            # add the divergence 
-            df_divergence = df_divergence.loc[SRA_runInfo_df.Run][SRA_runInfo_df.Run]
+                # debug
+                if len(set(SRA_runInfo_df.sampleID))<n_close_samples: continue
 
-            print(SRA_runInfo_df.sampleID)
+                # map each sampleID to the runs
+                sampleID_to_runs = dict(SRA_runInfo_df.groupby("sampleID").apply(lambda df_s: set(df_s.Run)))
 
-            print(df_divergence)
+                # for each run, add the divergence to the other runs of the same sample
+                SRA_runInfo_df["median_divergence_from_run_to_runsSameSample"] = SRA_runInfo_df.Run.apply(lambda run: np.median([df_divergence.loc[run][other_run] for other_run in sampleID_to_runs[SRA_runInfo_df.loc[run, "sampleID"]] if run!=other_run]) )
 
-            n_close_samples*nruns_per_sample
+                # keep the nruns_per_sample that have the lowest median_divergence_from_run_to_runsSameSample nruns_per_sample
+                interesting_runs = set.union(*[set(SRA_runInfo_df.loc[runs, "median_divergence_from_run_to_runsSameSample"].sort_values().iloc[0:nruns_per_sample].index) for sampleID, runs in sampleID_to_runs.items()])
+
+                SRA_runInfo_df = SRA_runInfo_df.loc[interesting_runs]
+
+                # redefine sampleID_to_runs with the closest divergence
+                sampleID_to_runs = dict(SRA_runInfo_df.groupby("sampleID").apply(lambda df_s: set(df_s.Run)))
+
+                # keep the n_close_samples that have the highest divergence between each other
+                samplesDivergenceDict = {}; I = 0
+                for sampleA, runsA in sampleID_to_runs.items():
+                    for sampleB, runsB in sampleID_to_runs.items():
+
+                        divergence = np.mean([np.mean(df_divergence.loc[runA][list(runsB)]) for runA in runsA])
+                        samplesDivergenceDict[I] = {"sampleA":sampleA, "sampleB":sampleB, "divergence":divergence}
+
+                        I+=1
+
+                df_divergence_samples = pd.DataFrame(samplesDivergenceDict).transpose()
+                for f in ["sampleA", "sampleB"]: df_divergence_samples[f] = df_divergence_samples[f].apply(int)
+
+                # delete the comparisons that are the same
+                df_divergence_samples["sampleA_and_sampleB"] = df_divergence_samples.apply(lambda r: tuple(sorted([r["sampleA"], r["sampleB"]])), axis=1)
+                df_divergence_samples = df_divergence_samples.drop_duplicates(subset="sampleA_and_sampleB")
+                df_divergence_samples = df_divergence_samples[df_divergence_samples.sampleA!=df_divergence_samples.sampleB].sort_values(by="divergence", ascending=False)
+
+                # iterate through the df_divergence from the most divergent comparisons until you have n_close_samples
+                final_samples = set()
+                for sampleA, sampleB in df_divergence_samples[["sampleA", "sampleB"]].values:
+
+                    # once you have all the samples break
+                    if len(final_samples)>=n_close_samples: break
+
+                    # add the samples
+                    final_samples.update({sampleA, sampleB})
+
+                # get the n_close_samples
+                final_samples = list(final_samples)[0:n_close_samples]
+                SRA_runInfo_df = SRA_runInfo_df[SRA_runInfo_df.sampleID.isin(final_samples)]
+
+                # break the loop
+                break
+
+            if len(SRA_runInfo_df)==total_nruns: break
+
+        # debug
+        if len(SRA_runInfo_df)!=total_nruns: raise ValueError("You could not find any datasets in SRA that would be useful")
+
+        # load df
+        save_object(SRA_runInfo_df, SRA_runInfo_df_file)
+
+    else: SRA_runInfo_df = load_object(SRA_runInfo_df_file)
 
 
+    ###### GETTING THE FINAL DATASETS ######
 
-            dakjhdakjhkjdahjkd
+    # define the path to the final table
+    close_shortReads_table = "%s/close_shortReads_table.tbl"%outdir
 
-      
-        khadkhdakdahjjda
+    if file_is_empty(close_shortReads_table) or replace is True:
 
-        # filter the number of runs that each sample should have to be correct. When you want to use this data to test 'real data' accuracy you want 2 runs of each sample
-        if testRealDataAccuracy is True: min_nRuns_with_sampleID = 2
-        else: min_nRuns_with_sampleID = 1
+        # change things
+        SRA_runInfo_df["sampleID"] = "sample" + SRA_runInfo_df.sampleID.apply(str)
+        SRA_runInfo_df["runID"] = SRA_runInfo_df.sampleID + "_" + SRA_runInfo_df.Run
 
-        SRA_runInfo_df = SRA_runInfo_df[SRA_runInfo_df.nRuns_with_sampleID>=min_nRuns_with_sampleID]
+        # define dirs
+        downloads_dir = "%s/final_downloading_SRRs"%outdir; make_folder(downloads_dir)
+        final_reads_dir = "%s/final_trimmed_reads_SRRs"%outdir; make_folder(final_reads_dir)
 
-        # if you could find enough datasets, break the loop
-        if len(SRA_runInfo_df)>=n_close_samples: break
-
-
-    if len(SRA_runInfo_df)<n_close_samples: raise ValueError("You could not find any datasets in SRA that would be useful")
+        # download the desired runs (this may be done locally)
+        print("downloading each SRR")
+        for srr in SRA_runInfo_df.Run: download_srr_parallelFastqDump(srr, "%s/%s"%(downloads_dir,srr), threads=threads, replace=replace)
         
+        # define a dict that maps each srr to the reads of reads 
+        srr_to_readsDict = {}
+
+        # replace each of the downloaded SRRs by the trimmed ones
+        for srr in SRA_runInfo_df.Run:
+            print("trimming %s reads"%srr)
+
+            # define the raw reads
+            reads1 = "%s/%s/%s_1.fastq.gz"%(downloads_dir, srr, srr)
+            reads2 = "%s/%s/%s_2.fastq.gz"%(downloads_dir, srr, srr)
+
+            # define the final trimmed reads
+            final_trimmed_reads1 = "%s/%s_1.fastq.gz"%(final_reads_dir, srr)
+            final_trimmed_reads2 = "%s/%s_2.fastq.gz"%(final_reads_dir, srr)
+
+            if file_is_empty(final_trimmed_reads1) or file_is_empty(final_trimmed_reads2) or replace is True:
+
+                # get the trimmed reads
+                trimmed_reads1, trimmed_reads2 = run_trimmomatic(reads1, reads2, replace=replace, threads=threads)
+
+                # rename
+                os.rename(trimmed_reads1, final_trimmed_reads1)
+                os.rename(trimmed_reads2, final_trimmed_reads2)
+
+            # add to the dict
+            srr_to_readsDict[srr] = {"short_reads1":final_trimmed_reads1, "short_reads2":final_trimmed_reads2}
+
+        # add to the df
+        for f in ["short_reads1", "short_reads2"]: SRA_runInfo_df[f] = SRA_runInfo_df.Run.apply(lambda srr: srr_to_readsDict[srr][f])
+
+        # remove the downloads dir
+        delete_folder(downloads_dir)
+
+        # get the final df
+        final_df = SRA_runInfo_df[["sampleID", "runID", "short_reads1", "short_reads2"]]
+
+        # write
+        final_df.to_csv(close_shortReads_table, sep="\t", header=True, index=False)
 
 
+    print(final_df)
 
+    dlkajhdkhadh
 
-
-
-    print(SRA_runInfo_df)
-
-
-
-    khgashjgahjsaggas
-
-
-
-
-
-
+    #########################################
 
     return close_shortReads_table
 
@@ -5347,19 +5529,25 @@ def get_svIDs_inMoreThan1species(ID_to_svtype_to_svDF):
     return svIDs_inMoreThan1species
 
     
-def prune_IDtoSVTYPEtoDF_keeping_HighConfidenceVars(ID_to_svtype_to_svDF, species_tree, min_af=0.4):
+def prune_IDtoSVTYPEtoDF_keeping_HighConfidenceVars(ID_to_svtype_to_svDF, df_samples, min_af_TraInvDel=0.7, min_af_Tan=0.5, min_af_Ins=0.3):
 
-    """This function takes a df that maps and ID to an svtypes to df and only keeps those that are High Confidence. These are vars that are either:
+    """This function takes a df that maps and ID to an svtypes to df and only keeps those that are High Confidence. These are vars that are both:
 
-    - found in >1 IDs
+    - found in any of the IDs of the same sampleID in df_samples
+    - The minimum allele frequency across all the breakends is above the min_af_TraInvDel, min_af_TanInscut or min_af_Inscopy (depending on the svtype).
+
     - The minimum allele frequency of all breakends is above min_af and the filter is PASS"""
 
     # first add the svID to each var. This is an ID that represents this variant across all sampleIDs, so that if there is a var overlapping across 2 samples it will have the same svID
 
+
     add_svID_to_IDtoSVTYPEtoDF(ID_to_svtype_to_svDF)
 
-    # get the svIDs that follow the species phylogeny
-    svIDs_inMoreThan1species = get_svIDs_inMoreThan1species(ID_to_svtype_to_svDF)
+    # map each ID to the IDs of the same sample (not the sameID)
+    ID_to_replicateIDs = {ID : set(df_samples[df_samples.sampleID==df_samples.loc[ID, "sampleID"]].index).difference({ID}) for ID in ID_to_svtype_to_svDF.keys()}
+
+    # map each ID to the svTypes
+    ID_to_svIDs = {ID : set.union(*[set(svDF.svID) for svDF in svtype_to_svDF.values() if len(svDF)>0]) for ID, svtype_to_svDF in ID_to_svtype_to_svDF.items()}
 
     # prune the df to keep only high-confidence vars
     for ID, svtype_to_svDF in ID_to_svtype_to_svDF.items():
@@ -5368,15 +5556,22 @@ def prune_IDtoSVTYPEtoDF_keeping_HighConfidenceVars(ID_to_svtype_to_svDF, specie
             if len(svDF)==0:  ID_to_svtype_to_svDF[ID][svtype] = svDF
             else:   
 
-                # add whether the var is in more than 1 species
-                svDF["sv_in_more_than1_spp"] = svDF.svID.isin(svIDs_inMoreThan1species)
+                # add whether the var is in any of the replicate IDs 
+                svDF["sv_in_any_replicateIDs"] = svDF.svID.apply(lambda svID: any([svID in ID_to_svIDs[repID] for repID in ID_to_replicateIDs[ID]]))
 
-                # add whether it is high confidence
+                # add whether the breakends are all PASS
                 svDF["all_bends_PASS"] = svDF.apply(lambda r: set.union(*[set([bend_info["FILTER"] for bend_info in list_breakend_info]) for list_breakend_info in r["bends_metadata_dict"].values()])=={"PASS"}, axis=1)
 
-                svDF["PASS_and_highAF"] = (svDF.estimate_AF_min>=min_af) & (svDF.all_bends_PASS)
+                # add wthether the minimum AF is above the min_af for this breakend
+                if svtype in {"translocations", "deletions", "inversions", "remaining"}: min_af = min_af_TraInvDel
+                elif svtype=="tandemDuplications": min_af = min_af_Tan
+                elif svtype=="insertions": min_af = min_af_Ins
+                else: raise ValueError("%s is not a valid svtype"%svtype)
 
-                svDF["high_confidence"] = (svDF.PASS_and_highAF) | (svDF.sv_in_more_than1_spp)
+                svDF["highAF"] = (svDF.estimate_AF_min>=min_af)
+
+                # define those that have high confidence as those that have the correct af and are in all replicateIDs
+                svDF["high_confidence"] = (svDF.highAF) & (svDF.sv_in_any_replicateIDs)
 
                 # keep the df that has high confidence
                 ID_to_svtype_to_svDF[ID][svtype] = svDF[svDF.high_confidence]
@@ -5387,14 +5582,14 @@ def get_is_overlapping_query_vs_target_region(q, r):
 
     return (q["chromosome"]==r["chromosome"]) and ((r["start"]<=q["start"]<=r["end"]) or (r["start"]<=q["end"]<=r["end"]) or (q["start"]<=r["start"]<=q["end"]) or (q["start"]<=r["end"]<=q["end"]))
 
-def get_ID_to_svtype_to_svDF_for_setOfGenomes_highConfidence(genomes_withSV_and_shortReads_table, reference_genome, outdir, species_treefile=None, replace=False, threads=4, realSV_calling_on="assembly", mitochondrial_chromosome="mito_C_glabrata_CBS138"):
+def get_ID_to_svtype_to_svDF_for_setOfGenomes_highConfidence(close_shortReads_table, reference_genome, outdir, replace=False, threads=4, mitochondrial_chromosome="mito_C_glabrata_CBS138"):
 
     """Generates a dict that maps each sample in genomes_withSV_and_shortReads_table to an svtype and a DF with all the info about several vars. It only gets the high-confidence vars.
 
     realSV_calling_on can be reads or assembly"""
 
     # load the df
-    df_genomes = pd.read_csv(genomes_withSV_and_shortReads_table, sep="\t").set_index("ID")
+    df_genomes = pd.read_csv(close_shortReads_table, sep="\t").set_index("runID")
 
     # define an outdir that will store all the real_vars
     make_folder(outdir)
@@ -5415,60 +5610,28 @@ def get_ID_to_svtype_to_svDF_for_setOfGenomes_highConfidence(genomes_withSV_and_
         for ID, row in df_genomes.iterrows():
             print("getting vars for %s"%ID)
 
-            # get the real vars on a different way depending on the type of 
-            if realSV_calling_on=="assembly":
-                print("getting real variants based on the genome assemblies")
+            # run in the gridss and clove with the fast parameters
+            outdir_gridssClove = "%s/shortReads_realVarsDiscovery_%s"%(all_realVars_dir,ID); make_folder(outdir_gridssClove)
 
-                # softlink the genome
-                dest_genomeFile = "%s/genome_%s.fasta"%(all_realVars_dir, ID)
-                if file_is_empty(dest_genomeFile): run_cmd("ln -s %s %s"%(row["assembly"], dest_genomeFile))
+            # get a bam file for these reads
+            bamfile = "%s/aligned_reads.bam"%outdir_gridssClove
+            sorted_bam = "%s.sorted"%bamfile
+            index_bam = "%s.bai"%sorted_bam
 
-                # find the real vars
-                svtype_to_svfile, df_gridss = generate_tables_of_SV_between_genomes_gridssClove(dest_genomeFile, reference_genome, replace=replace, threads=threads)
+            run_bwa_mem(row["short_reads1"], row["short_reads2"], reference_genome, outdir_gridssClove, bamfile, sorted_bam, index_bam, name_sample=ID, threads=threads, replace=replace)
 
-            elif realSV_calling_on=="reads":
-                print("getting real variants based on short_reads_real1 and short_reads_real2")
-
-                # run in the gridss and clove with the fast parameters
-                outdir_gridssClove = "%s/shortReads_realVarsDiscovery_%s"%(all_realVars_dir,ID); make_folder(outdir_gridssClove)
-
-                # get a bam file for these reads
-                bamfile = "%s/aligned_reads.bam"%outdir_gridssClove
-                sorted_bam = "%s.sorted"%bamfile
-                index_bam = "%s.bai"%sorted_bam
-
-                run_bwa_mem(row["short_reads_real1"], row["short_reads_real2"], reference_genome, outdir_gridssClove, bamfile, sorted_bam, index_bam, name_sample=ID, threads=threads, replace=replace)
-
-                # run fast pipeline GridssClove
-                svtype_to_svfile, df_gridss = run_GridssClove_optimising_parameters(sorted_bam, reference_genome, outdir_gridssClove, threads=threads, replace=replace, window_l=10000, mitochondrial_chromosome=mitochondrial_chromosome, fast_SVcalling=True)
-
-            else: raise ValueError("%s is not a valid realSV_calling_on"%realSV_calling_on)
+            # run fast pipeline GridssClove
+            svtype_to_svfile, df_gridss = run_GridssClove_optimising_parameters(sorted_bam, reference_genome, outdir_gridssClove, threads=threads, replace=replace, window_l=10000, mitochondrial_chromosome=mitochondrial_chromosome, fast_SVcalling=True)
 
             # keep 
             all_sampleID_to_svtype_to_file[ID] =  svtype_to_svfile
             all_sampleID_to_dfGRIDSS[ID] = df_gridss
 
-
-
-        finsihedWithShortReadCallingOfRealSVs
-
         # get a df that has all the info for each SV, and then the df with allele freq, metadata and 
         ID_to_svtype_to_svDF = get_sampleID_to_svtype_to_svDF_filtered(all_sampleID_to_svtype_to_file, all_sampleID_to_dfGRIDSS)
 
-        # build the species tree
-        if species_treefile is None: 
-            outdir_species_tree = "%s/output_speciesTree_JolyTree"%outdir
-            species_treefile = get_speciesTree_multipleGenomes_JolyTree(all_realVars_dir, outdir_species_tree, threads=threads, replace=replace)
-
-        # get the names so that they are IDs
-        species_tree = Tree(species_treefile)
-        for l in species_tree.get_leaves(): l.name = l.name.split("_")[1]
-        print("This is the considered species tree:\n", species_tree)
-
         # preseve only the high confidence vars from ID_to_svtype_to_svDF
-        prune_IDtoSVTYPEtoDF_keeping_HighConfidenceVars(ID_to_svtype_to_svDF, species_tree)
-
-        print(ID_to_svtype_to_svDF)
+        prune_IDtoSVTYPEtoDF_keeping_HighConfidenceVars(ID_to_svtype_to_svDF, df_genomes)
 
         # save
         save_object(ID_to_svtype_to_svDF, ID_to_svtype_to_svDF_file)
@@ -5491,24 +5654,22 @@ def set_position_to_max(pos, maxPos):
     if pos>maxPos: return maxPos
     else: return pos
 
-def get_compatible_real_svtype_to_file(genomes_withSV_and_shortReads_table, reference_genome, outdir, species_treefile=None, replace=False, threads=4, max_nvars=100, realSV_calling_on="assembly", mitochondrial_chromosome="mito_C_glabrata_CBS138"):
+def get_compatible_real_svtype_to_file(close_shortReads_table, reference_genome, outdir, replace=False, threads=4, max_nvars=100, mitochondrial_chromosome="mito_C_glabrata_CBS138"):
 
-    """This function generates a dict of svtype to the file for SVs that are compatible and ready to insert into the reference_genome. All the files are written into outdir. Only a set of 'high-confidence' SVs are reported, which are those that have ether a minimum allele frequency above 0.75 and all breakpoints with 'PASS' or are found in >2 genomes and following the phylogeny of the species tree. This is inferred with JolyTree if not provided. At the end, this pipeline reports a set of compatible SVs, that are ready to insert into RSVsim (so that the coordinates are 1-based). 
+    """This function generates a dict of svtype to the file for SVs that are compatible and ready to insert into the reference_genome. All the files are written into outdir. Only a set of 'high-confidence' SVs are reported, which are those that, for each sampleID inclose_shortReads_table, have a reasonable minimum allele frequency and all breakpoints with 'PASS' and are found in all the genomes of the same sampleID.
+
+    At the end, this pipeline reports a set of compatible SVs, that are ready to insert into RSVsim (so that the coordinates are 1-based). 
 
     Rememeber that this will not include 'remaining' events, as these can't be inserted 
     
-    For transloctaions, there will only be one translocation allowed for each arm. This is how RSVSim allows the simulation.
-
     max_nvars is the maximum number of variants of each type that will be generated
-
-    realSV_calling_on can be assembly or reads and determines from where the 'realSVs' are predicted
     """
 
     # initialize the start time
     pipeline_start_time = time.time()
 
     # get all the high-confidence real variants
-    ID_to_svtype_to_svDF = get_ID_to_svtype_to_svDF_for_setOfGenomes_highConfidence(genomes_withSV_and_shortReads_table, reference_genome, outdir, species_treefile=species_treefile, replace=replace, threads=threads, realSV_calling_on=realSV_calling_on, mitochondrial_chromosome=mitochondrial_chromosome)
+    ID_to_svtype_to_svDF = get_ID_to_svtype_to_svDF_for_setOfGenomes_highConfidence(close_shortReads_table, reference_genome, outdir, replace=replace, threads=threads, mitochondrial_chromosome=mitochondrial_chromosome)
 
     # define the df with the realVars info
     all_realVars_dir = "%s/all_realVars"%(outdir)
@@ -5544,10 +5705,8 @@ def get_compatible_real_svtype_to_file(genomes_withSV_and_shortReads_table, refe
         if file_is_empty(outfile_compatible_SVs) or replace is True:
         #if True:
 
-            print("writing consensus %s"%svtype)
-
             # initalize a df with all the compatible svDFs
-            compatible_svDF = pd.DataFrame()
+            compatible_svDF = pd.DataFrame(columns=svtype_to_fieldsDict[svtype]["all_fields"])
 
             # go through each ID
             for ID in ID_to_svtype_to_svDF.keys():
@@ -5578,29 +5737,30 @@ def get_compatible_real_svtype_to_file(genomes_withSV_and_shortReads_table, refe
                     else:
 
                         # add the bed to the regions matching
-                        df_bed_allRegions = df_bed_allRegions.append(sv_bed)
+                        df_bed_allRegions = df_bed_allRegions.append(sv_bed, sort=True)
 
                         # add to the compatible SVs
-                        compatible_svDF = compatible_svDF.append(sv_series_df)
-
-            # get only the important fields
-            compatible_svDF = compatible_svDF[svtype_to_fieldsDict[svtype]["all_fields"]]
-            compatible_svDF.index = list(range(len(compatible_svDF)))
-
-            # define the maping between the position field and the chromosome field
-            posF_to_chrF = svtype_to_fieldsDict[svtype]["positionField_to_chromosome"]
+                        compatible_svDF = compatible_svDF.append(sv_series_df, sort=True)
 
 
+            if len(compatible_svDF)>0:
 
-            # add +1 to all the positions (this is because RSVSim requires 1-based positions), also that the last position of the chromosome is not exceeded
-            for f in svtype_to_fieldsDict[svtype]["position_fields"]: compatible_svDF[f] = compatible_svDF.apply(lambda r: set_position_to_max(add1_unless_it_is_minus1(r[f]), chr_to_len[r[posF_to_chrF[f]]]), axis=1)
+                # get only the important fields
+                compatible_svDF = compatible_svDF[svtype_to_fieldsDict[svtype]["all_fields"]]
+                compatible_svDF.index = list(range(len(compatible_svDF)))
 
-            # for translocations, define the set of maximum nvars based on the number of chromosomes
-            if svtype=="translocations": real_max_nvars = min([max_nvars, len(all_chromosomes)-1])
-            else: real_max_nvars = max_nvars
+                # define the maping between the position field and the chromosome field
+                posF_to_chrF = svtype_to_fieldsDict[svtype]["positionField_to_chromosome"]
 
-            # if this number exceeds the number of variants it will chop the df
-            if len(compatible_svDF)>real_max_nvars: compatible_svDF = compatible_svDF.iloc[0:real_max_nvars]
+                # add +1 to all the positions (this is because RSVSim requires 1-based positions), also that the last position of the chromosome is not exceeded
+                for f in svtype_to_fieldsDict[svtype]["position_fields"]: compatible_svDF[f] = compatible_svDF.apply(lambda r: set_position_to_max(add1_unless_it_is_minus1(r[f]), chr_to_len[r[posF_to_chrF[f]]]), axis=1)
+
+
+                # if this number exceeds the number of variants it will chop the df
+                if len(compatible_svDF)>max_nvars: compatible_svDF = compatible_svDF.iloc[0:real_max_nvars]
+
+
+            print("Defining %i compatible %s"%(len(compatible_svDF), svtype))
 
             # write the compatible svDF into the final set of vars
             compatible_svDF.to_csv(outfile_compatible_SVs, sep="\t", header=True, index=False)

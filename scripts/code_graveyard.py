@@ -818,3 +818,34 @@ def transform_cut_and_paste_to_copy_and_paste_insertions(reference_genome, rearr
 
                 predicted_svtype_to_svfile, df_gridss = generate_tables_of_SV_between_genomes_gridssClove(rearranged_genome, reference_genome, replace=replace, threads=threads)
 
+
+# old way of considering assemblies
+
+    """
+    # OLD WAY
+    # get the assembly
+    assembly_name = "%s/%s.renamed.fasta"%(assemblies_dir, lrPrefix)
+    copied_assembly_name = "%s/%s.nanopore_assembly.fasta"%(outdir, lrPrefix)
+
+    # copy
+    if file_is_empty(copied_assembly_name): run_cmd("cp %s %s"%(assembly_name , copied_assembly_name))
+
+    # generate table
+    dict_for_df[lrPrefix] = {"assembly":copied_assembly_name, "short_reads1":R1, "short_reads2":R2, "ID":lrPrefix, "short_reads_real1":realR1, "short_reads_real2":realR2}
+    """
+
+
+### OLD get_ID_to_svtype_to_svDF_for_setOfGenomes_highConfidence
+
+
+  # get the real vars on a different way depending on the type of 
+            if realSV_calling_on=="assembly":
+                print("getting real variants based on the genome assemblies")
+
+                # softlink the genome
+                dest_genomeFile = "%s/genome_%s.fasta"%(all_realVars_dir, ID)
+                if file_is_empty(dest_genomeFile): run_cmd("ln -s %s %s"%(row["assembly"], dest_genomeFile))
+
+                # find the real vars
+                svtype_to_svfile, df_gridss = generate_tables_of_SV_between_genomes_gridssClove(dest_genomeFile, reference_genome, replace=replace, threads=threads)
+
