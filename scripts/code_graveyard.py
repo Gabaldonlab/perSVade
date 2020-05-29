@@ -810,3 +810,11 @@ def transform_cut_and_paste_to_copy_and_paste_insertions(reference_genome, rearr
         # not working
 
         ## #########################################################################
+
+
+            # get the variants from simulating reads from an assembly. Always ploidy 1 to get homozygous SVs
+            if type_data=="assembly":
+                print("getting SVs from assemblies")
+
+                predicted_svtype_to_svfile, df_gridss = generate_tables_of_SV_between_genomes_gridssClove(rearranged_genome, reference_genome, replace=replace, threads=threads)
+

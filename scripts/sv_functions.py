@@ -395,7 +395,7 @@ def run_bwa_mem(fastq1, fastq2, ref, outdir, bamfile, sorted_bam, index_bam, nam
         cmd_indexBam = "%s index -@ %i %s"%(samtools, threads, sorted_bam); run_cmd(cmd_indexBam)   # creates a .bai of sorted_bam
 
 
-    print("ALIGNMENT STEP WAS CORRECTLY PERFORMED")
+    #print("ALIGNMENT STEP WAS CORRECTLY PERFORMED")
 
 def make_flat_listOflists(LoL):
 
@@ -3818,7 +3818,7 @@ def get_taxid2name(taxIDs):
 
     return taxid2name
 
-def get_allWGS_runInfo_fromSRA_forTaxIDs(fileprefix, taxIDs, replace=False, min_million_reads=10):
+def get_allWGS_runInfo_fromSRA_forTaxIDs(fileprefix, taxIDs, reference_genome, replace=False, min_coverage=30):
 
     """This function tages all the SRRs that have WGS for the required taxIDs"""
 
@@ -3854,12 +3854,17 @@ def get_allWGS_runInfo_fromSRA_forTaxIDs(fileprefix, taxIDs, replace=False, min_
 
     else: SRA_runInfo_df = load_object(SRA_runInfo_df_file)
 
+
+    # define the expected coverage
+    length_genome = sum(get_chr_to_len(reference_genome).values())
+    SRA_runInfo_df["expected_coverage"] = SRA_runInfo_df.apply(lambda r: (r["spots_with_mates"]*r["avgLength"])/length_genome,axis=1)
+
     # plot the number of spots
     filename = "%s.distribution_parameters.pdf"%fileprefix
     print("getting parm distribution into %s"%filename)
-    fig = plt.figure(figsize=(5,12))
-    for I, field in enumerate(["spots", "spots_with_mates", "avgLength", "InsertSize", "size_MB"]):
-        ax = plt.subplot(5, 1, I+1)
+    fig = plt.figure(figsize=(5,13))
+    for I, field in enumerate(["spots", "spots_with_mates", "avgLength", "InsertSize", "size_MB", "expected_coverage"]):
+        ax = plt.subplot(6, 1, I+1)
         sns.distplot(SRA_runInfo_df[field], kde=False, rug=True)
         ax.set_xlabel(field)
 
@@ -3867,13 +3872,13 @@ def get_allWGS_runInfo_fromSRA_forTaxIDs(fileprefix, taxIDs, replace=False, min_
     fig.savefig(filename, bbox_inches='tight');
     plt.close(fig)
 
-    # keep only those that have at least 5M reads
-    SRA_runInfo_df = SRA_runInfo_df[SRA_runInfo_df["spots_with_mates"]>=(min_million_reads*1000000)]
+    # keep only those that have at least a coverage of min_coverage    
+    SRA_runInfo_df = SRA_runInfo_df[SRA_runInfo_df["expected_coverage"]>=min_coverage]
 
     for field in ["AssemblyName", "SampleType", "TaxID"]:
         print("These are the %s: "%field, set(SRA_runInfo_df[field]))
 
-    print("There are %i SRRs ready to use with at least %iM reads"%(len(SRA_runInfo_df), min_million_reads))
+    print("There are %i SRRs ready to use with at least %ix coverage"%(len(SRA_runInfo_df), min_coverage))
 
     return SRA_runInfo_df
 
@@ -3885,7 +3890,7 @@ def download_srr_subsetReads_onlyFastqDump(srr, download_dir, subset_n_reads=100
     download_dir_tmp = "%s_tmp"%download_dir
     make_folder(download_dir_tmp)
 
-    print("downloading %s for %s reads"%(srr, str(subset_n_reads)))
+    #print("downloading %s for %s reads"%(srr, str(subset_n_reads)))
 
     # define the reads
     reads1 = "%s/%s_1.fastq.gz"%(download_dir, srr)
@@ -4033,14 +4038,32 @@ def getSNPs_for_SRR(srr, reference_genome, outdir, subset_n_reads=100000, thread
     trimmed_reads1, trimmed_reads2 = run_trimmomatic(reads1, reads2, replace=replace, threads=threads)
 
     # get the aligned reads
-    print("running bwa mem")
+    #print("running bwa mem")
     bamfile = "%s/aligned_reads.bam"%outdir
     sorted_bam = "%s.sorted"%bamfile
     index_bam = "%s.bai"%sorted_bam
 
     run_bwa_mem(trimmed_reads1, trimmed_reads2, reference_genome, outdir, bamfile, sorted_bam, index_bam, srr, threads=threads, replace=replace)
 
-    return get_SNPs_from_bam(sorted_bam, outdir, reference_genome, replace=replace, threads=threads)
+    # get the SNPs
+    snps_set = get_SNPs_from_bam(sorted_bam, outdir, reference_genome, replace=replace, threads=threads)
+
+    # define the parallel running of mosdepth 
+    if threads==1: run_in_parallel=False
+    else: run_in_parallel = True
+
+    # get the coverage df
+    coverage_df =  pd.read_csv(generate_coverage_per_window_file_parallel(reference_genome, outdir, sorted_bam, windows_file="none", replace=replace, window_l=10000, run_in_parallel=run_in_parallel), sep="\t")
+
+    # define stats
+    mean_coverage = np.mean(coverage_df.mediancov_1)
+    fraction_genome_covered = np.mean(coverage_df.percentcovered_1)/100
+
+    #print("The mean coverage for %s is %.3f for windows of 10Kb"%(srr, mean_coverage))
+    #print("The mean fraction coverage for %s is %.3f for windows of 10Kb"%(srr, fraction_genome_covered))
+
+
+    return snps_set, mean_coverage, fraction_genome_covered
 
 
 def get_fraction_differing_positions_AvsB(snpsA, snpsB, length_genome):
@@ -4065,7 +4088,10 @@ def get_fraction_readPairsMapped(bamfile, replace=False, threads=4):
 
     return fraction_mapped
 
-def get_SRA_runInfo_df_with_sampleID(SRA_runInfo_df, reference_genome, outdir, replace=False, threads=4, SNPthreshold=0.0001, subset_n_reads=500000):
+
+
+
+def get_SRA_runInfo_df_with_sampleID(SRA_runInfo_df, reference_genome, outdir, replace=False, threads=4, SNPthreshold=0.0001, coverage_subset_reads=10):
 
     """This function takes an SRA_runInfo_df and adds the sampleID. samples with the sample sampleID are those that have less tha SNPthreshold fraction of positions of the reference genome with SNPs. By default it is 0.01%. """
 
@@ -4074,31 +4100,45 @@ def get_SRA_runInfo_df_with_sampleID(SRA_runInfo_df, reference_genome, outdir, r
     # change index
     SRA_runInfo_df = SRA_runInfo_df.set_index("Run", drop=False)
 
+    # calculate the length of the genome
+    length_genome = sum(get_chr_to_len(reference_genome).values())
 
-    ##### GET THE SNPS #####
+    # add the subset_n_reads depending on the coverage and the read length
+    SRA_runInfo_df["subset_n_reads"] = (length_genome*coverage_subset_reads / SRA_runInfo_df.avgLength).apply(int)
+
+    ##### GET THE SNPS AND COVERAGE #####
 
     # get the SNPs for each run
-    inputs_getSNPs_for_SRR = [(srr, reference_genome, "%s/%s"%(outdir, srr), subset_n_reads, 1, replace) for srr in SRA_runInfo_df.Run]
+    inputs_getSNPs_for_SRR = [(srr, reference_genome, "%s/%s"%(outdir, srr), SRA_runInfo_df.loc[srr, "subset_n_reads"], 1, replace) for srr in SRA_runInfo_df.Run]
 
     with multiproc.Pool(threads) as pool:
-        list_vars = pool.starmap(getSNPs_for_SRR, inputs_getSNPs_for_SRR)
+        list_vars_and_coverage = pool.starmap(getSNPs_for_SRR, inputs_getSNPs_for_SRR)
         pool.close()
+
+
+    # change the vars
+    list_vars = [x[0] for x in list_vars_and_coverage]
+    list_mean_coverage = [x[1] for x in list_vars_and_coverage]
+    list_fraction_genome_covered = [x[2] for x in list_vars_and_coverage]
 
     # add to the df
     SRA_runInfo_df["vars_set"] = list_vars
+    SRA_runInfo_df["mean_coverage"] = list_mean_coverage
+    SRA_runInfo_df["fraction_genome_covered"] = list_fraction_genome_covered
 
-    #########################
+    ###################################
 
     # add the fraction of mapping reads
     print("calculating fraction of mapped reads")
     SRA_runInfo_df["fraction_reads_mapped"] = SRA_runInfo_df.Run.apply(lambda run: get_fraction_readPairsMapped("%s/%s/aligned_reads.bam.sorted"%(outdir, run), replace=replace, threads=threads))
 
-    # calculate the length of the genome
-    length_genome = sum(get_chr_to_len(reference_genome).values())
+    # add the divergence from the reference genome
+    SRA_runInfo_df["fraction_genome_different_than_reference"] = SRA_runInfo_df.vars_set.apply(lambda x: len(x)/length_genome)
+
+    # add the fraction of reads that were maintained 
 
     # initialize vars
-    sampleID = 0
-    run_to_sampleID = {}
+    runA_to_runB_to_fraction_different_positions = {}
 
     # assign the  ID based on the comparison of SNPs 
     for runA in SRA_runInfo_df.Run:
@@ -4106,46 +4146,46 @@ def get_SRA_runInfo_df_with_sampleID(SRA_runInfo_df, reference_genome, outdir, r
         # get the snps
         snpsA = SRA_runInfo_df.loc[runA, "vars_set"]
 
-        # initialize that the sample does not match any other sample
-        match_in_runB = False
-
         for runB in SRA_runInfo_df.Run:
-            if runA==runB: continue
 
             # get the snps
             snpsB = SRA_runInfo_df.loc[runB, "vars_set"]
 
             # calculate the fraction of positions of the genome that are different
             fraction_different_positions = get_fraction_differing_positions_AvsB(snpsA, snpsB, length_genome)
+            runA_to_runB_to_fraction_different_positions.setdefault(runA, {}).setdefault(runB, fraction_different_positions)
 
-            # set that they are the same species
-            if fraction_different_positions<SNPthreshold: 
 
-                # get the sampleID of runB if it was there
-                if runB in run_to_sampleID: 
-                    run_to_sampleID[runA] = run_to_sampleID[runB]
-                    match_in_runB = True
-                    break
+    # get a df
+    df_divergence = pd.DataFrame(runA_to_runB_to_fraction_different_positions)
 
-        
-        # if there was no match in runB, just initialize
-        if match_in_runB is False:
-            sampleID += 1
-            run_to_sampleID[runA] = sampleID
+    # get the clusters of IDs through a graph
+    g =  igraph.Graph(directed=False)
+    list_IDs = list(range(len(SRA_runInfo_df.Run)))
+    srr_to_ID = dict(zip(SRA_runInfo_df.Run, list_IDs))
+    ID_to_srr = dict(zip(list_IDs, SRA_runInfo_df.Run))
+    g.add_vertices(list_IDs)
+    pairs_equal_IDs = set.union(*[{tuple(sorted((srr_to_ID[runA], srr_to_ID[runB]))) for runB in SRA_runInfo_df.Run if df_divergence.loc[runA, runB]<SNPthreshold} for runA in SRA_runInfo_df.Run])
+    g.add_edges(pairs_equal_IDs)
+    clustersIDs = list(get_graph_subcomponents(g))
 
+    # map each cluster to the SRRs
+    cluster_names = list(range(len(clustersIDs)))
+    clusterName_to_srrs = {name : {ID_to_srr[ID] for ID in IDs}  for name, IDs in dict(zip(cluster_names, clustersIDs)).items()}
+    run_to_sampleID = {}
+    for clusterName, srrs in clusterName_to_srrs.items():
+        for srr in srrs: run_to_sampleID[srr] = clusterName+1
+
+    # add to the df
     SRA_runInfo_df["sampleID"] = SRA_runInfo_df.Run.apply(lambda x: run_to_sampleID[x])
 
     # go through each sampleID and print the sample names
-    for s in set(SRA_runInfo_df.sampleID): print("Sample %i has these names: "%s, set(SRA_runInfo_df[SRA_runInfo_df.sampleID==s].SampleName))
-
-    # add the divergence from the reference genome
-    SRA_runInfo_df["fraction_genome_different_than_reference"] = SRA_runInfo_df.vars_set.apply(lambda x: len(x)/length_genome)
+   # for s in set(SRA_runInfo_df.sampleID): print("Sample %i has these names: "%s, set(SRA_runInfo_df[SRA_runInfo_df.sampleID==s].SampleName))
 
     # drop the vars
     SRA_runInfo_df = SRA_runInfo_df.drop("vars_set", axis=1)
 
-
-    return SRA_runInfo_df
+    return SRA_runInfo_df, df_divergence
 
 def downsample_bamfile_keeping_pairs(bamfile, fraction_reads=0.1, replace=True, threads=4, name="sampleX", sampled_bamfile=None):
 
@@ -4205,22 +4245,53 @@ def get_SNPs_for_a_sample_of_a_bam(sorted_bam, outdir, reference_genome, fractio
     # get the snps
     snps = get_SNPs_from_bam(sampled_bamfile, outdir, reference_genome, replace=replace, threads=threads)
 
+
+    #### FIND COVERAGE ####
+
+    """
+    THISISNECESSARYFORCHECKINGCOVERAGE
+
+    # define the parallel running of mosdepth 
+    if threads==1: run_in_parallel=False
+    else: run_in_parallel = True
+
+    # get the coverage df
+    coverage_df =  pd.read_csv(generate_coverage_per_window_file_parallel(reference_genome, outdir, sampled_bamfile, windows_file="none", replace=replace, window_l=10000, run_in_parallel=run_in_parallel), sep="\t")
+
+    # define stats
+    mean_coverage = np.mean(coverage_df.mediancov_1)
+    fraction_genome_covered = np.mean(coverage_df.percentcovered_1)/100
+
+    print("The mean coverage for this bam sample is %.3f for windows of 10Kb"%(mean_coverage))
+    print("The mean fraction coverage for this bam sample is %.3f for windows of 10Kb"%(fraction_genome_covered))
+
+    """
+
+    #######################
+
     return snps
 
-def get_fractionGenome_different_samplings_from_sorted_bam(sorted_bam, reference_genome, outdir, replace=False, threads=4, subset_n_reads=500000, nsamples=3):
+def get_fractionGenome_different_samplings_from_sorted_bam(sorted_bam, reference_genome, outdir, replace=False, threads=4, coverage_subset_reads=5, nsamples=3):
 
     """ This function makes nsamples (of subset_n_reads each) of a sorted bam and calculates the fraction of positions of the genome that are different between the different samples. It returns the mean of all the measurements. """
 
     make_folder(outdir)
 
-    print(sorted_bam)
-
     # count number of reads
     npairs = count_number_read_pairs(sorted_bam, replace=replace, threads=threads)
 
+    # count the read length
+    read_length = get_read_length(sorted_bam, threads=threads, replace=replace)
+
+    # get the length of the reference genome
+    length_genome = sum(get_chr_to_len(reference_genome).values())
+
+    # expected coverage
+    expected_coverage = (npairs*read_length)/length_genome
+
     # calculate the fraction of reads that each sample should have
-    fraction_reads_per_sample = subset_n_reads/npairs
-    print("Subsampling %.4f of reads"%fraction_reads_per_sample)
+    fraction_reads_per_sample = coverage_subset_reads/expected_coverage
+    print("Subsampling %.4f of reads to get %ix coverage"%(fraction_reads_per_sample, coverage_subset_reads))
 
     # run for each sample in parallel
     inputs_get_SNPs_for_a_sample_of_a_bam = [(sorted_bam, "%s/sample%i"%(outdir, sample), reference_genome, fraction_reads_per_sample, replace, 1) for sample in range(nsamples)]
@@ -4230,9 +4301,7 @@ def get_fractionGenome_different_samplings_from_sorted_bam(sorted_bam, reference
         list_vars = pool.starmap(get_SNPs_for_a_sample_of_a_bam, inputs_get_SNPs_for_a_sample_of_a_bam)
         pool.close()
 
-    # get the length of the reference genome
-    length_genome = sum(get_chr_to_len(reference_genome).values())
-
+    # get the fraction of different positions
     all_fraction_different_positions = []
 
     # go through each combination of vars
@@ -4246,20 +4315,13 @@ def get_fractionGenome_different_samplings_from_sorted_bam(sorted_bam, reference
 
     return max(all_fraction_different_positions)
 
-def get_genomes_withSV_and_shortReads_table_close_to_taxID(target_taxID, reference_genome, outdir, sorted_bam, n_close_samples=5, realSV_calling_on="reads", testRealDataAccuracy=True, replace=False, threads=4, subset_n_reads=500000, max_fraction_genome_different_than_reference=0.1, min_fraction_reads_mapped=0.95):
+def get_close_shortReads_table_close_to_taxID(target_taxID, reference_genome, outdir, sorted_bam, n_close_samples=3, nruns_per_sample=3, replace=False, threads=4, max_fraction_genome_different_than_reference=0.15, min_fraction_reads_mapped=0.9, min_fraction_genome_covered=0.9, coverage_subset_reads=5, min_coverage=150, min_fraction_coverage_subset_reads=0.5):
 
-    """This function takes a taxID and returns the genomes_withSV_and_shortReads_table that is required to do optimisation of parameters.
+    """
+    This function takes a taxID and returns the close_shortReads_table that is required to do optimisation of parameters
+    """
 
-    - realSV_calling_on can be reads, assembly. If it is only assembly, the final table will have the fields ID,assembly. If it is 'reads' it will have ID,short_reads_real1,short_reads_real2. It is only thought to be useful for  realSV_calling_on reads
-
-    - If testRealDataAccuracy is True, only those taxIDs where we can find at least two datasets will be considered. One of the datasets will be added to the table as short_reads_1,short_reads_2.
-
-    - all the datasets that have a divergence above (max_fraction_genome_different_than_reference) vs the reference will never be considered
-
-    fraction_genome_different_than_reference>0.1 will not  """
-
-    print("Getting genomes for taxID into %s for configuration:\n"%(outdir), target_taxID, n_close_samples, realSV_calling_on, testRealDataAccuracy)
-
+    print("Getting genomes for taxID into %s"%(outdir))
 
     # load the NCBI taxonomy database and upgrade it if not already done
     print("getting NCBI taxonomy database")
@@ -4275,16 +4337,18 @@ def get_genomes_withSV_and_shortReads_table_close_to_taxID(target_taxID, referen
         open(ncbiTaxa_updated_file, "w").write("NCBItaxa updated\n")
 
 
-    if realSV_calling_on=="assembly": raise ValueError("This has not been tested fro 'assembly' obtention")
-
     # calculate the expected difference between two runs of the same sample from the given sample
     outdir_resamplingBam = "%s/resampling_bam_andGetting_fractionDifPositions"%outdir
-    SNPthreshold_sameSample = get_fractionGenome_different_samplings_from_sorted_bam(sorted_bam, reference_genome, outdir_resamplingBam, replace=replace, threads=threads, subset_n_reads=subset_n_reads)
+    SNPthreshold_sameSample = get_fractionGenome_different_samplings_from_sorted_bam(sorted_bam, reference_genome, outdir_resamplingBam, replace=replace, threads=threads, coverage_subset_reads=coverage_subset_reads)
 
-    print("We will say that if two samples differ by less than %.4f pct of the genome they are from the same sample. This has been calculated by resampling the input sorted bam with %i reads many times, and taking the maximum value"%(SNPthreshold_sameSample*100, subset_n_reads))
+    print("We will say that if two samples differ by less than %.4f pct of the genome they are from the same sample. This has been calculated by resampling the input sorted bam with %ix coverage many times"%(SNPthreshold_sameSample*100, coverage_subset_reads))
 
     # get sampleID 
     outdir_gettingID = "%s/getting_sample_IDs"%outdir; make_folder(outdir_gettingID)
+
+    # define the total number of runs that you need
+    total_nruns = n_close_samples*nruns_per_sample
+    print("Looking for %i runs"%total_nruns)
 
     # define all potentially interesting taxIDs close to the target_taxIDs
     for nancestorNodes in range(1, 100): # one would mean to consider only IDs that are under the current species
@@ -4312,20 +4376,72 @@ def get_genomes_withSV_and_shortReads_table_close_to_taxID(target_taxID, referen
         # get the run info of all WGS datasets from SRA
         print("Getting WGS info")
         fileprefix = "%s/output"%(outdir_ancestors)
-        SRA_runInfo_df = get_allWGS_runInfo_fromSRA_forTaxIDs(fileprefix, interesting_taxIDs_sorted, replace=replace)
+        all_SRA_runInfo_df = get_allWGS_runInfo_fromSRA_forTaxIDs(fileprefix, interesting_taxIDs_sorted, reference_genome, replace=replace, min_coverage=min_coverage).set_index("Run", drop=False)
 
         # if you did not find anything get to farther ancestors
-        if len(SRA_runInfo_df)<n_close_samples: continue
+        if len(all_SRA_runInfo_df)<total_nruns: continue
 
-        print(outdir_gettingID)
-        SRA_runInfo_df = get_SRA_runInfo_df_with_sampleID(SRA_runInfo_df, reference_genome, outdir_gettingID, replace=replace, threads=threads, subset_n_reads=subset_n_reads, SNPthreshold=SNPthreshold_sameSample)
+        # reshufle rows
+        all_SRA_runInfo_df = all_SRA_runInfo_df.sample(frac=1)
 
-        # filter out samples that have a divergence above the max_fraction_genome_different_than_reference
-        SRA_runInfo_df = SRA_runInfo_df[(SRA_runInfo_df.fraction_genome_different_than_reference<=max_fraction_genome_different_than_reference) & (SRA_runInfo_df.fraction_reads_mapped>=min_fraction_reads_mapped)]
+        # go throough several fractions of all_SRA_runInfo_df
+        inital_fraction_runs = min([(total_nruns*2)/len(all_SRA_runInfo_df) , 1])
 
-        # add the number of runs that each sample has
-        sampleID_to_nRuns = Counter(SRA_runInfo_df.sampleID)
-        SRA_runInfo_df["nRuns_with_sampleID"] = SRA_runInfo_df.sampleID.apply(lambda x: sampleID_to_nRuns[x])
+        # keep growing the all_SRA_runInfo_df until you find the desired number of runs
+        for fraction_runs in np.linspace(inital_fraction_runs, 1, 3):
+            print("Getting %.2f of the runs "%fraction_runs)
+
+            # get the number of runs
+            nruns = int(len(all_SRA_runInfo_df)*fraction_runs)
+            SRA_runInfo_df = all_SRA_runInfo_df.iloc[0:nruns]
+
+            # get the sra info of this chunk
+            SRA_runInfo_df, df_divergence = get_SRA_runInfo_df_with_sampleID(SRA_runInfo_df, reference_genome, outdir_gettingID, replace=replace, threads=threads, coverage_subset_reads=coverage_subset_reads, SNPthreshold=SNPthreshold_sameSample)
+
+            # define the min_fraction_genome_different_than_reference as twice the SNPthreshold_sameSample. This is to discard samples that are the same as the reference
+            min_fraction_genome_different_than_reference = 1.5*SNPthreshold_sameSample
+
+            # define the minimum coverage that the sample should have in order to pass, as afraction of the expected coverage
+            min_mean_coverage = min_fraction_coverage_subset_reads*coverage_subset_reads
+
+            # apply all the filters
+            idx = ((SRA_runInfo_df.fraction_genome_different_than_reference<=max_fraction_genome_different_than_reference) &
+                  (SRA_runInfo_df.fraction_genome_different_than_reference>=min_fraction_genome_different_than_reference) & 
+                  (SRA_runInfo_df.fraction_reads_mapped>=min_fraction_reads_mapped) &
+                  (SRA_runInfo_df.fraction_genome_covered>=min_fraction_genome_covered) &
+                  (SRA_runInfo_df.mean_coverage>=min_mean_coverage))
+
+            SRA_runInfo_df = SRA_runInfo_df[idx]
+
+            print("There are %i/%i runs that pass the filters"%(sum(idx), len(idx)))
+
+            # add the number of runs that each sample has
+            sampleID_to_nRuns = Counter(SRA_runInfo_df.sampleID)
+            SRA_runInfo_df["nRuns_with_sampleID"] = SRA_runInfo_df.sampleID.apply(lambda x: sampleID_to_nRuns[x])
+
+            print(sorted(sampleID_to_nRuns.values()))
+
+            # keep only the SRA_runInfo_df that has above 
+            SRA_runInfo_df = SRA_runInfo_df[SRA_runInfo_df.nRuns_with_sampleID>=nruns_per_sample]
+
+            # debug
+            if len(SRA_runInfo_df)<total_nruns: continue
+
+            # add the divergence 
+            df_divergence = df_divergence.loc[SRA_runInfo_df.Run][SRA_runInfo_df.Run]
+
+            print(SRA_runInfo_df.sampleID)
+
+            print(df_divergence)
+
+            n_close_samples*nruns_per_sample
+
+
+
+            dakjhdakjhkjdahjkd
+
+      
+        khadkhdakdahjjda
 
         # filter the number of runs that each sample should have to be correct. When you want to use this data to test 'real data' accuracy you want 2 runs of each sample
         if testRealDataAccuracy is True: min_nRuns_with_sampleID = 2
@@ -4357,7 +4473,7 @@ def get_genomes_withSV_and_shortReads_table_close_to_taxID(target_taxID, referen
 
 
 
-    return genomes_withSV_and_shortReads_table
+    return close_shortReads_table
 
 
 
@@ -4846,13 +4962,13 @@ def plot_boxplots_allele_freqs(sampleID_to_svtype_to_svDF, filename):
     fig.savefig(filename, bbox_inches='tight');
     plt.close(fig)
 
-def test_SVgeneration_from_DefaultParms(reference_genome, outdir, sample_sorted_bam, threads=4, replace=False, n_simulated_genomes=2, mitochondrial_chromosome="mito_C_glabrata_CBS138", nvars=100, type_data="assembly"):
+def test_SVgeneration_from_DefaultParms(reference_genome, outdir, sample_sorted_bam, threads=4, replace=False, n_simulated_genomes=2, mitochondrial_chromosome="mito_C_glabrata_CBS138", nvars=100):
 
-    """This function reports how well the finding of SV from a genome assembly (type_data=="assembly") or reads (type_data=="reads") works from random simulations. Writing under outdir"""
+    """This function reports how well the finding of SV from reads works from random simulations. Writing under outdir"""
 
     # define the output
-    precision_and_recall_filename = "%s/precision_and_recall_SVgeneration_from_%s.pdf"%(outdir, type_data)
-    allele_frequency_boxplots_filename = "%s/allele_frequency_boxplots_SVgeneration_from_%s.pdf"%(outdir, type_data)
+    precision_and_recall_filename = "%s/precision_and_recall_SVgeneration_from_reads.pdf"%(outdir)
+    allele_frequency_boxplots_filename = "%s/allele_frequency_boxplots_SVgeneration_from_reads.pdf"%(outdir)
     if file_is_empty(precision_and_recall_filename) or file_is_empty(allele_frequency_boxplots_filename) or replace is True:
 
         # initialize the start time
@@ -4880,37 +4996,30 @@ def test_SVgeneration_from_DefaultParms(reference_genome, outdir, sample_sorted_
             # generate genome with simulated SVs
             sim_svtype_to_svfile, rearranged_genome = rearrange_genomes_simulateSV(reference_genome, outdir_sim, replace=replace, nvars=nvars, mitochondrial_chromosome=mitochondrial_chromosome)
 
-            # get the variants from simulating reads from an assembly. Always ploidy 1 to get homozygous SVs
-            if type_data=="assembly":
-                print("getting SVs from assemblies")
-
-                predicted_svtype_to_svfile, df_gridss = generate_tables_of_SV_between_genomes_gridssClove(rearranged_genome, reference_genome, replace=replace, threads=threads)
-
             # get the variants by simulating short reads from the genome
-            elif type_data=="reads": 
-                print("getting SVs from reads")
+            print("getting SVs from reads")
 
-                # define properties of the run
-                chr_to_len = get_chr_to_len(reference_genome)
-                median_insert_size, median_insert_size_sd  = get_insert_size_distribution(sample_sorted_bam, replace=replace, threads=threads)
-                read_length = get_read_length(sample_sorted_bam, threads=threads, replace=replace)
-                total_nread_pairs = count_number_read_pairs(sample_sorted_bam, replace=replace, threads=threads)
-                expected_coverage_per_bp = int((total_nread_pairs*read_length) / sum(chr_to_len.values())) +  1 
+            # define properties of the run
+            chr_to_len = get_chr_to_len(reference_genome)
+            median_insert_size, median_insert_size_sd  = get_insert_size_distribution(sample_sorted_bam, replace=replace, threads=threads)
+            read_length = get_read_length(sample_sorted_bam, threads=threads, replace=replace)
+            total_nread_pairs = count_number_read_pairs(sample_sorted_bam, replace=replace, threads=threads)
+            expected_coverage_per_bp = int((total_nread_pairs*read_length) / sum(chr_to_len.values())) +  1 
 
-                # define the function that gets coverage from seq properties
-                distToTel_chrom_GC_to_coverage_fn = (lambda x,y,z: expected_coverage_per_bp)
+            # define the function that gets coverage from seq properties
+            distToTel_chrom_GC_to_coverage_fn = (lambda x,y,z: expected_coverage_per_bp)
 
-                # get the info of the reference genome with predictions of coverage per window
-                df_genome_info = get_windows_infoDF_with_predictedFromFeatures_coverage(rearranged_genome, distToTel_chrom_GC_to_coverage_fn, expected_coverage_per_bp, replace=replace, window_l=10000, threads=threads)
+            # get the info of the reference genome with predictions of coverage per window
+            df_genome_info = get_windows_infoDF_with_predictedFromFeatures_coverage(rearranged_genome, distToTel_chrom_GC_to_coverage_fn, expected_coverage_per_bp, replace=replace, window_l=10000, threads=threads)
 
-                # simulate reads and align them to the reference genome
-                outdir_simulation_short_reads = "%s/simulation_shortReads"%(outdir_sim); make_folder(outdir_simulation_short_reads)
-                simulated_bam_file = simulate_and_align_PairedReads_perWindow(df_genome_info, rearranged_genome, reference_genome, total_nread_pairs, read_length, outdir_simulation_short_reads, median_insert_size, median_insert_size_sd, replace=replace, threads=threads)
+            # simulate reads and align them to the reference genome
+            outdir_simulation_short_reads = "%s/simulation_shortReads"%(outdir_sim); make_folder(outdir_simulation_short_reads)
+            simulated_bam_file = simulate_and_align_PairedReads_perWindow(df_genome_info, rearranged_genome, reference_genome, total_nread_pairs, read_length, outdir_simulation_short_reads, median_insert_size, median_insert_size_sd, replace=replace, threads=threads)
 
-                # call GRIDSS and CLOVE for the simulated reads
-                final_run_dir = "%s/final_run_dir"%(outdir_simulation_short_reads); make_folder(final_run_dir)
+            # call GRIDSS and CLOVE for the simulated reads
+            final_run_dir = "%s/final_run_dir"%(outdir_simulation_short_reads); make_folder(final_run_dir)
 
-                predicted_svtype_to_svfile, df_gridss = run_GridssClove_optimising_parameters(simulated_bam_file, reference_genome, final_run_dir, threads=threads, replace=replace, window_l=10000, mitochondrial_chromosome=mitochondrial_chromosome, fast_SVcalling=True)
+            predicted_svtype_to_svfile, df_gridss = run_GridssClove_optimising_parameters(simulated_bam_file, reference_genome, final_run_dir, threads=threads, replace=replace, window_l=10000, mitochondrial_chromosome=mitochondrial_chromosome, fast_SVcalling=True)
 
             # get a df of benchmarking
             fileprefix = "%s/rearranged_genome_benchmarking_SV"%outdir_sim

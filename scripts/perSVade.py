@@ -49,26 +49,22 @@ parser.add_argument("--replace", dest="replace", action="store_true", help="Repl
 parser.add_argument("-p", "--ploidy", dest="ploidy", default=1, type=int, help="Ploidy, can be 1 or 2")
 
 # different modules to be executed
-parser.add_argument("--testSVgen_from_assembly", dest="testSVgen_from_assembly", default=True, action="store_true", help="This indicates whether to generate a report of how the generation of SV from an assembly works for C. glabrata.")
+parser.add_argument("--testSVgen_from_DefaulReads", dest="testSVgen_from_DefaulReads", default=True, action="store_true", help="This indicates whether to generate a report of how the generation of SV works with the default parameters on random simulations")
+
+parser.add_argument("--close_shortReads_table", dest="close_shortReads_table", type=str, default=None, help="This is the path to a table that has 4 fields: sampleID,runID,short_reads1,short_reads2. These should be WGS runs of samples that are close to the reference genome and some expected SV. Whenever this argument is provided, the pipeline will find SVs in these samples and generate a folder <outdir>/findingRealSVs/SVs_compatible_to_insert that will contain one file for each SV, so that they are compatible and ready to insert in a simulated genome. This table will be used if --testRealDataAccuracy is specified, which will require at least 3 runs for each sample.")
 
 
-parser.add_argument("--realSV_calling_on", dest="realSV_calling_on", type=str, default="reads", help="Indicates whether the calling of real variants should be done on the provided assemblies (needs 'assembly') or the reads (needs 'reads').")
+parser.add_argument("--target_taxID", dest="target_taxID", type=int, default=None, help="This is the taxID (according to NCBI taxonomy) to which your reference genome belongs. If provided, it is used to find --n_close_samples (default 3) close samples to the reference, according to the NCBI taxonomy database. It will download the closest n_close_samples from SRA. If --testRealDataAccuracy is give, it will also download an additional, independent run of SRA of the given sample. This option will have no effect if --close_shortReads_table is provided.")
 
-parser.add_argument("--genomes_withSV_and_shortReads_table", dest="genomes_withSV_and_shortReads_table", type=str, default=None, help="This is the path to atable that has three fields: ID,assembly,short_reads1,short_reads2,short_reads_real1,short_reads_real2. These should be genomes that are close to the reference genome and some expected SV. Whenever this argument is provided, the pipeline will find SVs in these assemblies and generate a folder <outdir>/findingRealSVs/SVs_compatible_to_insert that will contain one file for each SV, so that they are compatible and ready to insert in a simulated genome. If this table has also short_reads* the pipeline can test which is the recall of these short reads for finding the 'real SVs' with the testRealDataAccuracy option. If the realSV_calling_on is 'assembly', real vars will be predicted from assembly. If realSV_calling_on is 'reads', real vars will be predicted from short_reads_train*")
+parser.add_argument("--n_close_samples", dest="n_close_samples", default=3, type=int, help="Number of close samples to search in case --target_taxID is provided")
 
-parser.add_argument("--target_taxID", dest="target_taxID", type=int, default=None, help="This is the taxID (according to NCBI taxonomy) to which your reference genome belongs. If provided, it is used to find --n_close_samples (default 5) close samples to the reference, according to the NCBI taxonomy database. It will download the closest n_close_samples from SRA. This is option is only valid if --realSV_calling_on is 'reads'. If --testRealDataAccuracy is give, it will also download an additional, independent run of SRA of the given sample. This option will have no effect if --genomes_withSV_and_shortReads_table is provided.")
+parser.add_argument("--nruns_per_sample", dest="nruns_per_sample", default=3, type=int, help="Number of runs to download for each sample in the case that --target_taxID is specified. If --testRealDataAccuracy, this has to be at least 3. ")
 
-parser.add_argument("--n_close_samples", dest="n_close_samples", default=5, type=int, help="Number of close samples to search in case --target_taxID is provided")
-
-
-parser.add_argument("--SVs_compatible_to_insert_dir", dest="SVs_compatible_to_insert_dir", type=str, default=None, help="A directory with one file for each SV that can be inserted into the reference genome in simulations. It may be created with --genomes_withSV_and_shortReads_table. If both --SVs_compatible_to_insert_dir and --genomes_withSV_and_shortReads_table are provided, --SVs_compatible_to_insert_dir will be used, and --genomes_withSV_and_shortReads_table will have no effect. If none of them are provided, this pipeline will base the parameter optimization on randomly inserted SVs (the random behavior). The coordinates have to be 1-based, as they are ready to insert into RSVsim.")
+parser.add_argument("--SVs_compatible_to_insert_dir", dest="SVs_compatible_to_insert_dir", type=str, default=None, help="A directory with one file for each SV that can be inserted into the reference genome in simulations. It may be created with --close_shortReads_table. If both --SVs_compatible_to_insert_dir and --close_shortReads_table are provided, --SVs_compatible_to_insert_dir will be used, and --close_shortReads_table will have no effect. If none of them are provided, this pipeline will base the parameter optimization on randomly inserted SVs (the default behavior). The coordinates have to be 1-based, as they are ready to insert into RSVsim.")
 
 parser.add_argument("--fast_SVcalling", dest="fast_SVcalling", action="store_true", default=False, help="Run SV calling with a default set of parameters. There will not be any optimisation nor reporting of accuracy. This is expected to work almost as fast as gridss and clove together.")
 
-parser.add_argument("--testRealDataAccuracy", dest="testRealDataAccuracy", action="store_true", default=True, help="Reports the accuracy (recall) of your calling on the real data. This is defined with --genomes_withSV_and_shortReads_table.")
-
-parser.add_argument("--species_tree_closeGenomes", dest="species_tree_closeGenomes", type=str, default=None, help="The path to a newick file that contains the species tree (the leaf names should match the 'ID' field) of the genomes provided in  --genomes_withSV_and_shortReads_table. This is important because the sorting of 'high-confidence vars' out of genomes_withSV_and_shortReads_table requires the tree of the genomes. By default, this is calculated with JolyTree, which is fast but not the most accurate method.")
-
+parser.add_argument("--testRealDataAccuracy", dest="testRealDataAccuracy", action="store_true", default=True, help="Reports the accuracy (recall) of your calling on the real data. This requires with --close_shortReads_table or --target_taxID.")
 
 # simulation parameter args
 parser.add_argument("--nvars", dest="nvars", default=50, type=int, help="Number of variants to simulate. Note that the number of balanced translocations inserted in simulations will be always as maximum the number of gDNA chromosome-pairs implicated.")
@@ -185,10 +181,11 @@ if fun.file_is_empty("%s.fai"%opt.ref) or opt.replace is True:
 #####################################
 
 #### test how well the finding of SVs in an assembly works ####
-if opt.testSVgen_from_assembly:
+if opt.testSVgen_from_DefaulReads:
 
-    outdir_test_FindSVinAssembly = "%s/test_FindSVinAssembly"%opt.outdir
-    if __name__ == '__main__': fun.test_SVgeneration_from_DefaultParms(opt.ref, outdir_test_FindSVinAssembly, sorted_bam, threads=opt.threads, replace=opt.replace, n_simulated_genomes=opt.nsimulations, mitochondrial_chromosome=opt.mitochondrial_chromosome, nvars=opt.nvars, type_data=opt.realSV_calling_on)
+    outdir_test_FindSVinAssembly = "%s/test_FindSVfromDefaultSimulations"%opt.outdir
+    if __name__ == '__main__': fun.test_SVgeneration_from_DefaultParms(opt.ref, outdir_test_FindSVinAssembly, sorted_bam, threads=opt.threads, replace=opt.replace, n_simulated_genomes=opt.nsimulations, mitochondrial_chromosome=opt.mitochondrial_chromosome, nvars=opt.nvars)
+
 
 ###############################################################
 
@@ -201,28 +198,28 @@ if opt.SVs_compatible_to_insert_dir is not None and opt.fast_SVcalling is False:
     # if it is already predefined
     real_svtype_to_file = {svtype : "%s/%s"%(opt.SVs_compatible_to_insert_dir) for svtype in all_svs}
 
-elif opt.fast_SVcalling is False and (opt.genomes_withSV_and_shortReads_table is not None or opt.target_taxID is not None):
+elif opt.fast_SVcalling is False and (opt.close_shortReads_table is not None or opt.target_taxID is not None):
     
     # the table was provided
-    if opt.genomes_withSV_and_shortReads_table is not None: 
+    if opt.close_shortReads_table is not None: 
 
-        print("finding the set of compatible SVs from %s"%opt.genomes_withSV_and_shortReads_table)
+        print("finding the set of compatible SVs from %s"%opt.close_shortReads_table)
 
         # define the outdir for the real vars
-        outdir_finding_realVars = "%s/findingRealSVs"%opt.outdir
+        outdir_finding_realVars = "%s/findingRealSVs_providedCloseReads"%opt.outdir
 
     # a taxID was provided, which overrides the value of opt.genomes_withSV_and_shortReads_table
     elif opt.target_taxID is not None:
 
-        print("finding close genomes or reads for close taxIDs in the GenBank and SRA databases for taxID %s"%opt.target_taxID)
+        print("finding close genomes or reads for close taxIDs in the SRA database for taxID %s"%opt.target_taxID)
 
         # define the outdir for the real vars
-        outdir_finding_realVars = "%s/findingRealSVs_automaticFindingOfCloseGenomes"%opt.outdir; fun.make_folder(outdir_finding_realVars)
+        outdir_finding_realVars = "%s/findingRealSVs_automaticFindingOfCloseReads"%opt.outdir; fun.make_folder(outdir_finding_realVars)
 
         # define the outdir where the close genomes whould be downloaded
-        outdir_getting_closeGenomesANDreads = "%s/getting_closeGenomesANDreads"%outdir_finding_realVars; fun.make_folder(outdir_getting_closeGenomesANDreads)
+        outdir_getting_closeReads = "%s/getting_closeReads"%outdir_finding_realVars; fun.make_folder(outdir_getting_closeReads)
 
-        opt.genomes_withSV_and_shortReads_table = fun.get_genomes_withSV_and_shortReads_table_close_to_taxID(opt.target_taxID, opt.ref, outdir_getting_closeGenomesANDreads, sorted_bam, n_close_samples=opt.n_close_samples, realSV_calling_on="assembly,reads", testRealDataAccuracy=opt.testRealDataAccuracy, replace=opt.replace, threads=opt.threads)
+        opt.close_shortReads_table = fun.get_close_shortReads_table_close_to_taxID(opt.target_taxID, opt.ref, outdir_getting_closeReads, sorted_bam, n_close_samples=opt.n_close_samples, nruns_per_sample=opt.nruns_per_sample, replace=opt.replace, threads=opt.threads)
 
         ljahdjkdahk 
         # assembly,reads needs to be changed
@@ -230,8 +227,12 @@ elif opt.fast_SVcalling is False and (opt.genomes_withSV_and_shortReads_table is
 
 
 
+    lajddjjdahh
+
     # get the real SVs
     real_svtype_to_file = fun.get_compatible_real_svtype_to_file(opt.genomes_withSV_and_shortReads_table, opt.ref, outdir_finding_realVars, species_treefile=opt.species_tree_closeGenomes, replace=opt.replace, threads=opt.threads, max_nvars=opt.nvars, realSV_calling_on=opt.realSV_calling_on, mitochondrial_chromosome=opt.mitochondrial_chromosome)
+
+
 
 
 else: 
