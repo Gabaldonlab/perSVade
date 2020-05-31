@@ -225,24 +225,33 @@ def id_generator(size=10, chars=string.ascii_uppercase + string.digits, already_
 
     return ID
 
-
 def find_nearest(a, a0):
-
     """Element in nd array `a` closest to the scalar value `a0`"""
     
-    # Debug elements that are inf
-    if a0 not in [np.inf, -np.inf]:
-        a = np.array(a)
-        idx = np.abs(a - a0).argmin()
-        closest_in_a = a.flat[idx]
-        
-    elif a0==np.inf:
-        closest_in_a = max(a)
-        
-    elif a0==-np.inf:
-        closest_in_a = min(a)        
+    if type(a0) in {float, int}:
+
+        # Debug elements that are inf
+        if a0 not in [np.inf, -np.inf]:
+            a = np.array(a)
+            idx = np.abs(a - a0).argmin()
+            closest_in_a = a.flat[idx]
+            
+        elif a0==np.inf:
+            closest_in_a = max(a)
+            
+        elif a0==-np.inf:
+            closest_in_a = min(a)        
+
+    elif type(a0) in {bool, str, tuple}:
+
+        # return the value in a that has the exact same value
+        if a0 in a: closest_in_a = a0
+        else: raise ValueError("%s can't be found in %s"%(a0, a))
+
+    else: raise ValueError("%s is not a valid type for find_nearest function"%(a0))
 
     return closest_in_a
+
 
 def chunks(l, n):
     
@@ -1858,12 +1867,6 @@ def rearrange_genomes_simulateSV(reference_genome, outdir, replace=False, nvars=
 
     return final_svtype_to_svfile, final_rearranged_genome
 
-    
-
-    
-
-
-
 def get_int_or_float_as_text(number):
 
     """Formats numbers"""
@@ -2536,8 +2539,6 @@ def get_gridssDF_filtered_from_filtersDict(df_gridss, filters_dict):
     df_filt = get_gridssDF_filtered(df_gridss, min_Nfragments=filters_dict["min_Nfragments"], min_af=filters_dict["min_af"], wrong_INFOtags=filters_dict["wrong_INFOtags"], wrong_FILTERtags=filters_dict["wrong_FILTERtags"], filter_polyGC=filters_dict["filter_polyGC"], filter_noSplitReads=filters_dict["filter_noSplitReads"], filter_noReadPairs=filters_dict["filter_noReadPairs"], maximum_strand_bias=filters_dict["maximum_strand_bias"], maximum_microhomology=filters_dict["maximum_microhomology"], maximum_lenght_inexactHomology=filters_dict["maximum_lenght_inexactHomology"], range_filt_DEL_breakpoints=filters_dict["range_filt_DEL_breakpoints"], min_length_inversions=filters_dict["min_length_inversions"], dif_between_insert_and_del=filters_dict["dif_between_insert_and_del"], max_to_be_considered_small_event=filters_dict["max_to_be_considered_small_event"], min_size=filters_dict["min_size"], add_columns=False, min_af_EitherSmallOrLargeEvent=filters_dict["min_af_EitherSmallOrLargeEvent"] )
 
     return df_filt
-
-
 
 def get_bedpe_from_svVCF(svVCF, outdir, replace=False, only_simple_conversion=False):
 
@@ -3584,7 +3585,7 @@ def write_clove_df_into_bedORbedpe_files_like_RSVSim(df_clove, fileprefix, refer
     if any([x in set(df_clove.SVTYPE) for x in {"CID", "CIT", "DUP", "TRA"}]) and "insertions" in svtypes_to_consider:
 
         # get the df
-        df_ins = df_clove[df_clove.SVTYPE.isin({"CID", "CIT", "DUP", "TRA"})][["#CHROM", "POS", "CHR2", "START", "END", "ID", "SVTYPE", "coverage_FILTER"]]
+        df_ins = df_clove[df_clove.SVTYPE.isin({"CID", "CIT", "DUP", "TRA"})][[f for f in ["#CHROM", "POS", "CHR2", "START", "END", "ID", "SVTYPE", "coverage_FILTER"] if f in df_clove.keys()]]
 
         # rename
         df_ins = df_ins.rename(columns={"#CHROM":"ChrB", "POS":"StartB", "CHR2":"ChrA", "START":"StartA", "END":"EndA"})
@@ -4752,6 +4753,7 @@ def get_is_matching_predicted_and_known_rows(rk, rp, equal_fields, approximate_f
 
     """Takes a row of a knownID (rk) and a predictedID (rp) and returns a boolean indicating if they match. These rk and rp can be any dict-like structures that have the expected equal_fields and so."""
 
+
     # ask if the equal fields match
     equal_fields_match = all([rp[f]==rk[f] for f in equal_fields])
 
@@ -4939,7 +4941,6 @@ def get_best_most_conservative_row_df_benchmark(df_benchmark):
 
 
     raise ValueError("There is not a single best filtering")
-
 
 all_svs = {'translocations', 'insertions', 'deletions', 'inversions', 'tandemDuplications', 'remaining'}
 def get_integrated_benchmarking_fields_series_for_setFilters_df(df):
@@ -5531,12 +5532,11 @@ def get_svIDs_inMoreThan1species(ID_to_svtype_to_svDF):
     
 def prune_IDtoSVTYPEtoDF_keeping_HighConfidenceVars(ID_to_svtype_to_svDF, df_samples, min_af_TraInvDel=0.7, min_af_Tan=0.5, min_af_Ins=0.3):
 
-    """This function takes a df that maps and ID to an svtypes to df and only keeps those that are High Confidence. These are vars that are both:
+    """This function takes a df that maps and ID to an svtypes to df and only keeps those that are High Confidence. These are vars that are either:
 
-    - found in any of the IDs of the same sampleID in df_samples
-    - The minimum allele frequency across all the breakends is above the min_af_TraInvDel, min_af_TanInscut or min_af_Inscopy (depending on the svtype).
-
-    - The minimum allele frequency of all breakends is above min_af and the filter is PASS"""
+    - found in all of the IDs of the same sampleID in df_samples
+    - The minimum allele frequency across all the breakends is above the min_af_TraInvDel, min_af_TanInscut or min_af_Inscopy (depending on the svtype) and all breakpends are PASS
+    """
 
     # first add the svID to each var. This is an ID that represents this variant across all sampleIDs, so that if there is a var overlapping across 2 samples it will have the same svID
 
@@ -5557,7 +5557,7 @@ def prune_IDtoSVTYPEtoDF_keeping_HighConfidenceVars(ID_to_svtype_to_svDF, df_sam
             else:   
 
                 # add whether the var is in any of the replicate IDs 
-                svDF["sv_in_any_replicateIDs"] = svDF.svID.apply(lambda svID: any([svID in ID_to_svIDs[repID] for repID in ID_to_replicateIDs[ID]]))
+                svDF["sv_in_all_replicateIDs"] = svDF.svID.apply(lambda svID: all([svID in ID_to_svIDs[repID] for repID in ID_to_replicateIDs[ID]]))
 
                 # add whether the breakends are all PASS
                 svDF["all_bends_PASS"] = svDF.apply(lambda r: set.union(*[set([bend_info["FILTER"] for bend_info in list_breakend_info]) for list_breakend_info in r["bends_metadata_dict"].values()])=={"PASS"}, axis=1)
@@ -5571,7 +5571,7 @@ def prune_IDtoSVTYPEtoDF_keeping_HighConfidenceVars(ID_to_svtype_to_svDF, df_sam
                 svDF["highAF"] = (svDF.estimate_AF_min>=min_af)
 
                 # define those that have high confidence as those that have the correct af and are in all replicateIDs
-                svDF["high_confidence"] = (svDF.highAF) & (svDF.sv_in_any_replicateIDs)
+                svDF["high_confidence"] = (svDF.sv_in_all_replicateIDs) | ((svDF.highAF) & (svDF.all_bends_PASS))
 
                 # keep the df that has high confidence
                 ID_to_svtype_to_svDF[ID][svtype] = svDF[svDF.high_confidence]
@@ -5757,7 +5757,7 @@ def get_compatible_real_svtype_to_file(close_shortReads_table, reference_genome,
 
 
                 # if this number exceeds the number of variants it will chop the df
-                if len(compatible_svDF)>max_nvars: compatible_svDF = compatible_svDF.iloc[0:real_max_nvars]
+                if len(compatible_svDF)>max_nvars: compatible_svDF = compatible_svDF.iloc[0:max_nvars]
 
 
             print("Defining %i compatible %s"%(len(compatible_svDF), svtype))
@@ -6238,6 +6238,987 @@ def simulate_and_align_PairedReads_perWindow(df_windows, genome_interest, refere
 
     return sim_sorted_bam
 
+
+def get_fractions_reads_for_ploidy(ploidy):
+
+    """Takes a ploidy and returns the fraction_var and fraction_ref."""
+
+    # define the fraction of reads that come from each genome
+    if ploidy in {"haploid", "diploid_homo"}:
+
+        fraction_var = 1.0
+        fraction_ref = 0.0
+
+    elif ploidy=="diploid_hetero":
+
+        fraction_var = 0.5
+        fraction_ref = 0.5 
+
+    else:
+
+        # These are specific combinations of genomes (polyploids or populations)
+        try:
+            typeGenome_to_ncopies = {x.split(":")[0] : int(x.split(":")[1]) for x in ploidy.split("_")}
+            typeGenome_to_fraction_reads = {type_genome: ncopies / sum(typeGenome_to_ncopies.values()) for type_genome, ncopies in typeGenome_to_ncopies.items()}
+
+        except: raise ValueError("ploidy %s is incorrect. The format is ref:2_var:1 , which would be one copy of variant genome for every two copies of reference genome"%ploidy)
+        
+        fraction_var = typeGenome_to_fraction_reads["var"]
+        fraction_ref = typeGenome_to_fraction_reads["ref"]
+
+    return fraction_var, fraction_ref
+
+
+
+def merge_2bams(bamA, bamB, merged, threads=4):
+
+    """Merges two bams"""
+    remove_file(merged)
+
+    print("merging %s and %s into %s"%(bamA, bamB, merged))
+    run_cmd("%s merge --threads %i %s %s %s"%(samtools, threads, merged, bamA, bamB))
+
+def sort_bam(bam, sorted_bam, threads=4):
+
+    """Sorts a bam file into sorted_bam"""
+
+    print("sorting bam")
+    run_cmd("%s sort --threads %i -o %s %s"%(samtools, threads, sorted_bam, bam))
+
+def index_bam(bam, threads=4):
+
+    """indexes bam and creates a .bai file"""
+
+    print("indexing bam")
+    run_cmd("%s index -@ %i %s"%(samtools, threads, bam))
+
+
+def merge_2bams_sort_and_index(bamfileA, bamfileB, merged_bam, merged_sorted_bam, merged_sorted_bam_index, threads=4):
+
+    """Takes two bams and merges them. writes files under merged_bam_prefix"""
+
+    # first merge
+    merge_2bams(bamfileA, bamfileB, merged_bam, threads=threads)
+
+    # sort 
+    sort_bam(merged_bam, merged_sorted_bam, threads=threads)
+
+    # index
+    index_bam(merged_sorted_bam, threads=threads)
+
+    # remove the unsorted bam
+    remove_file(merged_bam)
+
+
+def get_merged_bamfile_for_ploidy(variant_bamfile, reference_bamfile, ploidy, replace=False, threads=4):
+
+    """This function takes two bam files, one that includes aligned reads for a reference genome and another that includes aligned reads for a variat genome. It subsamples each of the bamfiles so that there is a proportion of reads comming from each reference and variant, and the proportion is indicated by ploidy, which can be any of the strings in the default values of target_ploidies of run_GridssClove_optimising_parameters."""
+
+    print("merging %s and %s in ploidy %s"%(variant_bamfile, reference_bamfile, ploidy))
+
+    # initialize counter
+    start_time = time.time()
+
+    # haploid means only variant
+    if ploidy=="haploid": merged_sorted_bam = variant_bamfile
+
+    # in all the other cases, do some merging
+    else:
+
+        # define the expected files
+        merged_bam = "%s.%s.bam"%(variant_bamfile, ploidy)
+        merged_sorted_bam = "%s.sorted"%merged_bam
+        merged_sorted_bam_index = "%s.bai"%merged_sorted_bam
+
+        if any([file_is_empty(f) for f in [merged_sorted_bam, merged_sorted_bam_index]]) or replace is True:
+
+            # FIRST DEFINE TWO BAMFILES
+
+            # diploid homo is merging a subset of 50% of reads for each variant_bamfile
+            if ploidy=="diploid_homo":
+
+                # simulate 50% of reads for each the variant
+                bamfileA = downsample_bamfile_keeping_pairs(variant_bamfile, fraction_reads=0.5, replace=replace, threads=threads, name="varGenomeA")
+                bamfileB = downsample_bamfile_keeping_pairs(variant_bamfile, fraction_reads=0.5, replace=replace, threads=threads, name="varGenomeB")
+
+            # all the situations where you have a combination of reference and variant genomes
+            else:
+
+                # get the fractions of reads
+                fraction_var, fraction_ref = get_fractions_reads_for_ploidy(ploidy)
+
+                # simulate the reads for the giiven fraction
+                bamfileA = downsample_bamfile_keeping_pairs(variant_bamfile, fraction_reads=fraction_var, replace=replace, threads=threads, name="varGenome")
+                bamfileB = downsample_bamfile_keeping_pairs(reference_bamfile, fraction_reads=fraction_ref, replace=replace, threads=threads, name="refGenome")
+
+            # NOW MERGE, SORT and INDEX
+            merge_2bams_sort_and_index(bamfileA, bamfileB, merged_bam, merged_sorted_bam, merged_sorted_bam_index, threads=threads)
+
+            # FINALLY REMOVE THE SAMPLED BAMFILES
+            for f in [bamfileA, bamfileB]: remove_file(f)
+
+    # get the time the function took to run
+    print("--- merging took for ploidy %s reads took %s seconds ---"%(ploidy, time.time() - start_time))
+
+    return merged_sorted_bam
+
+def get_tupleBreakpoints_for_filters_GRIDSS(df_gridss, filters_dict, return_timing=False):
+
+    """ Takes a df_gridss (the output vcf) and a dictionary with filters, returning a tuple of the breakpoints where both breakends have passed the filters."""
+
+    # initialize time
+    start_time = time.time()
+
+    # debug the fact that there is no min_af_EitherSmallOrLargeEvent
+    if "min_af_EitherSmallOrLargeEvent" not in filters_dict: filters_dict["min_af_EitherSmallOrLargeEvent"] = 0.0
+
+    # get the filtered df
+    df_filt = get_gridssDF_filtered(df_gridss, min_Nfragments=filters_dict["min_Nfragments"], min_af=filters_dict["min_af"], wrong_INFOtags=filters_dict["wrong_INFOtags"], wrong_FILTERtags=filters_dict["wrong_FILTERtags"], filter_polyGC=filters_dict["filter_polyGC"], filter_noSplitReads=filters_dict["filter_noSplitReads"], filter_noReadPairs=filters_dict["filter_noReadPairs"], maximum_strand_bias=filters_dict["maximum_strand_bias"], maximum_microhomology=filters_dict["maximum_microhomology"], maximum_lenght_inexactHomology=filters_dict["maximum_lenght_inexactHomology"], range_filt_DEL_breakpoints=filters_dict["range_filt_DEL_breakpoints"], min_length_inversions=filters_dict["min_length_inversions"], dif_between_insert_and_del=filters_dict["dif_between_insert_and_del"], max_to_be_considered_small_event=filters_dict["max_to_be_considered_small_event"], min_size=filters_dict["min_size"], add_columns=False, min_af_EitherSmallOrLargeEvent=filters_dict["min_af_EitherSmallOrLargeEvent"] )
+
+    # get the breakpoints that have both breakends
+    correct_breakpoints = tuple(sorted([bp for bp, N in Counter(df_filt.breakpointID).items() if N==2]))
+
+    if return_timing: return  (time.time() - start_time)
+    else: return correct_breakpoints
+
+def keep_relevant_filters_lists_inparallel(filterName_to_filtersList, df_gridss, type_filtering="keeping_all_filters_that_change",  wrong_INFOtags=("IMPRECISE",), min_size=50):
+
+    """Takes a dictionary that maps the filterName to the list of possible filters. It modifies each of the lists in filterName_to_filtersList in a way that only those values that yield a unique set of breakpoints when being applied in the context of a set breakpoints. The final set of filters taken are the most conservative of each. """
+
+    # define a set of filters that are very unconservative (they take all the breakpoints)
+    unconservative_filterName_to_filter = {"min_Nfragments":-1, "min_af":-1, "wrong_FILTERtags":("",), "filter_polyGC":False, "filter_noSplitReads":False, "filter_noReadPairs":False, "maximum_strand_bias":1.1, "maximum_microhomology":1000000000000, "maximum_lenght_inexactHomology":1000000000000, "range_filt_DEL_breakpoints":(0,1), "min_length_inversions":-1, "dif_between_insert_and_del":0, "max_to_be_considered_small_event":1, "wrong_INFOtags":wrong_INFOtags, "min_size":min_size, "min_af_EitherSmallOrLargeEvent":-1}
+
+    # define an unconservative set of breakpoints
+    unconservative_breakpoints = tuple(sorted([bp for bp, N in Counter(df_gridss.breakpointID).items() if N==2]))
+    print("There are %i bp in total"%len(unconservative_breakpoints))
+
+    # define a list of filters dict, only changing one of the values in filterName_to_filtersList, recording at the same time an ID
+    filters_dict_list = [] # a list of filterDicts
+    filter_changing_list = [] # a list of (filterName, value) tuples
+    for filterName, filtersList in filterName_to_filtersList.items():
+        for filterVal in filtersList:
+
+            # define the changed dict in a copy of the unconservative one
+            filters_dict = cp.deepcopy(unconservative_filterName_to_filter)
+            filters_dict[filterName] = filterVal
+
+            # keep  
+            filter_changing_list.append((filterName, filterVal))
+            filters_dict_list.append(filters_dict)
+
+    # run in a map or a pool the obtention of tuples of breakpoints for each parameter combination
+    inputs_fn = [(df_gridss, fd) for fd in filters_dict_list]
+
+    # pool
+    with  multiproc.Pool(multiproc.cpu_count()) as pool:
+        bp_tuples_list = pool.starmap(get_tupleBreakpoints_for_filters_GRIDSS, inputs_fn)
+        pool.close()
+
+    # map
+    #bp_tuples_list = list(map(lambda x: get_tupleBreakpoints_for_filters_GRIDSS(x[0], x[1]), inputs_fn))
+
+    # map the filter changing to the dict and the breakpoints
+    filterChanging_to_filtersDict = dict(zip(filter_changing_list, filters_dict_list))
+    filterChanging_to_breakpoints = dict(zip(filter_changing_list, bp_tuples_list))
+
+    # get those filters that change the df
+    if type_filtering=="keeping_all_filters_that_change":
+
+        # go through each parameter combination
+        for (filterName, filterValue), breakpoints in filterChanging_to_breakpoints.items():
+
+            # if it is the same, remove from 
+            if (breakpoints==unconservative_breakpoints or len(breakpoints)==0) and len(filterName_to_filtersList[filterName])>1: filterName_to_filtersList[filterName].remove(filterValue)
+
+    # get those filters that yield a unique set of BPs
+    elif type_filtering=="keeping_filters_that_yield_uniqueBPs":
+
+        # go through each filter type, and edit filtersList to keep the ones that yield a unique set of breakpoints
+        for filterName, filtersList in filterName_to_filtersList.items():
+
+            # define the filtersChanginIDs for this filter
+            filterChanging_IDs = set([ID for ID in filterChanging_to_breakpoints if ID[0]==filterName])
+
+            # get the lists of breakpoints and filtersDicts
+            filtersDict_list = [filterChanging_to_filtersDict[ID] for ID in filterChanging_IDs]
+            breakpoints_list = [filterChanging_to_breakpoints[ID] for ID in filterChanging_IDs]
+
+            # map each unique breakpoints to a list of the dicts that change it
+            bpointTuple_to_filterDicts = {}
+            for bpointTuple, filterDict in zip(breakpoints_list, filtersDict_list): bpointTuple_to_filterDicts.setdefault(bpointTuple, []).append(filterDict)
+
+            # for each set, get the most conservative dict, and so extract the value of filterName
+            all_filter_values_unique = set([get_represenative_filtersDict_for_filtersDict_list(list_unique_filter_dicts, type_filters="most_conservative")[filterName] for list_unique_filter_dicts in bpointTuple_to_filterDicts.values()])
+
+            # edit filterslist to keep only the unique filter values
+            all_non_unique_vals = cp.deepcopy(set(filtersList).difference(all_filter_values_unique))
+            for useless_filter_value in all_non_unique_vals: filtersList.remove(useless_filter_value)
+
+    elif "none": pass
+
+    else: raise ValueError("%s is not valid"%type_filtering)
+
+def write_bedpeANDfilterdicts_for_breakpoints(df_bedpe, breakpoints, filterDicts, outdir):
+
+    """Takes a df_bedpe that is already filtered (only has the fields to write) and it writes the breakpoints into outdir. It also writes a series with the most conservative filter set that gace with the filters that have rise to this bedpe"""
+
+    # define the folder
+    make_folder(outdir)
+
+    # write bedpe
+    bedpe_file = "%s/filtered_breakpoints.bedpe"%outdir
+    df_bedpe[df_bedpe.name.isin(breakpoints)].to_csv(bedpe_file, sep="\t", header=False, index=False)
+
+    # get the name of the folder as a file
+    outdir_name = outdir.split("/")[-1]
+
+    # get the less conservative filterdict
+    less_conservative_filtersDict = get_represenative_filtersDict_for_filtersDict_list(filterDicts, type_filters="most_conservative")
+    save_object(less_conservative_filtersDict, "%s/most_conservative_filtersDict.py"%outdir)
+
+def write_breakpoints_for_parameter_combinations_and_get_filterIDtoBpoints_gridss(df_gridss, df_bedpe, outdir, range_filtering="theoretically_meaningful", expected_AF=1.0, replace=False):
+
+    """Gets, for a range of filters defined byrange_filtering, a dictionary that maps a string defining all these filters to a df that has the filtered breakpoints (bedpe) . If range_filtering is large, we expect ~13 h to run on 48 cores for the Candida glabrata genome"""
+
+    # define files that will be written at the end of this function
+    filtersID_to_breakpoints_file  = "%s/filtersID_to_breakpoints_file.py"%outdir
+
+    print("getting lists of bedpe breakpoints")
+
+    if any([file_is_empty(f) for f in [filtersID_to_breakpoints_file]]) or replace is True:
+
+        ##### WORK WITH DF_BEDPE ########
+
+        # map each brekendID to the breakpointID
+        all_bend_IDs = set.union(*df_bedpe.IDs_set)
+        bendID_to_bpointID = {bendID : df_bedpe[df_bedpe.IDs_set.apply(lambda IDs_set: bendID in IDs_set)].iloc[0]["name"] for bendID in df_gridss.ID if bendID in all_bend_IDs}
+
+        # get only breakends that are in bendID_to_bpointID, meaning that there are 2 breakends
+        df_gridss_twoBreakEnds = df_gridss[df_gridss.ID.isin(bendID_to_bpointID)]
+        df_gridss_twoBreakEnds["breakpointID"] = df_gridss_twoBreakEnds.ID.apply(lambda x: bendID_to_bpointID[x])
+        df_gridss_twoBreakEnds = df_gridss_twoBreakEnds.set_index("ID")[["INFO_SIMPLE_TYPE", "length_event", "allele_frequency", "allele_frequency_SmallEvent", "DATA_VF", "INFO_misc", "FILTER", "INFO_SB", "length_microHomology", "length_inexactHomology", "len_inserted_sequence", "has_poly16GC", "DATA_SR", "DATA_RP", "breakpointID", "real_AF"]]
+
+        # check that all breakpoints have two breakends in the df
+        if set(Counter(df_gridss_twoBreakEnds["breakpointID"]).values())!={2}: raise ValueError("Not all breakpoints have 2 brekends")
+        
+        #################################
+
+        # initialize all filter tags
+        all_FILTER_tags = ("ASSEMBLY_ONLY", "NO_ASSEMBLY", "ASSEMBLY_TOO_FEW_READ", "ASSEMBLY_TOO_SHORT", "INSUFFICIENT_SUPPORT", "LOW_QUAL", "REF", "SINGLE_ASSEMBLY")
+
+        # I discard the following filters with these reasons:
+
+        """
+        - ASSEMBLY_ONLY is fine, as it is likely that this is enough evidence
+        - ASSEMBLY_TOO_FEW_READ. The read correction is already done with the filter min_Nfragments
+        - ASSEMBLY_TOO_SHORT. This is already considered in min_size
+        - REF: This is already considered in min_af
+        - SINGLE_ASSEMBLY: this is already considered given that we filterout breakpoints where one breakend is discarded
+        - SINGLE_SUPPORT: already considered from min_Nfragments_l
+
+        In the gridss-purple-linx paper they filter out if there is NO_ASSEMBLY, in the GenomeBiology benchmark they filter if there is LOW_QUAL;NO_ASSEMBLY. Thus, I always filter by NO_ASSEMBLY
+        """
+        meaningful_FILTER_tags = ("NO_ASSEMBLY", "INSUFFICIENT_SUPPORT", "LOW_QUAL")
+
+        # define arrays of parameters, depending on range_filtering
+        if range_filtering=="large":
+
+            min_Nfragments_l = [0, 1, 2, 3, 4, 5, 8, 10, 15, 20, 30]
+            min_af_l = [0.0, 0.01, 0.05, 0.1, 0.2, 0.5, expected_AF*0.9]
+            min_af_EitherSmallOrLargeEvent_l = min_af_l
+            wrong_FILTERtags_l = [("",), ("NO_ASSEMBLY",), ("NO_ASSEMBLY", "INSUFFICIENT_SUPPORT"), ("NO_ASSEMBLY", "LOW_QUAL"), ("LOW_QUAL", "INSUFFICIENT_SUPPORT"), all_FILTER_tags, meaningful_FILTER_tags] 
+            filter_polyGC_l = [True, False]
+            filter_noSplitReads_l = [True, False]
+            filter_noReadPairs_l = [True, False]
+            maximum_strand_bias_l = [0.9, 0.95, 0.99, 1.0]
+            maximum_microhomology_l = [10, 50, 100, 200, 1000, 100000000]
+            maximum_lenght_inexactHomology_l = [10, 50, 100, 200, 1000, 10000000]
+            range_filt_DEL_breakpoints_l = [(100, 800), (50, 900), (200, 700), (0,1)]
+            min_length_inversions_l = [0, 40, 50, 60, 70, 10000]
+            dif_between_insert_and_del_l = [0, 1, 5, 10, 20, 10000000]
+            max_to_be_considered_small_event_l = [1, 100, 200, 500, 1000, 1500, 1000000000]
+
+        elif range_filtering=="medium":
+
+            min_Nfragments_l = [5, 8, 10]
+            min_af_l = [0.05, 0.1, expected_AF*0.9]
+            min_af_EitherSmallOrLargeEvent_l = min_af_l
+            wrong_FILTERtags_l = [("",), ("NO_ASSEMBLY",), ("NO_ASSEMBLY", "LOW_QUAL"), all_FILTER_tags] 
+            filter_polyGC_l = [True]
+            filter_noSplitReads_l = [True]
+            filter_noReadPairs_l = [True]
+            maximum_strand_bias_l = [0.95]
+            maximum_microhomology_l = [10, 50, 100]
+            maximum_lenght_inexactHomology_l = [10, 50, 100]
+            range_filt_DEL_breakpoints_l = [(100, 800), (50, 900), (200, 700)]
+            min_length_inversions_l = [40, 50, 60]
+            dif_between_insert_and_del_l = [5, 10, 20]
+            max_to_be_considered_small_event_l = [200, 500, 1000]
+
+        elif range_filtering=="small":
+
+            min_Nfragments_l = [5, 10]
+            min_af_l = [0.05, expected_AF*0.9]
+            min_af_EitherSmallOrLargeEvent_l = min_af_l
+            wrong_FILTERtags_l = [("",), all_FILTER_tags] 
+            filter_polyGC_l = [True]
+            filter_noSplitReads_l = [True]
+            filter_noReadPairs_l = [True]
+            maximum_strand_bias_l = [0.95]
+            maximum_microhomology_l = [50]
+            maximum_lenght_inexactHomology_l = [50]
+            range_filt_DEL_breakpoints_l = [(100, 800)]
+            min_length_inversions_l = [40, 50]
+            dif_between_insert_and_del_l = [5, 10]
+            max_to_be_considered_small_event_l = [1000]
+
+        elif range_filtering=="theoretically_meaningful":
+
+            min_Nfragments_l = [5, 8, 10, 15, 20, 30]
+            min_af_l = [0.05, 0.1, 0.2, 0.5, expected_AF*0.9]
+            min_af_EitherSmallOrLargeEvent_l = min_af_l
+            wrong_FILTERtags_l = [("",), ("NO_ASSEMBLY",), ("NO_ASSEMBLY", "INSUFFICIENT_SUPPORT"), ("NO_ASSEMBLY", "LOW_QUAL"), ("LOW_QUAL", "INSUFFICIENT_SUPPORT"), all_FILTER_tags, meaningful_FILTER_tags] 
+            filter_polyGC_l = [True]
+            filter_noSplitReads_l = [True, False]
+            filter_noReadPairs_l = [True, False]
+            maximum_strand_bias_l = [0.9, 0.95]
+            maximum_microhomology_l = [100, 200, 1000, 100000000]
+            maximum_lenght_inexactHomology_l = [100, 200, 1000, 10000000]
+            range_filt_DEL_breakpoints_l = [(100, 800), (50, 900), (200, 700), (0,1)]
+            min_length_inversions_l = [0, 50, 1000000000]
+            dif_between_insert_and_del_l = [0, 5, 10, 1000000000]
+            max_to_be_considered_small_event_l = [100, 200, 500, 1000, 1500, 1000000000]
+
+        elif range_filtering=="single":
+
+            min_Nfragments_l = [8]
+            min_af_l = [0.05]
+            min_af_EitherSmallOrLargeEvent_l = min_af_l
+            wrong_FILTERtags_l = [("NO_ASSEMBLY",)] 
+            filter_polyGC_l = [True]
+            filter_noSplitReads_l = [True]
+            filter_noReadPairs_l = [True]
+            maximum_strand_bias_l = [0.95]
+            maximum_microhomology_l = [50]
+            maximum_lenght_inexactHomology_l = [50]
+            range_filt_DEL_breakpoints_l = [(100, 800)]
+            min_length_inversions_l = [40]
+            dif_between_insert_and_del_l = [5]
+            max_to_be_considered_small_event_l = [1000]
+
+        else: raise ValueError("%s is not a valid range_filtering parameter, it has to be 'large', 'medium', 'small' or 'single' "%range_filtering)
+
+        # define filters that are always the same
+        wrong_INFOtags = ("IMPRECISE",)
+        min_size = 50
+
+        # map the filters through a dict
+        filterName_to_filtersList = {"min_Nfragments":min_Nfragments_l, "min_af":min_af_l, "wrong_FILTERtags":wrong_FILTERtags_l, "filter_polyGC":filter_polyGC_l, "filter_noSplitReads":filter_noSplitReads_l, "filter_noReadPairs":filter_noReadPairs_l, "maximum_strand_bias":maximum_strand_bias_l, "maximum_microhomology":maximum_microhomology_l, "maximum_lenght_inexactHomology":maximum_lenght_inexactHomology_l, "range_filt_DEL_breakpoints":range_filt_DEL_breakpoints_l, "min_length_inversions":min_length_inversions_l, "dif_between_insert_and_del":dif_between_insert_and_del_l, "max_to_be_considered_small_event":max_to_be_considered_small_event_l, "min_af_EitherSmallOrLargeEvent":min_af_EitherSmallOrLargeEvent_l}
+
+        # edit the filter list, to keep only those that, when applied, change the called breakpoints
+        keep_relevant_filters_lists_inparallel(filterName_to_filtersList, df_gridss_twoBreakEnds, type_filtering="keeping_filters_that_yield_uniqueBPs", wrong_INFOtags=wrong_INFOtags, min_size=min_size) # it can also be keeping_all_filters_that_change or keeping_filters_that_yield_uniqueBPs or none
+
+        # initialize objects to store the filtering
+        I = 1
+        filters_dict_list = []
+
+        # go through each range of filters
+        print("generating dictionaries of filters")
+        for min_Nfragments in min_Nfragments_l:
+          for min_af in min_af_l:
+            for min_af_EitherSmallOrLargeEvent in min_af_EitherSmallOrLargeEvent_l:
+                for wrong_FILTERtags in wrong_FILTERtags_l:
+                  for filter_polyGC in filter_polyGC_l:
+                    for filter_noSplitReads in filter_noSplitReads_l:
+                      for filter_noReadPairs in filter_noReadPairs_l:
+                        for maximum_strand_bias in maximum_strand_bias_l:
+                          for maximum_microhomology in maximum_microhomology_l:
+                            for maximum_lenght_inexactHomology in maximum_lenght_inexactHomology_l:
+                              for range_filt_DEL_breakpoints in range_filt_DEL_breakpoints_l:
+                                for min_length_inversions in min_length_inversions_l:
+                                  for dif_between_insert_and_del in dif_between_insert_and_del_l:
+                                    for max_to_be_considered_small_event in max_to_be_considered_small_event_l:
+
+                                        #print("filter %i"%I)
+                                        I+=1
+
+                                        # get the parameters_dict
+                                        filters_dict = dict(min_Nfragments=min_Nfragments, min_af=min_af, wrong_INFOtags=wrong_INFOtags, wrong_FILTERtags=wrong_FILTERtags, filter_polyGC=filter_polyGC, filter_noSplitReads=filter_noSplitReads, filter_noReadPairs=filter_noReadPairs, maximum_strand_bias=maximum_strand_bias, maximum_microhomology=maximum_microhomology, maximum_lenght_inexactHomology=maximum_lenght_inexactHomology, range_filt_DEL_breakpoints=range_filt_DEL_breakpoints, min_length_inversions=min_length_inversions, dif_between_insert_and_del=dif_between_insert_and_del, max_to_be_considered_small_event=max_to_be_considered_small_event, min_size=min_size, min_af_EitherSmallOrLargeEvent=min_af_EitherSmallOrLargeEvent)
+
+                                        # keep
+                                        filters_dict_list.append(filters_dict)
+        
+        print("There are %i combinations of parameters"%I)
+
+        # first try for some combinations, which will give you the timing 
+        times = [get_tupleBreakpoints_for_filters_GRIDSS(df_gridss_twoBreakEnds, filters_dict, return_timing=True) for filters_dict in random.sample(filters_dict_list, min(10, len(filters_dict_list)))]
+        ncores = multiproc.cpu_count()
+        print("Obtaining the list of tuples of breakpoints will take arround %.2f minutes on %i cores"%(((np.mean(times)*I)/ncores)/60, ncores))
+
+
+        # obtain the list of tuples for each parameter combintaion
+        with  multiproc.Pool(multiproc.cpu_count()) as pool:
+            bp_tuples_list = pool.starmap(get_tupleBreakpoints_for_filters_GRIDSS, [(df_gridss_twoBreakEnds, fd) for fd in filters_dict_list])
+            pool.close()
+
+        # map each tuple o bp to the dicts of parameters that gave it
+        bpointTuple_to_filterDicts = {}
+        for bpointTuple, filterDict in zip(bp_tuples_list, filters_dict_list): 
+            if len(bpointTuple)>0: bpointTuple_to_filterDicts.setdefault(bpointTuple, []).append(filterDict)
+        print("There are %i sets of breakpoints that can be created with %i combinations of parameters"%(len(bpointTuple_to_filterDicts), I))
+
+        # map each tuple pf breakpoints to an ID that will be saved
+        bpoints_to_ID = dict(zip(bpointTuple_to_filterDicts.keys(), map(lambda I: "filters_%i"%I, range(len(bpointTuple_to_filterDicts)))))
+
+        # generate under otdir all the breakpoints from df_bedpe
+        print("writing bedpefiles")
+        bedpe_fields = ["chrom1", "start1", "end1", "chrom2", "start2", "end2", "name", "score", "strand1", "strand2"]
+        df_bedpe = df_bedpe[bedpe_fields]
+        
+        # run generation
+        inputs_function = [(df_bedpe, bpoints, filterDicts, "%s/%s"%(outdir, bpoints_to_ID[bpoints])) for bpoints, filterDicts in bpointTuple_to_filterDicts.items()]
+
+        with multiproc.Pool(multiproc.cpu_count()) as pool:
+            pool.starmap(write_bedpeANDfilterdicts_for_breakpoints, inputs_function)
+            pool.close()
+
+        # save the map between each filter 
+        print("writing files")
+        filtersID_to_breakpoints = dict(zip(bpoints_to_ID.values(), bpoints_to_ID.keys()))
+        save_object(filtersID_to_breakpoints, filtersID_to_breakpoints_file)
+
+    else: filtersID_to_breakpoints = load_object(filtersID_to_breakpoints_file)
+
+    # return the dataframe with all the parameter combinations and the filter
+    return filtersID_to_breakpoints
+
+def benchmark_bedpe_with_knownSVs(bedpe, know_SV_dict, reference_genome, sorted_bam, median_coverage, replace=False, ID_benchmark="defaultID", delete_intermediate_files=True):
+
+    """Takes the full path to a bedpe file and generates files, under the same directory, that indicate the benchmarking."""
+
+    # write files under the bedpe outdir
+    outdir = "/".join(bedpe.split("/")[0:-1])
+    bedpe_filename = bedpe.split("/")[-1]
+
+    # get the benchmark file
+    benchmark_df_filename = "%s/df_benchmarking_allParms.py"%outdir
+    #remove_file(benchmark_df_filename) # debug
+
+    if file_is_empty(benchmark_df_filename) or replace is True:
+    #if True: # debug
+
+        #print("running clove in %s"%outdir)
+        print("benchmarking")
+
+        # first run clove without checking for coverage deviations
+        outfile_clove = "%s.clove.vcf"%(bedpe)
+        run_clove_filtered_bedpe(bedpe, outfile_clove, sorted_bam, replace=replace, median_coverage=10, median_coverage_dev=1, check_coverage=False)
+
+        # now convert it to a df that has also the coverage for TANDEL REGIONS
+        df_clove = get_clove_output_with_coverage(outfile_clove, reference_genome, sorted_bam, median_coverage, replace=replace, run_in_parallel=True, delete_bams=False)
+
+        # add an arti
+
+        # initialize benchmark_df
+        df_benchmark_all = pd.DataFrame()
+
+        ##### BENCHMARK INSERTIONS, INVERSIONS and TRANSLOCATIONS ##########
+        #print("benchmarking insertions and inversions variants")
+        
+        # get files in a way that it is similar to RSVSim, only for complex variants
+        fileprefix = "%s/insertionsANDinversionsANDtranslocations"%(outdir)
+        remaining_df_clove, svtype_to_predsvfile = write_clove_df_into_bedORbedpe_files_like_RSVSim(df_clove, fileprefix, reference_genome, sorted_bam, replace=replace, svtypes_to_consider={"insertions", "inversions", "translocations"})
+        svtype_to_predsvfile_InsInvTra = {svtype : svtype_to_predsvfile[svtype] for svtype in {"insertions", "inversions", "translocations"} if svtype in svtype_to_predsvfile}
+        know_SV_dict_InsInvTra = {svtype : know_SV_dict[svtype] for svtype in {"insertions", "inversions", "translocations"} if svtype in know_SV_dict}
+
+        # benchmark (and write missing events with overlaps)
+        df_benchmark_InsInvTra = benchmark_processedSVs_against_knownSVs_inHouse(svtype_to_predsvfile_InsInvTra, know_SV_dict_InsInvTra, fileprefix, replace=replace, add_integrated_benchmarking=False) # this time you don't want the 'integrated thing'
+        
+        # keep
+        df_benchmark_all = df_benchmark_all.append(df_benchmark_InsInvTra, sort=True)
+
+        # add fields that are necessary to compare with the TANDEL df
+        df_benchmark_all["clove_max_rel_coverage_to_consider_del"] = [-1]*len(df_benchmark_all)
+        df_benchmark_all["clove_min_rel_coverage_to_consider_dup"] = [-1]*len(df_benchmark_all)
+
+
+        #########################################################################
+
+        # initialize a benchmark df for tandel
+        df_benchmark_TANDEL = pd.DataFrame()
+
+        ##### deletions #################
+
+        # get df
+        df_DEL = df_clove[df_clove.SVTYPE=="DEL"]
+
+        # go through different deletion ranges that define true deletion
+        max_rel_coverage_to_consider_del_l = [0.0, 0.0001, 0.001, 0.01, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.5, 0.6, 0.7, 0.9, 1.0]
+        for max_rel_coverage_to_consider_del in max_rel_coverage_to_consider_del_l:
+
+            # count the maximum coverage for the deletion
+            maxDELcoverage = int(max_rel_coverage_to_consider_del*median_coverage)
+
+            # define ID
+            coveragefiltID = "maxDELcoverage%i"%(maxDELcoverage)
+
+            # add the filter 
+            if len(df_DEL)>0: df_DEL["coverage_FILTER"] = df_DEL.apply(lambda r: get_covfilter_cloveDF_row_according_to_SVTYPE(r, max_rel_coverage_to_consider_del=max_rel_coverage_to_consider_del, min_rel_coverage_to_consider_dup=0), axis=1)
+            else: df_DEL["coverage_FILTER"] = []
+
+            # get a dict svtype_to_svfile
+            fileprefix = "%s/%s"%(outdir, coveragefiltID)
+            remaining_df_clove, svtype_to_predsvfile = write_clove_df_into_bedORbedpe_files_like_RSVSim(df_DEL, fileprefix, reference_genome, sorted_bam, replace=replace, svtypes_to_consider={"deletions"})
+
+            # benchmark
+            know_SV_dict_DEL = {svtype : know_SV_dict[svtype] for svtype in {"deletions"} if svtype in know_SV_dict}
+
+            df_benchmark = benchmark_processedSVs_against_knownSVs_inHouse(svtype_to_predsvfile, know_SV_dict_DEL, fileprefix, replace=replace, add_integrated_benchmarking=False)
+
+            df_benchmark["clove_max_rel_coverage_to_consider_del"] = [max_rel_coverage_to_consider_del]*len(df_benchmark)
+            df_benchmark["clove_min_rel_coverage_to_consider_dup"] = [-1]*len(df_benchmark)
+
+            # keep
+            df_benchmark_TANDEL = df_benchmark_TANDEL.append(df_benchmark, sort=True)
+
+        ################################
+
+        ##### tandem duplications ######
+
+        # get df
+        df_TAN = df_clove[df_clove.SVTYPE=="TAN"]
+
+        # go through different TAN ranges that define true TAN
+        min_rel_coverage_to_consider_dup_l = [0.0, 0.4, 0.5, 1.0, 1.5, 2.0, 2.5, 3.5]
+        for min_rel_coverage_to_consider_dup in min_rel_coverage_to_consider_dup_l:
+
+            # count the maximum coverage for the tan
+            minDUPcoverage = int(min_rel_coverage_to_consider_dup*median_coverage)
+
+            # define ID
+            coveragefiltID = "minDUPcoverage%i"%(minDUPcoverage)
+
+            # add the filter 
+            if len(df_TAN)>0: df_TAN["coverage_FILTER"] = df_TAN.apply(lambda r: get_covfilter_cloveDF_row_according_to_SVTYPE(r, max_rel_coverage_to_consider_del=1000000, min_rel_coverage_to_consider_dup=min_rel_coverage_to_consider_dup), axis=1)
+            else: df_TAN["coverage_FILTER"] = []
+
+            # get a dict svtype_to_svfile
+            fileprefix = "%s/%s"%(outdir, coveragefiltID)
+            remaining_df_clove, svtype_to_predsvfile = write_clove_df_into_bedORbedpe_files_like_RSVSim(df_TAN, fileprefix, reference_genome, sorted_bam, replace=replace, svtypes_to_consider={"tandemDuplications"})
+
+            # benchmark
+            know_SV_dict_TAN = {svtype : know_SV_dict[svtype] for svtype in {"tandemDuplications"} if svtype in know_SV_dict}
+
+            df_benchmark = benchmark_processedSVs_against_knownSVs_inHouse(svtype_to_predsvfile, know_SV_dict_TAN, fileprefix, replace=replace, add_integrated_benchmarking=False)
+            df_benchmark["clove_max_rel_coverage_to_consider_del"] = [-1]*len(df_benchmark)
+            df_benchmark["clove_min_rel_coverage_to_consider_dup"] = [min_rel_coverage_to_consider_dup]*len(df_benchmark)
+
+            # keep
+            df_benchmark_TANDEL = df_benchmark_TANDEL.append(df_benchmark, sort=True)
+
+        ################################
+
+        # keep
+        df_benchmark_all = df_benchmark_all.append(df_benchmark_TANDEL, sort=True)
+
+        # append both and return
+        df_benchmark_all["benchmarkID"] = [ID_benchmark]*len(df_benchmark_all)
+        df_benchmark_all["bedpe"] = [bedpe]*len(df_benchmark_all) # I changed this line at some point because it was raising integers
+
+        # add the parameters that yielded this dict
+        filters_dict = load_object("%s/most_conservative_filtersDict.py"%outdir)
+        df_benchmark_all["filters_dict"] = [filters_dict]*len(df_benchmark_all)
+
+        # save in disk
+        print("saving into %s"%benchmark_df_filename)
+        save_object(df_benchmark_all, benchmark_df_filename)
+
+    else: df_benchmark_all = load_object(benchmark_df_filename)
+
+    # delete intermediate fields
+    if delete_intermediate_files is True:
+
+        filenames_to_keep = {bedpe_filename, "%s.clove.vcf.TANDEL.bed.coverage_provided_windows.tab"%bedpe_filename, "unbalanced_translocations_5with5_or_3with3.bed.coverage_provided_windows.tab", "%s.clove.vcf"%bedpe_filename, "uniform_filters_series.py", "variable_filters_df.py", "df_benchmarking_allParms.py", "less_conservative_filtersDict.py"}
+
+        #for file in os.listdir(outdir):
+        #    if file not in filenames_to_keep and "benchmark_analysis_" not in file: remove_file("%s/%s"%(outdir, file))
+
+
+    return df_benchmark_all
+
+
+
+def merge_tables_into_file(list_table_files, outfile):
+
+    """Takes a list of table files and merges them into outfile"""
+    
+    if len(list_table_files)>0:
+
+        df = pd.concat([pd.read_csv(x, sep="\t") for x in list_table_files if os.path.isfile(x)], sort=True)
+
+        # check that the outilfe is not in the list_table_files
+        if outfile in list_table_files: outfile += ".%s"%(id_generator(25))
+        df.to_csv(outfile, sep="\t", header=True, index=False)
+
+        # remove previously generated files
+        for f in list_table_files: remove_file(f)
+
+
+def get_date():
+
+    """Gets the date of today"""
+
+    today = date.today()
+
+    return today.strftime("%d/%m/%Y")
+
+
+
+def makePlots_gridsss_benchmarking_oneGenome(df_benchmark, PlotsDir, plots={"histogram", "scatter_PRvsRC", "scatter_PRvsRCa_eachSVtype", "Fscore_correlation_scatter", "Fscore_correlation_mat"}):
+
+    """Takes a dataframe such as the output of benchmark_GridssClove_for_knownSV and writes plots under PlotsDir, as specified in plots. These are several """
+
+    print("performing plots into %s"%PlotsDir)
+
+    make_folder(PlotsDir)
+
+    # map each svtype to a marker
+    svtype_to_color = {"tandemDuplications": "gray", "deletions": "black", "inversions": "blue", "translocations": "olive", "insertions": "red", "remaining":"magenta"}
+    svtype_to_marker = {"tandemDuplications": "P", "deletions": "s", "inversions": "^", "translocations": "D", "insertions": "o", "remaining":"v"}
+
+    # define things
+    all_events = {'inversions', 'translocations', 'deletions', 'tandemDuplications', 'insertions'}
+
+    # only consider the benchmarking types if there are events
+    all_events = [e for e in {'inversions', 'translocations', 'deletions', 'tandemDuplications', 'insertions', 'remaining'} if len(df_benchmark[df_benchmark.svtype==e])>0]
+    #print(all_events)
+
+    # change the vals to floats
+    for field in ["precision", "recall", "Fvalue"]: df_benchmark[field] = df_benchmark[field].apply(float)
+
+    # a histogram with the distribution of precision, recall and Fvalue
+    if "histogram" in plots:
+
+        fig = plt.figure(figsize=(12, 4))
+
+        # go through each field to plot
+        for I, field in enumerate(["precision", "recall", "Fvalue"]):
+
+            # initialize subplot
+            ax = plt.subplot(1, 3, I+1)
+
+            # add hists for each svtype
+            for svtype in set(df_benchmark.svtype): sns.distplot(list(df_benchmark[df_benchmark.svtype==svtype][field]), hist=True, kde=False, rug=True, color=svtype_to_color[svtype], label=svtype, kde_kws=dict(linewidth=3))
+
+            ax.set_xlabel(field)
+            ax.set_ylabel("n parameter combinations")
+
+
+        fig.tight_layout()  # otherwise the right y-label is slightly 
+        filename="%s/histogram_PR_RC_Fvalue.pdf"%(PlotsDir)
+        fig.savefig(filename, bbox_inches='tight');
+        #if is_cluster is False: plt.show()
+        plt.close(fig)
+
+    # a scatterplot correlating precision an recall
+    if "scatter_PRvsRC" in plots:
+
+        fig = plt.figure(figsize=(12, 4))
+
+        #print(df_benchmark)
+
+        # first subplot, raw values
+        ax = plt.subplot(1, 3, 1)
+        sns.scatterplot(x="recall", y="precision", data=df_benchmark, hue="svtype", palette=svtype_to_color)
+
+        # raw with alpha
+        ax = plt.subplot(1, 3, 2)
+        sns.scatterplot(x="recall", y="precision", data=df_benchmark, hue="svtype", palette=svtype_to_color, alpha=0.15, edgecolors=None)
+
+        # color according to Fvalue
+        ax = plt.subplot(1, 3, 3)
+        cmap = sns.cubehelix_palette(dark=.3, light=.8, as_cmap=True)
+
+        sns.scatterplot(x="recall", y="precision", data=df_benchmark, hue="Fvalue", palette=cmap, edgecolors=None, style="svtype", markers=svtype_to_marker)
+        #sns.scatterplot(x="recall", y="precision", data=df_benchmark, hue="Fvalue", edgecolors=None, style="svtype", markers=svtype_to_marker)
+
+
+        fig.tight_layout()  # otherwise the right y-label is slightly 
+        filename="%s/scatter_PRvsRCvsFvalue.pdf"%(PlotsDir)
+        fig.savefig(filename, bbox_inches='tight');
+        #if is_cluster is False: plt.show()
+        plt.close(fig)
+
+    # a PRvsRC plot for each svtype
+    if "scatter_PRvsRCa_eachSVtype" in plots:
+
+        all_svtypes = sorted(set(df_benchmark.svtype))
+
+        fig = plt.figure(figsize=(4*len(all_svtypes), 4))
+
+        for I, svtype in enumerate(all_svtypes):
+
+            # color according to Fvalue
+            ax = plt.subplot(1, len(all_svtypes), I+1)
+            cmap = sns.cubehelix_palette(dark=.3, light=.6, as_cmap=True)
+
+            sns.scatterplot(x="recall", y="precision", data=df_benchmark[df_benchmark.svtype==svtype], hue="Fvalue", palette=cmap, edgecolors=None, style="svtype", markers=svtype_to_marker)
+            plt.axvline(1, color="black", linestyle="--", linewidth=1.0)
+            plt.axhline(1, color="black", linestyle="--", linewidth=1.0)
+            plt.plot([0, 1], color="black", linestyle="--", linewidth=1.0)
+            
+
+            ax.set_title(svtype)
+
+        fig.tight_layout()  # otherwise the right y-label is slightly 
+        filename="%s/scatter_PRvsRCa_eachSVtype.pdf"%(PlotsDir)
+        fig.savefig(filename, bbox_inches='tight');
+        #if is_cluster is False: plt.show()
+        plt.close(fig)
+
+
+    # a scatterplot correlating, the Fscores of each pairwise comparison of SVTYPE, for this you need to define a dataframe that has a unique identifier for each unique [svtype, gridss_maxcoverage, gridss_regionsToIgnoreBed], and taking the maxiumum Fscore
+
+    filter_set_ID = ["gridss_maxcoverage", "gridss_regionsToIgnoreBed", "benchmarkID"]
+    unique_set_ID = filter_set_ID + ["svtype"]
+    df_Fvalue = df_benchmark[unique_set_ID + ["Fvalue"]].groupby(unique_set_ID).max() # this has index the unique_set_ID
+    df_Fvalue["svtype"] = [x[3] for x in df_Fvalue.index]
+    df_Fvalue["filterID"] = [tuple(x[0:3]) for x in df_Fvalue.index]
+
+    # define, for each svtype combination, the Fscores correlated
+    svX_to_svY_to_vals = {}
+    svX_to_svY_to_SameMaxAccuracyFilters = {}
+
+    all_svtypes = list(set(df_benchmark.svtype))
+    for Ix, svtype_X in enumerate(all_svtypes):
+        for svtype_Y in all_svtypes[Ix:]:
+
+            # same idx
+            if svtype_Y==svtype_X: 
+
+                svX_to_svY_to_SameMaxAccuracyFilters.setdefault(svtype_X, {}).setdefault(svtype_Y, "")
+                svX_to_svY_to_SameMaxAccuracyFilters.setdefault(svtype_Y, {}).setdefault(svtype_X, "")
+                continue
+
+            # get the Fscores X and Y, corresponding to the same filters
+            svXfilt_to_values = dict(zip(df_Fvalue[df_Fvalue.svtype==svtype_X].filterID, df_Fvalue[df_Fvalue.svtype==svtype_X].Fvalue))
+            svYfilt_to_values = dict(zip(df_Fvalue[df_Fvalue.svtype==svtype_Y].filterID, df_Fvalue[df_Fvalue.svtype==svtype_Y].Fvalue))
+
+            svX_to_svY_to_vals.setdefault(svtype_X, {}).setdefault(svtype_Y, pd.DataFrame([[svXfilt_to_values[filtID], svYfilt_to_values[filtID]] for filtID in svYfilt_to_values], columns=["X", "Y"]))
+
+            # record whether the filter ID of the X and the Y are the same
+            maxXfilt = max(svXfilt_to_values.items(), key=(lambda x:x[1]))[0]
+            maxYfilt = max(svYfilt_to_values.items(), key=(lambda x:x[1]))[0]
+
+            sameMaxFilt_to_str = {True:"*", False:""}
+            svX_to_svY_to_SameMaxAccuracyFilters.setdefault(svtype_X, {}).setdefault(svtype_Y, sameMaxFilt_to_str[maxXfilt==maxYfilt])
+            svX_to_svY_to_SameMaxAccuracyFilters.setdefault(svtype_Y, {}).setdefault(svtype_X, sameMaxFilt_to_str[maxXfilt==maxYfilt])
+
+    # scatterplot
+    if "Fscore_correlation_scatter" in plots:
+
+        fig = plt.figure(figsize=(7, 7))
+
+        # go through each combination and plot
+        for svX, svY_to_vals in svX_to_svY_to_vals.items():
+            for svY, vals in svY_to_vals.items():
+
+                corr, p = scipy.stats.spearmanr(vals, axis=0)
+                if pd.isna(corr): corr = 0.0; p = 1.0
+                ax = sns.scatterplot(x="X", y="Y", data=vals, color=svtype_to_color[svX], marker=svtype_to_marker[svY], label="X:%s, Y:%s, r=%.2f, p=%.3f"%(svX, svY, corr, p))
+
+        ax.set_xlabel("Fvalue X")
+        ax.set_ylabel("Fvalue Y")
+
+
+        fig.tight_layout()  # otherwise the right y-label is slightly 
+        filename="%s/Fscore_correlation_scatter.pdf"%(PlotsDir)
+        fig.savefig(filename, bbox_inches='tight');
+        #if is_cluster is False: plt.show()
+        plt.close(fig)
+
+    # s
+    if "Fscore_correlation_mat" in plots:
+
+        fig = plt.figure(figsize=(4, 4))
+
+        svX_to_svY_to_corr = {}
+        svX_to_svY_to_p = {}
+
+        # go through each combination and get the correlation data
+        for svX, svY_to_vals in svX_to_svY_to_vals.items():
+            for svY, vals in svY_to_vals.items():
+
+                corr, p = scipy.stats.spearmanr(vals, axis=0)
+                if pd.isna(corr): corr = 0.0; p = 1.0
+
+                # correlation
+                svX_to_svY_to_corr.setdefault(svX, {}).setdefault(svY, corr)
+                svX_to_svY_to_corr.setdefault(svY, {}).setdefault(svX, corr)
+
+        # get as dfs
+        df_corr = pd.DataFrame(svX_to_svY_to_corr); df_corr = df_corr[list(df_corr.index)]
+        df_labels = pd.DataFrame(svX_to_svY_to_SameMaxAccuracyFilters)[list(df_corr.index)].loc[list(df_corr.index)].applymap(str)
+
+        # Generate a mask for the upper triangle
+        mask = np.zeros_like(df_corr, dtype=np.bool)
+        mask[np.triu_indices_from(mask)] = True
+
+        # Generate a custom diverging colormap
+        cmap = sns.cubehelix_palette(dark=.3, light=.6, as_cmap=True)
+
+        # Draw the heatmap with the mask and correct aspect ratio
+        sns.heatmap(df_corr, cmap=cmap, square=True, linewidths=.5, cbar_kws={"shrink": .5, "label":"correlation, *: same best filtering"}, mask=mask, annot=df_labels, fmt = '')
+
+        fig.tight_layout()  # otherwise the right y-label is slightly 
+        filename="%s/Fscore_correlation_mat.pdf"%(PlotsDir)
+        fig.savefig(filename, bbox_inches='tight');
+        #if is_cluster is False: plt.show()
+        plt.close(fig)
+
+
+
+def benchmark_GridssClove_for_knownSV(sample_bam, reference_genome, know_SV_dict, outdir, range_filtering="theoretically_meaningful", expected_AF=1.0, replace=False, threads=4, median_insert_size=500, median_insert_size_sd=50, window_l=1000, mitochondrial_chromosome="mito_C_glabrata_CBS138", run_in_parallel=False):
+
+    """Runs a benchmarking for several combinations of filters of a GridsssClove pipeline of a given bam file (sample_bam), writing files under outdir. The known SV are provided as a dictionary that maps each type of SV to a path where a table with the SVs are known .
+
+    range_filtering indicates which type of simulation will be performed, it can be "large", "medium", "small", "single" and correlates with the range of parameters to use.
+    expected_AF is the expected allele frequency, for a haploid it should be 1.0 
+
+    median_insert_size is used to define small breakends to calculate their allele frequency
+
+    window_l is used to define the coverage for winows of regions"""
+
+
+    ###### DEFINE GENERAL THINGS
+
+    start_time = time.time()
+
+    # define the median coverage of regions
+    print("getting coverage")
+    coverage_df =  pd.read_csv(generate_coverage_per_window_file_parallel(reference_genome, outdir, sample_bam, windows_file="none", replace=replace, window_l=window_l), sep="\t")
+    median_coverage = np.median(coverage_df[~coverage_df["#chrom"].isin(mitochondrial_chromosome.split(","))].mediancov_1); print("The median coverage is %i"%median_coverage)
+
+    ##################
+    
+    # define the combinations of gridss parameters
+    maxcoverage_list = [50000]
+    ignore_regions_list = [False]
+
+    # initialize a df with all the benchmarking
+    all_benchmarking_df = pd.DataFrame()
+
+    # run gridss in several different ways:
+    I = 1
+    for maxcoverage in maxcoverage_list:
+        for ignore_regions in ignore_regions_list:
+
+            # make an outdir for this gridss run
+            id_gridss_run = "max%ix_ignoreRegions%s"%(maxcoverage, ignore_regions)
+            gridss_outdir = "%s/benchmark_%s"%(outdir, id_gridss_run); make_folder(gridss_outdir)
+
+            # define the black listed regins
+            if ignore_regions is True: raise ValueError("This has not been configured yet to blacklist regions from gridss running")
+            else: blacklisted_regions = ""
+
+            # get the gridss outputs
+            #print("running gridss")
+            gridss_VCFoutput = run_gridss_and_annotateSimpleType(sample_bam, reference_genome, gridss_outdir, replace=replace, threads=threads, blacklisted_regions=blacklisted_regions, maxcoverage=maxcoverage)
+                  
+            bedpe_with_adds = get_bedpe_from_svVCF(gridss_VCFoutput, gridss_outdir, replace=replace)
+
+            # get into dfs with generally interesting info
+            #print("adding info")
+            df_gridss = add_info_to_gridssDF(load_single_sample_VCF(gridss_VCFoutput), median_insert_size=median_insert_size, median_insert_size_sd=median_insert_size_sd) # this is a dataframe with some extra info
+            #print("info added")
+            df_bedpe = pd.read_csv(bedpe_with_adds, sep="\t")
+            df_bedpe["IDs_set"] = df_bedpe.IDs.apply(lambda x: set(x.split("||")))
+
+            # write the breakpoints. The point of this is that with many parameter combinations we may yield the same breakpoints, so that it's more efficient to create them first
+            #print("getting combinations")
+            outdir_parameter_combinations = "%s/several_parameter_combinations_filter_%s_af%.2f"%(gridss_outdir, range_filtering, expected_AF)
+            #delete_folder(outdir_parameter_combinations) # DEBUG
+            make_folder(outdir_parameter_combinations)
+            filtersID_to_breakpoints = write_breakpoints_for_parameter_combinations_and_get_filterIDtoBpoints_gridss(df_gridss, df_bedpe, outdir_parameter_combinations, range_filtering=range_filtering, expected_AF=expected_AF, replace=replace) # this is a dataframe with all the filter combinations and the map between filterID and the actual filtering
+
+
+            # define the paths to the breakpoints
+            paths_to_bedpe_breakpoints = ["%s/%s/filtered_breakpoints.bedpe"%(outdir_parameter_combinations, filterID) for filterID in filtersID_to_breakpoints]
+
+            # define inputs of the benchmarking pipeline
+            inputs_benchmarking_pipeline = [(bedpe, know_SV_dict, reference_genome, sample_bam, median_coverage, replace, bedpe.split("/")[-2], True) for bedpe in paths_to_bedpe_breakpoints]
+
+            if run_in_parallel is True:
+
+                # initialize the list of benchmarking dfs
+                all_benchmarking_dfs = []
+
+                # go through each chunk of ncpus
+                for Ichunk, chunk_inputs_benchmarking_pipeline in enumerate(chunks(inputs_benchmarking_pipeline, threads)):
+                    print("working on chunk %i"%Ichunk)
+
+                    # get the parallelized obtention of data
+                    print("getting benchmarking for each set of filters in parallel")
+                    with multiproc.Pool(threads) as pool:
+                        all_benchmarking_dfs += pool.starmap(benchmark_bedpe_with_knownSVs, chunk_inputs_benchmarking_pipeline)
+                        pool.close()
+                        pool.terminate()
+            else:
+
+                all_benchmarking_dfs = list(map(lambda x: benchmark_bedpe_with_knownSVs(x[0], x[1], x[2], x[3], x[4], x[5], x[6], x[7]), inputs_benchmarking_pipeline))
+
+            #### delete the bamfiles for the chromosomes, which are created in benchmark_bedpe_with_knownSVs ######
+            all_chromosome_IDs = set([s.id for s in SeqIO.parse(reference_genome, "fasta")])
+            outdir_bam = get_dir(sample_bam)
+            name_bam = get_file(sample_bam)
+            for chrom in all_chromosome_IDs: 
+                files_to_remove = ["%s/%s"%(outdir_bam, x) for x in os.listdir(outdir_bam) if x.startswith(name_bam) and chrom in x]
+                for f in files_to_remove: remove_file(f)
+            #######################################################################################################
+
+            ###### remove temporary files and folders #####
+            for f in ["%s/%s"%(outdir_bam, x) for x in os.listdir(outdir_bam) if "temporary_file" in x]: remove_file(f); delete_folder(f)
+
+            ##### merge the tables of coverage regions and remove intermediate files ######
+            tables_coverage_windows = ["%s/%s"%(outdir_bam, x) for x in os.listdir(outdir_bam) if "temporary_file" not in x and "%s.coverage_per_window.tab"%name_bam in x]
+            outfile = "%s.coverage_per_window.tab.%s"%(sample_bam, get_date().replace("/", "_"))
+            merge_tables_into_file(tables_coverage_windows, outfile)
+
+            # merge all the coverage files generated in one
+            merge_coverage_per_window_files_in_one(sample_bam)
+
+            #################################################
+
+            # define the fields
+            fields_benchmarking_df = list(all_benchmarking_dfs[0].keys())
+
+            # concatenate and add fields
+            print("concatenating dfs")
+            benchmarking_df = pd.concat([d[fields_benchmarking_df] for d in all_benchmarking_dfs], sort=True)
+            benchmarking_df["gridss_maxcoverage"] = [maxcoverage]*len(benchmarking_df)
+            benchmarking_df["gridss_regionsToIgnoreBed"] = [blacklisted_regions]*len(benchmarking_df)
+            benchmarking_df["gridss_VCFoutput"] = [gridss_VCFoutput]*len(benchmarking_df)
+            benchmarking_df["median_coverage"] =  [median_coverage]*len(benchmarking_df)
+
+            # keep
+            if I==1: all_benchmarking_df = all_benchmarking_df.append(benchmarking_df, sort=True)
+            else: all_benchmarking_df = all_benchmarking_df[list(benchmarking_df.keys())].append(benchmarking_df, sort=True)
+
+            I+=1
+
+    # debug strange calculations
+    if any(pd.isna(all_benchmarking_df.precision)) or any(pd.isna(all_benchmarking_df.recall)): raise ValueError("There are NaNs in the precision or recall measures") 
+
+    # make plots of the benchmarking
+    PlotsDir = "%s/plots_benchmark"%outdir
+    print("making plots into %s"%PlotsDir)
+    makePlots_gridsss_benchmarking_oneGenome(all_benchmarking_df, PlotsDir)
+
+    # get the time
+    print("----It took %s seconds to run the whole benchmarking of one set of SV----"%(time.time() - start_time))
+
+    return all_benchmarking_df
+
 def get_best_parameters_for_GridssClove_run(sorted_bam, reference_genome, outdir, threads=4, replace=False, window_l=5000, n_simulated_genomes=2, mitochondrial_chromosome="mito_C_glabrata_CBS138", simulation_ploidies=["haploid", "diploid_homo", "diploid_hetero", "ref:2_var:1", "ref:3_var:1", "ref:4_var:1", "ref:5_var:1", "ref:9_var:1", "ref:19_var:1", "ref:99_var:1"], range_filtering_benchmark="theoretically_meaningful", expected_ploidy=1, nvars=100, real_svtype_to_file={}, median_insert_size=250, median_insert_size_sd=0):
 
     """This finds the optimum parameters for running GRIDSS clove and returns them. The parameters are equivalent to the run_GridssClove_optimising_parameters function"""
@@ -6278,7 +7259,7 @@ def get_best_parameters_for_GridssClove_run(sorted_bam, reference_genome, outdir
 
     # count total number of reads
     total_nread_pairs = count_number_read_pairs(sorted_bam, replace=False, threads=threads)
-    #total_nread_pairs  = 1000000 # this is to debug the simulation pipeline
+    #total_nread_pairs  = 100000 # this is to debug the simulation pipeline
     expected_coverage_per_bp = int((total_nread_pairs*read_length) / sum(chr_to_len.values())) +  1 # the expected coverage per position with pseudocount
     print("There are %i read pairs in your library. The expected coverage is %ix."%(total_nread_pairs, expected_coverage_per_bp))
 
@@ -6313,18 +7294,64 @@ def get_best_parameters_for_GridssClove_run(sorted_bam, reference_genome, outdir
             # get the simulated SVs, which are an integration of 
             sim_svtype_to_svfile, rearranged_genome = rearrange_genomes_simulateSV(reference_genome, simulation_outdir, replace=replace, nvars=nvars, mitochondrial_chromosome=mitochondrial_chromosome, simulated_svtype_to_svfile=real_svtype_to_file, svtypes={"insertions", "deletions", "inversions", "translocations", "tandemDuplications"})
 
-            kjhckgadkjgkadg
+            # define the genome ID
+            genomeID = "simulation_%i"%(simulation_ID)
+
+            # get a df that has genome info and predicted coverage from seq fetaures
+            df_genome_info = get_windows_infoDF_with_predictedFromFeatures_coverage(rearranged_genome, distToTel_chrom_GC_to_coverage_fn, expected_coverage_per_bp, replace=replace, window_l=window_l, threads=threads)
+
+            # get the aligned reads to the reference
+            simulation_bam_file = simulate_and_align_PairedReads_perWindow(df_genome_info, rearranged_genome, reference_genome, total_nread_pairs, read_length, simulation_outdir, median_insert_size, median_insert_size_sd, replace=replace, threads=threads)
+
+            # define a path to the known SVs (know_SV_dict should be changed to sim_svtype_to_svfile)
+
+            # add the "remaining" cathegory, as an empty field
+            remaining_file = "%s/remaining_sv.tab"%(get_dir(sim_svtype_to_svfile["translocations"]))
+            open(remaining_file, "w").write("ID\t#CHROM\tPOS\tCHR2\tSTART\tEND\tSVTYPE\n"+"iii\tccc\t0\tyyy\t0\t0\tzzz\n")
+            sim_svtype_to_svfile["remaining"] = remaining_file
+
+            # map each genomeID to the known variants
+            genomeID_to_knownSVdict[genomeID] = sim_svtype_to_svfile
+
+            # go through each of the target ploidies and generate the resulting bam files:
+            for ploidy in simulation_ploidies:
+                print("working on %s"%ploidy)
+
+                # define the final sorted bam depending on the ploidy (which also includes populations)
+                ploidy_merged_bam = get_merged_bamfile_for_ploidy(variant_bamfile=simulation_bam_file, reference_bamfile=simulated_reference_bam_file, ploidy=ploidy, replace=replace, threads=threads)
+
+                # calculate the expected fraction of reads comming from each genome
+                fraction_var, fraction_ref = get_fractions_reads_for_ploidy(ploidy)
+
+                # write a table and some files with the benchmarking of several filtering strategies of the data
+                ploidy_dir = "%s/benchmark_GridssClove_%s"%(simulation_outdir, ploidy); make_folder(ploidy_dir)
+
+                # get a df with a benchmark of many different parameters. This will also report some plots with the 
+                benchmarking_df = benchmark_GridssClove_for_knownSV(ploidy_merged_bam, reference_genome, sim_svtype_to_svfile, ploidy_dir, range_filtering=range_filtering_benchmark, expected_AF=fraction_var, replace=replace, threads=threads, median_insert_size=median_insert_size, median_insert_size_sd=median_insert_size_sd, window_l=window_l, mitochondrial_chromosome=mitochondrial_chromosome)
 
 
+                # add some parms and keep
+                benchmarking_df["genomeID"] = [genomeID]*len(benchmarking_df)
+                benchmarking_df["ploidy"] = [ploidy]*len(benchmarking_df)
+                benchmarking_df["sorted_bam"] = [ploidy_merged_bam]*len(benchmarking_df)
+                benchmarking_df["median_insert_size"] = [median_insert_size]*len(benchmarking_df)
+                benchmarking_df["median_insert_size_sd"] = [median_insert_size_sd]*len(benchmarking_df)
+                df_benchmark_all = df_benchmark_all.append(benchmarking_df, sort=True)
+
+        print("GRIDSS simulation finished correctly")
+
+        # save important files
+        print("saving important files...")
+        save_object(df_benchmark_all, df_benchmark_all_file)
+        save_object(genomeID_to_knownSVdict, genomeID_to_knownSVdict_file)
+
+
+    else:
+        print("GRIDSS simulation finished correctly. Loading previous files ...")
+        df_benchmark_all = load_object(df_benchmark_all_file)
+        genomeID_to_knownSVdict = load_object(genomeID_to_knownSVdict_file)
 
     ####################################################
-
-
-
-
-
-
-
 
     lndalshjldjasjjskdllkjskjlsakjlasdkjladsjklasdjklasdjkljklsjklsad
 
