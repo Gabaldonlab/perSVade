@@ -67,7 +67,7 @@ parser.add_argument("--fast_SVcalling", dest="fast_SVcalling", action="store_tru
 parser.add_argument("--testRealDataAccuracy", dest="testRealDataAccuracy", action="store_true", default=True, help="Reports the accuracy (recall) of your calling on the real data. This requires with --close_shortReads_table or --target_taxID.")
 
 # simulation parameter args
-parser.add_argument("--nvars", dest="nvars", default=50, type=int, help="Number of variants to simulate. Note that the number of balanced translocations inserted in simulations will be always as maximum the number of gDNA chromosome-pairs implicated.")
+parser.add_argument("--nvars", dest="nvars", default=15, type=int, help="Number of variants to simulate. Note that the number of balanced translocations inserted in simulations will be always as maximum the number of gDNA chromosome-pairs implicated.")
 
 parser.add_argument("--nsimulations", dest="nsimulations", default=2, type=int, help="The number of 'replicate' simulations that will be produced.")
 
