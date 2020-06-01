@@ -51,20 +51,23 @@ parser.add_argument("-p", "--ploidy", dest="ploidy", default=1, type=int, help="
 # different modules to be executed
 parser.add_argument("--testSVgen_from_DefaulReads", dest="testSVgen_from_DefaulReads", default=True, action="store_true", help="This indicates whether to generate a report of how the generation of SV works with the default parameters on random simulations")
 
-parser.add_argument("--close_shortReads_table", dest="close_shortReads_table", type=str, default=None, help="This is the path to a table that has 4 fields: sampleID,runID,short_reads1,short_reads2. These should be WGS runs of samples that are close to the reference genome and some expected SV. Whenever this argument is provided, the pipeline will find SVs in these samples and generate a folder <outdir>/findingRealSVs/SVs_compatible_to_insert that will contain one file for each SV, so that they are compatible and ready to insert in a simulated genome. This table will be used if --testRealDataAccuracy is specified, which will require at least 3 runs for each sample.")
+parser.add_argument("--close_shortReads_table", dest="close_shortReads_table", type=str, default=None, help="This is the path to a table that has 4 fields: sampleID,runID,short_reads1,short_reads2. These should be WGS runs of samples that are close to the reference genome and some expected SV. Whenever this argument is provided, the pipeline will find SVs in these samples and generate a folder <outdir>/findingRealSVs<>/SVs_compatible_to_insert that will contain one file for each SV, so that they are compatible and ready to insert in a simulated genome. This table will be used if --testRealDataAccuracy is specified, which will require at least 3 runs for each sample. It can be 'auto', in which case it will be inferred from the taxID provided by --target_taxID.")
 
 
-parser.add_argument("--target_taxID", dest="target_taxID", type=int, default=None, help="This is the taxID (according to NCBI taxonomy) to which your reference genome belongs. If provided, it is used to find --n_close_samples (default 3) close samples to the reference, according to the NCBI taxonomy database. It will download the closest n_close_samples from SRA. If --testRealDataAccuracy is give, it will also download an additional, independent run of SRA of the given sample. This option will have no effect if --close_shortReads_table is provided.")
+parser.add_argument("--target_taxID", dest="target_taxID", type=int, default=None, help="This is the taxID (according to NCBI taxonomy) to which your reference genome belongs. If provided it is used to download genomes and reads.")
 
 parser.add_argument("--n_close_samples", dest="n_close_samples", default=3, type=int, help="Number of close samples to search in case --target_taxID is provided")
 
-parser.add_argument("--nruns_per_sample", dest="nruns_per_sample", default=3, type=int, help="Number of runs to download for each sample in the case that --target_taxID is specified. If --testRealDataAccuracy, this has to be at least 3. ")
+parser.add_argument("--nruns_per_sample", dest="nruns_per_sample", default=3, type=int, help="Number of runs to download for each sample in the case that --target_taxID is specified. ")
 
 parser.add_argument("--SVs_compatible_to_insert_dir", dest="SVs_compatible_to_insert_dir", type=str, default=None, help="A directory with one file for each SV that can be inserted into the reference genome in simulations. It may be created with --close_shortReads_table. If both --SVs_compatible_to_insert_dir and --close_shortReads_table are provided, --SVs_compatible_to_insert_dir will be used, and --close_shortReads_table will have no effect. If none of them are provided, this pipeline will base the parameter optimization on randomly inserted SVs (the default behavior). The coordinates have to be 1-based, as they are ready to insert into RSVsim.")
 
 parser.add_argument("--fast_SVcalling", dest="fast_SVcalling", action="store_true", default=False, help="Run SV calling with a default set of parameters. There will not be any optimisation nor reporting of accuracy. This is expected to work almost as fast as gridss and clove together.")
 
-parser.add_argument("--testRealDataAccuracy", dest="testRealDataAccuracy", action="store_true", default=True, help="Reports the accuracy (recall) of your calling on the real data. This requires with --close_shortReads_table or --target_taxID.")
+parser.add_argument("--testRealDataAccuracy", dest="testRealDataAccuracy", action="store_true", default=True, help="Reports the accuracy  of your calling on the real data for all the WGS runs specified in --close_shortReads_table. ")
+
+parser.add_argument("--testSimulationsAccuracy", dest="testSimulationsAccuracy", action="store_true", default=True, help="Reports the accuracy  of your calling on the simulations that are uniform, based on realSVs, and without optimisation. ")
+
 
 # simulation parameter args
 parser.add_argument("--nvars", dest="nvars", default=15, type=int, help="Number of variants to simulate. Note that the number of balanced translocations inserted in simulations will be always as maximum the number of gDNA chromosome-pairs implicated.")
@@ -76,8 +79,8 @@ parser.add_argument("--simulation_ploidies", dest="simulation_ploidies", type=st
 parser.add_argument("--range_filtering_benchmark", dest="range_filtering_benchmark", type=str, default="small", help='The range of parameters that should be tested in the SV optimisation pipeline. It can be any of large, medium, small, theoretically_meaningful or single.')
 
 # alignment args
-parser.add_argument("-f1", "--fastq1", dest="fastq1", default=None, help="fastq_1 file. Option required to obtain bam files")
-parser.add_argument("-f2", "--fastq2", dest="fastq2", default=None, help="fastq_2 file. Option required to obtain bam files")
+parser.add_argument("-f1", "--fastq1", dest="fastq1", default=None, help="fastq_1 file. Option required to obtain bam files. It can be 'auto', in which case the closest run for a taxID will be picked.")
+parser.add_argument("-f2", "--fastq2", dest="fastq2", default=None, help="fastq_2 file. Option required to obtain bam files. It can be 'auto', in which case the closest run for a taxID will be picked.")
 parser.add_argument("-sbam", "--sortedbam", dest="sortedbam", default=None, help="The path to the sorted bam file, which should have a bam.bai file in the same dir. This is mutually exclusive with providing reads")
 parser.add_argument("--run_qualimap", dest="run_qualimap", action="store_true", help="Run qualimap for quality assessment of bam files. This may be inefficient sometimes because of the ")
 
@@ -206,10 +209,10 @@ if opt.SVs_compatible_to_insert_dir is not None and opt.fast_SVcalling is False:
     # if it is already predefined
     real_svtype_to_file = {svtype : "%s/%s"%(opt.SVs_compatible_to_insert_dir) for svtype in all_svs}
 
-elif opt.fast_SVcalling is False and (opt.close_shortReads_table is not None or opt.target_taxID is not None):
+elif opt.fast_SVcalling is False and opt.close_shortReads_table is not None:
     
     # the table was provided
-    if opt.close_shortReads_table is not None: 
+    if opt.close_shortReads_table!="auto": 
 
         print("finding the set of compatible SVs from %s"%opt.close_shortReads_table)
 
@@ -217,7 +220,7 @@ elif opt.fast_SVcalling is False and (opt.close_shortReads_table is not None or 
         outdir_finding_realVars = "%s/findingRealSVs_providedCloseReads"%opt.outdir
 
     # a taxID was provided, which overrides the value of opt.genomes_withSV_and_shortReads_table
-    elif opt.target_taxID is not None:
+    else:
 
         print("finding close genomes or reads for close taxIDs in the SRA database for taxID %s"%opt.target_taxID)
 
@@ -248,16 +251,12 @@ simulation_ploidies = opt.simulation_ploidies.split(",")
 
 ####################################################################
 
-### run the actual perSVade function optimising parameters ###
 
-SVdetection_outdir = "%s/SVdetection_output"%opt.outdir
+# test the accuracy on each of the simulations types
+if opt.testSimulationsAccuracy is True: fun.report_accuracy_simulations(sorted_bam, opt.ref, "%s/testing_SimulationsAccuracy"%opt.outdir, real_svtype_to_file, threads=opt.threads, replace=opt.replace, n_simulated_genomes=opt.nsimulations, mitochondrial_chromosome=opt.mitochondrial_chromosome, simulation_ploidies=simulation_ploidies, range_filtering_benchmark=opt.range_filtering_benchmark, nvars=opt.nvars)
 
-fun.run_GridssClove_optimising_parameters(sorted_bam, opt.ref, SVdetection_outdir, threads=opt.threads, replace=opt.replace, n_simulated_genomes=opt.nsimulations, mitochondrial_chromosome=opt.mitochondrial_chromosome, simulation_ploidies=simulation_ploidies, range_filtering_benchmark=opt.range_filtering_benchmark, expected_ploidy=opt.ploidy, nvars=opt.nvars, fast_SVcalling=opt.fast_SVcalling, real_svtype_to_file=real_svtype_to_file)
+khadghadghjdjhadghd
 
-kadkhdhkdhkd
-
-
-###############################################################
 
 
 ##### test the accuracy of the running on each of the 'real' genomes: #####
@@ -272,6 +271,13 @@ if opt.testRealDataAccuracy is True:
 ###########################################################################
 
 
+### run the actual perSVade function optimising parameters ###
+
+SVdetection_outdir = "%s/SVdetection_output"%opt.outdir
+
+fun.run_GridssClove_optimising_parameters(sorted_bam, opt.ref, SVdetection_outdir, threads=opt.threads, replace=opt.replace, n_simulated_genomes=opt.nsimulations, mitochondrial_chromosome=opt.mitochondrial_chromosome, simulation_ploidies=simulation_ploidies, range_filtering_benchmark=opt.range_filtering_benchmark, nvars=opt.nvars, fast_SVcalling=opt.fast_SVcalling, real_svtype_to_file=real_svtype_to_file)
+
+###############################################################
 
 
 sdflndljbdjkjbadkjbadmnbasdnbmasdnbasdnmb

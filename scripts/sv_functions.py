@@ -52,6 +52,7 @@ try:
     import matplotlib.pyplot as plt
 
 except: import matplotlib.pyplot as plt
+
 import seaborn as sns
 
 # get the cwd were all the scripts are 
@@ -772,7 +773,9 @@ def transform_cut_and_paste_to_copy_and_paste_insertions(reference_genome, rearr
             # add the ends of the chromosome, and convert to np array
             for chrom, lenSeq in chr_to_lenSeq.items(): 
 
-                chr_to_bpPositions[chrom].update({1, lenSeq})
+                if chrom in chr_to_bpPositions.keys(): chr_to_bpPositions[chrom].update({1, lenSeq})
+                else: chr_to_bpPositions[chrom] = {1, lenSeq}
+                
                 chr_to_bpPositions[chrom] = np.array(sorted(chr_to_bpPositions[chrom]))
 
             # add the closest breakpoint position of ChrA in the reference
@@ -940,7 +943,9 @@ def get_svDF_in_coords_of_rearranged_genome(svDF, reference_genome, rearranged_g
     # add the ends of the chromosome, and convert to np array
     for chrom, lenSeq in chr_to_ref_lenSeq.items(): 
 
-        chr_to_bpPositions[chrom].update({1, lenSeq})
+        if chrom in chr_to_bpPositions.keys(): chr_to_bpPositions[chrom].update({1, lenSeq})
+        else: chr_to_bpPositions[chrom] = {1, lenSeq}
+
         chr_to_bpPositions[chrom] = np.array(sorted(chr_to_bpPositions[chrom]))
 
 
@@ -2219,6 +2224,12 @@ def run_gridss_and_annotateSimpleType(sorted_bam, reference_genome, outdir, repl
     gridss_VCFoutput = "%s/gridss_output.vcf"%outdir; 
     if gridss_VCFoutput.split(".")[-1]!="vcf": raise ValueError("gridss needs a .vcf file. this is not the case for"%gridss_VCFoutput)
 
+    # softlink the sorted_bam under outdir so that the naming is not too long
+    sorted_bam_renamed = "%s/aligned_reads.sorted.bam"%outdir
+    index_bam_renamed = "%s/aligned_reads.sorted.bam.bai"%outdir
+    if file_is_empty(sorted_bam_renamed): run_cmd("ln -s %s %s"%(sorted_bam, sorted_bam_renamed))
+    if file_is_empty(index_bam_renamed): run_cmd("ln -s %s.bai %s"%(sorted_bam, index_bam_renamed))
+
     if file_is_empty(gridss_VCFoutput) or replace is True:
 
         # define other files
@@ -2254,7 +2265,7 @@ def run_gridss_and_annotateSimpleType(sorted_bam, reference_genome, outdir, repl
                 # run
                 print("running gridss on %s jvmheap"%jvmheap)
 
-                gridss_cmd = "%s --jar %s --reference %s -o %s --assembly %s --threads %i --workingdir %s --maxcoverage %i --blacklist %s --jvmheap %s %s"%(gridss_run, gridss_jar, reference_genome, gridss_VCFoutput, gridss_assemblyBAM, threads, gridss_tmpdir, maxcoverage, blacklisted_regions, jvmheap, sorted_bam)
+                gridss_cmd = "%s --jar %s --reference %s -o %s --assembly %s --threads %i --workingdir %s --maxcoverage %i --blacklist %s --jvmheap %s %s"%(gridss_run, gridss_jar, reference_genome, gridss_VCFoutput, gridss_assemblyBAM, threads, gridss_tmpdir, maxcoverage, blacklisted_regions, jvmheap, sorted_bam_renamed)
                 if gridss_std!="stdout": gridss_cmd += " > %s 2>&1"%gridss_std
                 run_cmd(gridss_cmd)
 
@@ -4658,9 +4669,6 @@ def get_close_shortReads_table_close_to_taxID(target_taxID, reference_genome, ou
 
     return close_shortReads_table
 
-
-
-
 def generate_tables_of_SV_between_genomes_gridssClove(query_genome, reference_genome, replace=False, threads=4, coverage=30, insert_size=500, read_lengths=[kb*1000 for kb in [0.3, 0.5, 1, 1.5, 2, 2.5]], error_rate=0.0, gridss_min_af=0.25):
 
     """Takes a bam file with aligned reads or genomes and generates calls, returning a dict that maps variation type to variants
@@ -4759,6 +4767,10 @@ def get_is_matching_predicted_and_known_rows(rk, rp, equal_fields, approximate_f
 
     # ask if the approximate fields match
     approximate_fields_match = all([abs(rp[f]-rk[f])<=tol_bp for f in approximate_fields])
+
+    # if the rknown is all 0s, return False
+    if "POS" in rk.keys():
+        if all([rk[f]==0 for f in ["POS", "START", "END"]]): return False
 
     # ask if all the chromField_to_posFields overlap by more than pct_overlap
     overlapping_regions_list = [True] # stores tested regions overlap. It is initalized with a True so that if there are no chromField_to_posFields it is True
@@ -4994,7 +5006,6 @@ def get_integrated_benchmarking_fields_series_for_setFilters_df(df):
         integrated_benchmarking_results_dict["filters_dict"] = get_represenative_filtersDict_for_filtersDict_list(list(df_best_filters["filters_dict"]), type_filters="most_conservative")
         integrated_benchmarking_results_dict["clove_max_rel_coverage_to_consider_del"] = df_best_filters.loc["deletions", "clove_max_rel_coverage_to_consider_del"]
         integrated_benchmarking_results_dict["clove_min_rel_coverage_to_consider_dup"] = df_best_filters.loc["tandemDuplications", "clove_min_rel_coverage_to_consider_dup"]
-        integrated_benchmarking_results_dict["threshold_p_unbalTRA"] = df_best_filters.loc["translocations", "threshold_p_unbalTRA"]
 
         integrated_benchmarking_results_dict["median_insert_size"] = df_best_filters.loc["deletions", "median_insert_size"]
         integrated_benchmarking_results_dict["median_insert_size_sd"] = df_best_filters.loc["deletions", "median_insert_size_sd"]
@@ -6872,8 +6883,6 @@ def get_date():
 
     return today.strftime("%d/%m/%Y")
 
-
-
 def makePlots_gridsss_benchmarking_oneGenome(df_benchmark, PlotsDir, plots={"histogram", "scatter_PRvsRC", "scatter_PRvsRCa_eachSVtype", "Fscore_correlation_scatter", "Fscore_correlation_mat"}):
 
     """Takes a dataframe such as the output of benchmark_GridssClove_for_knownSV and writes plots under PlotsDir, as specified in plots. These are several """
@@ -7076,8 +7085,6 @@ def makePlots_gridsss_benchmarking_oneGenome(df_benchmark, PlotsDir, plots={"his
         #if is_cluster is False: plt.show()
         plt.close(fig)
 
-
-
 def benchmark_GridssClove_for_knownSV(sample_bam, reference_genome, know_SV_dict, outdir, range_filtering="theoretically_meaningful", expected_AF=1.0, replace=False, threads=4, median_insert_size=500, median_insert_size_sd=50, window_l=1000, mitochondrial_chromosome="mito_C_glabrata_CBS138", run_in_parallel=False):
 
     """Runs a benchmarking for several combinations of filters of a GridsssClove pipeline of a given bam file (sample_bam), writing files under outdir. The known SV are provided as a dictionary that maps each type of SV to a path where a table with the SVs are known .
@@ -7219,7 +7226,614 @@ def benchmark_GridssClove_for_knownSV(sample_bam, reference_genome, know_SV_dict
 
     return all_benchmarking_df
 
-def get_best_parameters_for_GridssClove_run(sorted_bam, reference_genome, outdir, threads=4, replace=False, window_l=5000, n_simulated_genomes=2, mitochondrial_chromosome="mito_C_glabrata_CBS138", simulation_ploidies=["haploid", "diploid_homo", "diploid_hetero", "ref:2_var:1", "ref:3_var:1", "ref:4_var:1", "ref:5_var:1", "ref:9_var:1", "ref:19_var:1", "ref:99_var:1"], range_filtering_benchmark="theoretically_meaningful", expected_ploidy=1, nvars=100, real_svtype_to_file={}, median_insert_size=250, median_insert_size_sd=0):
+def get_df_accuracy_for_train_filer(r, outdir, test_gridss_info_dict, sorted_bam, reference_genome, median_coverage, replace, median_insert_size, median_insert_size_sd, test_SVdict):
+
+    """define a function that takes a row of df_filters_train and returns a series with the accuracy values of each filter"""
+
+    # define outdir
+    working_dir = "%s/train_on_%s_%s_%s"%(outdir, r["genomeID"], r["ploidy"], r["svtype"]); make_folder(working_dir)
+    #print("testing from %s"%working_dir)
+
+    # define the file
+    df_benchmark_filename = "%s/df_benchmark.tab"%working_dir
+
+    if file_is_empty(df_benchmark_filename) or replace is True:
+
+        # define the gridss_VCFoutput based on test_gridss_info_dict_under_outdir
+        gridss_VCFoutput = test_gridss_info_dict[r["gridss_regionsToIgnoreBed"]][r["gridss_maxcoverage"]]
+
+        # make a link under working_dir
+        gridss_VCFoutput_underWorkDir = "%s/gridss_output.vcf"%(working_dir)
+        print("testing...", gridss_VCFoutput_underWorkDir)
+        if file_is_empty(gridss_VCFoutput_underWorkDir) or replace is True: run_cmd("ln -s %s %s"%(gridss_VCFoutput , gridss_VCFoutput_underWorkDir))
+
+        # get the svs
+        predicted_svtype_to_SVtable, df_gridss = run_gridssClove_given_filters(sorted_bam, reference_genome, working_dir, median_coverage, replace=replace, threads=multiproc.cpu_count(), gridss_blacklisted_regions=r["gridss_regionsToIgnoreBed"], gridss_VCFoutput=gridss_VCFoutput_underWorkDir, gridss_maxcoverage=r["gridss_maxcoverage"], median_insert_size=median_insert_size, median_insert_size_sd=median_insert_size_sd, gridss_filters_dict=r["filters_dict"], tol_bp=50, run_in_parallel=True, max_rel_coverage_to_consider_del=r["clove_max_rel_coverage_to_consider_del"], min_rel_coverage_to_consider_dup=r["clove_min_rel_coverage_to_consider_dup"], replace_FromGridssRun=False)
+
+        # get the benchmarking df
+        fileprefix = "%s.benchmarking"%working_dir
+        df_benchmark_filtN = benchmark_processedSVs_against_knownSVs_inHouse(predicted_svtype_to_SVtable, test_SVdict, fileprefix, replace=replace, add_integrated_benchmarking=True)
+
+        # add the metdadata
+        df_benchmark_filtN["train_genomeID"] = r["genomeID"]
+        df_benchmark_filtN["train_ploidy"] = r["ploidy"]
+        df_benchmark_filtN["train_svtype"] = r["svtype"]
+
+        # save
+        df_benchmark_filtN.to_csv(df_benchmark_filename, sep="\t", header=True, index=False)
+
+    else: df_benchmark_filtN = pd.read_csv(df_benchmark_filename, sep="\t")
+
+    return df_benchmark_filtN
+
+def get_benchmarking_df_for_testSVs_from_trainSV_filterSets(test_SVdict, outdir, df_filters_train, test_gridss_info_dict, genomeID, ploidy, sorted_bam, reference_genome, median_coverage, median_insert_size, median_insert_size_sd, replace):
+
+    """This function takes a  set of test SVdict and it tries all the filters in df_filters_train on the gridss vcfs in gridss_info_dict, writing files under outdir. It returns a df with the accuracy for each svtype and filters from df_filters_train tested on SVdict. This will only train on 'integrated' and test on all SVtypes  """
+
+    start_time = time.time()
+
+    # check that the df_filters_train contains unique vals for each genomeID, ploidy and svtype
+    if len(df_filters_train)!=len(df_filters_train[["genomeID", "ploidy", "svtype"]].drop_duplicates()): raise ValueError('df_filters_train does not contain unique vals for "genomeID", "ploidy", "svtype"')
+
+    # define the df_benchmark
+    df_benchmark_all_filename = "%s/df_benchmark_all.tab"%outdir
+    print("working on %s"%df_benchmark_all_filename)
+
+    if file_is_empty(df_benchmark_all_filename) or replace is True:
+
+        # keep only the integrated train set
+        df_filters_train = df_filters_train[df_filters_train.svtype=="integrated"]
+
+        df_benchmark = pd.concat(list(df_filters_train.apply(lambda r: get_df_accuracy_for_train_filer(r, outdir, test_gridss_info_dict, sorted_bam, reference_genome, median_coverage, replace, median_insert_size, median_insert_size_sd, test_SVdict), axis=1)))
+
+        # add metadata
+        df_benchmark["test_genomeID"] = genomeID
+        df_benchmark["test_ploidy"] = ploidy
+        df_benchmark["test_svtype"] = df_benchmark.svtype
+
+        # save
+        print("saving %s"%df_benchmark_all_filename)
+        df_benchmark.to_csv(df_benchmark_all_filename, sep="\t", header=True, index=False)
+
+    else: df_benchmark = pd.read_csv(df_benchmark_all_filename, sep="\t")
+
+    print("----It took %s seconds to run the whole benchmarking of one set of test filters----"%(time.time() - start_time))
+
+    return df_benchmark
+
+
+######################################################
+################# GRAPHICS FUNCTIONS #################
+######################################################
+
+
+
+def plot_clustermap_with_annotation(df, row_colors_df, col_colors_df, filename, title="clustermap", col_cluster=False, row_cluster=False, colorbar_label="default label", adjust_position=True, legend=True, idxs_separator_pattern="_", texts_to_strip={"L001"}, default_label_legend="control", df_annotations=None, cmap=sns.color_palette("RdBu_r", 50), ylabels_graphics_df=None, grid_lines=True, add_to_legend_x=0.5):
+
+    """Takes a df were the index is the annotation and the cols are samples. It will be saved under filename. ylabels_graphics_df can be a df containing fontweight and color for each index value in df"""
+
+    # define the yticklabels
+    if ylabels_graphics_df is not None: yticklabels = True
+    else: yticklabels = False
+
+    # change the values of the df to floats
+    df = df.applymap(float)
+
+    # get the ordered xlabels and ylabels
+    cm_labels = sns.clustermap(df, col_cluster=col_cluster, row_cluster=row_cluster, yticklabels=True, xticklabels=True)
+    # plt.close()
+    xlabels = [x.get_text() for x in cm_labels.ax_heatmap.get_xticklabels()]
+    ylabels = [y.get_text() for y in cm_labels.ax_heatmap.get_yticklabels()]
+
+    # decide whether to add annotations
+    if df_annotations is not None:  annot = df_annotations.loc[ylabels][xlabels]
+    else: annot = False
+
+    # define the line color from the last item in the df
+    if grid_lines is True: 
+        linecolor = list(col_colors_df.loc[xlabels][list(col_colors_df.keys())[-1]])
+        linewidths = 1.5
+
+    else: 
+        linecolor = "gray"
+        linewidths = 0
+
+    if adjust_position is True:
+
+        # define figsize 
+        figsize = (len(df.columns)*0.3, len(df)*0.35)
+
+        # get the clustermap
+        cm = sns.clustermap(df, col_cluster=col_cluster, row_cluster=row_cluster, row_colors=row_colors_df, col_colors=col_colors_df, cbar_kws={'label': colorbar_label}, xticklabels=False, square=False, figsize=figsize, cmap=cmap, annot=annot, fmt="", annot_kws={"size": 6.5}, linecolor=linecolor, linewidths=linewidths, yticklabels=yticklabels) # figsize=figsize, linecolor=linecolor, linewidths=linewidths, yticklabels=yticklabels
+
+        # move the heatmap to the right
+        hm_pos = cm.ax_heatmap.get_position()
+        cm.ax_heatmap.set_position([hm_pos.x0, hm_pos.y0, hm_pos.width, hm_pos.height]); hm_pos = cm.ax_heatmap.get_position()
+
+        # adjust the row colorbar, proportional to the row colorbar
+        width_row_colorbar = (hm_pos.width/len(col_colors_df)) * len(row_colors_df.columns)
+        rc_pos = cm.ax_row_colors.get_position()
+        cm.ax_row_colors.set_position([hm_pos.x0 - width_row_colorbar, rc_pos.y0, width_row_colorbar, rc_pos.height]); rc_pos = cm.ax_row_colors.get_position()
+
+        # adjust the col colorbar proporitonal to the col colors
+        height_col_colorbar = (hm_pos.height/len(df)) * len(col_colors_df.columns)
+        cc_pos = cm.ax_col_colors.get_position()
+        cm.ax_col_colors.set_position([hm_pos.x0, hm_pos.y0 + hm_pos.height, hm_pos.width, height_col_colorbar]); cc_pos = cm.ax_col_colors.get_position()
+
+        # adjust the row dendrogram
+        if row_cluster is True: width_row_dendrogram = (hm_pos.width/len(df.columns))*4
+        else: width_row_dendrogram = 0
+        cm.ax_row_dendrogram.set_position([rc_pos.x0-width_row_dendrogram-0.001, rc_pos.y0, width_row_dendrogram, rc_pos.height])
+        row_dendrogram_pos = cm.ax_row_dendrogram.get_position()
+
+        
+        # adjust the position of the colorbar to the left of the col dednrogram
+        
+        rdendro_pos = cm.ax_row_dendrogram.get_position()
+        height_colorbar = hm_pos.height/2
+        width_colorbar = rc_pos.width/2
+        cm.cax.set_position([rdendro_pos.x0 - width_row_dendrogram - hm_pos.width*0.5, rdendro_pos.y0 + (rdendro_pos.height-rdendro_pos.y0)/2 - height_colorbar/2, width_colorbar, height_colorbar])
+        
+        # adjust position of the col dendrogram
+        cdendro_pos = cm.ax_col_dendrogram.get_position()
+        if col_cluster is True: height_col_dendrogram = (hm_pos.height/len(df))*4
+        else: height_col_dendrogram = 0
+        cm.ax_col_dendrogram.set_position([cc_pos.x0, cc_pos.y0+cc_pos.height, cc_pos.width, height_col_dendrogram])
+    
+    else:
+
+        # define figsize 
+        #figsize = (len(df.columns)*0.3, len(df)*0.35)
+
+        # get the clustermap
+        cm = sns.clustermap(df, col_cluster=col_cluster, row_cluster=row_cluster, row_colors=row_colors_df, col_colors=col_colors_df, cbar_kws={'label': colorbar_label}, xticklabels=False, square=True, cmap=cmap, annot=annot, fmt="", annot_kws={"size": 6}, linecolor=linecolor, linewidths=linewidths, yticklabels=yticklabels) # figsize=figsize, linecolor=linecolor, 
+
+        ########### adjsut square position to the hm ###########
+
+        # define the size of each square
+        hm_pos = cm.ax_heatmap.get_position()
+        size_square = hm_pos.width / len(df.columns)
+
+        # adjust the col colorbar
+        height_col_colorbar = size_square * len(col_colors_df.columns)
+        cm.ax_col_colors.set_position([hm_pos.x0, hm_pos.y0 + hm_pos.height + size_square*0.2, hm_pos.width, height_col_colorbar]); cc_pos = cm.ax_col_colors.get_position()
+
+        # adjust the row colorbar
+        width_row_colorbar = size_square * len(row_colors_df.columns)
+        cm.ax_row_colors.set_position([hm_pos.x0 - width_row_colorbar - size_square*0.2, hm_pos.y0, width_row_colorbar, hm_pos.height]); rc_pos = cm.ax_row_colors.get_position()
+
+        # adjust the row dendrogram
+        if row_cluster is True: width_row_dendrogram = width_row_colorbar
+        else: width_row_dendrogram = 0
+        cm.ax_row_dendrogram.set_position([rc_pos.x0-width_row_dendrogram, rc_pos.y0, width_row_dendrogram, rc_pos.height])
+        row_dendrogram_pos = cm.ax_row_dendrogram.get_position()
+
+
+        # adjust position of the col dendrogram
+        if col_cluster is True: height_col_dendrogram = height_col_colorbar
+        else: height_col_dendrogram = 0
+        cm.ax_col_dendrogram.set_position([cc_pos.x0, cc_pos.y0+cc_pos.height, cc_pos.width, height_col_dendrogram])
+
+        ########################################################
+
+    # get the tile
+    cm.ax_col_dendrogram.set_title(title)
+
+    # remove the colors from the colorbars
+    cm.ax_col_colors.collections[0].set_linewidth(0.1)
+    cm.ax_col_colors.collections[0].set_edgecolor("black")
+    cm.ax_row_colors.collections[0].set_linewidth(0.1)
+    cm.ax_row_colors.collections[0].set_edgecolor("black")
+
+    # add the position of the legend. one for rows, one for cols
+    if  legend is True:
+
+        # get the maximum number of boxes in legend
+        max_n_boxes_rows = 1 + len(row_colors_df.columns) + len(set.union(*[set(idx.split(idxs_separator_pattern)) for idx in row_colors_df.index]))
+        max_n_boxes_cols = 1 + len(col_colors_df.columns) + len(set.union(*[set(idx.split(idxs_separator_pattern)) for idx in col_colors_df.index]))
+        max_nboxes = max([max_n_boxes_cols, max_n_boxes_rows])
+
+        # go through rows and cols
+        for Ilegend, (legendlabel, colors_df) in enumerate([("rows", row_colors_df), ("cols", col_colors_df)]):
+
+            # add the label for the type of column
+            cm.ax_heatmap.bar(1, 0, color="white", label="--%s--"%legendlabel, linewidth=0); I=1
+
+            # go through each of the labels of the cols
+            for If, field in enumerate(colors_df.columns):
+
+                # get each of the label and color combinations
+                label_and_color_combinations = set(zip(map(lambda x: x.split(idxs_separator_pattern)[If], colors_df.index), colors_df[field]))
+
+                # add bar for the field
+                cm.ax_heatmap.bar(1, 0, color="white", label=field, linewidth=0); I+=1
+
+                for label, color in sorted(label_and_color_combinations):
+
+                    # add bar
+                    cm.ax_heatmap.bar(1, 0, color=color, label=label, linewidth=0); I+=1
+
+            # add missing bars to the legend
+            for extraBarI in range(max_nboxes-I): cm.ax_heatmap.bar(1, 0, color="white", label="-", linewidth=0)
+
+        # add the legend, depending on the location
+        cm.ax_heatmap.legend(loc="best", bbox_to_anchor=(hm_pos.x0+hm_pos.width+add_to_legend_x, hm_pos.y0, hm_pos.width, hm_pos.height), ncol=2) # loc is the lower left corner bbox_to_anchor
+        #cm.ax_heatmap.legend(loc="best", bbox_to_anchor=(2, 1), ncol=2) # loc is the lower left corner bbox_to_anchor
+
+        ###################################
+
+
+
+    # add graphics to y labels if provided
+    if ylabels_graphics_df is not None:
+
+        for I, (fw, c) in enumerate(ylabels_graphics_df[["fontweight", "color"]].values):
+
+            cm.ax_heatmap.get_yticklabels()[I].set_weight(fw) 
+            cm.ax_heatmap.get_yticklabels()[I].set_color(c) 
+
+
+    # SAVE
+    print("saving %s"%filename)
+    cm.savefig(filename)
+
+    return cm
+
+
+
+
+def getPlots_filtering_accuracy_across_genomes_and_ploidies(df_cross_benchmark, PlotsDir, simName_to_color={"simulation_1":"black", "simulation_2":"red", "simulation_3":"green"}, simType_to_color={'biased_towards_repeats':"red", 'realData':"black", 'uniform':"blue", "simulated":"blue"}, ploidy_to_color={'consensus_ref': 'gray', 'haploid': 'black', 'diploid_hetero': 'maroon', 'ref:3_var:1': 'red', 'ref:9_var:1': 'lightsalmon', 'ref:99_var:1': 'white'}, svtype_to_color={"tandemDuplications": "gray", "deletions": "black", "inversions": "blue", "translocations": "olive", "insertions": "red", "remaining":"magenta", "integrated":"c"}):
+
+    """This function takes a df that has several training and testing genomes with accuracy in each, and makes several plots to represent the data under outdir """
+
+    #print("WARNING: you have to change the colors !!!")
+
+    #### cross-accuracy heatmap between combinations of parameters ###
+
+    # define training and testing sets
+    all_train_ploidies = set(df_cross_benchmark.train_ploidy)
+    all_train_ploidies_str = "_".join(sorted(all_train_ploidies))
+
+    all_train_genomeIDs = set(df_cross_benchmark.train_genomeID)
+    all_train_genomeIDs_str = "_".join(sorted(all_train_genomeIDs))
+
+    all_test_ploidies = set(df_cross_benchmark.test_ploidy)
+    all_test_ploidies_str = "_".join(sorted(all_test_ploidies))
+
+    all_test_genomeIDs = set(df_cross_benchmark.test_genomeID)
+    all_test_genomeIDs_str = "_".join(sorted(all_test_genomeIDs))
+
+    all_svtypes = {'integrated', 'translocations', 'tandemDuplications', 'remaining', 'inversions', 'deletions', 'insertions'}
+    all_svtypes_str = "-".join(sorted(all_svtypes))
+
+    # define the lists of ploidies
+
+    # training
+    #interesting_train_plodies_list = [all_train_ploidies, {"haploid"}, {"haploid", "diploid_hetero"}]
+    #interesting_train_plodies_list = [{"haploid"}]
+    interesting_train_plodies_list = [all_train_ploidies]
+
+    #interesting_train_genomeIDs_list = [all_train_genomeIDs, {x for x in all_train_genomeIDs if "biased_towards_repeats" in x}, {x for x in all_train_genomeIDs if "uniform" in x}]
+    interesting_train_genomeIDs_list = [all_train_genomeIDs]
+
+    #interesting_train_svtypes_list = [all_svtypes] + [{x} for x in all_svtypes]
+    interesting_train_svtypes_list = [all_svtypes]
+    #interesting_train_svtypes_list = [{x} for x in all_svtypes]
+
+    # testing
+
+    #interesting_test_plodies_list = [all_test_ploidies, {"haploid"}, {"haploid", "diploid_hetero"}]
+    interesting_test_plodies_list = [all_test_ploidies]
+
+    #interesting_test_genomeIDs_list = [all_test_genomeIDs, {x for x in all_test_genomeIDs if "biased_towards_repeats" in x}, {x for x in all_test_genomeIDs if "uniform" in x}]
+    interesting_test_genomeIDs_list = [all_test_genomeIDs]
+
+    #interesting_test_svtypes_list = [all_svtypes] + [{x} for x in all_svtypes]
+    interesting_test_svtypes_list = [all_svtypes]
+    #interesting_test_svtypes_list = [{x} for x in all_svtypes]
+
+    # accuracies and testings
+    interesting_accuracies = ["Fvalue", "recall", "precision"]
+    #interesting_accuracies = ["precision"]
+
+
+    #row_cluster_list = [False, True]
+    row_cluster_list = [True]
+    #col_cluster_list = [False, True]
+    col_cluster_list = [True]
+
+    # map each accuracy 
+
+    # go through each combination
+    for interesting_train_plodies in interesting_train_plodies_list:
+        for interesting_train_genomeIDs in interesting_train_genomeIDs_list:
+            for interesting_train_svtypes in interesting_train_svtypes_list:
+                for interesting_test_plodies in interesting_test_plodies_list:
+                    for interesting_test_genomeIDs in interesting_test_genomeIDs_list:
+                        for interesting_test_svtypes in interesting_test_svtypes_list:        
+
+                            # get the filtered df
+                            df = df_cross_benchmark[(df_cross_benchmark.train_ploidy.isin(interesting_train_plodies)) & (df_cross_benchmark.train_genomeID.isin(interesting_train_genomeIDs)) & (df_cross_benchmark.train_svtype.isin(interesting_train_svtypes)) & (df_cross_benchmark.test_ploidy.isin(interesting_test_plodies)) & (df_cross_benchmark.test_genomeID.isin(interesting_test_genomeIDs)) & (df_cross_benchmark.test_svtype.isin(interesting_test_svtypes)) & (df_cross_benchmark.nevents>=10)]
+
+                            # add a simulation tag
+
+                            # add the train and test indices
+                            df["train_idx"] = (df.train_simName + "||||" + df.train_simType + "||||" + df.train_ploidy + "||||" + df.train_svtype)
+                            df["test_idx"] = (df.test_simName + "||||" + df.test_simType + "||||" + df.test_ploidy + "||||" + df.test_svtype)
+
+                            # find the train test that has the best Fvalue (the one that is maximum in the)
+                            df_square_best = df[["train_idx", "test_idx", "Fvalue"]].pivot(index='train_idx', columns='test_idx', values="Fvalue")
+                            train_idx_to_accuracy_df = df_square_best.apply(lambda r: pd.Series({"min_Fscore":min(r), "mean_Fscore":np.mean(r), "max_Fscore":max(r), "inverse_std_Fscore": 1/np.std(r), "median_Fscore":np.median(r)}) , axis=1).sort_values(by=["min_Fscore", "inverse_std_Fscore", "mean_Fscore", "median_Fscore", "max_Fscore"])
+                            best_train_idx = train_idx_to_accuracy_df.iloc[-1].name
+
+                            # go through each accuracy measurement
+                            for accuracy in interesting_accuracies:
+
+                                # prepare the dataframe so that the rows reflect the trainset and the cols the test set
+                                df_square = df[["train_idx", "test_idx", accuracy]].pivot(index='train_idx', columns='test_idx', values=accuracy)
+                                df_square_nevents = df[["train_idx", "test_idx", "nevents"]].pivot(index='train_idx', columns='test_idx', values="nevents")
+
+                                # generate the cols colors df
+                                def get_colors_series(idx):
+
+                                    # get the different keywords
+                                    simName, simType, ploidy, svtype = idx.split("||||")
+
+                                    return pd.Series({"simName":simName_to_color[simName], "simType":simType_to_color[simType], "ploidy":ploidy_to_color[ploidy], "svtype":svtype_to_color[svtype]})
+                                
+                                row_colors_df = pd.Series(df_square.index, index=df_square.index).apply(get_colors_series)
+                                col_colors_df = pd.Series(df_square.columns, index=df_square.columns).apply(get_colors_series)
+
+                                #### get df annotations if the svtype is the same #######
+
+                                # and a + when there are very few cases in the test
+                                colIDX_to_rowIDX_to_label = {}
+                                for col in df_square.columns: # iterate through testing
+                                    svtype_col = col.split("||||")[-1]
+
+                                    for row in df_square.index: # iterate through training
+                                        svtype_row = row.split("||||")[-1]
+
+                                        # define the number of events in test
+                                        nevents_test = df_square_nevents.loc[row, col]
+
+                                        # if they are the same
+                                        if nevents_test<10: label = str(nevents_test)
+                                        elif col==row: label = "=" 
+                                        elif svtype_col==svtype_row: label = "*"
+                                        else: label = ""
+
+                                        # when the row is the same as the best_train_idx, add a best to the label
+                                        if row==best_train_idx: 
+                                            #label = "%s(B)"%label (a best)
+
+                                            # add the accuracy
+                                            if df_square.loc[row, col]==1: label = "1"
+                                            else: label = "." + ("%.2f"%df_square.loc[row, col]).split(".")[1]
+
+                                        # keep
+                                        colIDX_to_rowIDX_to_label.setdefault(col, {}).setdefault(row, label)
+
+                                df_annotations = pd.DataFrame(colIDX_to_rowIDX_to_label)
+
+                                #########################################################
+
+                                # go through each clustering
+                                for row_cluster in row_cluster_list:
+                                    for col_cluster in col_cluster_list:
+
+                                        # define the filename
+
+                                        #train vals
+                                        train_genomeIDs = "_".join(sorted(interesting_train_genomeIDs)); 
+                                        if train_genomeIDs==all_train_genomeIDs_str: train_genomeIDs = "all"
+                                        train_ploidies = "_".join(sorted(interesting_train_plodies)); 
+                                        if train_ploidies==all_train_ploidies_str: train_ploidies = "all"
+                                        train_svtypes = "_".join(sorted(interesting_train_svtypes)); 
+                                        if train_svtypes==all_svtypes_str: train_svtypes = "all"
+
+                                        # test vals
+                                        test_genomeIDs = "_".join(sorted(interesting_test_genomeIDs)); 
+                                        if test_genomeIDs==all_test_genomeIDs_str: test_genomeIDs = "all"
+                                        test_ploidies = "_".join(sorted(interesting_test_plodies)); 
+                                        if test_ploidies==all_test_ploidies_str: test_ploidies = "all"
+                                        test_svtypes = "_".join(sorted(interesting_test_svtypes)); 
+                                        if test_svtypes==all_svtypes_str: test_svtypes = "all"
+
+                                        plots_dir_crossaccuracyHeatmaps = "%s/cross_accuracy_heatmaps"%PlotsDir; make_folder(plots_dir_crossaccuracyHeatmaps)
+                                        string_title_train = "train_genomes:%s_ploidies:%s_svtypes:%s"%(train_genomeIDs, train_ploidies, train_svtypes)
+                                        string_title_test = "test_genomes:%s_ploidies:%s_svtypes:%s"%(test_genomeIDs, test_ploidies, test_svtypes)
+
+                            
+                                        filename = "%s/accuracyHeatmap_%s.pdf"%(plots_dir_crossaccuracyHeatmaps, accuracy)
+                                        
+
+                                        filename = filename.replace(":", "_")
+
+                                        #filename = "%s/accuracyHeatmap_shortName.pdf"%(plots_dir_crossaccuracyHeatmaps)
+
+
+                                        #title = "%s\n%s"%(string_title_train, string_title_test)
+                                        title ="checking overfitting in SV calling"
+
+                                        #print(df_square)
+
+
+                                        # get the dendrogram, either adjusting or not
+                                        plot_clustermap_with_annotation(df_square, row_colors_df, col_colors_df, filename, title=title, col_cluster=col_cluster, row_cluster=row_cluster, colorbar_label=accuracy, adjust_position=False, legend=True, idxs_separator_pattern="||||", texts_to_strip={"L001"}, default_label_legend="control", df_annotations=df_annotations, cmap=sns.color_palette("RdBu_r", 50), ylabels_graphics_df=None, grid_lines=True)
+    
+
+    # return the best_train_idx
+    return dict(zip(["simName", "simType", "ploidy", "svtype"], best_train_idx.split("||||")))
+
+    ##################################################################
+
+
+
+
+
+######################################################
+######################################################
+######################################################
+
+
+def get_and_report_filtering_accuracy_across_genomes_and_ploidies(df_benchmark, genomeID_to_knownSVdict, outdir, PlotsDir, reference_genome, replace=False, consider_integrated_filtering=True, threads=4, run_in_parallel=False):
+
+    """This function takes a df that has the benchmarking info (each line is a set of filtering parameters) and a "genomeID" and "ploidy" fields, which indicate the unique genomes. The idea is to pick, for each genomeID and ploidy combination, the best filtering set (highest Fscore) for the others simulations. If the genomeID is not in df_benchmark.genomeID it will run the whole gridss pipeline for the desired filtering sets, considering known_genomes_withSV_and_shortReads_table """
+
+    # general vars
+    
+    ##### add an overal accuracy measurement for df_benchmark  ########
+    if consider_integrated_filtering is True:
+
+        # define the expected df field
+        df_benchmark_with_integratedInfo_file = "%s/df_benchmark_all_with_integratedInfo.py"%outdir
+
+
+        if file_is_empty(df_benchmark_with_integratedInfo_file) or replace is True:
+
+            # define the fileds related to a filtering ID
+            fields_filtering_ID = ['bedpe', 'benchmarkID','genomeID', 'gridss_VCFoutput', 'gridss_maxcoverage', 'gridss_regionsToIgnoreBed', 'ploidy']
+
+            # get as filtered df
+            print("getting all the variants integrated for each set of filters")
+            df_benchmark_allSVtypes = df_benchmark.groupby(fields_filtering_ID, as_index=True).apply(get_integrated_benchmarking_fields_series_for_setFilters_df)
+
+            # add the indices as fields, to match those of df_benchmark
+            for I, field in enumerate(fields_filtering_ID): df_benchmark_allSVtypes[field] =  df_benchmark_allSVtypes.index.get_level_values(I)
+            df_benchmark_allSVtypes = df_benchmark_allSVtypes.set_index("svtype", drop=False)
+
+            # append to df benchmark
+            df_benchmark = df_benchmark.append(df_benchmark_allSVtypes[list(df_benchmark.keys())])
+
+            # keep
+            save_object(df_benchmark, df_benchmark_with_integratedInfo_file)
+
+        else: df_benchmark = load_object(df_benchmark_with_integratedInfo_file)
+
+    #####################################################################
+
+    # get, for each combination of genomeID, ploidy, svtype the best and less conservative filterset into a list
+    print("Getting list of best filters for each genome, ploidy and svtype")
+    IDs_sepparate_measurements = ["genomeID", "ploidy", "svtype"]
+    df_best_filters = df_benchmark.groupby(IDs_sepparate_measurements).apply(get_best_most_conservative_row_df_benchmark)
+    for I, field in enumerate(IDs_sepparate_measurements): df_best_filters[field] =  df_best_filters.index.get_level_values(I)
+
+    # define the combinations of regions_to_ignore and max_coverage
+    df_regionsIgnore_maxCov = df_best_filters[["gridss_regionsToIgnoreBed", "gridss_maxcoverage"]].drop_duplicates()
+
+
+    ####### GENERATE A DF WITH THE INFO OF EACH SV SET TO BE TESTED THROUGH df_best_filters ############
+
+    # initialize dicts to run cross-benchmarking
+    genomeIDandPlody_to_info = {}
+
+    # initialize a folder were files of the benchmarking will be stored
+    cross_benchmarking_files_dir = "%s/cross_benchmarking_files"%outdir; make_folder(cross_benchmarking_files_dir)
+
+    ## add the info for all genomes and ploidies found in df_best_filters
+    for genomeID, ploidy in df_best_filters[["genomeID", "ploidy"]].drop_duplicates().values:
+
+        # initialize test dict
+        test_gridss_info_dict = {}
+
+        # go through the gridss filterings
+        for gridss_regionsToIgnoreBed, gridss_maxcoverage in df_regionsIgnore_maxCov.values:
+
+            # find in df_benchmark the corresponding value
+            df_ben_int = df_benchmark[(df_benchmark.genomeID==genomeID) & (df_benchmark.ploidy==ploidy) & (df_benchmark.gridss_maxcoverage==gridss_maxcoverage) & (df_benchmark.gridss_regionsToIgnoreBed==gridss_regionsToIgnoreBed)][["gridss_VCFoutput", "sorted_bam", "median_coverage", "median_insert_size", "median_insert_size_sd"]].drop_duplicates()
+
+            # debug
+            if len(df_ben_int)!=1: raise ValueError("There are not only one gridss vcfs with the given genomeID and ploidy")
+            gridss_VCFoutput = df_ben_int.gridss_VCFoutput.iloc[0]
+
+            # get the known vars
+            knownSVdict = genomeID_to_knownSVdict[genomeID]
+
+            # keep into test_gridss_info_dict
+            test_gridss_info_dict.setdefault(gridss_regionsToIgnoreBed, {}).setdefault(gridss_maxcoverage, gridss_VCFoutput)
+
+        # keep in the dict
+        knownSVdict = genomeID_to_knownSVdict[genomeID]
+        processing_dir = "%s/%s_%s"%(cross_benchmarking_files_dir, genomeID, ploidy); make_folder(processing_dir)
+        genomeIDandPlody_to_info[(genomeID, ploidy)] = {"test_SVdict":knownSVdict, "outdir":processing_dir, "df_filters_train":df_best_filters, "test_gridss_info_dict":test_gridss_info_dict, "sorted_bam":df_ben_int.sorted_bam.iloc[0], "median_coverage":df_ben_int.median_coverage.iloc[0], "median_insert_size":df_ben_int.median_insert_size.iloc[0], "median_insert_size_sd":df_ben_int.median_insert_size_sd.iloc[0]}
+
+    ###########################################################################################
+
+    # run a function in parallel that will take a genome and ploidy combination and evaluate the accuracy of all the filters in df_best_filters. first prepare input as list of tuples
+    list_inputs = [(d["test_SVdict"], d["outdir"], d["df_filters_train"], d["test_gridss_info_dict"], genomeID, ploidy, d["sorted_bam"], reference_genome, d["median_coverage"], d["median_insert_size"], d["median_insert_size_sd"],  replace) for (genomeID, ploidy), d in genomeIDandPlody_to_info.items()] # 0 is for debug
+
+    # get the cross benchmarking df
+    df_cross_benchmark_file = "%s/df_cross_benchmark.py"%outdir
+
+    if file_is_empty(df_cross_benchmark_file) or replace is True:
+
+        if run_in_parallel is True:
+
+            # run in parallel
+            with multiproc.Pool(threads) as pool:
+                list_cross_benchmarking_dfs = pool.starmap(get_benchmarking_df_for_testSVs_from_trainSV_filterSets, list_inputs) # needs if __name__=="__main__" 
+                
+                pool.close()
+                pool.terminate()
+
+        else:
+
+            list_cross_benchmarking_dfs = list(map(lambda x: get_benchmarking_df_for_testSVs_from_trainSV_filterSets(x[0], x[1], x[2], x[3], x[4], x[5], x[6], x[7], x[8], x[9], x[10], x[11]), list_inputs))
+        
+        # concatenate all the dfs
+        df_cross_benchmark = pd.concat(list_cross_benchmarking_dfs)
+
+        # save
+        save_object(df_cross_benchmark, df_cross_benchmark_file)
+
+    else: df_cross_benchmark = load_object(df_cross_benchmark_file)
+
+
+    # add the simulation type for train and test
+    def add_simulation_name_and_type(genomeID, tag):
+
+        if "biased_towards_repeats" in genomeID: 
+            simName = genomeID.split("_simType_biased_towards_repeats")[0]
+            simType = "biased_towards_repeats"
+
+        elif "uniform" in genomeID: 
+            simName = genomeID.split("_simType_uniform")[0]
+            simType = "uniform"
+
+        elif "realData" in genomeID: 
+            simName = genomeID
+            simType = "realData"
+
+        else:
+            simName = genomeID
+            simType = "simulated"
+
+        return pd.Series({"%s_simName"%tag : simName, "%s_simType"%tag : simType})
+
+    df_cross_benchmark[["train_simName", "train_simType"]] = df_cross_benchmark.train_genomeID.apply(lambda x: add_simulation_name_and_type(x, "train"))
+    df_cross_benchmark[["test_simName", "test_simType"]] = df_cross_benchmark.test_genomeID.apply(lambda x: add_simulation_name_and_type(x, "test"))
+
+    ######### get the plots and the best filters ###########
+
+    best_filters_dict = getPlots_filtering_accuracy_across_genomes_and_ploidies(df_cross_benchmark, PlotsDir)
+
+    #########################################################
+
+    # get the best filters
+    best_filters_series = df_best_filters.loc[(best_filters_dict["simName"], best_filters_dict["ploidy"], best_filters_dict["svtype"])]
+
+    # get the df_cross_benchmark that matches the best series
+    df_cross_benchmark_best = df_cross_benchmark[(df_cross_benchmark.train_genomeID==best_filters_dict["simName"]) & (df_cross_benchmark.train_ploidy==best_filters_dict["ploidy"]) & (df_cross_benchmark.train_svtype==best_filters_dict["svtype"]) & (df_cross_benchmark.nevents>5)]
+
+    print("These are the accuracy measurements on all data")
+    print(df_cross_benchmark_best[["test_genomeID", "test_ploidy", "Fvalue", "precision", "recall"]].sort_values(by=["Fvalue", "precision"]))
+
+    return df_cross_benchmark_best, best_filters_series
+
+
+
+def get_best_parameters_for_GridssClove_run(sorted_bam, reference_genome, outdir, threads=4, replace=False, window_l=5000, n_simulated_genomes=2, mitochondrial_chromosome="mito_C_glabrata_CBS138", simulation_ploidies=["haploid", "diploid_homo", "diploid_hetero", "ref:2_var:1", "ref:3_var:1", "ref:4_var:1", "ref:5_var:1", "ref:9_var:1", "ref:19_var:1", "ref:99_var:1"], range_filtering_benchmark="theoretically_meaningful", nvars=100, real_svtype_to_file={}, median_insert_size=250, median_insert_size_sd=0):
 
     """This finds the optimum parameters for running GRIDSS clove and returns them. The parameters are equivalent to the run_GridssClove_optimising_parameters function"""
 
@@ -7353,12 +7967,44 @@ def get_best_parameters_for_GridssClove_run(sorted_bam, reference_genome, outdir
 
     ####################################################
 
-    lndalshjldjasjjskdllkjskjlsakjlasdkjladsjklasdjklasdjkljklsjklsad
+    ################### REPORT ACCURACY BETWEEN PARAMETERS OF DIFFERENT OPTIMISATIONS ####################
 
-    return gridss_blacklisted_regions, gridss_maxcoverage, gridss_filters_dict, max_rel_coverage_to_consider_del, min_rel_coverage_to_consider_dup
+    # we will take the parameters that work best for all the simulations that we input
+
+    # define the outputs
+    outdir_benchmarking = "%s/benchmarking_all_filters_for_all_genomes_and_ploidies"%outdir; make_folder(outdir_benchmarking)
+    PlotsDir_benchmarking = "%s/plots"%outdir_benchmarking; make_folder(PlotsDir_benchmarking)
 
 
-def run_GridssClove_optimising_parameters(sorted_bam, reference_genome, outdir, threads=4, replace=False, window_l=5000, n_simulated_genomes=2, mitochondrial_chromosome="mito_C_glabrata_CBS138", simulation_ploidies=["haploid", "diploid_homo", "diploid_hetero", "ref:2_var:1", "ref:3_var:1", "ref:4_var:1", "ref:5_var:1", "ref:9_var:1", "ref:19_var:1", "ref:99_var:1"], range_filtering_benchmark="theoretically_meaningful", expected_ploidy=1, nvars=100, fast_SVcalling=False, real_svtype_to_file={}):
+    print("getting report of the accuracies between simulations")
+
+    df_cross_benchmark_best, best_f = get_and_report_filtering_accuracy_across_genomes_and_ploidies(df_benchmark_all, genomeID_to_knownSVdict, outdir_benchmarking, PlotsDir_benchmarking, reference_genome, replace=replace, consider_integrated_filtering=True, threads=threads)
+
+    # define the filters
+    gridss_blacklisted_regions = best_f["gridss_regionsToIgnoreBed"]
+    gridss_maxcoverage = best_f["gridss_maxcoverage"]
+    gridss_filters_dict = best_f["filters_dict"]
+    max_rel_coverage_to_consider_del = best_f["clove_max_rel_coverage_to_consider_del"]
+    min_rel_coverage_to_consider_dup = best_f["clove_min_rel_coverage_to_consider_dup"]
+
+    ######################################################################################################
+
+
+    #### remove unnecessary files ####
+
+    # simulations
+    #for simulation_ID in range(1, n_simulated_genomes+1): delete_folder("%s/simulation_%i"%(outdir, simulation_ID))
+
+    # remove the cross-benchmarking files
+    delete_folder("%s/cross_benchmarking_files"%outdir_benchmarking)
+
+
+    ####################################
+
+    return gridss_blacklisted_regions, gridss_maxcoverage, gridss_filters_dict, max_rel_coverage_to_consider_del, min_rel_coverage_to_consider_dup, df_cross_benchmark_best
+
+
+def run_GridssClove_optimising_parameters(sorted_bam, reference_genome, outdir, threads=4, replace=False, window_l=5000, n_simulated_genomes=2, mitochondrial_chromosome="mito_C_glabrata_CBS138", simulation_ploidies=["haploid", "diploid_homo", "diploid_hetero", "ref:2_var:1", "ref:3_var:1", "ref:4_var:1", "ref:5_var:1", "ref:9_var:1", "ref:19_var:1", "ref:99_var:1"], range_filtering_benchmark="theoretically_meaningful", nvars=100, fast_SVcalling=False, real_svtype_to_file={}, gridss_VCFoutput=""):
 
     """
     Takes some aligned reads and runs the GridssPipeline optimising the parameters of GRIDSS filtering. These are the different parameters of the function:
@@ -7374,7 +8020,8 @@ def run_GridssClove_optimising_parameters(sorted_bam, reference_genome, outdir, 
     - expected_ploidy is a number that states the expected ploidy. 
     - nvars deteremines the number of SVs to simulate in each simulation of each type. The mtDNA will get 5% of these. There will be as maximum len(gDNA chromosomes)-1 balanced translocations, so that each chromosomal arm is only implicated once.
     - fast_SVcalling runs the SV on a predefined set of parameters, without optimisation
-    - real_svtype_to_file is a dict that maps each type of 
+    - real_svtype_to_file is a dict that maps each type of sv to the file that contains it. It is useful to introduce a previously found set of SVs.
+    - gridss_VCFoutput is passed to run_gridssClove_given_filters. It can be useful if you don't want to rerun gridss, which is very expensive.
 
     """
 
@@ -7403,7 +8050,7 @@ def run_GridssClove_optimising_parameters(sorted_bam, reference_genome, outdir, 
 
         parameter_optimisation_dir = "%s/parameter_optimisation"%outdir; make_folder(parameter_optimisation_dir)
 
-        gridss_blacklisted_regions, gridss_maxcoverage, gridss_filters_dict, max_rel_coverage_to_consider_del, min_rel_coverage_to_consider_dup = get_best_parameters_for_GridssClove_run(sorted_bam, reference_genome, parameter_optimisation_dir, threads=threads, replace=replace, window_l=window_l, n_simulated_genomes=n_simulated_genomes, mitochondrial_chromosome=mitochondrial_chromosome, simulation_ploidies=simulation_ploidies, range_filtering_benchmark=range_filtering_benchmark, expected_ploidy=expected_ploidy, nvars=nvars, real_svtype_to_file=real_svtype_to_file, median_insert_size=median_insert_size, median_insert_size_sd=median_insert_size_sd)
+        gridss_blacklisted_regions, gridss_maxcoverage, gridss_filters_dict, max_rel_coverage_to_consider_del, min_rel_coverage_to_consider_dup, df_cross_benchmark_best = get_best_parameters_for_GridssClove_run(sorted_bam, reference_genome, parameter_optimisation_dir, threads=threads, replace=replace, window_l=window_l, n_simulated_genomes=n_simulated_genomes, mitochondrial_chromosome=mitochondrial_chromosome, simulation_ploidies=simulation_ploidies, range_filtering_benchmark=range_filtering_benchmark, nvars=nvars, real_svtype_to_file=real_svtype_to_file, median_insert_size=median_insert_size, median_insert_size_sd=median_insert_size_sd)
 
     # get the parameters from an optimisation
     else: 
@@ -7422,7 +8069,8 @@ def run_GridssClove_optimising_parameters(sorted_bam, reference_genome, outdir, 
 
     # define the final outdir 
     outdir_gridss_final = "%s/final_gridss_running"%outdir; make_folder(outdir_gridss_final)
-    final_gridss_vcf = "%s/output_gridss.vcf"%outdir_gridss_final
+    if file_is_empty(gridss_VCFoutput): final_gridss_vcf = "%s/output_gridss.vcf"%outdir_gridss_final
+    else: final_gridss_vcf = gridss_VCFoutput
 
     # define the median coverage across window_l windows of the genome
     coverage_df =  pd.read_csv(generate_coverage_per_window_file_parallel(reference_genome, outdir_gridss_final, sorted_bam, windows_file="none", replace=replace, window_l=window_l), sep="\t")
@@ -7431,7 +8079,7 @@ def run_GridssClove_optimising_parameters(sorted_bam, reference_genome, outdir, 
 
     # run the pipeline
     print("running final gridss with parameters...")
-    final_sv_dict, df_gridss = run_gridssClove_given_filters(sorted_bam, reference_genome, outdir_gridss_final, median_coverage, replace=replace, threads=threads, gridss_blacklisted_regions=gridss_blacklisted_regions, gridss_VCFoutput=final_gridss_vcf, gridss_maxcoverage=gridss_maxcoverage, median_insert_size=median_insert_size, median_insert_size_sd=median_insert_size_sd, gridss_filters_dict=gridss_filters_dict, run_in_parallel=True, max_rel_coverage_to_consider_del=max_rel_coverage_to_consider_del, min_rel_coverage_to_consider_dup=min_rel_coverage_to_consider_dup, replace_FromGridssRun=replace, define_insertions_based_on_coverage=False)
+    final_sv_dict, df_gridss = run_gridssClove_given_filters(sorted_bam, reference_genome, outdir_gridss_final, median_coverage, replace=replace, threads=threads, gridss_blacklisted_regions=gridss_blacklisted_regions, gridss_VCFoutput=final_gridss_vcf, gridss_maxcoverage=gridss_maxcoverage, median_insert_size=median_insert_size, median_insert_size_sd=median_insert_size_sd, gridss_filters_dict=gridss_filters_dict, run_in_parallel=True, max_rel_coverage_to_consider_del=max_rel_coverage_to_consider_del, min_rel_coverage_to_consider_dup=min_rel_coverage_to_consider_dup, replace_FromGridssRun=replace)
 
     ########################################
 
@@ -7444,14 +8092,6 @@ def run_GridssClove_optimising_parameters(sorted_bam, reference_genome, outdir, 
 
     print("--- the gridss pipeline optimising parameters took %s seconds in %i cores ---"%(time.time() - pipeline_start_time, threads))
 
-    # at the end remove all the files that are unnecessary
-
-    # simulations
-    #for simulation_ID in range(1, n_simulated_genomes+1): delete_folder("%s/simulation_%i"%(outdir, simulation_ID))
-
-    # remove the cross-benchmarking files
-    #delete_folder("%s/cross_benchmarking_files"%outdir_benchmarking)
-
     # generate a file that indicates whether the gridss run is finished
     #final_file = "%s/gridss_finished_file_final_gridss_final_with_window_size.txt"%outdir
     #open(final_file, "w").write("gridss finished...")
@@ -7459,6 +8099,56 @@ def run_GridssClove_optimising_parameters(sorted_bam, reference_genome, outdir, 
     ######################################
 
     return final_sv_dict, df_gridss
+
+
+def report_accuracy_simulations(sorted_bam, reference_genome, outdir, real_svtype_to_file, threads=4, replace=False, window_l=5000, n_simulated_genomes=2, mitochondrial_chromosome="mito_C_glabrata_CBS138", simulation_ploidies=["haploid", "diploid_homo", "diploid_hetero", "ref:2_var:1", "ref:3_var:1", "ref:4_var:1", "ref:5_var:1", "ref:9_var:1", "ref:19_var:1", "ref:99_var:1"], range_filtering_benchmark="theoretically_meaningful", nvars=100):
+
+    """This function runs tests the accuracy on uniform simulations and those indicated by real_svtype_to_file. It reports the accuracy of the parameter optimisation on each of these simulations, as well as how the fast method works for each of the different simulation types. """
+
+    # test that there is real data
+    if len(real_svtype_to_file)==0: raise ValueError("You need real data if you want to test accuracy")
+
+    # make the outdir
+    make_folder(outdir)
+
+    print("Testing accuracy of simulations")
+
+    # calculate the insert size statistics
+    median_insert_size, median_insert_size_sd  = get_insert_size_distribution(sorted_bam, replace=replace, threads=threads)
+
+    # initialize a df that will contain the accuracy of each simulation type. The fields will be genomeID, ploidy, svtype, typeParameterOptimisation (this can be uniform, realSVs, fastSV_on_uniform or fastSV_on_realSVs), Fvalue, precision and recall
+    df_benchmarking = pd.DataFrame()
+
+    # go through each simulation type
+    for typeSimulations, svtype_to_svfile in [("uniform", {}), ("realSVs", real_svtype_to_file)]:
+        print(typeSimulations)
+
+        # define the parameter optimisation dir
+        parameter_optimisation_dir = "%s/parameter_optimisation_%s"%(outdir, typeSimulations); make_folder(parameter_optimisation_dir)
+
+        # get the accuracy of these types of simulations, as well as the best parameters
+        gridss_blacklisted_regions, gridss_maxcoverage, gridss_filters_dict, max_rel_coverage_to_consider_del, min_rel_coverage_to_consider_dup, df_cross_benchmark_best = get_best_parameters_for_GridssClove_run(sorted_bam, reference_genome, parameter_optimisation_dir, threads=threads, replace=replace, window_l=window_l, n_simulated_genomes=n_simulated_genomes, mitochondrial_chromosome=mitochondrial_chromosome, simulation_ploidies=simulation_ploidies, range_filtering_benchmark=range_filtering_benchmark, nvars=nvars, real_svtype_to_file=svtype_to_svfile, median_insert_size=median_insert_size, median_insert_size_sd=median_insert_size_sd)
+
+        # go through each simulation and ploidy and run the fastSV calling on it. This will be fast by putting the 
+
+
+
+    # make plots to report the accuracy of each simulation type. There will be one subplot for each precision/recall/Fvalue and ploidy combination. The rows will be for ploidies and the cols for Each plot will contain the 
+
+
+
+
+
+
+
+
+
+    kkajhad
+
+
+
+
+
 
 
 
