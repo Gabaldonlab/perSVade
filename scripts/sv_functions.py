@@ -5594,7 +5594,7 @@ def get_is_overlapping_query_vs_target_region(q, r):
 
     return (q["chromosome"]==r["chromosome"]) and ((r["start"]<=q["start"]<=r["end"]) or (r["start"]<=q["end"]<=r["end"]) or (q["start"]<=r["start"]<=q["end"]) or (q["start"]<=r["end"]<=q["end"]))
 
-def get_ID_to_svtype_to_svDF_for_setOfGenomes_highConfidence(close_shortReads_table, reference_genome, outdir, replace=False, threads=4, mitochondrial_chromosome="mito_C_glabrata_CBS138", run_in_slurm=False, walltime="02:00:00", queue="bsc_ls"):
+def get_ID_to_svtype_to_svDF_for_setOfGenomes_highConfidence(close_shortReads_table, reference_genome, outdir, replace=False, threads=4, mitochondrial_chromosome="mito_C_glabrata_CBS138", run_in_slurm=False, walltime="02:00:00", queue="debug"):
 
     """Generates a dict that maps each sample in genomes_withSV_and_shortReads_table to an svtype and a DF with all the info about several vars. It only gets the high-confidence vars.
 
@@ -5628,11 +5628,8 @@ def get_ID_to_svtype_to_svDF_for_setOfGenomes_highConfidence(close_shortReads_ta
             # run in the gridss and clove with the fast parameters
             outdir_gridssClove = "%s/shortReads_realVarsDiscovery_%s"%(all_realVars_dir,ID); make_folder(outdir_gridssClove)
 
-            # define an outdir for this SVdetection_output
-            outdir_SVdetection = "%s/SVdetection_output"%outdir_runID; make_folder(outdir_SVdetection)
-
             # define the previous important files
-            final_file = "%s/gridss_finished_file.txt"%outdir_SVdetection
+            final_file = "%s/SVdetection_output/gridss_finished_file.txt"%outdir_gridssClove
 
             # only contine if the final file is not defined
             if file_is_empty(final_file) or replace is True:
