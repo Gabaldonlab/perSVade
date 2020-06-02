@@ -120,6 +120,7 @@ annotate_simpleEvents_gridssVCF_R = "%s/annotate_simpleEvents_gridssVCF.R"%CWD
 analyze_svVCF = "%s/generate_files_from_svVCF.R"%CWD
 analyze_svVCF_simple = "%s/generate_files_from_svVCF_simple.R"%CWD
 TRIMMOMATIC = "%s/run_trimmomatic.py"%CWD 
+perSVade_py = "%s/perSVade.py"%CWD 
 
 ######################################################
 ######################################################
@@ -5593,7 +5594,7 @@ def get_is_overlapping_query_vs_target_region(q, r):
 
     return (q["chromosome"]==r["chromosome"]) and ((r["start"]<=q["start"]<=r["end"]) or (r["start"]<=q["end"]<=r["end"]) or (q["start"]<=r["start"]<=q["end"]) or (q["start"]<=r["end"]<=q["end"]))
 
-def get_ID_to_svtype_to_svDF_for_setOfGenomes_highConfidence(close_shortReads_table, reference_genome, outdir, replace=False, threads=4, mitochondrial_chromosome="mito_C_glabrata_CBS138"):
+def get_ID_to_svtype_to_svDF_for_setOfGenomes_highConfidence(close_shortReads_table, reference_genome, outdir, replace=False, threads=4, mitochondrial_chromosome="mito_C_glabrata_CBS138", run_in_slurm=False, walltime="02:00:00", queue="bsc_ls"):
 
     """Generates a dict that maps each sample in genomes_withSV_and_shortReads_table to an svtype and a DF with all the info about several vars. It only gets the high-confidence vars.
 
@@ -5613,6 +5614,9 @@ def get_ID_to_svtype_to_svDF_for_setOfGenomes_highConfidence(close_shortReads_ta
 
     if file_is_empty(ID_to_svtype_to_svDF_file) or replace is True:
 
+        # initialize a list of cmds to run
+        all_cmds = []
+
         # initialize dicts that keep them all together
         all_sampleID_to_svtype_to_file = {}
         all_sampleID_to_dfGRIDSS = {}
@@ -5624,19 +5628,62 @@ def get_ID_to_svtype_to_svDF_for_setOfGenomes_highConfidence(close_shortReads_ta
             # run in the gridss and clove with the fast parameters
             outdir_gridssClove = "%s/shortReads_realVarsDiscovery_%s"%(all_realVars_dir,ID); make_folder(outdir_gridssClove)
 
-            # get a bam file for these reads
-            bamfile = "%s/aligned_reads.bam"%outdir_gridssClove
-            sorted_bam = "%s.sorted"%bamfile
-            index_bam = "%s.bai"%sorted_bam
+            # define an outdir for this SVdetection_output
+            outdir_SVdetection = "%s/SVdetection_output"%outdir_runID; make_folder(outdir_SVdetection)
 
-            run_bwa_mem(row["short_reads1"], row["short_reads2"], reference_genome, outdir_gridssClove, bamfile, sorted_bam, index_bam, name_sample=ID, threads=threads, replace=replace)
+            # define the previous important files
+            final_file = "%s/gridss_finished_file.txt"%outdir_SVdetection
 
-            # run fast pipeline GridssClove
-            svtype_to_svfile, df_gridss = run_GridssClove_optimising_parameters(sorted_bam, reference_genome, outdir_gridssClove, threads=threads, replace=replace, window_l=10000, mitochondrial_chromosome=mitochondrial_chromosome, fast_SVcalling=True)
+            # only contine if the final file is not defined
+            if file_is_empty(final_file) or replace is True:
+
+                # define the cmd. This is a normal perSvade.py run with the vars of the previous dir  
+                cmd = "python %s -r %s --threads %i --outdir %s  --mitochondrial_chromosome %s -f1 %s -f2 %s --fast_SVcalling"%(perSVade_py, reference_genome, threads, outdir_gridssClove, mitochondrial_chromosome, row["short_reads1"], row["short_reads2"])
+
+                # add arguments depending on the pipeline
+                if replace is True: cmd += " --replace"
+
+                # if the running in slurm is false, just run the cmd
+                if run_in_slurm is False: run_cmd(cmd)
+                else: 
+                    all_cmds.append(cmd)
+                    continue
+
+            # define the svdict
+            svtype_to_svfile
+            df_gridss
+
+            jgvghffjh
 
             # keep 
             all_sampleID_to_svtype_to_file[ID] =  svtype_to_svfile
             all_sampleID_to_dfGRIDSS[ID] = df_gridss
+
+            # get a bam file for these reads
+            #bamfile = "%s/aligned_reads.bam"%outdir_gridssClove
+            #sorted_bam = "%s.sorted"%bamfile
+            #index_bam = "%s.bai"%sorted_bam
+
+            #run_bwa_mem(row["short_reads1"], row["short_reads2"], reference_genome, outdir_gridssClove, bamfile, sorted_bam, index_bam, name_sample=ID, threads=threads, replace=replace)
+
+            # run fast pipeline GridssClove
+            #svtype_to_svfile, df_gridss = run_GridssClove_optimising_parameters(sorted_bam, reference_genome, outdir_gridssClove, threads=threads, replace=replace, window_l=10000, mitochondrial_chromosome=mitochondrial_chromosome, fast_SVcalling=True)
+
+        # if yoy are running on slurm, get it in a job array
+        if run_in_slurm is True: 
+
+            if len(all_cmds)>0: 
+                print("submitting %i jobs to the cluster for the real data"%len(all_cmds))
+                jobs_filename = "%s/jobs.getting_realSVs"%all_realVars_dir
+                open(jobs_filename, "w").write("\n".join(all_cmds))
+
+                # define and create the STDERR and STDOUT
+                STDERR = "%s/STDERR"%all_realVars_dir
+                STDOUT = "%s/STDOUT"%all_realVars_dir
+
+                generate_jobarray_file_slurm(jobs_filename, stderr=STDERR, stdout=STDOUT, walltime=walltime,  name="getRealSVs", queue=queue, sbatch=True, ncores_per_task=threads, rmstd=True, constraint="", number_tasks_to_run_at_once="all" )
+
+                raise ValueError("You have to wait under all the jobs in testRealSVs are done")
 
         # get a df that has all the info for each SV, and then the df with allele freq, metadata and 
         ID_to_svtype_to_svDF = get_sampleID_to_svtype_to_svDF_filtered(all_sampleID_to_svtype_to_file, all_sampleID_to_dfGRIDSS)
@@ -5665,7 +5712,7 @@ def set_position_to_max(pos, maxPos):
     if pos>maxPos: return maxPos
     else: return pos
 
-def get_compatible_real_svtype_to_file(close_shortReads_table, reference_genome, outdir, replace=False, threads=4, max_nvars=100, mitochondrial_chromosome="mito_C_glabrata_CBS138"):
+def get_compatible_real_svtype_to_file(close_shortReads_table, reference_genome, outdir, replace=False, threads=4, max_nvars=100, mitochondrial_chromosome="mito_C_glabrata_CBS138", run_in_slurm=False):
 
     """This function generates a dict of svtype to the file for SVs that are compatible and ready to insert into the reference_genome. All the files are written into outdir. Only a set of 'high-confidence' SVs are reported, which are those that, for each sampleID inclose_shortReads_table, have a reasonable minimum allele frequency and all breakpoints with 'PASS' and are found in all the genomes of the same sampleID.
 
@@ -5680,7 +5727,7 @@ def get_compatible_real_svtype_to_file(close_shortReads_table, reference_genome,
     pipeline_start_time = time.time()
 
     # get all the high-confidence real variants
-    ID_to_svtype_to_svDF = get_ID_to_svtype_to_svDF_for_setOfGenomes_highConfidence(close_shortReads_table, reference_genome, outdir, replace=replace, threads=threads, mitochondrial_chromosome=mitochondrial_chromosome)
+    ID_to_svtype_to_svDF = get_ID_to_svtype_to_svDF_for_setOfGenomes_highConfidence(close_shortReads_table, reference_genome, outdir, replace=replace, threads=threads, mitochondrial_chromosome=mitochondrial_chromosome, run_in_slurm=run_in_slurm)
 
     # define the df with the realVars info
     all_realVars_dir = "%s/all_realVars"%(outdir)
@@ -6971,7 +7018,10 @@ def makePlots_gridsss_benchmarking_oneGenome(df_benchmark, PlotsDir, plots={"his
             ax = plt.subplot(1, len(all_svtypes), I+1)
             cmap = sns.cubehelix_palette(dark=.3, light=.6, as_cmap=True)
 
-            sns.scatterplot(x="recall", y="precision", data=df_benchmark[df_benchmark.svtype==svtype], hue="Fvalue", palette=cmap, edgecolors=None, style="svtype", markers=svtype_to_marker)
+            # this sometimes fails with the Fvalue as hue
+            try: sns.scatterplot(x="recall", y="precision", data=df_benchmark[df_benchmark.svtype==svtype], hue="Fvalue", palette=cmap, edgecolors=None, style="svtype", markers=svtype_to_marker)
+            except: sns.scatterplot(x="recall", y="precision", data=df_benchmark[df_benchmark.svtype==svtype], edgecolors=None, style="svtype", markers=svtype_to_marker)
+
             plt.axvline(1, color="black", linestyle="--", linewidth=1.0)
             plt.axhline(1, color="black", linestyle="--", linewidth=1.0)
             plt.plot([0, 1], color="black", linestyle="--", linewidth=1.0)
@@ -7831,8 +7881,6 @@ def get_and_report_filtering_accuracy_across_genomes_and_ploidies(df_benchmark, 
 
     return df_cross_benchmark_best, best_filters_series
 
-
-
 def get_best_parameters_for_GridssClove_run(sorted_bam, reference_genome, outdir, threads=4, replace=False, window_l=5000, n_simulated_genomes=2, mitochondrial_chromosome="mito_C_glabrata_CBS138", simulation_ploidies=["haploid", "diploid_homo", "diploid_hetero", "ref:2_var:1", "ref:3_var:1", "ref:4_var:1", "ref:5_var:1", "ref:9_var:1", "ref:19_var:1", "ref:99_var:1"], range_filtering_benchmark="theoretically_meaningful", nvars=100, real_svtype_to_file={}, median_insert_size=250, median_insert_size_sd=0):
 
     """This finds the optimum parameters for running GRIDSS clove and returns them. The parameters are equivalent to the run_GridssClove_optimising_parameters function"""
@@ -8069,8 +8117,12 @@ def run_GridssClove_optimising_parameters(sorted_bam, reference_genome, outdir, 
 
     # define the final outdir 
     outdir_gridss_final = "%s/final_gridss_running"%outdir; make_folder(outdir_gridss_final)
-    if file_is_empty(gridss_VCFoutput): final_gridss_vcf = "%s/output_gridss.vcf"%outdir_gridss_final
-    else: final_gridss_vcf = gridss_VCFoutput
+
+    # define the final vcf dir
+    final_gridss_vcf = "%s/output_gridss.vcf"%outdir_gridss_final
+
+    # if there is a provided gridss_VCFoutput, softlink it to the outdir_gridss_final
+    if not file_is_empty(gridss_VCFoutput) and file_is_empty(final_gridss_vcf): run_cmd("ln -s %s %s"%(gridss_VCFoutput, final_gridss_vcf)) 
 
     # define the median coverage across window_l windows of the genome
     coverage_df =  pd.read_csv(generate_coverage_per_window_file_parallel(reference_genome, outdir_gridss_final, sorted_bam, windows_file="none", replace=replace, window_l=window_l), sep="\t")
@@ -8093,13 +8145,43 @@ def run_GridssClove_optimising_parameters(sorted_bam, reference_genome, outdir, 
     print("--- the gridss pipeline optimising parameters took %s seconds in %i cores ---"%(time.time() - pipeline_start_time, threads))
 
     # generate a file that indicates whether the gridss run is finished
-    #final_file = "%s/gridss_finished_file_final_gridss_final_with_window_size.txt"%outdir
-    #open(final_file, "w").write("gridss finished...")
+    final_file = "%s/gridss_finished_file.txt"%outdir
+    open(final_file, "w").write("gridss finished...")
 
     ######################################
 
     return final_sv_dict, df_gridss
 
+
+def plot_report_accuracy_simulations(df_benchmarking, filename):
+
+    """Plots the accuracy of each type of SVcalling on simulations. There will be one subplot for each precision/recall/Fvalue and ploidy combination. The rows will be for ploidies and the cols for accuracy measurements."""
+
+    df_benchmarking_long = pd.DataFrame()
+
+    accuracy_fields = ["precision", "recall", "Fvalue"]
+    nonAccuracy_fields = [c for c in df_benchmarking.columns if c not in accuracy_fields]
+
+    # convert to a long format
+    for f in accuracy_fields:
+
+        df = df_benchmarking[nonAccuracy_fields + [f]].rename(columns={f : "accuracy"})
+        df["type_ac"] = f
+        df_benchmarking_long = df_benchmarking_long.append(df)
+
+    # define the palette
+    palette = {"uniform":"navy", "realSVs":"red", "fastSV_on_uniform":"cyan", "fastSV_on_realSVs":"magenta"}
+
+
+    # change the svtype name
+    svtype_to_shortSVtype = {"deletions":"del", "tandemDuplications":"tan", "insertions":"ins", "translocations":"tra", "inversions":"inv", "integrated":"all"}
+    df_benchmarking_long["svtype"] = df_benchmarking_long.svtype.apply(lambda x: svtype_to_shortSVtype[x])
+
+    g = sns.catplot(x="svtype", y="accuracy", hue="typeParameterOptimisation", col="type_ac", row="ploidy", data=df_benchmarking_long,kind="bar", height=2, aspect=2, ci="sd", palette=palette)
+
+    g.set(ylim=(0.5, 1))
+
+    g.savefig(filename, bbox_inches='tight')
 
 def report_accuracy_simulations(sorted_bam, reference_genome, outdir, real_svtype_to_file, threads=4, replace=False, window_l=5000, n_simulated_genomes=2, mitochondrial_chromosome="mito_C_glabrata_CBS138", simulation_ploidies=["haploid", "diploid_homo", "diploid_hetero", "ref:2_var:1", "ref:3_var:1", "ref:4_var:1", "ref:5_var:1", "ref:9_var:1", "ref:19_var:1", "ref:99_var:1"], range_filtering_benchmark="theoretically_meaningful", nvars=100):
 
@@ -8116,38 +8198,250 @@ def report_accuracy_simulations(sorted_bam, reference_genome, outdir, real_svtyp
     # calculate the insert size statistics
     median_insert_size, median_insert_size_sd  = get_insert_size_distribution(sorted_bam, replace=replace, threads=threads)
 
-    # initialize a df that will contain the accuracy of each simulation type. The fields will be genomeID, ploidy, svtype, typeParameterOptimisation (this can be uniform, realSVs, fastSV_on_uniform or fastSV_on_realSVs), Fvalue, precision and recall
-    df_benchmarking = pd.DataFrame()
+    # define a file that will contain the benchmarking
+    df_benchmarking_file = "%s/df_benchmarking.tab"%outdir
 
-    # go through each simulation type
-    for typeSimulations, svtype_to_svfile in [("uniform", {}), ("realSVs", real_svtype_to_file)]:
-        print(typeSimulations)
+    if file_is_empty(df_benchmarking_file) or replace is True:
 
-        # define the parameter optimisation dir
-        parameter_optimisation_dir = "%s/parameter_optimisation_%s"%(outdir, typeSimulations); make_folder(parameter_optimisation_dir)
+        # initialize a df that will contain the accuracy of each simulation type. The fields will be genomeID, ploidy, svtype, typeParameterOptimisation (this can be uniform, realSVs, fastSV_on_uniform or fastSV_on_realSVs), Fvalue, precision and recall
+        df_benchmarking_fields = ["genomeID", "ploidy", "svtype", "typeParameterOptimisation", "Fvalue", "precision", "recall"]
+        df_benchmarking = pd.DataFrame(columns=df_benchmarking_fields)
 
-        # get the accuracy of these types of simulations, as well as the best parameters
-        gridss_blacklisted_regions, gridss_maxcoverage, gridss_filters_dict, max_rel_coverage_to_consider_del, min_rel_coverage_to_consider_dup, df_cross_benchmark_best = get_best_parameters_for_GridssClove_run(sorted_bam, reference_genome, parameter_optimisation_dir, threads=threads, replace=replace, window_l=window_l, n_simulated_genomes=n_simulated_genomes, mitochondrial_chromosome=mitochondrial_chromosome, simulation_ploidies=simulation_ploidies, range_filtering_benchmark=range_filtering_benchmark, nvars=nvars, real_svtype_to_file=svtype_to_svfile, median_insert_size=median_insert_size, median_insert_size_sd=median_insert_size_sd)
+        # go through each simulation type
+        for typeSimulations, svtype_to_svfile in [("uniform", {}), ("realSVs", real_svtype_to_file)]:
+            print(typeSimulations)
 
-        # go through each simulation and ploidy and run the fastSV calling on it. This will be fast by putting the 
+            # define the parameter optimisation dir
+            parameter_optimisation_dir = "%s/parameter_optimisation_%s"%(outdir, typeSimulations); make_folder(parameter_optimisation_dir)
+
+            # get the accuracy of these types of simulations, as well as the best parameters
+            gridss_blacklisted_regions, gridss_maxcoverage, gridss_filters_dict, max_rel_coverage_to_consider_del, min_rel_coverage_to_consider_dup, df_cross_benchmark_best = get_best_parameters_for_GridssClove_run(sorted_bam, reference_genome, parameter_optimisation_dir, threads=threads, replace=replace, window_l=window_l, n_simulated_genomes=n_simulated_genomes, mitochondrial_chromosome=mitochondrial_chromosome, simulation_ploidies=simulation_ploidies, range_filtering_benchmark=range_filtering_benchmark, nvars=nvars, real_svtype_to_file=svtype_to_svfile, median_insert_size=median_insert_size, median_insert_size_sd=median_insert_size_sd)
+
+            # add to the df the simulations paramteres
+            df_cross_benchmark_best["typeParameterOptimisation"] = typeSimulations
+            df_cross_benchmark_best = df_cross_benchmark_best.rename(columns={"test_genomeID": "genomeID", "test_ploidy":"ploidy"})
+            df_benchmarking = df_benchmarking.append(df_cross_benchmark_best[df_benchmarking_fields])
+
+            # go through each simulation and ploidy and run the fastSV calling on it. This will be fast by putting the vcf file under the 
+            for simulation_ID in range(1, n_simulated_genomes+1):
+                print(simulation_ID)
+
+                # define the genome ID
+                genomeID = "simulation_%i"%(simulation_ID)
+
+                # define the known SVs
+                knownSV_dict = {svtype : "%s/simulation_%i/final_simulated_SVs/%s.tab"%(parameter_optimisation_dir, simulation_ID, svtype) for svtype in {"insertions", "translocations", "deletions", "tandemDuplications", "inversions"}}
+
+                # go through each of the target ploidies and generate the resulting bam files:
+                for ploidy in simulation_ploidies:
+
+                    # define the vcf outdir
+                    benchmarking_dir = "%s/simulation_%i/benchmark_GridssClove_%s/benchmark_max%ix_ignoreRegions%s"%(parameter_optimisation_dir, simulation_ID, ploidy, gridss_maxcoverage, gridss_blacklisted_regions!="")
+                    gridss_vcf = "%s/gridss_output.vcf.withSimpleEventType.vcf"%benchmarking_dir
+                    print("working on %s"%ploidy)
+
+                    # define the outdir
+                    outdir_fastCalling = "%s/fastSVcalling_%s_simulation_%i_ploidy_%s"%(outdir, typeSimulations, simulation_ID, ploidy); make_folder(outdir_fastCalling)
+
+                    # define the sorted bam
+                    sorted_bam_fastSV = "%s/aligned_reads.sorted.bam"%benchmarking_dir
+
+                    # debug
+                    if any([file_is_empty(x) for x in [sorted_bam_fastSV, gridss_vcf]]): raise ValueError("Some files do not exist")
+
+                    # get the fast calling (without repeating)
+                    sv_dict, df_gridss = run_GridssClove_optimising_parameters(sorted_bam_fastSV, reference_genome, outdir_fastCalling, threads=threads, replace=replace, mitochondrial_chromosome=mitochondrial_chromosome, fast_SVcalling=True, gridss_VCFoutput=gridss_vcf)
+
+                    # define the benchmarking accuracy
+                    fileprefix = "%s/benchmarking"%outdir_fastCalling
+                    df_benchmark_fastSVcalling = benchmark_processedSVs_against_knownSVs_inHouse(sv_dict, knownSV_dict, fileprefix, replace=replace, add_integrated_benchmarking=True)
+
+                    # add fields
+                    df_benchmark_fastSVcalling["genomeID"] = genomeID
+                    df_benchmark_fastSVcalling["ploidy"] = ploidy
+                    df_benchmark_fastSVcalling["typeParameterOptimisation"] = "fastSV_on_%s"%typeSimulations
+
+                    # keep
+                    df_benchmarking = df_benchmarking.append(df_benchmark_fastSVcalling[df_benchmarking_fields])
+
+
+        # save
+        df_benchmarking.to_csv(df_benchmarking_file, sep="\t", header=True, index=False)
+
+    else: df_benchmarking = pd.read_csv(df_benchmarking_file, sep="\t")
+
+
+    # make plots to report the accuracy of each simulation type. 
+    filename = "%s/accuracy_on_simulations.pdf"%outdir
+    plot_report_accuracy_simulations(df_benchmarking, filename)
 
 
 
-    # make plots to report the accuracy of each simulation type. There will be one subplot for each precision/recall/Fvalue and ploidy combination. The rows will be for ploidies and the cols for Each plot will contain the 
+
+def generate_jobarray_file_slurm(jobs_filename, stderr="./STDERR", stdout="./STDOUT", walltime="02:00:00",  name="JobArray", queue="bsc_ls", sbatch=False, ncores_per_task=1, rmstd=True, constraint="", number_tasks_to_run_at_once="all" ):
+    
+    """ This function takes:
+        jobs_filename: a path to a file in which each line is a command that has to be executed in a sepparate cluster node
+        name: the name of the jobs array
+        stderr and stdout: paths to directories that will contains the STDERR and STDOUT files
+        walltime is the time in "dd-hh:mm:ss"
+        memory is the RAM: i.e.: 4G, 2M, 200K
+        ncores_per_task is the number of cores that each job gets
+        
+        name is the name prefix
+        queue can be "debug" or "bsc_ls", use bsc_queues to understand which works best
+        rmstd indicates if the previous std has to be removed
+        constraint is a list of constraints to pass to sbatch. For example “highmem” is useful for requesting more memory. You cannot submit a job requesting memory parameters, memory is automatically set for each asked cpu (2G/core by default, 8G/core for highmem)
+
+        number_tasks_to_run_at_once are the number of tasks in a job array to run at once
+        
+        It returns a jobs_filename.run file, which can be sbatch to the cluster directly if sbatch is True
+        This is run in the VarCall_CNV_env
+    """
+
+    def removeSTDfiles(stddir):
+        """ Will remove all files in stddir with name"""
+        for file in os.listdir(stddir):
+            if file.startswith(name): os.unlink("%s/%s"%(stddir, file))
+
+    # prepare the stderr and stdout
+    if not os.path.isdir(stderr): os.mkdir(stderr)
+    elif rmstd is True: removeSTDfiles(stderr)
+
+    if not os.path.isdir(stdout): os.mkdir(stdout)
+    elif rmstd is True: removeSTDfiles(stdout)
+    
+    # Get the number of jobs
+    n_jobs = len(open(jobs_filename, "r").readlines())
+
+    # if default, number_tasks_to_run_at_once is 0, which means that it will try to run all tasks at once
+    if number_tasks_to_run_at_once=="all": number_tasks_to_run_at_once = n_jobs
+
+    # define the number of nodes, consider that each node has 48 cpus, you need to request the number of nodes accordingly
+    nnodes = int((ncores_per_task/48)+1) # get the non decimal part of a float
+
+    # define the constraint only if it is necessary
+    if constraint!="": constraint_line = "#SBATCH --constraint=%s"%constraint
+    else: constraint_line = ""
+
+    # define arguments
+    arguments = ["#!/bin/sh", # the interpreter
+                 "#SBATCH --time=%s"%walltime, # several SBATCH misc commands
+                 "#SBATCH --qos=%s"%queue,
+                 "#SBATCH --job-name=%s"%name,
+                 "#SBATCH --cpus-per-task=%i"%ncores_per_task,
+                 "#SBATCH --error=%s/%s_%sA_%sa.err"%(stderr, name, "%", "%"), # the standard error
+                 "#SBATCH --output=%s/%s_%sA_%sa.out"%(stdout, name, "%", "%"), # the standard error
+                 "#SBATCH --get-user-env", # this is to maintain the environment
+                 "#SBATCH --workdir=.",
+                 "#SBATCH --array=1-%i%s%i"%(n_jobs, "%", number_tasks_to_run_at_once),
+                 #"#SBATCH --array=1-%i"%n_jobs,
+                 "#SBATCH --nodes=1",
+                 constraint_line,
+                 "",
+                 "echo 'sourcing conda to run pipeline...';",
+                 "echo 'running pipeline';",
+                 'srun $(head -n $SLURM_ARRAY_TASK_ID %s | tail -n 1)'%jobs_filename]
+
+
+    # define and write the run filename
+    jobs_filename_run = "%s.run"%jobs_filename
+    with open(jobs_filename_run, "w") as fd: fd.write("\n".join(arguments))
+    
+    # run in cluster if specified
+    if sbatch is True: out_state = os.system("sbatch %s"%jobs_filename_run); print("%s sbatch out state: %i"%(name, out_state))
+
+    # get info about the exit status: sacct -j <jobid> --format=JobID,JobName,MaxRSS,Elapsed
+
+
+def report_accuracy_realSVs(close_shortReads_table, reference_genome, outdir, real_svtype_to_file, outdir_finding_realVars, threads=4, replace=False, window_l=5000, n_simulated_genomes=2, mitochondrial_chromosome="mito_C_glabrata_CBS138", simulation_ploidies=["haploid", "diploid_homo", "diploid_hetero", "ref:2_var:1", "ref:3_var:1", "ref:4_var:1", "ref:5_var:1", "ref:9_var:1", "ref:19_var:1", "ref:99_var:1"], range_filtering_benchmark="theoretically_meaningful", nvars=100, run_in_slurm=False, walltime="05:00:00", queue="bsc_ls"):
+
+
+    """This function runs the SV pipeline for all the datasets in close_shortReads_table with the fastSV, optimisation based on uniform parameters and optimisation based on realSVs (specified in real_svtype_to_file). outdir_finding_realVars is the outdir where you previously found the real vars, which is useful to not repeat the alignment of the reads"""
+
+    # this pipeline requires real data and close_shortReads_table that is not none
+    if len(real_svtype_to_file)==0: raise ValueError("You need real data if you want to test accuracy")
+    if file_is_empty(close_shortReads_table): raise ValueError("You need real data reads if you want to test accuracy")
+
+    # make the outdir
+    make_folder(outdir)
+
+    print("testing the pipeline on real SVs")
+
+    # load the real data table
+    df_reads = pd.read_csv(close_shortReads_table, sep="\t")
+
+    # initialize the cmds to run 
+    all_cmds = []
+
+    # go through each run and configuration
+    for typeSimulations, svtype_to_svfile, fast_SVcalling in [("uniform", {}, False), ("realSVs", real_svtype_to_file, False), ("fast", {}, True)]:
+
+        # define an outdir for this type of simulations
+        outdir_typeSimulations = "%s/%s"%(outdir, typeSimulations); make_folder(outdir_typeSimulations)
+
+        # go though each runID
+        for runID in set(df_reads.runID):
+            print(typeSimulations, runID)
+
+            # define an outdir for this runID
+            outdir_runID = "%s/%s"%(outdir_typeSimulations, runID); make_folder(outdir_runID)
+            outdir_SVdetection = "%s/SVdetection_output"%outdir_runID; make_folder(outdir_SVdetection)
+
+            # define the previous important files
+            previous_run_dir = "%s/all_realVars/shortReads_realVarsDiscovery_%s"%(outdir_finding_realVars, runID)
+            sorted_bam = "%s/aligned_reads.bam.sorted"%previous_run_dir
+            final_file = "%s/gridss_finished_file.txt"%outdir_SVdetection
+
+            # softlink files
+            sorted_bam_outdir = "%s/aligned_reads.bam.sorted"%outdir_runID
+            if file_is_empty(sorted_bam_outdir): run_cmd("ln -s %s %s"%(sorted_bam, sorted_bam_outdir))
+            if file_is_empty("%s.bai"%sorted_bam_outdir): run_cmd("ln -s %s.bai %s.bai"%(sorted_bam, sorted_bam_outdir))
+
+            # define the path to the table with previous SVs comparible to insert
+            SVs_compatible_to_insert_dir = "%s/SVs_compatible_to_insert"%outdir_finding_realVars
+
+            # only contine if the final file is not defined
+            if file_is_empty(final_file) or replace is True:
+
+                # define the cmd. This is a normal perSvade.py run with the vars of the previous dir  
+                cmd = "python %s -r %s --threads %i --outdir %s --nvars %i --nsimulations %i --simulation_ploidies %s --range_filtering_benchmark %s --sortedbam %s --mitochondrial_chromosome %s"%(perSVade_py, reference_genome, threads, outdir_runID, nvars, n_simulated_genomes, ",".join(simulation_ploidies), range_filtering_benchmark, sorted_bam_outdir, mitochondrial_chromosome)
+
+                # add arguments depending on the pipeline
+                if replace is True: cmd += " --replace"
+                if fast_SVcalling is True: cmd += " --fast_SVcalling"
+                if len(svtype_to_svfile)>0: cmd += " --SVs_compatible_to_insert_dir %s"%SVs_compatible_to_insert_dir
+
+                # if the running in slurm is false, just run the cmd
+                if run_in_slurm is False: run_cmd(cmd)
+                else: 
+                    all_cmds.append(cmd)
+                    continue
+
+            # define the svdict
+
+            bhjbmnbmbmbnbmbnmbnbnbnmmnbbnbnmbmnbnmbnm
+
+    # if you are not running on slurm, just execute one cmd after the other
+    if run_in_slurm is True:
+
+        if len(all_cmds)>0: 
+            print("submitting %i jobs to the cluster for testing real-data accuracy"%len(all_cmds))
+            jobs_filename = "%s/jobs.testingRealDataAccuracy"%outdir
+            open(jobs_filename, "w").write("\n".join(all_cmds))
+
+            # define and create the STDERR and STDOUT
+            STDERR = "%s/STDERR"%outdir
+            STDOUT = "%s/STDOUT"%outdir
+
+            generate_jobarray_file_slurm(jobs_filename, stderr=STDERR, stdout=STDOUT, walltime=walltime,  name="testRealSVs", queue=queue, sbatch=True, ncores_per_task=threads, rmstd=True, constraint="", number_tasks_to_run_at_once="all" )
+
+            raise ValueError("You have to wait under all the jobs in testRealSVs are done")
 
 
 
 
-
-
-
-
-
-    kkajhad
-
-
-
-
+    nadjkadjkhadjkhasd
 
 
 
