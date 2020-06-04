@@ -153,6 +153,9 @@ def get_sampleID_to_svtype_to_svDF_filtered(sampleID_to_svtype_to_file, sampleID
 
     """
 
+    g_min_QUAL_l = [0, 20, 50, 100, 200, 300, 400, 500, 600, 700, 800, 900, 1000]
+    min_QUAL
+
     # get the overlapping events with a map
     map_eventIDs_already_in_parents = list(map(lambda x: get_eventIDs_already_in_parents(x[0], x[1], x[2]), get_eventIDs_already_in_parents_inputs))
     
