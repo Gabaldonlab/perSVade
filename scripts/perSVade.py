@@ -80,8 +80,8 @@ parser.add_argument("--simulation_ploidies", dest="simulation_ploidies", type=st
 parser.add_argument("--range_filtering_benchmark", dest="range_filtering_benchmark", type=str, default="theoretically_meaningful", help='The range of parameters that should be tested in the SV optimisation pipeline. It can be any of large, medium, small, theoretically_meaningful or single.')
 
 # alignment args
-parser.add_argument("-f1", "--fastq1", dest="fastq1", default=None, help="fastq_1 file. Option required to obtain bam files. It can be 'auto', in which case the closest run for a taxID will be picked.")
-parser.add_argument("-f2", "--fastq2", dest="fastq2", default=None, help="fastq_2 file. Option required to obtain bam files. It can be 'auto', in which case the closest run for a taxID will be picked.")
+parser.add_argument("-f1", "--fastq1", dest="fastq1", default=None, help="fastq_1 file. Option required to obtain bam files. It can be 'auto', in which case a set of 10M reads will be generated.")
+parser.add_argument("-f2", "--fastq2", dest="fastq2", default=None, help="fastq_2 file. Option required to obtain bam files. It can be 'auto', in which case a set of 10M reads will be generated.")
 parser.add_argument("-sbam", "--sortedbam", dest="sortedbam", default=None, help="The path to the sorted bam file, which should have a bam.bai file in the same dir. This is mutually exclusive with providing reads")
 parser.add_argument("--run_qualimap", dest="run_qualimap", action="store_true", default=False, help="Run qualimap for quality assessment of bam files. This may be inefficient sometimes because of the ")
 
@@ -134,7 +134,15 @@ else:
 
 ##### YOU NEED TO RUN THE BAM FILE #####
 
-if all([not x is None for x in {opt.fastq1, opt.fastq2}]):
+# if you stated auto in the reads, generate a 50x coverage bam file
+if any([x=="auto" for x in {opt.fastq1, opt.fastq2}]):
+
+    sorted_bam, index_bam = fun.get_simulated_bamFile(opt.outdir, opt.ref, replace=opt.replace, threads=opt.threads, total_nread_pairs=10000000)
+    print("using simulated bam file from %s"%sorted_bam)
+
+
+# normal alignment of provided reads
+elif all([not x is None for x in {opt.fastq1, opt.fastq2}]):
 
     print("WORKING ON ALIGNMENT")
     fun.run_bwa_mem(opt.fastq1, opt.fastq2, opt.ref, opt.outdir, bamfile, sorted_bam, index_bam, name_sample, threads=opt.threads, replace=opt.replace)
@@ -192,12 +200,24 @@ if fun.file_is_empty("%s.fai"%opt.ref) or opt.replace is True:
 ##### STRUCTURAL VARIATION ##########
 #####################################
 
+
+#### define general args ####
+
+# the simulation ploidies as a list
+simulation_ploidies = opt.simulation_ploidies.split(",")
+
+# the window length for all operations
+fun.window_l = int(min({len_seq for chrom, len_seq  in fun.get_chr_to_len(opt.ref).items() if chrom not in opt.mitochondrial_chromosome.split(",")})*0.05) + 1
+
+print("using a window length of %i"%fun.window_l)
+
+#############################
+
 #### test how well the finding of SVs in an assembly works ####
 if opt.testSVgen_from_DefaulReads:
 
     outdir_test_FindSVinAssembly = "%s/test_FindSVfromDefaultSimulations"%opt.outdir
     if __name__ == '__main__': fun.test_SVgeneration_from_DefaultParms(opt.ref, outdir_test_FindSVinAssembly, sorted_bam, threads=opt.threads, replace=opt.replace, n_simulated_genomes=opt.nsimulations, mitochondrial_chromosome=opt.mitochondrial_chromosome, nvars=opt.nvars)
-
 
 ###############################################################
 
@@ -246,18 +266,12 @@ else:
 
 ###################################################################################################
 
-#### parse cmd-line arguments for optimisation-based parameters ####
-
-simulation_ploidies = opt.simulation_ploidies.split(",")
-
-####################################################################
 
 # test the accuracy on each of the simulations types
 if opt.testSimulationsAccuracy is True: fun.report_accuracy_simulations(sorted_bam, opt.ref, "%s/testing_SimulationsAccuracy"%opt.outdir, real_svtype_to_file, threads=opt.threads, replace=opt.replace, n_simulated_genomes=opt.nsimulations, mitochondrial_chromosome=opt.mitochondrial_chromosome, simulation_ploidies=simulation_ploidies, range_filtering_benchmark=opt.range_filtering_benchmark, nvars=opt.nvars)
 
 # test accuracy on real data
 if opt.testRealDataAccuracy is True:  fun.report_accuracy_realSVs(opt.close_shortReads_table, opt.ref, "%s/testing_RealSVsAccuracy"%opt.outdir, real_svtype_to_file, outdir_finding_realVars, threads=opt.threads, replace=opt.replace, n_simulated_genomes=opt.nsimulations, mitochondrial_chromosome=opt.mitochondrial_chromosome, simulation_ploidies=simulation_ploidies, range_filtering_benchmark=opt.range_filtering_benchmark, nvars=opt.nvars, run_in_slurm=opt.run_in_slurm)
-
 
 # run the actual perSVade function optimising parameters
 SVdetection_outdir = "%s/SVdetection_output"%opt.outdir
