@@ -1924,6 +1924,7 @@ def get_int_or_float_as_text(number):
 def convert_fasta_to_fqgz(fasta_file, replace=False, remove_fasta=True):
 
     """Takes a fasta file and converts it to fq"""
+    
 
     # define fastq name
     prefix = fasta_file.rstrip(".fasta").rstrip(".fa")
