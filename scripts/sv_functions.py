@@ -3244,6 +3244,9 @@ def get_target_region_row(r, region, breakpoint_positions, maxPos, max_relative_
     # if the start is 1 , set the 5' region to the 3' region
     if region=="5" and r["start"]==1: region="3"
 
+    # if the region in the 3' is not larger than  enough, just define the 5' region
+    if region=="3" and (maxPos-r["end"])<min_region_len: region="5"
+
     # get the 5' region
     if region=="5":
 
@@ -3326,11 +3329,6 @@ def get_df_with_coverage_per_windows_relative_to_neighbor_regions(df_windows, be
 
             # get a df with the regions
             df_region = df_windows.apply(lambda r: get_target_region_row(r, region, chrom_to_bpPositions[r["chromosome"]], chrom_to_maxPos[r["chromosome"]]), axis=1)
-
-
-        print(df_region.sort_values(by="chromosome"))
-        print(region, "\n\n\n")
-
 
         # get the coverage df
         bed_file = "%s.%s.bed"%(bed_windows_prefix, region)
