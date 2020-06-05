@@ -30,7 +30,7 @@ outdir="$curDir"/Cglabrata/RUN1_CST34_2G_FLZ/outdir_perSVade
 
 # this is for the whole genome
 refgenome="$parentDir"/Cglabrata_antifungals/data/Cglabrata_genomes_and_annotations/C_glabrata_CBS138_current_chromosomes.fasta
-#gff="$parentDir"/Cglabrata_antifungals/data/Cglabrata_genomes_and_annotations/C_glabrata_CBS138_current_features.gff
+gff="$parentDir"/Cglabrata_antifungals/data/Cglabrata_genomes_and_annotations/C_glabrata_CBS138_current_features.gff
 
 # generate the table with the known genomes and reads
 
@@ -45,6 +45,10 @@ taxID=5478
 
 # provided table
 python $pipeline -r $refgenome -o $outdir -p 1 -f1 $reads1 -f2 $reads2 -mchr mito_C_glabrata_CBS138 --threads $threads --close_shortReads_table $close_shortReads_table --run_in_slurm --testRealDataAccuracy
+
+# test VarCall pipeline
+#python $pipeline -r $refgenome -o $outdir -p 1 -f1 $reads1 -f2 $reads2 -mchr mito_C_glabrata_CBS138 --threads $threads --skip_SVcalling --run_smallVarsCNV -gff $gff
+
 
 # test with 'auto' generation of bam file
 #python $pipeline -r $refgenome -o $outdir -p 1 -f1 auto -f2 auto -mchr mito_C_glabrata_CBS138 --threads $threads --close_shortReads_table $close_shortReads_table

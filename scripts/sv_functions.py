@@ -227,6 +227,67 @@ svtype_to_fieldsDict = {"inversions": {"equal_fields": ["Chr"],
 ####################################
 ####################################
 
+def get_aa(codons, genetic_code):
+
+    """Takes a string of codons and returns the AA, according to the genetic_code"""
+
+    # if there are no codons
+    if codons=="-": return "-"
+
+    # if it is a protein
+    elif len(codons)%3==0: return str(Seq(codons).translate(table = genetic_code))
+
+    # if not
+    else: 
+        if len(codons)<3: return "X"
+        else: return (str(Seq("".join(list(chunks(codons, 3))[0:-1])).translate(table = genetic_code)) + "X")
+
+def modify_DF_cols(row, genetic_code, stop_codons, genCode_affected_vars):
+
+    """Takes a row of a VEP df according to the genetic_code and modifies the necessary rows"""
+
+    if row["Codons"]=="-": codons_ref = "-"; codons_alt = "-"
+
+    else:
+        # get the codons
+        codons_ref, codons_alt = row["Codons"].split("/")
+        codons_ref = codons_ref.upper(); codons_alt = codons_alt.upper(); 
+
+    # get refs
+    aa_ref = get_aa(codons_ref, genetic_code); aa_alt = get_aa(codons_alt, genetic_code);
+
+    # define the consequences
+    consequences = set()
+
+    # retainig stops
+    if codons_ref in stop_codons and codons_alt in stop_codons: consequences.add('stop_retained_variant')
+
+    # indels
+    if (len(aa_ref.strip("-"))>len(aa_alt.strip("-")) and len(codons_ref)%3==0 and len(codons_alt)%3==0) or (aa_ref not in {"*", "X"} and aa_alt=="-"): consequences.add('inframe_deletion')
+    if (len(aa_ref.strip("-"))<len(aa_alt.strip("-")) and len(codons_ref)%3==0 and len(codons_alt)%3==0) or (aa_alt not in {"*", "X"} and aa_ref=="-"): consequences.add('inframe_insertion')
+
+    # frameshift
+    if "X" in aa_alt: consequences.add('frameshift_variant')
+
+    # SNPs
+    if len(codons_ref)==3 and len(codons_alt)==3 and aa_ref!="*" and aa_alt!="*":
+        if aa_ref==aa_alt: consequences.add('synonymous_variant')
+        else: consequences.add('missense_variant')
+
+    # stop codon info
+    nStops_ref = aa_ref.count("*"); nStops_alt = aa_alt.count("*"); 
+    if nStops_ref<nStops_alt: consequences.add('stop_gained')
+    if nStops_ref>nStops_alt: consequences.add('stop_lost')
+
+    # protein altering. This is equivalent to the thing of the row already. 
+    if "protein_altering_variant" in row["Consequence"]: consequences.add('protein_altering_variant')
+
+    # add any consequence that is not in any of the genCode_affected_vars
+    consequences.update(set(row["Consequence"].split(",")).difference(genCode_affected_vars))
+
+    # return the aa and the consequences
+    return pd.Series({"Amino_acids": "%s/%s"%(aa_ref, aa_alt), "Consequence": ",".join(list(consequences))})
+
 def id_generator(size=10, chars=string.ascii_uppercase + string.digits, already_existing_ids=set()):
 
     """ already_existing_ids is a set that indicates whihc IDs can't be picked """
@@ -263,7 +324,6 @@ def find_nearest(a, a0):
     else: raise ValueError("%s is not a valid type for find_nearest function"%(a0))
 
     return closest_in_a
-
 
 def chunks(l, n):
     
@@ -348,6 +408,155 @@ def get_chr_to_len(genome):
     return chr_to_len
 
 def get_uniqueVals_df(df): return set.union(*[set(df[col]) for col in df.columns])
+
+
+
+def extract_BEDofGENES_of_gff3(gff, bed, replace=False, reference=""):
+
+    """Takes the full path to a gff annotation and writes a bed file to bed, which only has genes' info. 
+    The bed will be 1-indexed, which is not usually the case. Bed files are 0 inexed. 
+
+    It also writes a file called 'bed.regions_lengthwindow_l' that has the regions of - and + window_l of the start and end of the gene, respectively.
+    The regions bed is returned by this function.
+
+    """
+
+    
+
+    # load the gff
+    df_gff3 = pd.read_csv(gff, skiprows=list(range(len([line for line in open(gff, "r") if line.startswith("#")]))), sep="\t", names=["chromosome", "source", "type_feature", "start", "end", "score", "strand", "phase", "attributes"])
+    
+    # define a function that takes attribues and returns ID
+    def get_ID_gff(attributes):
+
+        ID = [x.lstrip("ID=") for x in attributes.split(";") if x.startswith("ID=")][0]
+        if ";part=" in attributes: ID += "_part%s"%([x.lstrip("part=").split("/")[0] for x in attributes.split(";") if x.startswith("part=")][0])
+
+        return ID
+
+    df_gff3["ID"] = df_gff3.attributes.apply(get_ID_gff)
+
+    # define the regions you are interested in 
+    interesting_features = {"gene"}
+
+    # get the bed of the interesting features
+    df_bed = df_gff3[df_gff3.type_feature.isin(interesting_features)][["chromosome", "start", "end", "ID"]]
+    if file_is_empty(bed) or replace is True: df_bed.to_csv(path_or_buf=bed, sep="\t", index=False, header=False)
+
+    # check that the ID assignation is correct
+    if len(set(df_bed.index))!=len(df_bed): raise ValueError("The gene IDs unique IDs in the provided gffs does not match the unique numer of gene IDs. This may be because of unexpected formatting of the 'attributes' field of the provided gff file")
+
+    #### get the bed of the regions sorrounding the genes ####
+
+    # map each chromosome to it's length
+    chromosome_to_lenght = {chrRec.id : len(str(chrRec.seq)) for chrRec in SeqIO.parse(reference, "fasta")}
+
+    # define two functions that take the start and the end and return the left and right bounds of the gene +- window
+    def get_left_bound_of_gene(start):
+
+        """Takes only the start"""
+
+        left_bound = start - window_l
+        if left_bound<1: return 1
+        else: return left_bound
+
+    def get_right_bound_of_gene(chr_end_tup):
+
+        """Takes a tuple of chromosome and end"""
+
+        chromosome, end = chr_end_tup
+        chromosome_len = chromosome_to_lenght[chromosome]
+
+        right_bound = end + window_l
+        if right_bound>chromosome_len: return chromosome_len
+        else: return right_bound
+
+    # get the regions
+    df_bed = df_bed.rename(index=str, columns={"start":"gene_start", "end":"gene_end", "ID":"gene_ID"}) # rename the column names
+    df_bed["region_start"] = df_bed.gene_start.apply(get_left_bound_of_gene)
+
+    df_bed["chromosome_end_tuple"] = [(chrom, end) for chrom, end in df_bed[["chromosome", "gene_end"]].values]
+    df_bed["region_end"] = df_bed.chromosome_end_tuple.apply(get_right_bound_of_gene)
+
+    # write always
+    regions_filename = "%s.regions_lenght%i"%(bed, window_l)
+    df_bed[["chromosome", "region_start", "region_end", "gene_ID"]].to_csv(path_or_buf=regions_filename, sep="\t", index=False, header=False)
+
+    # return for further usage
+    return regions_filename
+
+
+
+def write_coverage_per_gene_mosdepth_and_parallel(sorted_bam, reference_genome, cnv_outdir, bed, gene_to_coverage_file, replace=False):
+
+    """Takes a bam, a bed (1-indexed) and a file were the gene-to-coverage should be written, and writes a file with the gene_to_coverage info """
+
+    if file_is_empty(gene_to_coverage_file) or replace is True:
+        print("generating %s"%gene_to_coverage_file)
+
+        # get the first three cols, important for the coverage calc
+        cnv_bed = "%s/%s"%(cnv_outdir, get_file(bed))
+        run_cmd("cut -f1-3 %s > %s"%(bed, cnv_bed))
+
+        # get the coverage file for the first three
+        coverage_file = generate_coverage_per_window_file_parallel(reference_genome, cnv_outdir, sorted_bam, windows_file=cnv_bed, replace=replace, run_in_parallel=True, delete_bams=True)
+
+        # add the ID
+        df_bed = pd.read_csv(bed, sep="\t", header=-1, names=["chromosome", "start", "end", "ID"])
+        df_coverage = pd.read_csv(coverage_file, sep="\t")
+        df_coverage_with_ID = df_coverage.merge(df_bed, how="right", left_on=["#chrom", "start", "end"], right_on=["chromosome", "start", "end"], right_index=False, left_index=False, validate="one_to_many")[['chromosome', 'start', 'end', 'length', 'mediancov_1', 'nocoveragebp_1', 'percentcovered_1', 'ID']].rename(columns={"mediancov_1":"median_reads_per_gene"})
+
+        # add fields
+        df_coverage_with_ID["fraction_covered_by_MoreThan1read"] = df_coverage_with_ID.percentcovered_1 / 100
+        df_coverage_with_ID["relative_coverage"] = df_coverage_with_ID.median_reads_per_gene / np.median(df_coverage_with_ID.median_reads_per_gene)
+
+        # replace 
+        coverage_file_with_ID = "%s.withID"%coverage_file
+        df_coverage_with_ID.to_csv(coverage_file_with_ID, sep="\t", index=False, header=True)
+
+        print("writing %s"%gene_to_coverage_file)
+        os.rename(coverage_file_with_ID, gene_to_coverage_file)
+
+
+
+
+def run_gatk_HaplotypeCaller(outdir_gatk, ref, sorted_bam, ploidy, threads, coverage, replace=False):
+
+    """Runs haplotype caller under outdir and returns the filename of the filtered results"""
+
+    # make the outdir if not there
+    if not os.path.isdir(outdir_gatk): os.mkdir(outdir_gatk)
+
+    # run GATK
+    gatk_out = "%s/output.raw.vcf"%outdir_gatk; gatk_out_tmp = "%s.tmp"%gatk_out
+    if file_is_empty(gatk_out) or replace is True:
+
+        print("Running GATK HaplotypeCaller...")
+        gatk_cmd = "%s HaplotypeCaller -R %s -I %s -O %s -ploidy %i --genotyping-mode DISCOVERY --emit-ref-confidence NONE --stand-call-conf 30 --native-pair-hmm-threads %i > %s.log"%(gatk, ref, sorted_bam, gatk_out_tmp, ploidy, threads, gatk_out); run_cmd(gatk_cmd)
+        os.rename(gatk_out_tmp, gatk_out)
+
+        # rename the index as well
+        os.rename("%s.tmp.idx"%gatk_out, "%s.idx"%gatk_out)
+
+    # variant filtration. There's a field called filter that has the FILTER argument
+    gatk_out_filtered = "%s/output.filt.vcf"%outdir_gatk; gatk_out_filtered_tmp = "%s.tmp"%gatk_out_filtered
+    if file_is_empty(gatk_out_filtered) or replace is True:
+
+        print("Running GATK HaplotypeCaller Variant filtration...")
+
+        # this depends on the ploidy. If ploidy is 2 you don't want to filter out heterozygous positions
+        if ploidy==1: filterHeterozygous = '-G-filter-name "heterozygous" -G-filter "isHet == 1"'
+        else: filterHeterozygous = ''
+
+        gatk_filt_cmd = '%s VariantFiltration -V %s -O %s -cluster 5 -window 20 %s --filter-name "BadDepthofQualityFilter" -filter "DP <= %i || QD < 2.0 || MQ < 40.0 || FS > 60.0 || MQRankSum < -12.5 || ReadPosRankSum < -8.0" > %s.log'%(gatk, gatk_out, gatk_out_filtered_tmp, filterHeterozygous , coverage, gatk_out_filtered); run_cmd(gatk_filt_cmd)
+        os.rename(gatk_out_filtered_tmp, gatk_out_filtered)
+
+        # rename the index as well
+        os.rename("%s.tmp.idx"%gatk_out_filtered, "%s.idx"%gatk_out_filtered)
+
+    # return the filtered file
+    return gatk_out_filtered
+
 
 def run_bwa_mem(fastq1, fastq2, ref, outdir, bamfile, sorted_bam, index_bam, name_sample, threads=1, replace=False):
 
@@ -815,7 +1024,7 @@ def transform_cut_and_paste_to_copy_and_paste_insertions(reference_genome, rearr
 
                 # check that the rearranged seq appears once in the genome and the ref seq in the ref genome. And they do not cross.
                 chrA_refSeq = chr_to_refSeq[chrA]
-                if not(chrA_refSeq.count(ref_seq)==1 and chrA_refSeq.count(rearranged_seq)==0 and all_rearranged_chromosomes_together.count(rearranged_seq)==1 and all_rearranged_chromosomes_together.count(ref_seq)==0): 
+                if not(chrA_refSeq.count(ref_seq)==1 and all_rearranged_chromosomes_together.count(rearranged_seq)==1 and all_rearranged_chromosomes_together.count(ref_seq)==0): # chrA_refSeq.count(rearranged_seq)==0
 
                     print(chrA)
 
@@ -1924,7 +2133,7 @@ def get_int_or_float_as_text(number):
 def convert_fasta_to_fqgz(fasta_file, replace=False, remove_fasta=True):
 
     """Takes a fasta file and converts it to fq"""
-    
+
 
     # define fastq name
     prefix = fasta_file.rstrip(".fasta").rstrip(".fa")
@@ -3930,7 +4139,12 @@ def get_reference_genome_from_GenBank(taxID, dest_genome_file, replace=False):
 
             except: print("WARNING: %s could not be found"%file_type)
 
+    # define the files to return
+    genome_file = file_type_to_finalFile["genome"]
+    gff_file = file_type_to_finalFile["gff"]
+    if file_is_empty(gff_file): gff_file = None
 
+    return genome_file, gff_file
 
 def get_taxid2name(taxIDs):
 
@@ -4033,6 +4247,338 @@ def download_srr_subsetReads_onlyFastqDump(srr, download_dir, subset_n_reads=100
         run_cmd("mv %s %s"%(download_dir_tmp, download_dir))
 
     return reads1, reads2
+
+def run_freebayes_for_chromosome(chromosome_id, outvcf_folder, ref, sorted_bam, ploidy, coverage, replace):
+
+    """Takes a chromosome ID and the fasta file and an outvcf and runs freebayes on it"""
+
+    # define the output vcf file
+    outvcf = "%s/%s_freebayes.vcf"%(outvcf_folder, chromosome_id); outvcf_tmp = "%s.tmp.vcf"%outvcf
+    print("running freebayes for %s"%chromosome_id)
+
+    # remove previously existing files
+    if file_is_empty(outvcf) or replace is True:
+
+        # generate the bam file for this chromosome (and index)
+        sorted_bam_chr = "%s.%s.bam"%(sorted_bam, chromosome_id)
+        run_cmd("%s view -b %s %s > %s"%(samtools, sorted_bam, chromosome_id, sorted_bam_chr))
+        run_cmd("%s index -@ 1 %s"%(samtools, sorted_bam_chr))
+
+        # get the fasta for the chromosome
+        fasta_chromosome = "%s.%s.fasta"%(ref, chromosome_id)
+        SeqIO.write([seq for seq in SeqIO.parse(ref, "fasta") if seq.id==chromosome_id], fasta_chromosome, "fasta")
+
+        # run freebayes
+        run_cmd("%s -f %s -p %i --min-coverage %i -b %s --haplotype-length -1 -v %s"%(freebayes, fasta_chromosome, ploidy, coverage, sorted_bam_chr, outvcf_tmp))
+
+        # remove the intermediate files
+        print("%s exists %s"%(fasta_chromosome, str(file_is_empty(fasta_chromosome))))
+        remove_file(sorted_bam_chr); remove_file("%s.bai"%sorted_bam_chr); remove_file(fasta_chromosome); remove_file("%s.fai"%fasta_chromosome);
+
+        # rename
+        os.rename(outvcf_tmp, outvcf)
+
+    # return the vcfs
+    return outvcf
+
+
+
+def leftTrimVariant(pos, ref, alt, onlyOneBp=True):
+
+    """Takes a variant with a position, ref and alt alleles and returns the trimmed to the left. onlyOneBp means that it will only trim one basepair. Fo some reason this is how the vcflib and gatk normalisations have the trims. """
+
+    # get the lengths
+    len_ref = len(ref); len_alt = len(alt)
+
+    # those that start with the same base can be trimmed
+    if ref[0]==alt[0]:
+
+        len_overlap = 0
+        # go through each position and keep how long is the overlap on the left
+        if onlyOneBp is True: rangelength = 1 # only the first bp
+        else: rangelength = min([len_ref, len_alt]) # all
+
+        for i in range(rangelength):
+            if ref[i]==alt[i]: len_overlap+=1
+            else: break
+
+        # define the modified position, which increments depending on the length of the overlap
+        mod_pos = pos + len_overlap
+
+        # define the ref
+        if len_overlap==len_ref: mod_ref = "-"
+        else: mod_ref = ref[len_overlap:]
+
+        # define the alt the same way
+        if len_overlap==len_alt: mod_alt = "-"
+        else: mod_alt = alt[len_overlap:]
+
+    else: mod_pos, mod_ref, mod_alt = pos, ref, alt # the same
+
+    return mod_pos, mod_ref, mod_alt
+
+
+
+def load_vep_table_intoDF(vep_filename):
+
+    """Takes the tabular output of ensembl vep and returns a table where the index is (chr, pos, ref, alt)"""
+
+    # load normal df
+    vep_df = pd.read_csv(vep_filename, sep="\t", na_values=vcf_strings_as_NaNs, keep_default_na=False)
+
+    # keep the orignial uploaded variation
+    vep_df["#Uploaded_variation_original"] = vep_df["#Uploaded_variation"]
+
+    # change the uploaded variation so that it includes only the allele position
+    vep_df["#Uploaded_variation"] = vep_df["#Uploaded_variation"].apply(lambda x: x.split("/")[0]) + "/" + vep_df.Allele
+
+    # add the index of the alternative allele which corresponds to this var. For example, if the gt is 1|1|1, and this var has a 1, it will mean that it is the gt of the middle.
+    print("geting GT index")
+    vep_df["GT_index"] = vep_df[["#Uploaded_variation_original", "Allele"]].apply(lambda r: [Iallele+1 for Iallele, alt in enumerate(r["#Uploaded_variation_original"].split("/")[1:]) if r["Allele"]==alt][0], axis=1)
+
+    #/home/mschikora/samba/Cglabrata_antifungals/VarCall/VarCallOutdirs/RUN1_EF1620_7F_ANIFLZ_VarCallresults/freebayes_ploidy1_out/output.filt.norm_vcflib.vcf_annotated.tab
+
+    def get_idx_from_row(row):
+
+        """Thakes a row of vep_df and returns the index"""
+
+        chrom = row["Location"].split(":")[0]
+        pos_str = row["#Uploaded_variation"].split("_")[-2]
+        ref = row["#Uploaded_variation"].split("_")[-1].split("/")[0]
+        pos = int(pos_str)
+        alt = row["Allele"]
+
+        return (chrom, pos, ref, alt)
+
+    vep_df.index = vep_df.apply(get_idx_from_row, axis=1)
+    vep_df["chromosome"] = [x[0] for x in vep_df.index] 
+    vep_df["position"] = [x[1] for x in vep_df.index]
+    vep_df["ref"] = [x[2] for x in vep_df.index]
+    vep_df["alt"] = [x[3] for x in vep_df.index]
+
+    # check that the index and uploaded var are the same
+    if len(set(vep_df.index))!=len(set(vep_df["#Uploaded_variation"])): raise ValueError("each chrom/pos/ref/alt combination does not match the uploaded variation")
+
+    return vep_df
+
+
+
+def load_vcf_intoDF_GettingFreq_AndFilter(vcf_file):
+    
+    """Takes a vcf and loads it into a pandas dataframe. It assumes that it is a vcf with only one sample, at the end. It returns the allele frequency of all the representations of the variants. At least those that have been tested for the VEP output. These are important filters:
+    
+    # for all
+    DP (from DATA, one for all alleles)
+    QUAL (one for all)
+
+    # specific from freebayes
+    SAF (from INFO, one for each alleles)
+    SAR (from INFO, one for each alleles)
+    RPR (from INFO, one for each allele)
+    RPL (from INFO, one for each allele)
+
+    # specific from HC:
+    QD (from INFO)
+    MQ (from INFO)
+    FS (from INFO)
+    MQRankSum (from INFO)
+    ReadPosRankSum (from INFO)
+
+    """
+
+    # get the df (avoid NA as a default NaN)
+
+    df = pd.read_csv(vcf_file, skiprows=list(range(len([line for line in open(vcf_file, "r", encoding='utf-8', errors='ignore') if line.startswith("##")]))), sep="\t", na_values=vcf_strings_as_NaNs, keep_default_na=False)
+
+    # set the index to be a tuple of (chromosome, location, ref, alt)
+    df["CHROM_POS_REF_ALT"] = [tuple(x) for x in df[["#CHROM", "POS", "REF", "ALT"]].values]; df = df.set_index("CHROM_POS_REF_ALT")
+
+    # add a colum that will result from the merging of FORMAT and the last column (which are the values of FORMAT)
+    data_colname = list(df.keys())[-1]
+    df["METADATA"] = [dict(zip(x[0].split(":"), x[1].split(":"))) for x in df[["FORMAT", data_colname]].values]
+    features = df.iloc[0].METADATA.keys()
+
+    # add as columns all the fetaures
+    for feature in features: 
+
+        # go through each data record
+        data = []
+        for rec in df.METADATA:
+
+            if feature in rec: data.append(rec[feature])
+            else: data.append("")
+        df[feature] = data
+
+    ##### ADD INFO COLS #####
+
+    interesting_INFO_filters = {"SAF", "SAR", "RPR", "RPL", "QD", "MQ", "FS", "MQRankSum", "ReadPosRankSum"}
+    df["INFO_dict"] = df.INFO.apply(lambda x: {item.split("=")[0] : item.split("=")[1].split(",") for item in x.split(";") if item.split("=")[0] in interesting_INFO_filters})
+
+    def get_INFOfilt(r, INFO_filt):
+        
+        if INFO_filt in set(r["INFO_dict"].keys()): return r["INFO_dict"][INFO_filt]
+        else: return [np.nan]*len(r["ALT"].split(","))
+
+    for INFO_filt in interesting_INFO_filters: df["INFO_%s_list"%INFO_filt] = df.apply(lambda r: get_INFOfilt(r, INFO_filt), axis=1)
+
+    #########################
+
+
+    # a function that avoids nans
+    def returnNonNAN(float_val):
+        if pd.isna(float_val): return 0.0000001
+        else: return float_val 
+
+    # calculate the real allelle frequency
+    def calculate_altAllele_freq(x):
+
+        """Takes AD and returns a tuple with the alternagtive alleles frequencies"""
+        alleles_reads = [int(nr) for nr in x.split(",")]
+        sum_alleles = sum(alleles_reads)
+
+        return [returnNonNAN(np.divide(altAlleleReads, sum_alleles)) for altAlleleReads in alleles_reads[1:]]
+
+    df["alternative_allelle_frequencies"] = df.AD.apply(calculate_altAllele_freq)
+
+    # get the frequencies into a dictionary
+    print("calculating features for multialleles")
+
+    # define the in
+
+    def get_dicts_metadata(row):
+
+        """Takes a row of df and returns a dictionary that contains var_to_frequency, var_to_filter and var_to_GT for the variant of the row, split by ",", and the left-trimmed one. It also returns a dict mapping each var to the filters that are important. 
+        """
+
+        # initialize dicts
+        var_to_frequency = {} 
+        var_to_filter = {}
+        var_to_GT = {}
+        var_to_filters = {} # these are some potentially interesting filters, where each allele gets one
+
+        # get the tuple var
+        var = row.name
+        chrom, pos, ref, alt = var
+
+        # get all alternative alleles
+        alt_alleles = alt.split(",")
+
+        # get all the alternative frequencies
+        altAllele_to_freq = dict(zip(alt_alleles, row["alternative_allelle_frequencies"]))
+        INFOfilt_to_altAllele_to_val = {INFOfilt : dict(zip(alt_alleles , row["INFO_%s_list"%INFOfilt])) for INFOfilt in interesting_INFO_filters}
+
+        # map them to freqs and tags
+        for real_alt, freq in altAllele_to_freq.items(): 
+
+            # add the interesting filters from the INFO field, QUAL and DP
+            filters_str = ";".join(["%s=%s"%(INFOfilt, INFOfilt_to_altAllele_to_val[INFOfilt][real_alt]) for INFOfilt in interesting_INFO_filters] + ["QUAL=%s"%row["QUAL"], "DP=%i"%int(row["DP"])])
+         
+            # first the direct representation of the variant
+            var_to_frequency[(chrom, pos, ref, real_alt)] = freq
+            var_to_filter[(chrom, pos, ref, real_alt)] = row["FILTER"]
+            var_to_GT[(chrom, pos, ref, real_alt)] = str(row["GT"])
+            var_to_filters[(chrom, pos, ref, real_alt)] = filters_str
+
+            # now the left-most trimmed
+            mod_pos, mod_ref, mod_alt = leftTrimVariant(pos, ref, real_alt)
+
+            # keep if changed
+            if (mod_pos, mod_ref, mod_alt)!=(pos, ref, real_alt): 
+                untrimmed_var = (chrom, pos, ref, real_alt)
+
+                var_to_frequency[(chrom, mod_pos, mod_ref, mod_alt)] = var_to_frequency[untrimmed_var]
+                var_to_filter[(chrom, mod_pos, mod_ref, mod_alt)] = var_to_filter[untrimmed_var]
+                var_to_GT[(chrom, mod_pos, mod_ref, mod_alt)] = var_to_GT[untrimmed_var]
+                var_to_filters[(chrom, mod_pos, mod_ref, mod_alt)] = var_to_filters[untrimmed_var]
+
+        return {"var_to_frequency":var_to_frequency, "var_to_filter":var_to_filter, "var_to_GT":var_to_GT, "var_to_filters":var_to_filters}
+
+    series_dicts = df.apply(get_dicts_metadata, axis=1)
+
+    #print(list(series_dicts.apply(lambda d: d["var_to_frequency"])))
+
+    # get the union of all dicts
+    print("Geting final dicts")
+    var_to_frequency = dict(j for i in series_dicts.apply(lambda d: d["var_to_frequency"]) for j in i.items())
+    var_to_filter = dict(j for i in series_dicts.apply(lambda d: d["var_to_filter"]) for j in i.items())
+    var_to_GT = dict(j for i in series_dicts.apply(lambda d: d["var_to_GT"]) for j in i.items())
+    var_to_filters = dict(j for i in series_dicts.apply(lambda d: d["var_to_filters"]) for j in i.items())
+
+    # get only the columns that you want to keep the real vcf
+    return df[["#CHROM", "POS", "ID", "REF", "ALT", "QUAL", "FILTER", "INFO", "FORMAT",  data_colname]], var_to_frequency, var_to_filter, var_to_GT, var_to_filters
+
+
+def run_freebayes_parallel(outdir_freebayes, ref, sorted_bam, ploidy, coverage, replace=False):
+
+    """It parallelizes over the current CPUs of the system"""
+
+    # make the dir if not already done
+    if not os.path.isdir(outdir_freebayes): os.mkdir(outdir_freebayes)
+
+    #run freebayes
+    freebayes_output ="%s/output.raw.vcf"%outdir_freebayes; freebayes_output_tmp = "%s.tmp"%freebayes_output
+    if file_is_empty(freebayes_output) or replace is True:
+
+        print("running freebayes in parallel with %i threads"%(multiproc.cpu_count()))
+
+        # define the chromosomes
+        all_chromosome_IDs = [seq.id for seq in SeqIO.parse(ref, "fasta")]
+
+        # remove the previous tmp file
+        if not file_is_empty(freebayes_output_tmp): os.unlink(freebayes_output_tmp)
+
+        # initialize the pool class with the available CPUs --> this is asyncronous parallelization
+        pool = multiproc.Pool(multiproc.cpu_count())
+
+        # make a dir to store the vcfs
+        chromosome_vcfs_dir = "%s/chromosome_vcfs"%outdir_freebayes; make_folder(chromosome_vcfs_dir)
+
+        # run in parallel the freebayes generation for all the 
+        chromosomal_vcfs = pool.starmap(run_freebayes_for_chromosome, [(ID, chromosome_vcfs_dir, ref, sorted_bam, ploidy, coverage, replace) for ID in all_chromosome_IDs])
+
+        # close the pool
+        pool.close()
+
+        # go through each of the chromosomal vcfs and append to a whole df
+        all_df = pd.DataFrame()
+        all_header_lines = []
+        for vcf in chromosomal_vcfs:
+
+            # load the df keeping the header lines
+            header_lines = [l for l in open(vcf, "r") if l.startswith("##")]
+            df = pd.read_csv(vcf, sep="\t", header = len(header_lines))
+
+            # define the vcf header
+            vcf_header = ["#CHROM", "POS", "ID", "REF", "ALT", "QUAL", "FILTER", "INFO", "FORMAT"]
+            sample_header = [c for c in df.columns if c not in vcf_header][0]
+            vcf_header.append(sample_header)
+
+            # keep header that is unique
+            all_header_lines.append("".join([line for line in header_lines if line.split("=")[0] not in {"##reference", "##commandline", "##fileDate"}]))
+            
+            # append to the previous df
+            all_df = all_df.append(df[vcf_header], sort=True)
+
+        # check that all headers are the same
+        if len(set(all_header_lines))!=1: 
+            print("These are the header lines: ", set(all_header_lines))
+            print("There are %i unique headers"%len(set(all_header_lines)))
+            raise ValueError("Not all headers are the same in the individual chromosomal vcfs. This may indicate a problem with parallelization of freebayes")
+
+        # write the file
+        open(freebayes_output_tmp, "w").write(all_header_lines[0] + all_df[vcf_header].to_csv(sep="\t", index=False, header=True))
+
+        # rename
+        os.rename(freebayes_output_tmp, freebayes_output)
+
+    # filter the freebayes by quality
+    freebayes_filtered = "%s/output.filt.vcf"%outdir_freebayes; freebayes_filtered_tmp = "%s.tmp"%freebayes_filtered
+    if file_is_empty(freebayes_filtered) or replace is True:
+        print("filtering freebayes")
+        cmd_filter_fb = '%s -f "QUAL > 1 & QUAL / AO > 10 & SAF > 0 & SAR > 0 & RPR > 1 & RPL > 1" --tag-pass PASS %s > %s'%(vcffilter, freebayes_output, freebayes_filtered_tmp); run_cmd(cmd_filter_fb)
+        os.rename(freebayes_filtered_tmp, freebayes_filtered)
+
+    return freebayes_filtered
 
 
 
@@ -4931,7 +5477,7 @@ def get_SVbenchmark_dict(df_predicted, df_known, equal_fields=["Chr"], approxima
     # get dict
     return {"TP":TP, "FP":FP, "FN":FN, "Fvalue":Fvalue, "nevents":nevents, "precision":precision, "recall":recall, "TP_predictedIDs":TP_predictedIDs, "true_positives_knownIDs":set_to_str(true_positives_knownIDs), "false_negatives_knownIDs":set_to_str(false_negatives_knownIDs), "true_positives_predictedIDs":set_to_str(true_positives_predictedIDs), "false_positives_predictedIDs":set_to_str(false_positives_predictedIDs)}
 
-def get_represenative_filtersDict_for_filtersDict_list(filtersDict_list, type_filters="most_conservative"):
+def get_represenative_filtersDict_for_filtersDict_list(filtersDict_list, type_filters="less_conservative"):
 
     """Takes a lis, each position with a list of filters like passed to get_tupleBreakpoints_for_filters_GRIDSS and returns a representative dict, according to less_conservative"""
 
@@ -4945,7 +5491,7 @@ def get_represenative_filtersDict_for_filtersDict_list(filtersDict_list, type_fi
 
 def get_changing_fields_in_df_benchmark(df):
 
-    """This function takes a df such as the input of get_best_most_conservative_row_df_benchmark and returns a set with the keys that are different across rows"""
+    """This function takes a df such as the input of get_best_less_conservative_row_df_benchmark and returns a set with the keys that are different across rows"""
 
     changing_fields = set()
 
@@ -4959,6 +5505,65 @@ def get_changing_fields_in_df_benchmark(df):
         elif len(set(df[f]))>1: changing_fields.add(f)
 
     return changing_fields
+
+def get_best_less_conservative_row_df_benchmark(df_benchmark):
+
+    """Takes a df_benchmark, and returns the row with the less conservative row, given that it has the highest Fvalue. The least conservative is made in a step wise way filtering several things one after the other"""
+
+    # get the maximum df
+    df_best = df_benchmark[df_benchmark.Fvalue==max(df_benchmark.Fvalue)]
+    if len(df_best)==1: return df_best.iloc[0]
+    
+    # get the df with the highest precision
+    df_best = df_best[df_best.precision==max(df_best.precision)]
+    if len(df_best)==1: return df_best.iloc[0]
+
+    # get the one with the highest recall
+    df_best = df_best[df_best.recall==max(df_best.recall)]
+    if len(df_best)==1: return df_best.iloc[0]
+
+    # get the least conservative set of filters for gridss
+    less_conservative_filtersDict_tuple = get_dict_as_tuple(get_represenative_filtersDict_for_filtersDict_list(df_best.filters_dict, type_filters="less_conservative"))
+    df_best = df_best[df_best.filters_dict.apply(get_dict_as_tuple)==less_conservative_filtersDict_tuple]
+    if len(df_best)==1: return df_best.iloc[0]
+
+    # get the maximum clove_max_rel_coverage_to_consider_del
+    df_best = df_best[df_best.clove_max_rel_coverage_to_consider_del==max(df_best.clove_max_rel_coverage_to_consider_del)]
+    if len(df_best)==1: return df_best.iloc[0]
+
+    # get the minimum clove_min_rel_coverage_to_consider_dup
+    df_best = df_best[df_best.clove_min_rel_coverage_to_consider_dup==min(df_best.clove_min_rel_coverage_to_consider_dup)]
+    if len(df_best)==1: return df_best.iloc[0]
+
+    # get filters with maximum tolerated cov
+    if "gridss_maxcoverage" in df_best.keys():
+        df_best = df_best[df_best.gridss_maxcoverage==max(df_best.gridss_maxcoverage)]
+        if len(df_best)==1: return df_best.iloc[0]
+
+    # if any, take the ones without filtering any regions in gridss
+    if "gridss_regionsToIgnoreBed" in df_best.keys():
+        
+        if any(df_best.gridss_regionsToIgnoreBed==""):    
+            df_best = df_best[df_best.gridss_regionsToIgnoreBed==""]
+            if len(df_best)==1: return df_best.iloc[0]
+
+    # get the one with the maxiumum threshold defining unbalanced translocations
+    df_best = df_best[df_best.threshold_p_unbalTRA==min(df_best.threshold_p_unbalTRA)]
+    if len(df_best)==1: return df_best.iloc[0]
+
+    # at the end just return the best one
+    print("Warning: there is no single type of filtering that can fullfill all the requirements") 
+
+
+    # if you didn't find a single best, raise error
+    print("\nthis is the best df:\n", df_best, "printing the non equal fields across all rows:\n")
+    changing_fields = get_changing_fields_in_df_benchmark(df_best)
+    for f in changing_fields:
+        print("\t", f)
+        for Irow in range(len(df_best)): print("\t\t", df_best[f].iloc[Irow])
+
+
+    raise ValueError("There is not a single best filtering")
 
 def get_best_most_conservative_row_df_benchmark(df_benchmark):
 
@@ -5019,10 +5624,10 @@ def get_best_most_conservative_row_df_benchmark(df_benchmark):
 all_svs = {'translocations', 'insertions', 'deletions', 'inversions', 'tandemDuplications', 'remaining'}
 def get_integrated_benchmarking_fields_series_for_setFilters_df(df):
 
-    """This function takes a grouped per-filterSet df and returns a row with all the integrated accuracy measurements. The filters of gridss that are best for each SV may vary. If so we will take the most conservative filters of all of the fiters that are best for each SV."""
+    """This function takes a grouped per-filterSet df and returns a row with all the integrated accuracy measurements. The filters of gridss that are best for each SV may vary. If so we will take the less conservative filters of all of the fiters that are best for each SV."""
 
     # get a df where each row is one df
-    df_best_filters = df.groupby("svtype").apply(get_best_most_conservative_row_df_benchmark)
+    df_best_filters = df.groupby("svtype").apply(get_best_less_conservative_row_df_benchmark)
 
     # debug when there are filters_dict
     if "filters_dict" in set(df_best_filters.keys()):
@@ -5065,7 +5670,7 @@ def get_integrated_benchmarking_fields_series_for_setFilters_df(df):
     # add the fileds corresponding to when there are filters dicts
     if "filters_dict" in set(df_best_filters.keys()): 
 
-        integrated_benchmarking_results_dict["filters_dict"] = get_represenative_filtersDict_for_filtersDict_list(list(df_best_filters["filters_dict"]), type_filters="most_conservative")
+        integrated_benchmarking_results_dict["filters_dict"] = get_represenative_filtersDict_for_filtersDict_list(list(df_best_filters["filters_dict"]), type_filters="less_conservative")
         integrated_benchmarking_results_dict["clove_max_rel_coverage_to_consider_del"] = df_best_filters.loc["deletions", "clove_max_rel_coverage_to_consider_del"]
         integrated_benchmarking_results_dict["clove_min_rel_coverage_to_consider_dup"] = df_best_filters.loc["tandemDuplications", "clove_min_rel_coverage_to_consider_dup"]
 
@@ -6533,7 +7138,7 @@ def get_tupleBreakpoints_for_filters_GRIDSS(df_gridss, filters_dict, return_timi
 
 def keep_relevant_filters_lists_inparallel(filterName_to_filtersList, df_gridss, type_filtering="keeping_all_filters_that_change",  wrong_INFOtags=("IMPRECISE",), min_size=50):
 
-    """Takes a dictionary that maps the filterName to the list of possible filters. It modifies each of the lists in filterName_to_filtersList in a way that only those values that yield a unique set of breakpoints when being applied in the context of a set breakpoints. The final set of filters taken are the most conservative of each. """
+    """Takes a dictionary that maps the filterName to the list of possible filters. It modifies each of the lists in filterName_to_filtersList in a way that only those values that yield a unique set of breakpoints when being applied in the context of a set breakpoints. The final set of filters taken are the less conservative of each. """
 
     # define a set of filters that are very unconservative (they take all the breakpoints)
     unconservative_filterName_to_filter = {"min_Nfragments":-1, "min_af":-1, "wrong_FILTERtags":("",), "filter_polyGC":False, "filter_noSplitReads":False, "filter_noReadPairs":False, "maximum_strand_bias":1.1, "maximum_microhomology":1000000000000, "maximum_lenght_inexactHomology":1000000000000, "range_filt_DEL_breakpoints":(0,1), "min_length_inversions":-1, "dif_between_insert_and_del":0, "max_to_be_considered_small_event":1, "wrong_INFOtags":wrong_INFOtags, "min_size":min_size, "min_af_EitherSmallOrLargeEvent":-1, "min_QUAL":0}
@@ -6597,8 +7202,8 @@ def keep_relevant_filters_lists_inparallel(filterName_to_filtersList, df_gridss,
             bpointTuple_to_filterDicts = {}
             for bpointTuple, filterDict in zip(breakpoints_list, filtersDict_list): bpointTuple_to_filterDicts.setdefault(bpointTuple, []).append(filterDict)
 
-            # for each set, get the most conservative dict, and so extract the value of filterName
-            all_filter_values_unique = set([get_represenative_filtersDict_for_filtersDict_list(list_unique_filter_dicts, type_filters="most_conservative")[filterName] for list_unique_filter_dicts in bpointTuple_to_filterDicts.values()])
+            # for each set, get the less conservative dict, and so extract the value of filterName
+            all_filter_values_unique = set([get_represenative_filtersDict_for_filtersDict_list(list_unique_filter_dicts, type_filters="less_conservative")[filterName] for list_unique_filter_dicts in bpointTuple_to_filterDicts.values()])
 
             # edit filterslist to keep only the unique filter values
             all_non_unique_vals = cp.deepcopy(set(filtersList).difference(all_filter_values_unique))
@@ -6610,7 +7215,7 @@ def keep_relevant_filters_lists_inparallel(filterName_to_filtersList, df_gridss,
 
 def write_bedpeANDfilterdicts_for_breakpoints(df_bedpe, breakpoints, filterDicts, outdir):
 
-    """Takes a df_bedpe that is already filtered (only has the fields to write) and it writes the breakpoints into outdir. It also writes a series with the most conservative filter set that gace with the filters that have rise to this bedpe"""
+    """Takes a df_bedpe that is already filtered (only has the fields to write) and it writes the breakpoints into outdir. It also writes a series with the less conservative filter set that gace with the filters that have rise to this bedpe"""
 
     # define the folder
     make_folder(outdir)
@@ -6623,8 +7228,8 @@ def write_bedpeANDfilterdicts_for_breakpoints(df_bedpe, breakpoints, filterDicts
     outdir_name = outdir.split("/")[-1]
 
     # get the less conservative filterdict
-    less_conservative_filtersDict = get_represenative_filtersDict_for_filtersDict_list(filterDicts, type_filters="most_conservative")
-    save_object(less_conservative_filtersDict, "%s/most_conservative_filtersDict.py"%outdir)
+    less_conservative_filtersDict = get_represenative_filtersDict_for_filtersDict_list(filterDicts, type_filters="less_conservative")
+    save_object(less_conservative_filtersDict, "%s/less_conservative_filtersDict.py"%outdir)
 
 def write_breakpoints_for_parameter_combinations_and_get_filterIDtoBpoints_gridss(df_gridss, df_bedpe, outdir, range_filtering="theoretically_meaningful", expected_AF=1.0, replace=False):
 
@@ -6983,7 +7588,7 @@ def benchmark_bedpe_with_knownSVs(bedpe, know_SV_dict, reference_genome, sorted_
         df_benchmark_all["bedpe"] = [bedpe]*len(df_benchmark_all) # I changed this line at some point because it was raising integers
 
         # add the parameters that yielded this dict
-        filters_dict = load_object("%s/most_conservative_filtersDict.py"%outdir)
+        filters_dict = load_object("%s/less_conservative_filtersDict.py"%outdir)
         df_benchmark_all["filters_dict"] = [filters_dict]*len(df_benchmark_all)
 
         # save in disk
@@ -7430,8 +8035,8 @@ def get_benchmarking_df_for_testSVs_from_trainSV_filterSets(test_SVdict, outdir,
 
     if file_is_empty(df_benchmark_all_filename) or replace is True:
 
-        # keep only the integrated train set
-        df_filters_train = df_filters_train[df_filters_train.svtype=="integrated"]
+        # keep only the integrated train set. If this is commented it does not happen
+        #df_filters_train = df_filters_train[df_filters_train.svtype=="integrated"]
 
         df_benchmark = pd.concat(list(df_filters_train.apply(lambda r: get_df_accuracy_for_train_filer(r, outdir, test_gridss_info_dict, sorted_bam, reference_genome, median_coverage, replace, median_insert_size, median_insert_size_sd, test_SVdict), axis=1)))
 
@@ -7865,7 +8470,7 @@ def get_and_report_filtering_accuracy_across_genomes_and_ploidies(df_benchmark, 
     # get, for each combination of genomeID, ploidy, svtype the best and less conservative filterset into a list
     print("Getting list of best filters for each genome, ploidy and svtype")
     IDs_sepparate_measurements = ["genomeID", "ploidy", "svtype"]
-    df_best_filters = df_benchmark.groupby(IDs_sepparate_measurements).apply(get_best_most_conservative_row_df_benchmark)
+    df_best_filters = df_benchmark.groupby(IDs_sepparate_measurements).apply(get_best_less_conservative_row_df_benchmark)
     for I, field in enumerate(IDs_sepparate_measurements): df_best_filters[field] =  df_best_filters.index.get_level_values(I)
 
     # define the combinations of regions_to_ignore and max_coverage
@@ -8453,7 +9058,7 @@ def generate_jobarray_file_slurm(jobs_filename, stderr="./STDERR", stdout="./STD
     # get info about the exit status: sacct -j <jobid> --format=JobID,JobName,MaxRSS,Elapsed
 
 
-def report_accuracy_realSVs(close_shortReads_table, reference_genome, outdir, real_svtype_to_file, outdir_finding_realVars, threads=4, replace=False, n_simulated_genomes=2, mitochondrial_chromosome="mito_C_glabrata_CBS138", simulation_ploidies=["haploid", "diploid_homo", "diploid_hetero", "ref:2_var:1", "ref:3_var:1", "ref:4_var:1", "ref:5_var:1", "ref:9_var:1", "ref:19_var:1", "ref:99_var:1"], range_filtering_benchmark="theoretically_meaningful", nvars=100, run_in_slurm=False, walltime="02:00:00", queue="debug"):
+def report_accuracy_realSVs(close_shortReads_table, reference_genome, outdir, real_svtype_to_file, outdir_finding_realVars, threads=4, replace=False, n_simulated_genomes=2, mitochondrial_chromosome="mito_C_glabrata_CBS138", simulation_ploidies=["haploid", "diploid_homo", "diploid_hetero", "ref:2_var:1", "ref:3_var:1", "ref:4_var:1", "ref:5_var:1", "ref:9_var:1", "ref:19_var:1", "ref:99_var:1"], range_filtering_benchmark="theoretically_meaningful", nvars=100, run_in_slurm=False, walltime="12:00:00", queue="bsc_ls"):
 
 
     """This function runs the SV pipeline for all the datasets in close_shortReads_table with the fastSV, optimisation based on uniform parameters and optimisation based on realSVs (specified in real_svtype_to_file). outdir_finding_realVars is the outdir where you previously found the real vars, which is useful to not repeat the alignment of the reads"""

@@ -33,6 +33,9 @@ picard = "%s/share/picard-2.18.26-0/picard.jar"%EnvDir
 samtools = "%s/bin/samtools"%EnvDir
 java = "%s/bin/java"%EnvDir
 
+# scripts that are installed under this software
+varcall_cnv_pipeline = "%s/varcall_cnv_pipeline.py"%CWD
+
 #######
 
 description = """
@@ -53,7 +56,6 @@ parser.add_argument("--testSVgen_from_DefaulReads", dest="testSVgen_from_DefaulR
 
 parser.add_argument("--close_shortReads_table", dest="close_shortReads_table", type=str, default=None, help="This is the path to a table that has 4 fields: sampleID,runID,short_reads1,short_reads2. These should be WGS runs of samples that are close to the reference genome and some expected SV. Whenever this argument is provided, the pipeline will find SVs in these samples and generate a folder <outdir>/findingRealSVs<>/SVs_compatible_to_insert that will contain one file for each SV, so that they are compatible and ready to insert in a simulated genome. This table will be used if --testRealDataAccuracy is specified, which will require at least 3 runs for each sample. It can be 'auto', in which case it will be inferred from the taxID provided by --target_taxID.")
 
-
 parser.add_argument("--target_taxID", dest="target_taxID", type=int, default=None, help="This is the taxID (according to NCBI taxonomy) to which your reference genome belongs. If provided it is used to download genomes and reads.")
 
 parser.add_argument("--n_close_samples", dest="n_close_samples", default=5, type=int, help="Number of close samples to search in case --target_taxID is provided")
@@ -64,11 +66,15 @@ parser.add_argument("--SVs_compatible_to_insert_dir", dest="SVs_compatible_to_in
 
 parser.add_argument("--fast_SVcalling", dest="fast_SVcalling", action="store_true", default=False, help="Run SV calling with a default set of parameters. There will not be any optimisation nor reporting of accuracy. This is expected to work almost as fast as gridss and clove together.")
 
+# pipeline skipping options 
+parser.add_argument("--skip_SVcalling", dest="skip_SVcalling", action="store_true", default=False, help="Do not run SV calling.")
+
+
+# testing options
 parser.add_argument("--testRealDataAccuracy", dest="testRealDataAccuracy", action="store_true", default=False, help="Reports the accuracy  of your calling on the real data for all the WGS runs specified in --close_shortReads_table. ")
 
 parser.add_argument("--testSimulationsAccuracy", dest="testSimulationsAccuracy", action="store_true", default=False, help="Reports the accuracy  of your calling on the simulations that are uniform, based on realSVs, and without optimisation. ")
 
-parser.add_argument("--run_in_slurm", dest="run_in_slurm", action="store_true", default=False, help="If provided, it will run in a job arrays the works of --testSimulationsAccuracy and --testRealDataAccuracy. This requires this script to be run on a slurm-based cluster.")
 
 # simulation parameter args
 parser.add_argument("--nvars", dest="nvars", default=50, type=int, help="Number of variants to simulate. Note that the number of balanced translocations inserted in simulations will be always as maximum the number of gDNA chromosome-pairs implicated.")
@@ -84,9 +90,19 @@ parser.add_argument("-f1", "--fastq1", dest="fastq1", default=None, help="fastq_
 parser.add_argument("-f2", "--fastq2", dest="fastq2", default=None, help="fastq_2 file. Option required to obtain bam files. It can be 'auto', in which case a set of 10M reads will be generated.")
 parser.add_argument("-sbam", "--sortedbam", dest="sortedbam", default=None, help="The path to the sorted bam file, which should have a bam.bai file in the same dir. This is mutually exclusive with providing reads")
 parser.add_argument("--run_qualimap", dest="run_qualimap", action="store_true", default=False, help="Run qualimap for quality assessment of bam files. This may be inefficient sometimes because of the ")
+parser.add_argument("--run_in_slurm", dest="run_in_slurm", action="store_true", default=False, help="If provided, it will run in a job arrays the works of --testSimulationsAccuracy and --testRealDataAccuracy. This requires this script to be run on a slurm-based cluster.")
 
 # other args
 parser.add_argument("-mchr", "--mitochondrial_chromosome", dest="mitochondrial_chromosome", default="mito_C_glabrata_CBS138", type=str, help="The name of the mitochondrial chromosome. This is important if you have mitochondrial proteins for which to annotate the impact of nonsynonymous variants, as the mitochondrial genetic code is different. This should be the same as in the gff. If there is no mitochondria just put 'no_mitochondria'. If there is more than one mitochindrial scaffold, provide them as comma-sepparated IDs.")
+
+
+# small VarCalk and CNV args
+parser.add_argument("--run_smallVarsCNV", dest="run_smallVarsCNV", action="store_true", default=False, help="Will call small variants and CNV.")
+parser.add_argument("-gff", "--gff-file", dest="gff", default=None, help="path to the GFF3 annotation of the reference genome. Make sure that the IDs are completely unique for each 'gene' tag. This is necessary for both the CNV analysis (it will look at genes there) and the annotation of the variants.")
+parser.add_argument("-caller", "--caller", dest="caller", required=False, default="all", help="SNP caller option to obtain vcf file. options: no/all/HaplotypeCaller/bcftools/freebayes.")
+parser.add_argument("-c", "--coverage", dest="coverage", default=20, type=int, help="minimum Coverage (int)")
+parser.add_argument("-mcode", "--mitochondrial_code", dest="mitochondrial_code", default=3, type=int, help="The code of the NCBI mitochondrial genetic code. For yeasts it is 3. You can find the numbers for your species here https://www.ncbi.nlm.nih.gov/Taxonomy/Utils/wprintgc.cgi")
+parser.add_argument("-gcode", "--gDNA_code", dest="gDNA_code", default=1, type=int, help="The code of the NCBI gDNA genetic code. You can find the numbers for your species here https://www.ncbi.nlm.nih.gov/Taxonomy/Utils/wprintgc.cgi . For C. albicans it is 12. ")
 
 opt = parser.parse_args()
 
@@ -102,8 +118,8 @@ name_sample = opt.outdir.split("/")[-1]; print("working on %s"%name_sample)
 reference_genome_dir = "%s/reference_genome_dir"%(opt.outdir); fun.make_folder(reference_genome_dir)
 new_reference_genome_file = "%s/reference_genome.fasta"%reference_genome_dir
 
-# download the reference genome from GenBank given the taxID
-if opt.ref=="auto": fun.get_reference_genome_from_GenBank(opt.target_taxID, new_reference_genome_file, replace=opt.replace)
+# download the reference genome from GenBank given the taxID and also the gff annotation
+if opt.ref=="auto": opt.ref, opt.gff = fun.get_reference_genome_from_GenBank(opt.target_taxID, new_reference_genome_file, replace=opt.replace)
 
 # just move the ref genome in the outdir
 else:
@@ -111,6 +127,16 @@ else:
     # move the reference genome into the outdir, so that every file is written under outdir
     fun.run_cmd("cp %s %s"%(opt.ref, new_reference_genome_file))
     opt.ref = new_reference_genome_file
+
+
+# if the gff is not none, move it to the same dir of the reference genome
+if opt.gff is not None:
+
+    target_gff = "%s/reference_genome_features.gff"%reference_genome_dir
+    if fun.file_is_empty(target_gff): 
+        #fun.run_cmd("rm %s"%target_gff)
+        fun.run_cmd("ln -s %s %s"%(opt.gff, target_gff))
+    opt.gff = target_gff
 
 # define files that may be used in many steps of the pipeline
 if opt.sortedbam is None:
@@ -266,7 +292,6 @@ else:
 
 ###################################################################################################
 
-
 # test the accuracy on each of the simulations types
 if opt.testSimulationsAccuracy is True: fun.report_accuracy_simulations(sorted_bam, opt.ref, "%s/testing_SimulationsAccuracy"%opt.outdir, real_svtype_to_file, threads=opt.threads, replace=opt.replace, n_simulated_genomes=opt.nsimulations, mitochondrial_chromosome=opt.mitochondrial_chromosome, simulation_ploidies=simulation_ploidies, range_filtering_benchmark=opt.range_filtering_benchmark, nvars=opt.nvars)
 
@@ -274,15 +299,41 @@ if opt.testSimulationsAccuracy is True: fun.report_accuracy_simulations(sorted_b
 if opt.testRealDataAccuracy is True:  fun.report_accuracy_realSVs(opt.close_shortReads_table, opt.ref, "%s/testing_RealSVsAccuracy"%opt.outdir, real_svtype_to_file, outdir_finding_realVars, threads=opt.threads, replace=opt.replace, n_simulated_genomes=opt.nsimulations, mitochondrial_chromosome=opt.mitochondrial_chromosome, simulation_ploidies=simulation_ploidies, range_filtering_benchmark=opt.range_filtering_benchmark, nvars=opt.nvars, run_in_slurm=opt.run_in_slurm)
 
 # run the actual perSVade function optimising parameters
-SVdetection_outdir = "%s/SVdetection_output"%opt.outdir
-fun.run_GridssClove_optimising_parameters(sorted_bam, opt.ref, SVdetection_outdir, threads=opt.threads, replace=opt.replace, n_simulated_genomes=opt.nsimulations, mitochondrial_chromosome=opt.mitochondrial_chromosome, simulation_ploidies=simulation_ploidies, range_filtering_benchmark=opt.range_filtering_benchmark, nvars=opt.nvars, fast_SVcalling=opt.fast_SVcalling, real_svtype_to_file=real_svtype_to_file)
+if opt.skip_SVcalling is False:
 
+    SVdetection_outdir = "%s/SVdetection_output"%opt.outdir
+    fun.run_GridssClove_optimising_parameters(sorted_bam, opt.ref, SVdetection_outdir, threads=opt.threads, replace=opt.replace, n_simulated_genomes=opt.nsimulations, mitochondrial_chromosome=opt.mitochondrial_chromosome, simulation_ploidies=simulation_ploidies, range_filtering_benchmark=opt.range_filtering_benchmark, nvars=opt.nvars, fast_SVcalling=opt.fast_SVcalling, real_svtype_to_file=real_svtype_to_file)
 
 print("structural variation analysis with perSVade finished")
 
 #####################################
 #####################################
 #####################################
+
+
+#####################################
+###### SMALL VARS AND CNV ###########
+#####################################
+
+if opt.run_smallVarsCNV:
+
+    # define an outdir
+    outdir_varcall = "%s/smallVars_CNV_output"%opt.outdir
+
+    # define the basic cmd
+    varcall_cmd = "%s -r %s --threads %i --outdir %s -p %i -sbam %s --caller %s --coverage %i --mitochondrial_chromosome %s --mitochondrial_code %i --gDNA_code %i "%(varcall_cnv_pipeline, opt.ref, opt.threads, outdir_varcall, opt.ploidy, sorted_bam, opt.caller, opt.coverage, opt.mitochondrial_chromosome, opt.mitochondrial_code, opt.gDNA_code)
+
+    # add options
+    if opt.replace is True: varcall_cmd += " --replace"
+    if opt.gff is not None: varcall_cmd += " -gff %s"%opt.gff
+
+    # run
+    fun.run_cmd(varcall_cmd)
+
+#####################################
+#####################################
+#####################################
+
 
 
 print("perSVade Finished")
