@@ -44,7 +44,7 @@ taxID=5478
 #####################
 
 # provided table
-python $pipeline -r $refgenome -o $outdir -p 1 -f1 $reads1 -f2 $reads2 -mchr mito_C_glabrata_CBS138 --threads $threads --close_shortReads_table $close_shortReads_table --run_in_slurm --testRealDataAccuracy
+python $pipeline -r $refgenome -o $outdir -p 1 -f1 $reads1 -f2 $reads2 -mchr mito_C_glabrata_CBS138 --threads $threads --close_shortReads_table $close_shortReads_table --run_in_slurm --testRealDataAccuracy --skip_SVcalling
 
 # test VarCall pipeline
 #python $pipeline -r $refgenome -o $outdir -p 1 -f1 $reads1 -f2 $reads2 -mchr mito_C_glabrata_CBS138 --threads $threads --skip_SVcalling --run_smallVarsCNV -gff $gff

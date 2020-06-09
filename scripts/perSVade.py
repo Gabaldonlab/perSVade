@@ -45,7 +45,7 @@ Runs perSVade pipeline on an input set of paired end short ends. It is expected 
 parser = argparse.ArgumentParser(description=description, formatter_class=RawTextHelpFormatter)
 
 # general args
-parser.add_argument("-r", "--ref", dest="ref", required=True, help="Reference genome. Has to end with .fasta. It can also be 'auto', in which case the pipeline will download the reference genome from GenBank, if the taxID is specified with --target_taxID")
+parser.add_argument("-r", "--ref", dest="ref", required=True, help="Reference genome. Has to end with .fasta. It can also be 'auto', in which case the pipeline will download the reference genome from GenBank, if the taxID is specified with --target_taxID. It can also be a specific GenBank accession to be downloaded, like  GCA_000149245.3.")
 parser.add_argument("-thr", "--threads", dest="threads", default=16, type=int, help="Number of threads, Default: 16")
 parser.add_argument("-o", "--outdir", dest="outdir", action="store", required=True, help="Directory where the data will be stored")
 parser.add_argument("--replace", dest="replace", action="store_true", help="Replace existing files")
@@ -69,6 +69,11 @@ parser.add_argument("--fast_SVcalling", dest="fast_SVcalling", action="store_tru
 # pipeline skipping options 
 parser.add_argument("--skip_SVcalling", dest="skip_SVcalling", action="store_true", default=False, help="Do not run SV calling.")
 
+# pipeline stopping options
+parser.add_argument("--StopAfter_readObtentionFromSRA", dest="StopAfter_readObtentionFromSRA", action="store_true", default=False, help="Stop after obtaining reads from SRA.")
+parser.add_argument("--StopAfter_genomeObtention", dest="StopAfter_genomeObtention", action="store_true", default=False, help="Stop after genome obtention.")
+parser.add_argument("--StopAfter_bamFileObtention", dest="StopAfter_bamFileObtention", action="store_true", default=False, help="Stop after obtaining the BAM file of aligned reads.")
+
 
 # testing options
 parser.add_argument("--testRealDataAccuracy", dest="testRealDataAccuracy", action="store_true", default=False, help="Reports the accuracy  of your calling on the real data for all the WGS runs specified in --close_shortReads_table. ")
@@ -90,10 +95,12 @@ parser.add_argument("-f1", "--fastq1", dest="fastq1", default=None, help="fastq_
 parser.add_argument("-f2", "--fastq2", dest="fastq2", default=None, help="fastq_2 file. Option required to obtain bam files. It can be 'auto', in which case a set of 10M reads will be generated.")
 parser.add_argument("-sbam", "--sortedbam", dest="sortedbam", default=None, help="The path to the sorted bam file, which should have a bam.bai file in the same dir. This is mutually exclusive with providing reads")
 parser.add_argument("--run_qualimap", dest="run_qualimap", action="store_true", default=False, help="Run qualimap for quality assessment of bam files. This may be inefficient sometimes because of the ")
+
+# machine options
 parser.add_argument("--run_in_slurm", dest="run_in_slurm", action="store_true", default=False, help="If provided, it will run in a job arrays the works of --testSimulationsAccuracy and --testRealDataAccuracy. This requires this script to be run on a slurm-based cluster.")
 
 # other args
-parser.add_argument("-mchr", "--mitochondrial_chromosome", dest="mitochondrial_chromosome", default="mito_C_glabrata_CBS138", type=str, help="The name of the mitochondrial chromosome. This is important if you have mitochondrial proteins for which to annotate the impact of nonsynonymous variants, as the mitochondrial genetic code is different. This should be the same as in the gff. If there is no mitochondria just put 'no_mitochondria'. If there is more than one mitochindrial scaffold, provide them as comma-sepparated IDs.")
+parser.add_argument("-mchr", "--mitochondrial_chromosome", dest="mitochondrial_chromosome", default="mito_C_glabrata_CBS138", type=str, help="The name of the mitochondrial chromosome. This is important if you have mitochondrial proteins for which to annotate the impact of nonsynonymous variants, as the mitochondrial genetic code is different. This should be the same as in the gff. If there is no mitochondria just put 'no_mitochondria'. If there is more than one mitochindrial scaffold, provide them as comma-sepparated IDs. It can be auto, in which case the ref genome will be parsed and automatically identified.")
 
 
 # small VarCalk and CNV args
@@ -106,6 +113,9 @@ parser.add_argument("-gcode", "--gDNA_code", dest="gDNA_code", default=1, type=i
 
 opt = parser.parse_args()
 
+########################################
+##### GENERAL PROCESSING OF INPUTS #####
+########################################
 
 # if replace is set remove the outdir, and then make it
 if opt.replace is True: fun.delete_folder(opt.outdir)
@@ -118,25 +128,51 @@ name_sample = opt.outdir.split("/")[-1]; print("working on %s"%name_sample)
 reference_genome_dir = "%s/reference_genome_dir"%(opt.outdir); fun.make_folder(reference_genome_dir)
 new_reference_genome_file = "%s/reference_genome.fasta"%reference_genome_dir
 
-# download the reference genome from GenBank given the taxID and also the gff annotation
-if opt.ref=="auto": opt.ref, opt.gff = fun.get_reference_genome_from_GenBank(opt.target_taxID, new_reference_genome_file, replace=opt.replace)
+if fun.file_is_empty(new_reference_genome_file) or opt.replace is True:
 
-# just move the ref genome in the outdir
-else:
+    # download the reference genome from GenBank given the taxID and also the gff annotation
+    if opt.ref=="auto": opt.ref, opt.gff = fun.get_reference_genome_from_GenBank(opt.target_taxID, new_reference_genome_file, replace=opt.replace)
 
-    # move the reference genome into the outdir, so that every file is written under outdir
-    fun.run_cmd("cp %s %s"%(opt.ref, new_reference_genome_file))
-    opt.ref = new_reference_genome_file
+    # get by GenBank annotation
+    elif opt.ref.startswith("GCA_"): opt.ref, opt.gff = fun.get_reference_genome_from_GenBank(opt.ref, new_reference_genome_file, replace=opt.replace)
 
+    # just move the ref genome in the outdir
+    else:
+
+        # move the reference genome into the outdir, so that every file is written under outdir
+        try: run_cmd("rm %s"%new_reference_genome_file)
+        except: pass
+        fun.run_cmd("ln -s %s %s"%(opt.ref, new_reference_genome_file))
+
+    if opt.gff is None: print("WARNING: gff was not provided. This will be a problem if you want to annotate small variant calls")
+
+    # check that the mitoChromosomes are in the ref
+    all_chroms = {s.id for s in SeqIO.parse(opt.ref, "fasta")}
+    if any([x not in all_chroms for x in opt.mitochondrial_chromosome.split(",")]) and opt.mitochondrial_chromosome!="no_mitochondria":
+        raise ValueError("The provided mitochondrial_chromosomes are not in the reference genome.")
+
+opt.ref = new_reference_genome_file
 
 # if the gff is not none, move it to the same dir of the reference genome
+target_gff = "%s/reference_genome_features.gff"%reference_genome_dir
 if opt.gff is not None:
 
-    target_gff = "%s/reference_genome_features.gff"%reference_genome_dir
     if fun.file_is_empty(target_gff): 
-        #fun.run_cmd("rm %s"%target_gff)
+        try: fun.run_cmd("rm %s"%target_gff)
+        except: pass
+
         fun.run_cmd("ln -s %s %s"%(opt.gff, target_gff))
+    
     opt.gff = target_gff
+
+# get the genome len
+genome_length = sum(fun.get_chr_to_len(opt.ref).values())
+print("The genome has %.2f Mb"%(genome_length/1000000 ))
+
+if opt.StopAfter_genomeObtention is True: 
+    print("Stopping pipeline after the genome obtention.")
+    sys.exit(0)
+
 
 # define files that may be used in many steps of the pipeline
 if opt.sortedbam is None:
@@ -154,16 +190,26 @@ else:
     sorted_bam = opt.sortedbam
     index_bam = "%s.bai"%sorted_bam
 
+########################################
+########################################
+########################################
+
+
 #####################################
 ############# BAM FILE ##############
 #####################################
 
 ##### YOU NEED TO RUN THE BAM FILE #####
 
-# if you stated auto in the reads, generate a 50x coverage bam file
+# if you stated auto in the reads, generate a 30x coverage bam file
 if any([x=="auto" for x in {opt.fastq1, opt.fastq2}]):
 
-    sorted_bam, index_bam = fun.get_simulated_bamFile(opt.outdir, opt.ref, replace=opt.replace, threads=opt.threads, total_nread_pairs=10000000)
+    # define the number of reads as a function of the coverage
+    read_length = 150
+    total_nread_pairs = int((genome_length*30)/read_length)
+    print("Simulating %.2fM reads"%(total_nread_pairs/1000000))
+
+    sorted_bam, index_bam = fun.get_simulated_bamFile(opt.outdir, opt.ref, replace=opt.replace, threads=opt.threads, total_nread_pairs=total_nread_pairs, read_length=read_length)
     print("using simulated bam file from %s"%sorted_bam)
 
 
@@ -221,6 +267,9 @@ if fun.file_is_empty("%s.fai"%opt.ref) or opt.replace is True:
 ###########################################
 ###########################################
 
+if opt.StopAfter_bamFileObtention is True: 
+    print("Stopping pipeline after the bamfile obtention.")
+    sys.exit(0)
 
 #####################################
 ##### STRUCTURAL VARIATION ##########
@@ -233,7 +282,7 @@ if fun.file_is_empty("%s.fai"%opt.ref) or opt.replace is True:
 simulation_ploidies = opt.simulation_ploidies.split(",")
 
 # the window length for all operations
-fun.window_l = int(min({len_seq for chrom, len_seq  in fun.get_chr_to_len(opt.ref).items() if chrom not in opt.mitochondrial_chromosome.split(",")})*0.05) + 1
+fun.window_l = int(np.median([len_seq for chrom, len_seq  in fun.get_chr_to_len(opt.ref).items() if chrom not in opt.mitochondrial_chromosome.split(",")])*0.05) + 1
 
 print("using a window length of %i"%fun.window_l)
 
@@ -277,9 +326,12 @@ elif opt.fast_SVcalling is False and opt.close_shortReads_table is not None:
         # define the outdir where the close genomes whould be downloaded
         outdir_getting_closeReads = "%s/getting_closeReads"%outdir_finding_realVars; fun.make_folder(outdir_getting_closeReads)
 
-        opt.close_shortReads_table = fun.get_close_shortReads_table_close_to_taxID(opt.target_taxID, opt.ref, outdir_getting_closeReads, sorted_bam, n_close_samples=opt.n_close_samples, nruns_per_sample=opt.nruns_per_sample, replace=opt.replace, threads=opt.threads)
+        opt.close_shortReads_table = fun.get_close_shortReads_table_close_to_taxID(opt.target_taxID, opt.ref, outdir_getting_closeReads, sorted_bam, n_close_samples=opt.n_close_samples, nruns_per_sample=opt.nruns_per_sample, replace=opt.replace, threads=opt.threads, run_in_slurm=opt.run_in_slurm)
 
-        ljahdjkdahk 
+        # skip the running of the pipeline 
+        if opt.StopAfter_readObtentionFromSRA:
+            print("Stopping pipeline after the reads obtention from SRA")
+            sys.exit(0) 
 
     # get the real SVs
     real_svtype_to_file = fun.get_compatible_real_svtype_to_file(opt.close_shortReads_table, opt.ref, outdir_finding_realVars, replace=opt.replace, threads=opt.threads, max_nvars=opt.nvars, mitochondrial_chromosome=opt.mitochondrial_chromosome, run_in_slurm=opt.run_in_slurm)
