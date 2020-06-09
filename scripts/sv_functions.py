@@ -121,6 +121,7 @@ analyze_svVCF = "%s/generate_files_from_svVCF.R"%CWD
 analyze_svVCF_simple = "%s/generate_files_from_svVCF_simple.R"%CWD
 TRIMMOMATIC = "%s/run_trimmomatic.py"%CWD 
 perSVade_py = "%s/perSVade.py"%CWD 
+run_trimmomatic_and_fastqc_py = "%s/run_trimmomatic_and_fastqc.py"%CWD
 
 ######################################################
 ######################################################
@@ -166,6 +167,8 @@ g_filterName_to_filterValue_to_Number = {filterName : dict(zip(filtersList, rang
 
 # define the default window_l
 window_l = 10000
+
+svtype_to_color={"tandemDuplications": "gray", "deletions": "black", "inversions": "blue", "translocations": "olive", "insertions": "red", "remaining":"magenta", "integrated":"c"}
 
 # define a dict that maps each svtype to the fields that are important to define the overlaps
 svtype_to_fieldsDict = {"inversions": {"equal_fields": ["Chr"], 
@@ -3448,17 +3451,29 @@ def get_target_region_row(r, region, breakpoint_positions, maxPos, max_relative_
     # get the maximum region length
     max_region_length = (r["end"]-r["start"])*max_relative_len_neighbors
 
+    # define general names
+    region_name = "%s_region"%region
+
     # define the minimum region length
     min_region_len = 100
 
+    #### readjust for regions that are close to the telomere ####
+
     # if the start is 1 , set the 5' region to the 3' region
-    if region=="5" and r["start"]==1: region="3"
+    if region=="5" and r["start"]<min_region_len: region="3"
 
     # if the region in the 3' is not larger than  enough, just define the 5' region
-    if region=="3" and (maxPos-r["end"])<min_region_len: region="5"
+    elif region=="3" and (maxPos-r["end"])<min_region_len: region="5"
+
+    #############################################################
+
+    # if the region spans the whole chromosome, just set whole chromosome as the 'region'
+    if r["start"]<5 and r["end"]/maxPos>0.95: 
+        start = r["start"]
+        end = r["end"]
 
     # get the 5' region
-    if region=="5":
+    elif region=="5":
 
         # the end is the start of the region
         end = r["start"]-1
@@ -3498,9 +3513,6 @@ def get_target_region_row(r, region, breakpoint_positions, maxPos, max_relative_
         else: end = start + max_region_length
 
         ##########################
-
-    # define general names
-    region_name = "%s_region"%region
 
     # return a series of all important fields
     return pd.Series({"chromosome":r["chromosome"], "start":start, "end":end, "region_name":region_name})
@@ -4086,22 +4098,56 @@ def get_GenBank_assembly_statistics_df(file, assembly_summary_genbank_url="ftp:/
 
     return df
 
+def assembly_row_has_annotation(r, prefix):
+
+    """Takes a row of the get_GenBank_assembly_statistics_df and returns whether it has a gff annotation"""
+
+    print("looking for annotation")
+
+    # define the ftp direction
+    ftp_site = r["ftp_path"]
+    ftp_last = ftp_site.split("/")[-1]# something that has to be added for the ftp direction
+    full_ftp_direction = ftp_site+"/"+ftp_last
+
+    # define the gff name
+    origin_file = "%s_genomic.gff.gz"%(full_ftp_direction)
+    dest_file = "%s_testing.gff"%prefix
 
 
-def get_reference_genome_from_GenBank(taxID, dest_genome_file, replace=False):
+    # print getting file
+    try: 
+        urllib.request.urlretrieve(origin_file, dest_file)
+        remove_file(dest_file)
+        return True
 
-    """Downloads the reference genome for a given taxID into dest_genome_file from genBank """
+    except: return False
+
+def get_reference_genome_from_GenBank(ID, dest_genome_file, replace=False):
+
+    """Downloads the reference genome for a given ID into dest_genome_file from genBank """
 
     # get the genBank df
     gb_file = "%s.GenBankAssemblySummary.txt"%dest_genome_file
     df_assemblies = get_GenBank_assembly_statistics_df(gb_file, replace=replace)
 
-    print(taxID)
+    # it is a genbank assembly just get the accession
+    if ID.startswith("GCA_"): rep_genomes = df_assemblies[df_assemblies.assembly_accession==ID]
 
-    rep_genomes = df_assemblies[(df_assemblies.taxid==taxID) & (df_assemblies.refseq_category.isin({"reference genome", "representative genome"}))]
+    # it is a taxID
+    else:
 
-    if len(rep_genomes)==0: raise ValueError("There are no representative genomes in GenBank for this taxID")
-    if len(rep_genomes)>1: print("WARNING: There are more than 1 refeernce genomes for this taxID")
+        # get the taxID genomes
+        df_taxID = df_assemblies[(df_assemblies.taxid==ID) | (df_assemblies.species_taxid==ID)]
+
+        # get the reference genomes
+        rep_genomes = df_taxID[(df_taxID.refseq_category.isin({"reference genome", "representative genome"}))]
+
+    if len(rep_genomes)==0: 
+
+        df_taxID.to_csv("%s/../testing/failed_assemblies_taxID%i"%(CWD, ID), sep="\t", header=True, index=False)
+        raise ValueError("There are no representative genomes in GenBank for this ID")
+
+    if len(rep_genomes)>1: print("WARNING: There are more than 1 reference genomes for this ID")
 
     # download genome and annotations
     ftp_site = rep_genomes.iloc[0]["ftp_path"]
@@ -4698,6 +4744,9 @@ def getSNPs_for_SRR(srr, reference_genome, outdir, subset_n_reads=100000, thread
     """This function runs fast SNP calling for an SRR, saving data into outdir an srr. It returns the path to the VCF file. By default it runs on one core"""
 
 
+    start_time = time.time()
+
+
     # make the outdir 
     make_folder(outdir)
 
@@ -4732,6 +4781,8 @@ def getSNPs_for_SRR(srr, reference_genome, outdir, subset_n_reads=100000, thread
 
     #print("The mean coverage for %s is %.3f for windows of 10Kb"%(srr, mean_coverage))
     #print("The mean fraction coverage for %s is %.3f for windows of 10Kb"%(srr, fraction_genome_covered))
+
+    print("--- the running of getSNPs_for_SRR took %s seconds in %i cores for a mean_coverage=%.3f ---"%(time.time() - start_time, threads, mean_coverage))
 
 
     return snps_set, mean_coverage, fraction_genome_covered
@@ -5032,7 +5083,7 @@ def download_srr_parallelFastqDump(srr, destination_dir, is_paired=True, threads
     delete_folder(downloading_dir)
 
 
-def get_close_shortReads_table_close_to_taxID(target_taxID, reference_genome, outdir, sorted_bam, n_close_samples=3, nruns_per_sample=3, replace=False, threads=4, max_fraction_genome_different_than_reference=0.15, min_fraction_reads_mapped=0.9, min_fraction_genome_covered=0.9, coverage_subset_reads=5, min_coverage=150, min_fraction_coverage_subset_reads=0.5):
+def get_close_shortReads_table_close_to_taxID(target_taxID, reference_genome, outdir, sorted_bam, n_close_samples=3, nruns_per_sample=3, replace=False, threads=4, max_fraction_genome_different_than_reference=0.15, min_fraction_reads_mapped=0.9, min_fraction_genome_covered=0.9, coverage_subset_reads=5, min_coverage=30, min_fraction_coverage_subset_reads=0.5, run_in_slurm=False, walltime="02:00:00", queue="debug"):
 
     """
     This function takes a taxID and returns the close_shortReads_table that is required to do optimisation of parameters
@@ -5106,15 +5157,14 @@ def get_close_shortReads_table_close_to_taxID(target_taxID, reference_genome, ou
             # reorder runs by coverage
             all_SRA_runInfo_df = all_SRA_runInfo_df.sort_values(by="expected_coverage", ascending=False)
 
-            print(all_SRA_runInfo_df["expected_coverage"])
-
-            kjhdajkhkdka
-
             # go throough several fractions of all_SRA_runInfo_df
             inital_fraction_runs = min([(total_nruns*2)/len(all_SRA_runInfo_df) , 1])
 
-            # keep growing the all_SRA_runInfo_df until you find the desired number of runs
-            for fraction_runs in np.linspace(inital_fraction_runs, 1, 10):
+            # define the number of chunks, so that each chunk gets inital_fraction_runs
+            nchunks = int(len(all_SRA_runInfo_df)*inital_fraction_runs)
+
+            # keep growing the all_SRA_runInfo_df until you find the desired number of runs.
+            for fraction_runs in np.linspace(inital_fraction_runs, 1, nchunks):
                 print("Getting %.2f of the runs "%fraction_runs)
 
                 # get the number of runs
@@ -5210,6 +5260,8 @@ def get_close_shortReads_table_close_to_taxID(target_taxID, reference_genome, ou
     else: SRA_runInfo_df = load_object(SRA_runInfo_df_file)
 
 
+    hgfghfhgfhg
+
     ###### GETTING THE FINAL DATASETS ######
 
     # define the path to the final table
@@ -5232,6 +5284,9 @@ def get_close_shortReads_table_close_to_taxID(target_taxID, reference_genome, ou
         # define a dict that maps each srr to the reads of reads 
         srr_to_readsDict = {}
 
+        # initialize the cmds to submit to the cluster
+        all_cmds = [] 
+
         # replace each of the downloaded SRRs by the trimmed ones
         for srr in SRA_runInfo_df.Run:
             print("trimming %s reads"%srr)
@@ -5240,21 +5295,50 @@ def get_close_shortReads_table_close_to_taxID(target_taxID, reference_genome, ou
             reads1 = "%s/%s/%s_1.fastq.gz"%(downloads_dir, srr, srr)
             reads2 = "%s/%s/%s_2.fastq.gz"%(downloads_dir, srr, srr)
 
+            # define the trimmed reads
+            trimmed_reads1 = "%s.trimmed.fastq.gz"%reads1
+            trimmed_reads2 = "%s.trimmed.fastq.gz"%reads2
+
             # define the final trimmed reads
             final_trimmed_reads1 = "%s/%s_1.fastq.gz"%(final_reads_dir, srr)
             final_trimmed_reads2 = "%s/%s_2.fastq.gz"%(final_reads_dir, srr)
 
-            if file_is_empty(final_trimmed_reads1) or file_is_empty(final_trimmed_reads2) or replace is True:
+            if file_is_empty(trimmed_reads1) or file_is_empty(trimmed_reads2) or replace is True:
 
                 # get the trimmed reads
-                trimmed_reads1, trimmed_reads2 = run_trimmomatic(reads1, reads2, replace=replace, threads=threads)
+                cmd = "%s -f1 %s -f2 %s --threads %i"%(run_trimmomatic_and_fastqc_py, reads1, reads2, threads)
+                if replace is True: cmd += " --replace"
 
-                # rename
-                os.rename(trimmed_reads1, final_trimmed_reads1)
-                os.rename(trimmed_reads2, final_trimmed_reads2)
+                # add to cmds
+                if run_in_slurm is True: 
+                    all_cmds.append(cmd)
+                    continue
+                else: 
+
+                    # get the trimmed reads
+                    run_cmd(cmd)
+
+            if file_is_empty(final_trimmed_reads1): os.rename(trimmed_reads1, final_trimmed_reads1)
+            if file_is_empty(final_trimmed_reads2): os.rename(trimmed_reads2, final_trimmed_reads2)
 
             # add to the dict
             srr_to_readsDict[srr] = {"short_reads1":final_trimmed_reads1, "short_reads2":final_trimmed_reads2}
+
+        # if there are all_cmds, run them in a job array
+        if len(all_cmds)>0:
+            print("Submitting %i trimmomatic jobs to the MN"%(len(all_cmds)))
+
+
+            STDOUT = "%s/STDOUT"%final_reads_dir
+            STDERR = "%s/STDERR"%final_reads_dir
+
+            jobs_filename = "%s/jobs.trimming_SRAdatasets"%final_reads_dir
+            open(jobs_filename, "w").write("\n".join(all_cmds))
+
+          
+            generate_jobarray_file_slurm(jobs_filename, stderr=STDERR, stdout=STDOUT, walltime=walltime,  name="trimming_SRAreads", queue=queue, sbatch=True, ncores_per_task=threads, rmstd=True, constraint="", number_tasks_to_run_at_once="all" )
+
+            raise ValueError("You need to wait until the trimming of downloaded reads is finsihed")
 
         # add to the df
         for f in ["short_reads1", "short_reads2"]: SRA_runInfo_df[f] = SRA_runInfo_df.Run.apply(lambda srr: srr_to_readsDict[srr][f])
@@ -6327,7 +6411,7 @@ def get_ID_to_svtype_to_svDF_for_setOfGenomes_highConfidence(close_shortReads_ta
             outdir_gridssClove = "%s/shortReads_realVarsDiscovery_%s"%(all_realVars_dir,ID); make_folder(outdir_gridssClove)
 
             # define the previous important files
-            final_file = "%s/SVdetection_output/gridss_finished_file.txt"%outdir_gridssClove
+            final_file = "%s/SVdetection_output/gridss_finished.txt"%outdir_gridssClove
 
             # only contine if the final file is not defined
             if file_is_empty(final_file) or replace is True:
@@ -6678,7 +6762,12 @@ def run_wgsim_pairedEnd_for_window(genome, chromosome, start, end, readPairs, re
         # if the end can be extended
         elif (end + length_to_extend)<=len_chr: end = end + length_to_extend
 
-        else: raise ValueError("Region %i cannot be corrected according to read length, maybe because the chromosome is to short. Check that %s is ok"%(ID, chromosome))
+        # if the region is longer than the chrom, just set the whole chromosome
+        if len_chr<min_length_region: 
+            start = 0
+            end = len_chr
+
+        else: raise ValueError("Region %s cannot be corrected according to read length, maybe because the chromosome is to short. Check that %s is ok"%(ID, chromosome))
 
     # first get the region
     region_fasta = "%s/%s.fasta"%(outdir, ID)
@@ -6695,11 +6784,11 @@ def run_wgsim_pairedEnd_for_window(genome, chromosome, start, end, readPairs, re
     fastq_1 = "%s/%s_read1.fq"%(outdir, ID); fastq_2 = "%s/%s_read2.fq"%(outdir, ID); 
     fastq_1_tmp = "%s.tmp"%fastq_1; fastq_2_tmp = "%s.tmp"%fastq_2; 
 
-    fastqgz_1 = "%s.gz"%fastq_1; fastqgz_2 = "%s.gz"%fastq_2;
-    fastqgz_1_tmp = "%s.gz"%fastq_1_tmp; fastqgz_2_tmp = "%s.gz"%fastq_2_tmp;
+    #fastqgz_1 = "%s.gz"%fastq_1; fastqgz_2 = "%s.gz"%fastq_2;
+    #fastqgz_1_tmp = "%s.gz"%fastq_1_tmp; fastqgz_2_tmp = "%s.gz"%fastq_2_tmp;
 
  
-    if any([file_is_empty(x) for x in {fastqgz_1, fastqgz_2}]) or replace is True:
+    if any([file_is_empty(x) for x in {fastq_1, fastq_2}]) or replace is True:
 
         #print("simulating %s"%ID)
 
@@ -6713,25 +6802,25 @@ def run_wgsim_pairedEnd_for_window(genome, chromosome, start, end, readPairs, re
             if os.stat(f).st_size==0: print("!!WARNING: No reads could be generated for region %s into %s. It is likely too short. This may cause problems with multiprocessing."%(ID, f))
 
         # delete previously generated gzips
-        for f in [fastqgz_1_tmp, fastqgz_2_tmp]: remove_file(f)
+        #for f in [fastqgz_1_tmp, fastqgz_2_tmp]: remove_file(f)
         
         # compress        
         #print("%s performing gzip"%ID)
-        for f in [fastq_1_tmp, fastq_2_tmp]: run_cmd("gzip %s"%f)
-        os.rename(fastqgz_1_tmp, fastqgz_1); os.rename(fastqgz_2_tmp, fastqgz_2); 
+        #for f in [fastq_1_tmp, fastq_2_tmp]: run_cmd("gzip %s"%f)
 
         # check that everything is fine in the std and remove it
         if all([l.startswith("[wgsim") for l in open(std, "r").readlines()]): remove_file(std)
         else: raise ValueError("There may have been an error in generating some reads. Check %s"%std)
 
+        os.rename(fastq_1_tmp, fastq_1); os.rename(fastq_2_tmp, fastq_2); 
 
     # remove the fasta file
     remove_file(region_fasta)
     #print("%s returning"%ID)
 
-    return (fastqgz_1, fastqgz_2)
+    return (fastq_1, fastq_2)
 
-def run_wgsim_pairedEnd_per_windows_in_parallel(df_windows, genome, outdir, read_length,  median_insert_size, median_insert_size_sd, replace=False, max_n_windows_at_once=500, error_rate=0.02):
+def run_wgsim_pairedEnd_per_windows_in_parallel(df_windows, genome, outdir, read_length,  median_insert_size, median_insert_size_sd, replace=False, max_n_windows_at_once=2000, error_rate=0.02):
 
     """Takes a dataframe with windows of ["chromosome", "start", "end", "readPairs"] and writes, under outdir, two fastq.gz files of simulated paired end  reads. The parallel runs are written in subfolder under outir which is finally removed. It returns a tuple of the two fastq.gz files.
 
@@ -6775,7 +6864,7 @@ def run_wgsim_pairedEnd_per_windows_in_parallel(df_windows, genome, outdir, read
                 delete_folder(parallel_files_outdir)
                 make_folder(parallel_files_outdir)
 
-                print("opening multiprocessing")
+                print("opening multiprocessing on %i cores on %i windows"%(multiproc.cpu_count(), len(df_chunk)))
 
                 # initialize the pool
                 start_time =  time.time()
@@ -6788,7 +6877,11 @@ def run_wgsim_pairedEnd_per_windows_in_parallel(df_windows, genome, outdir, read
                     pool.close()
                     pool.terminate()
                     pool.join()
-         
+
+                # run gzip in parallel
+                print("running pgzip in parallel")
+                run_cmd("pigz --fast %s/*"%parallel_files_outdir)
+
                 # concatenate them all
                 print("Integrating all in one for chunk %i..."%(I+1))
                 chunk_all_fastqgz_1_tmp = "%s.tmp"%chunk_all_fastqgz_1; chunk_all_fastqgz_2_tmp = "%s.tmp"%chunk_all_fastqgz_2; 
@@ -8732,6 +8825,9 @@ def get_best_parameters_for_GridssClove_run(sorted_bam, reference_genome, outdir
 
     df_cross_benchmark_best, best_f = get_and_report_filtering_accuracy_across_genomes_and_ploidies(df_benchmark_all, genomeID_to_knownSVdict, outdir_benchmarking, PlotsDir_benchmarking, reference_genome, replace=replace, consider_integrated_filtering=True, threads=threads)
 
+    # write this df
+    df_cross_benchmark_best.to_csv("%s/df_cross_benchmark_best.tab"%(outdir_benchmarking), sep="\t", header=True, index=False)
+
     # define the filters
     gridss_blacklisted_regions = best_f["gridss_regionsToIgnoreBed"]
     gridss_maxcoverage = best_f["gridss_maxcoverage"]
@@ -8849,7 +8945,7 @@ def run_GridssClove_optimising_parameters(sorted_bam, reference_genome, outdir, 
     print("--- the gridss pipeline optimising parameters took %s seconds in %i cores ---"%(time.time() - pipeline_start_time, threads))
 
     # generate a file that indicates whether the gridss run is finished
-    final_file = "%s/gridss_finished_file.txt"%outdir
+    final_file = "%s/gridss_finished.txt"%outdir
     open(final_file, "w").write("gridss finished...")
 
     ######################################
@@ -8980,8 +9076,6 @@ def report_accuracy_simulations(sorted_bam, reference_genome, outdir, real_svtyp
     plot_report_accuracy_simulations(df_benchmarking, filename)
 
 
-
-
 def generate_jobarray_file_slurm(jobs_filename, stderr="./STDERR", stdout="./STDOUT", walltime="02:00:00",  name="JobArray", queue="bsc_ls", sbatch=False, ncores_per_task=1, rmstd=True, constraint="", number_tasks_to_run_at_once="all" ):
     
     """ This function takes:
@@ -9058,7 +9152,93 @@ def generate_jobarray_file_slurm(jobs_filename, stderr="./STDERR", stdout="./STD
     # get info about the exit status: sacct -j <jobid> --format=JobID,JobName,MaxRSS,Elapsed
 
 
-def report_accuracy_realSVs(close_shortReads_table, reference_genome, outdir, real_svtype_to_file, outdir_finding_realVars, threads=4, replace=False, n_simulated_genomes=2, mitochondrial_chromosome="mito_C_glabrata_CBS138", simulation_ploidies=["haploid", "diploid_homo", "diploid_hetero", "ref:2_var:1", "ref:3_var:1", "ref:4_var:1", "ref:5_var:1", "ref:9_var:1", "ref:19_var:1", "ref:99_var:1"], range_filtering_benchmark="theoretically_meaningful", nvars=100, run_in_slurm=False, walltime="12:00:00", queue="bsc_ls"):
+def plot_accuracy_simulations_from_all_sampleID_to_dfBestAccuracy(all_sampleID_to_dfBestAccuracy, filename):
+
+    """This function takes a dict that maps each combination of typeSimulation||||runID to the df with the best accuracies. There will be one subplot for each precision/recall/Fvalue and ploidy combination. The rows will be for ploidies and the cols for accuracy measurements. """
+
+    print("running plot_accuracy_simulations_from_all_sampleID_to_dfBestAccuracy")
+
+    # generate df
+    df_benchmarking = pd.DataFrame()
+
+    for ID, df in all_sampleID_to_dfBestAccuracy.items():
+
+        simID, sampleID = ID.split("||||")
+        df["typeParameterOptimisation"] = simID
+        df["sampleID"] = sampleID
+
+        # keep
+        df_benchmarking = df_benchmarking.append(df)
+
+
+    # get a df benchamrking long
+    df_benchmarking_long = pd.DataFrame()
+
+    accuracy_fields = ["precision", "recall", "Fvalue"]
+    nonAccuracy_fields = [c for c in df_benchmarking.columns if c not in accuracy_fields]
+
+    # convert to a long format
+    for f in accuracy_fields:
+
+        df = df_benchmarking[nonAccuracy_fields + [f]].rename(columns={f : "accuracy"})
+        df["ac"] = f
+        df_benchmarking_long = df_benchmarking_long.append(df)
+
+    # change the length of the df
+    svtype_to_shortSVtype = {"deletions":"del", "tandemDuplications":"tan", "insertions":"ins", "translocations":"tra", "inversions":"inv", "integrated":"all"}
+    df_benchmarking_long["svtype"] = df_benchmarking_long.svtype.apply(lambda x: svtype_to_shortSVtype[x])
+
+    # rename the ploidy
+    df_benchmarking_long = df_benchmarking_long.rename(columns={"test_ploidy":"ploidy"})
+
+    # define the minimum accuracy
+    min_y = max([min(df_benchmarking_long["accuracy"])-0.1, 0])
+
+    # get a violin catplot
+    print("getting %s"%filename)
+    palette = {"uniform":"navy", "realSVs":"red"}
+
+    g = sns.catplot(x="svtype", y="accuracy", hue="typeParameterOptimisation", col="ac", row="ploidy", data=df_benchmarking_long,kind="swarm", height=2, aspect=2, palette=palette, dodge=True)
+    g.set(ylim=(min_y, 1))
+
+    # add horizontal lines
+    #for y in [0.5, 0.7, 0.8, 0.9]: g.map(plt.axhline, y=y, ls='--', c='k')
+
+    g.savefig(filename, bbox_inches='tight')
+
+
+
+
+    
+def plot_fraction_overlapping_realSVs(df_benchmarking, filename):
+
+    """This function takes a df that has the fraction_overlapping vars of each svtype for each runID. It plots it for each svtype. """
+
+    print("getting %s"%filename)
+
+    palette = {"uniform":"navy", "realSVs":"red", "fast":"magenta"}
+
+    # define the minimum accuracy
+    svtype_to_shortSVtype = {"deletions":"del", "tandemDuplications":"tan", "insertions":"ins", "translocations":"tra", "inversions":"inv", "integrated":"all", "remaining":"rem"}
+    df_benchmarking["svtype"] = df_benchmarking.svtype.apply(lambda x: svtype_to_shortSVtype[x])
+
+    fig = plt.figure(figsize=(len(set(df_benchmarking.svtype)), 6))
+
+    for I, y in enumerate(["fraction_overlapping", "n_SVs"]):
+
+        ax = plt.subplot(2, 1, I+1)
+
+        # get a violin plot
+        ax = sns.swarmplot(x="svtype", y=y, hue="simulationID", data=df_benchmarking, palette=palette, dodge=True)
+
+        ax.legend(bbox_to_anchor=(1, 1))
+
+
+    fig.savefig(filename, bbox_inches='tight')
+
+
+
+def report_accuracy_realSVs(close_shortReads_table, reference_genome, outdir, real_svtype_to_file, outdir_finding_realVars, threads=4, replace=False, n_simulated_genomes=2, mitochondrial_chromosome="mito_C_glabrata_CBS138", simulation_ploidies=["haploid", "diploid_homo", "diploid_hetero", "ref:2_var:1", "ref:3_var:1", "ref:4_var:1", "ref:5_var:1", "ref:9_var:1", "ref:19_var:1", "ref:99_var:1"], range_filtering_benchmark="theoretically_meaningful", nvars=100, run_in_slurm=False, walltime="08:00:00", queue="bsc_ls"):
 
 
     """This function runs the SV pipeline for all the datasets in close_shortReads_table with the fastSV, optimisation based on uniform parameters and optimisation based on realSVs (specified in real_svtype_to_file). outdir_finding_realVars is the outdir where you previously found the real vars, which is useful to not repeat the alignment of the reads"""
@@ -9070,75 +9250,166 @@ def report_accuracy_realSVs(close_shortReads_table, reference_genome, outdir, re
     # make the outdir
     make_folder(outdir)
 
+    # make a plots dir
+    plots_dir = "%s/plots"%outdir; make_folder(plots_dir)
+
     print("testing the pipeline on real SVs")
 
     # load the real data table
-    df_reads = pd.read_csv(close_shortReads_table, sep="\t")
+    df_reads = pd.read_csv(close_shortReads_table, sep="\t").set_index("runID", drop=False)
 
-    # initialize the cmds to run 
-    all_cmds = []
+    # define the outfiles
+    all_sampleID_to_dfBestAccuracy_file = "%s/all_sampleID_to_dfBestAccuracy.py"%outdir
+    ID_to_svtype_to_svDF_file = "%s/ID_to_svtype_to_svDF.py"%outdir
 
-    # go through each run and configuration
-    for typeSimulations, svtype_to_svfile, fast_SVcalling in [("uniform", {}, False), ("realSVs", real_svtype_to_file, False), ("fast", {}, True)]:
+    if file_is_empty(ID_to_svtype_to_svDF_file) or file_is_empty(all_sampleID_to_dfBestAccuracy_file) or replace is True:
 
-        # define an outdir for this type of simulations
-        outdir_typeSimulations = "%s/%s"%(outdir, typeSimulations); make_folder(outdir_typeSimulations)
+        # initialize a dict that will contain all the data
+        all_sampleID_to_svtype_to_file = {}
+        all_sampleID_to_dfGRIDSS = {}
+        all_sampleID_to_dfBestAccuracy = {}
 
-        # go though each runID
-        for runID in set(df_reads.runID):
-            print(typeSimulations, runID)
+        # initialize the cmds to run 
+        all_cmds = []
 
-            # define an outdir for this runID
-            outdir_runID = "%s/%s"%(outdir_typeSimulations, runID); make_folder(outdir_runID)
+        # go through each run and configuration
+        for typeSimulations, svtype_to_svfile, fast_SVcalling in [("uniform", {}, False), ("realSVs", real_svtype_to_file, False), ("fast", {}, True)]:
 
-            # define the previous important files
-            previous_run_dir = "%s/all_realVars/shortReads_realVarsDiscovery_%s"%(outdir_finding_realVars, runID)
-            sorted_bam = "%s/aligned_reads.bam.sorted"%previous_run_dir
-            final_file = "%s/SVdetection_output/gridss_finished_file.txt"%outdir_runID
+            # define an outdir for this type of simulations
+            outdir_typeSimulations = "%s/%s"%(outdir, typeSimulations); make_folder(outdir_typeSimulations)
 
-            # softlink bam files
-            sorted_bam_outdir = "%s/aligned_reads.bam.sorted"%outdir_runID
-            if file_is_empty(sorted_bam_outdir): run_cmd("ln -s %s %s"%(sorted_bam, sorted_bam_outdir))
-            if file_is_empty("%s.bai"%sorted_bam_outdir): run_cmd("ln -s %s.bai %s.bai"%(sorted_bam, sorted_bam_outdir))
+            # go though each runID
+            for runID in set(df_reads.runID):
+                print(typeSimulations, runID)
 
-            # define the path to the table with previous SVs comparible to insert
-            SVs_compatible_to_insert_dir = "%s/SVs_compatible_to_insert"%outdir_finding_realVars
+                # define an outdir for this runID
+                outdir_runID = "%s/%s"%(outdir_typeSimulations, runID); make_folder(outdir_runID)
 
-            # only contine if the final file is not defined
-            if file_is_empty(final_file) or replace is True:
+                # define the previous important files
+                previous_run_dir = "%s/all_realVars/shortReads_realVarsDiscovery_%s"%(outdir_finding_realVars, runID)
+                sorted_bam = "%s/aligned_reads.bam.sorted"%previous_run_dir
+                final_file = "%s/SVdetection_output/gridss_finished.txt"%outdir_runID
 
-                # define the cmd. This is a normal perSvade.py run with the vars of the previous dir  
-                cmd = "python %s -r %s --threads %i --outdir %s --nvars %i --nsimulations %i --simulation_ploidies %s --range_filtering_benchmark %s --sortedbam %s --mitochondrial_chromosome %s"%(perSVade_py, reference_genome, threads, outdir_runID, nvars, n_simulated_genomes, ",".join(simulation_ploidies), range_filtering_benchmark, sorted_bam_outdir, mitochondrial_chromosome)
+                # softlink bam files
+                sorted_bam_outdir = "%s/aligned_reads.bam.sorted"%outdir_runID
+                if file_is_empty(sorted_bam_outdir): run_cmd("ln -s %s %s"%(sorted_bam, sorted_bam_outdir))
+                if file_is_empty("%s.bai"%sorted_bam_outdir): run_cmd("ln -s %s.bai %s.bai"%(sorted_bam, sorted_bam_outdir))
 
-                # add arguments depending on the pipeline
-                if replace is True: cmd += " --replace"
-                if fast_SVcalling is True: cmd += " --fast_SVcalling"
-                if len(svtype_to_svfile)>0: cmd += " --SVs_compatible_to_insert_dir %s"%SVs_compatible_to_insert_dir
+                # define the path to the table with previous SVs comparible to insert
+                SVs_compatible_to_insert_dir = "%s/SVs_compatible_to_insert"%outdir_finding_realVars
 
-                # if the running in slurm is false, just run the cmd
-                if run_in_slurm is False: run_cmd(cmd)
-                else: 
-                    all_cmds.append(cmd)
-                    continue
+                # only contine if the final file is not defined
+                if file_is_empty(final_file) or replace is True:
 
-            # define the svdict
+                    # define the cmd. This is a normal perSvade.py run with the vars of the previous dir  
+                    cmd = "python %s -r %s --threads %i --outdir %s --nvars %i --nsimulations %i --simulation_ploidies %s --range_filtering_benchmark %s --sortedbam %s --mitochondrial_chromosome %s"%(perSVade_py, reference_genome, threads, outdir_runID, nvars, n_simulated_genomes, ",".join(simulation_ploidies), range_filtering_benchmark, sorted_bam_outdir, mitochondrial_chromosome)
 
-    # if you are not running on slurm, just execute one cmd after the other
-    if run_in_slurm is True:
+                    # add arguments depending on the pipeline
+                    if replace is True: cmd += " --replace"
+                    if fast_SVcalling is True: cmd += " --fast_SVcalling"
+                    if len(svtype_to_svfile)>0: cmd += " --SVs_compatible_to_insert_dir %s"%SVs_compatible_to_insert_dir
 
-        if len(all_cmds)>0: 
-            print("submitting %i jobs to the cluster for testing real-data accuracy"%len(all_cmds))
-            jobs_filename = "%s/jobs.testingRealDataAccuracy"%outdir
-            open(jobs_filename, "w").write("\n".join(all_cmds))
+                    # if the running in slurm is false, just run the cmd
+                    if run_in_slurm is False: run_cmd(cmd)
+                    else: 
+                        all_cmds.append(cmd)
+                        continue
 
-            # define and create the STDERR and STDOUT
-            STDERR = "%s/STDERR"%outdir
-            STDOUT = "%s/STDOUT"%outdir
+                # define the svdict and the df_gridss 
+                svtype_to_svfile, df_gridss = get_svtype_to_svfile_and_df_gridss_from_perSVade_outdir(outdir_runID)
 
-            generate_jobarray_file_slurm(jobs_filename, stderr=STDERR, stdout=STDOUT, walltime=walltime,  name="testRealSVs", queue=queue, sbatch=True, ncores_per_task=threads, rmstd=True, constraint="", number_tasks_to_run_at_once="all" )
+                # add to dict
+                ID = "%s||||%s"%(typeSimulations, runID)
+                all_sampleID_to_svtype_to_file[ID] = svtype_to_svfile
+                all_sampleID_to_dfGRIDSS[ID] = df_gridss
 
-            raise ValueError("You have to wait under all the jobs in testRealSVs are done")
+                # get the df best accuracy
+                if typeSimulations!="fast": all_sampleID_to_dfBestAccuracy[ID] = pd.read_csv("%s/SVdetection_output/parameter_optimisation/benchmarking_all_filters_for_all_genomes_and_ploidies/df_cross_benchmark_best.tab"%outdir_runID, sep="\t")
 
+        # if you are not running on slurm, just execute one cmd after the other
+        if run_in_slurm is True:
+
+            if len(all_cmds)>0: 
+                print("submitting %i jobs to the cluster for testing real-data accuracy"%len(all_cmds))
+                jobs_filename = "%s/jobs.testingRealDataAccuracy"%outdir
+                open(jobs_filename, "w").write("\n".join(all_cmds))
+
+                # define and create the STDERR and STDOUT
+                STDERR = "%s/STDERR"%outdir
+                STDOUT = "%s/STDOUT"%outdir
+
+                generate_jobarray_file_slurm(jobs_filename, stderr=STDERR, stdout=STDOUT, walltime=walltime,  name="testRealSVs", queue=queue, sbatch=True, ncores_per_task=threads, rmstd=True, constraint="", number_tasks_to_run_at_once="all" )
+
+                raise ValueError("You have to wait under all the jobs in testRealSVs are done")
+
+
+        print("getting ID_to_svtype_to_svDF")
+        ID_to_svtype_to_svDF = get_sampleID_to_svtype_to_svDF_filtered(all_sampleID_to_svtype_to_file, all_sampleID_to_dfGRIDSS)
+
+        # add the 'svID', which is useful to calculate overlaps
+        print("adding svID")
+        add_svID_to_IDtoSVTYPEtoDF(ID_to_svtype_to_svDF)
+
+        # save
+        save_object(ID_to_svtype_to_svDF, ID_to_svtype_to_svDF_file)
+        save_object(all_sampleID_to_dfBestAccuracy, all_sampleID_to_dfBestAccuracy_file)
+
+    else: 
+        print("loading objects")
+        ID_to_svtype_to_svDF = load_object(ID_to_svtype_to_svDF_file)
+        all_sampleID_to_dfBestAccuracy = load_object(all_sampleID_to_dfBestAccuracy_file) 
+
+  
+
+    # map each runID to the IDs of the same sample 
+    runID_to_replicateIDs = {runID : set(df_reads[df_reads.sampleID==df_reads.loc[runID, "sampleID"]].index).difference({runID}) for runID in df_reads.runID}
+
+    # map each runID to the svtype to the svIDs
+    ID_to_svtype_to_svIDs = {ID : {svtype : set(svDF.svID) for svtype, svDF in svtype_to_svDF.items() if len(svDF)>0} for ID, svtype_to_svDF in ID_to_svtype_to_svDF.items()}
+
+    # initialize a benchmarking dict
+    df_benchmarking_realSVs_dict = {}
+
+    for ID, svtype_to_svIDs in ID_to_svtype_to_svIDs.items():
+        for svtype, svIDs in svtype_to_svIDs.items():
+
+            # define the IDs
+            simulationID, runID = ID.split("||||")
+
+            # only keep data if there are more than 10 svIDs
+            if len(svIDs)>=5: 
+
+                # define the svIDs in other runs of the same sample
+                other_svIDs = set.union(*[ID_to_svtype_to_svIDs["%s||||%s"%(simulationID, otherRunID)][svtype] for otherRunID in runID_to_replicateIDs[runID]])
+
+                # define the overlap
+                n_SVs = len(svIDs)
+                n_overlapping = len(other_svIDs.intersection(svIDs))
+                fraction_overlapping = n_overlapping/len(svIDs)
+
+                # keep
+                IDdict = "%s||||%s"%(ID, svtype)
+
+                df_benchmarking_realSVs_dict[IDdict] = {"simulationID":simulationID, "runID":runID, "sampleID":df_reads.loc[runID, "sampleID"], "svtype":svtype, "fraction_overlapping":fraction_overlapping, "n_overlapping":n_overlapping, "n_SVs":n_SVs}   
+
+    
+    df_benchmarking_realSVs = pd.DataFrame(df_benchmarking_realSVs_dict).transpose()
+
+    filename = "%s/accuracy_realSVs.pdf"%plots_dir
+    plot_fraction_overlapping_realSVs(df_benchmarking_realSVs, filename)
+
+
+    ajdakadkdahhjda
+
+
+
+
+
+    
+    
+    # plot the accuracy on simulations
+    filename = "%s/accuracy_simulations.pdf"%plots_dir
+    plot_accuracy_simulations_from_all_sampleID_to_dfBestAccuracy(all_sampleID_to_dfBestAccuracy, filename)
 
 
 

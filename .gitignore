@@ -1,6 +1,8 @@
 testing/Cglabrata
-testing/trash_folder
 testing/testing_perSVade_benchmark_stderr.txt
 testing/testing_perSVade_benchmark_stdout.txt
+testing/failed_assemblies_taxID5207
+testing/genomes_and_annotations
+testing/outdirs_testing_severalSpecies
 installation/external_software
 sync_git.py
