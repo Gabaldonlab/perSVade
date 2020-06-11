@@ -595,17 +595,21 @@ def run_bwa_mem(fastq1, fastq2, ref, outdir, bamfile, sorted_bam, index_bam, nam
             if os.path.isfile("%s.tmp"%samfile): os.unlink("%s.tmp"%samfile)
 
             print("Running bwa mem")
-            cmd_bwa = '%s mem -R "@RG\\tID:%s\\tSM:%s" -t %i %s %s %s > %s.tmp'%(bwa, name_sample, name_sample, threads, ref, fastq1, fastq2, samfile); run_cmd(cmd_bwa)
+            bwa_mem_stderr = "%s.tmp.stderr"%samfile
+            cmd_bwa = '%s mem -R "@RG\\tID:%s\\tSM:%s" -t %i %s %s %s > %s.tmp 2>%s'%(bwa, name_sample, name_sample, threads, ref, fastq1, fastq2, samfile, bwa_mem_stderr); run_cmd(cmd_bwa)
             os.rename("%s.tmp"%samfile , samfile)
 
         # convert to bam 
         if file_is_empty(bamfile) or replace is True:
             print("Converting to bam")
-            cmd_toBAM = "%s view -Sbu %s > %s.tmp"%(samtools, samfile, bamfile); run_cmd(cmd_toBAM)
-            os.rename("%s.tmp"%bamfile , bamfile)
+            bamconversion_stderr = "%s.tmp.stderr"%bamfile
+            cmd_toBAM = "%s view -Sbu %s > %s.tmp 2>%s"%(samtools, samfile, bamfile, bamconversion_stderr); run_cmd(cmd_toBAM)
 
             # remove the sam
-            print("Removing sam"); os.unlink(samfile)
+            #print("Removing sam"); 
+            os.unlink(samfile)
+
+            os.rename("%s.tmp"%bamfile , bamfile)
 
         # sorting bam
         if file_is_empty(sorted_bam) or replace is True:
@@ -617,16 +621,21 @@ def run_bwa_mem(fastq1, fastq2, ref, outdir, bamfile, sorted_bam, index_bam, nam
                 if outdir_file.startswith("aligned_reads") and ".tmp." in outdir_file: os.unlink(fullfilepath)
 
             # sort
-            cmd_sort = "%s sort --threads %i -o %s.tmp %s"%(samtools, threads, sorted_bam, bamfile); run_cmd(cmd_sort)
-            os.rename("%s.tmp"%sorted_bam , sorted_bam)
+            bam_sort_std = "%s.tmp.sortingBam_std.txt"%sorted_bam
+            cmd_sort = "%s sort --threads %i -o %s.tmp %s > %s 2>&1"%(samtools, threads, sorted_bam, bamfile, bam_sort_std); run_cmd(cmd_sort)
 
             # remove the the raw bam file
-            print("Removing unsorted bam"); os.unlink(bamfile)
+            #print("Removing unsorted bam")
+            os.unlink(bamfile)
+
+            os.rename("%s.tmp"%sorted_bam , sorted_bam)
+
 
     # indexing bam
     if file_is_empty(index_bam) or replace is True:
         print("Indexing bam")
-        cmd_indexBam = "%s index -@ %i %s"%(samtools, threads, sorted_bam); run_cmd(cmd_indexBam)   # creates a .bai of sorted_bam
+        bam_index_std = "%s.indexingBam_std.txt"%sorted_bam
+        cmd_indexBam = "%s index -@ %i %s > %s 2>&1"%(samtools, threads, sorted_bam, bam_index_std); run_cmd(cmd_indexBam)   # creates a .bai of sorted_bam
 
 
     #print("ALIGNMENT STEP WAS CORRECTLY PERFORMED")
@@ -2171,7 +2180,7 @@ def get_mosdepth_coverage_per_windows_output_likeBamStats(fileprefix, sorted_bam
 
     if file_is_empty(regions_file) or file_is_empty(thresholds_file) or replace is True:
 
-        print("running mosdepth into %s"%fileprefix)
+        #print("running mosdepth into %s"%fileprefix)
         
         # change the end, setting it to -1, and also sorting
         windows_1_based = "%s.1_based.bed"%windows_bed
@@ -2196,7 +2205,7 @@ def get_mosdepth_coverage_per_windows_output_likeBamStats(fileprefix, sorted_bam
         os.rename(regions_file_tmp, regions_file)
         os.rename(thresholds_file_tmp, thresholds_file)
 
-    print("arranging mosdepth output into df")
+    #print("arranging mosdepth output into df")
 
     # get as dfs
     df_regions = pd.read_csv(regions_file, sep="\t", header=-1, names=["#chrom",  "start", "end", "mediancov_1"]).drop_duplicates(subset=["#chrom",  "start", "end"])
@@ -2234,7 +2243,7 @@ def get_coverage_per_window_for_chromosomeDF(chromosome_id, destination_dir, win
     """Takes a chromosome id, a destination dir where to write files, a windows file (provided by generate_coverage_per_window_file_parallel) and a sorted bam and it generates a dataframe with the coverage stats"""
 
     # define the output coverage file
-    print("running coverage calculation for %s"%chromosome_id)
+    #print("running coverage calculation for %s"%chromosome_id)
         
     # generate a randomID
     randID = id_generator(25)
@@ -4246,7 +4255,7 @@ def get_allWGS_runInfo_fromSRA_forTaxIDs(fileprefix, taxIDs, reference_genome, r
 
     # plot the number of spots
     filename = "%s.distribution_parameters.pdf"%fileprefix
-    print("getting parm distribution into %s"%filename)
+    #print("getting parm distribution into %s"%filename)
     fig = plt.figure(figsize=(5,13))
     for I, field in enumerate(["spots", "spots_with_mates", "avgLength", "InsertSize", "size_MB", "expected_coverage"]):
         ax = plt.subplot(6, 1, I+1)
@@ -4261,7 +4270,8 @@ def get_allWGS_runInfo_fromSRA_forTaxIDs(fileprefix, taxIDs, reference_genome, r
     SRA_runInfo_df = SRA_runInfo_df[SRA_runInfo_df["expected_coverage"]>=min_coverage]
 
     for field in ["AssemblyName", "SampleType", "TaxID"]:
-        print("These are the %s: "%field, set(SRA_runInfo_df[field]))
+        pass
+        #print("These are the %s: "%field, set(SRA_runInfo_df[field]))
 
     print("There are %i SRRs ready to use with at least %ix coverage"%(len(SRA_runInfo_df), min_coverage))
 
@@ -4281,16 +4291,23 @@ def download_srr_subsetReads_onlyFastqDump(srr, download_dir, subset_n_reads=100
     reads1 = "%s/%s_1.fastq.gz"%(download_dir, srr)
     reads2 = "%s/%s_2.fastq.gz"%(download_dir, srr)
 
-    if file_is_empty(reads1) or file_is_empty(reads2):
+    for Itry in range(3):
 
-        # define previous runs
-        delete_folder(download_dir_tmp)
+        if file_is_empty(reads1) or file_is_empty(reads2):
 
-        # run dump
-        run_cmd("%s --split-files --gzip --maxSpotId %i --outdir %s %s"%(fastqdump, subset_n_reads, download_dir_tmp, srr))
+            # define previous runs
+            delete_folder(download_dir_tmp)
+            make_folder(download_dir_tmp)
 
-        # move the tmp to the final
-        run_cmd("mv %s %s"%(download_dir_tmp, download_dir))
+            # run dump
+            fastqdump_std = "%s/std.txt"%download_dir_tmp
+            fastqdump_cmd = "%s --split-files --gzip --maxSpotId %i --outdir %s %s > %s 2>&1"%(fastqdump, subset_n_reads, download_dir_tmp, srr, fastqdump_std)
+            
+            run_cmd(fastqdump_cmd)
+
+            # move the tmp to the final
+            os.rename(download_dir_tmp, download_dir)
+            #run_cmd("mv %s %s"%(download_dir_tmp, download_dir))
 
     return reads1, reads2
 
@@ -4318,7 +4335,7 @@ def run_freebayes_for_chromosome(chromosome_id, outvcf_folder, ref, sorted_bam, 
         run_cmd("%s -f %s -p %i --min-coverage %i -b %s --haplotype-length -1 -v %s"%(freebayes, fasta_chromosome, ploidy, coverage, sorted_bam_chr, outvcf_tmp))
 
         # remove the intermediate files
-        print("%s exists %s"%(fasta_chromosome, str(file_is_empty(fasta_chromosome))))
+        #print("%s exists %s"%(fasta_chromosome, str(file_is_empty(fasta_chromosome))))
         remove_file(sorted_bam_chr); remove_file("%s.bai"%sorted_bam_chr); remove_file(fasta_chromosome); remove_file("%s.fai"%fasta_chromosome);
 
         # rename
@@ -4670,7 +4687,7 @@ def run_trimmomatic(reads1, reads2, replace=False, threads=1):
 
     if file_is_empty(trimmed_reads1) or file_is_empty(trimmed_reads2) or replace is True:
 
-        print("running trimmomatic to get the trimmed reads")
+        #print("running trimmomatic to get the trimmed reads")
 
         # initialize all the html files
         all_html_files = []
@@ -4683,8 +4700,9 @@ def run_trimmomatic(reads1, reads2, replace=False, threads=1):
 
             if len(html_files)==0 or replace is True:
 
-                print("running fastqc")
-                run_cmd("%s -o %s --threads %i --extract --java %s %s"%(FASTQC, fastqc_dir, threads, JAVA, reads))
+                #print("running fastqc")
+                std_fastqc = "%s/std.txt"%fastqc_dir
+                run_cmd("%s -o %s --threads %i --extract --java %s %s > %s 2>&1"%(FASTQC, fastqc_dir, threads, JAVA, reads, std_fastqc))
 
             # get again the html files
             html_files = ["%s/%s"%(fastqc_dir, x) for x in os.listdir(fastqc_dir) if x.endswith(".html")]
@@ -4710,7 +4728,8 @@ def run_trimmomatic(reads1, reads2, replace=False, threads=1):
 
             print("running trimmomatic")
 
-            trim_cmd = "%s --number_threads %i -rr1 %s -rr2 %s -tr1 %s -tr2 %s -ad %s"%(TRIMMOMATIC, threads, reads1, reads2, trimmed_reads1, trimmed_reads2, adapters_filename)
+            std_trimmomatic = "%s.trimmomatic_std.txt"%trimmed_reads1
+            trim_cmd = "%s --number_threads %i -rr1 %s -rr2 %s -tr1 %s -tr2 %s -ad %s > %s 2>&1"%(TRIMMOMATIC, threads, reads1, reads2, trimmed_reads1, trimmed_reads2, adapters_filename, std_trimmomatic)
 
             run_cmd(trim_cmd)
 
@@ -4746,19 +4765,22 @@ def getSNPs_for_SRR(srr, reference_genome, outdir, subset_n_reads=100000, thread
 
     start_time = time.time()
 
+    print("running getSNPs_for_SRR for %i reads "%subset_n_reads)
 
     # make the outdir 
     make_folder(outdir)
 
     # first get the reads into a downloading dir
     reads_dir = "%s/reads_dir"%outdir
+    print("downloading fastq files")
     reads1, reads2 = download_srr_subsetReads_onlyFastqDump(srr, reads_dir, subset_n_reads=subset_n_reads)
 
     # get the trimmed reads
+    print("running trimmomatic")
     trimmed_reads1, trimmed_reads2 = run_trimmomatic(reads1, reads2, replace=replace, threads=threads)
 
     # get the aligned reads
-    #print("running bwa mem")
+    print("running bwa mem")
     bamfile = "%s/aligned_reads.bam"%outdir
     sorted_bam = "%s.sorted"%bamfile
     index_bam = "%s.bai"%sorted_bam
@@ -4766,6 +4788,7 @@ def getSNPs_for_SRR(srr, reference_genome, outdir, subset_n_reads=100000, thread
     run_bwa_mem(trimmed_reads1, trimmed_reads2, reference_genome, outdir, bamfile, sorted_bam, index_bam, srr, threads=threads, replace=replace)
 
     # get the SNPs
+    print("getting SNPs ")
     snps_set = get_SNPs_from_bam(sorted_bam, outdir, reference_genome, replace=replace, threads=threads)
 
     # define the parallel running of mosdepth 
@@ -4782,7 +4805,7 @@ def getSNPs_for_SRR(srr, reference_genome, outdir, subset_n_reads=100000, thread
     #print("The mean coverage for %s is %.3f for windows of 10Kb"%(srr, mean_coverage))
     #print("The mean fraction coverage for %s is %.3f for windows of 10Kb"%(srr, fraction_genome_covered))
 
-    print("--- the running of getSNPs_for_SRR took %s seconds in %i cores for a mean_coverage=%.3f ---"%(time.time() - start_time, threads, mean_coverage))
+    #print("--- the running of getSNPs_for_SRR took %s seconds in %i cores for a mean_coverage=%.3f ---"%(time.time() - start_time, threads, mean_coverage))
 
 
     return snps_set, mean_coverage, fraction_genome_covered
@@ -5038,6 +5061,29 @@ def get_fractionGenome_different_samplings_from_sorted_bam(sorted_bam, reference
     return max(all_fraction_different_positions)
 
 
+def download_srr_with_prefetch(srr, SRRfile):
+
+    """This function downloads an srr file for an srr if not already done"""
+
+    # define the downloading dir
+    downloading_dir = get_dir(SRRfile)
+
+    # make the downloading dir
+    make_folder(downloading_dir)
+
+    for Itry in range(2):
+
+        if file_is_empty(SRRfile):
+
+            # remove the locks of previous runs
+            for file in ["%s/%s"%(downloading_dir, f) for f in os.listdir(downloading_dir) if ".lock" in f or ".tmp." in f]: remove_file(file)
+
+            # run prefetch
+            try: run_cmd("%s -o %s %s"%(prefetch, SRRfile, srr))
+            except: print("prefetch did not work for %s"%srr)
+
+    return SRRfile
+
 def download_srr_parallelFastqDump(srr, destination_dir, is_paired=True, threads=4, replace=False):
 
     """Takes an SRR accession and downloads the fastq files into destination_dir with prefetch"""
@@ -5065,13 +5111,7 @@ def download_srr_parallelFastqDump(srr, destination_dir, is_paired=True, threads
 
         # first run prefetch if not already done
         SRRfile = "%s/%s.srr"%(downloading_dir, srr)
-        if file_is_empty(SRRfile):
-
-            # remove the locks of previous runs
-            for file in ["%s/%s"%(downloading_dir, f) for f in os.listdir(downloading_dir) if ".lock" in f or ".tmp." in f]: remove_file(file)
-
-            # run prefetch
-            run_cmd("%s -o %s %s"%(prefetch, SRRfile, srr))
+        download_srr_with_prefetch(srr, SRRfile)
 
         # download into fastq split files
         run_cmd("%s -s %s -t %i -O %s --tmpdir %s --split-files --gzip"%(parallel_fastq_dump, SRRfile, threads, downloading_dir, tmp_dir))
@@ -5083,7 +5123,7 @@ def download_srr_parallelFastqDump(srr, destination_dir, is_paired=True, threads
     delete_folder(downloading_dir)
 
 
-def get_close_shortReads_table_close_to_taxID(target_taxID, reference_genome, outdir, sorted_bam, n_close_samples=3, nruns_per_sample=3, replace=False, threads=4, max_fraction_genome_different_than_reference=0.15, min_fraction_reads_mapped=0.9, min_fraction_genome_covered=0.9, coverage_subset_reads=5, min_coverage=30, min_fraction_coverage_subset_reads=0.5, run_in_slurm=False, walltime="02:00:00", queue="debug"):
+def get_close_shortReads_table_close_to_taxID(target_taxID, reference_genome, outdir, n_close_samples=3, nruns_per_sample=3, replace=False, threads=4, max_fraction_genome_different_than_reference=0.15, min_fraction_reads_mapped=0.9, min_fraction_genome_covered=0.9, coverage_subset_reads=5, min_coverage=30, min_fraction_coverage_subset_reads=0.5, run_in_slurm=False, walltime="02:00:00", queue="debug", StopAfter_sampleIndexingFromSRA=False, SNPthreshold_sameSample=0.001):
 
     """
     This function takes a taxID and returns the close_shortReads_table that is required to do optimisation of parameters
@@ -5107,9 +5147,8 @@ def get_close_shortReads_table_close_to_taxID(target_taxID, reference_genome, ou
 
     # calculate the expected difference between two runs of the same sample from the given sample
     outdir_resamplingBam = "%s/resampling_bam_andGetting_fractionDifPositions"%outdir
-    SNPthreshold_sameSample = get_fractionGenome_different_samplings_from_sorted_bam(sorted_bam, reference_genome, outdir_resamplingBam, replace=replace, threads=threads, coverage_subset_reads=coverage_subset_reads)*2
 
-    print("We will say that if two samples differ by less than %.4f pct of the genome they are from the same sample. This has been calculated by resampling the input sorted bam with %ix coverage many times. We take twice the value of maxium divergence observed from these value."%(SNPthreshold_sameSample*100, coverage_subset_reads))
+    print("We will say that if two samples differ by less than %.4f pct of the genome they are from the same sample. This has been provided by this function "%(SNPthreshold_sameSample*100))
 
     # get sampleID 
     outdir_gettingID = "%s/getting_sample_IDs"%outdir; make_folder(outdir_gettingID)
@@ -5122,6 +5161,9 @@ def get_close_shortReads_table_close_to_taxID(target_taxID, reference_genome, ou
 
     if file_is_empty(SRA_runInfo_df_file) or replace is True:
         print("getting SRRs")
+
+        # initialize a set that defines the runs of the previous node
+        runs_previous_nodes = set()
 
         # define all potentially interesting taxIDs close to the target_taxIDs
         for nancestorNodes in range(1, 100): # one would mean to consider only IDs that are under the current species
@@ -5156,20 +5198,23 @@ def get_close_shortReads_table_close_to_taxID(target_taxID, reference_genome, ou
 
             # reorder runs by coverage
             all_SRA_runInfo_df = all_SRA_runInfo_df.sort_values(by="expected_coverage", ascending=False)
+            print("Looking for %i runs"%total_nruns)
 
             # go throough several fractions of all_SRA_runInfo_df
-            inital_fraction_runs = min([(total_nruns*2)/len(all_SRA_runInfo_df) , 1])
+            inital_fraction_runs = min([(total_nruns*1.5)/len(all_SRA_runInfo_df) , 1])
 
             # define the number of chunks, so that each chunk gets inital_fraction_runs
-            nchunks = int(len(all_SRA_runInfo_df)*inital_fraction_runs)
+            nchunks = int(len(all_SRA_runInfo_df)*inital_fraction_runs)+1
 
             # keep growing the all_SRA_runInfo_df until you find the desired number of runs.
             for fraction_runs in np.linspace(inital_fraction_runs, 1, nchunks):
-                print("Getting %.2f of the runs "%fraction_runs)
 
                 # get the number of runs
                 nruns = int(len(all_SRA_runInfo_df)*fraction_runs)
                 SRA_runInfo_df = all_SRA_runInfo_df.iloc[0:nruns]
+
+                print("Getting %.2f of the runs (%i runs)"%(fraction_runs, nruns))
+
 
                 # get the sra info of this chunk
                 SRA_runInfo_df, df_divergence = get_SRA_runInfo_df_with_sampleID(SRA_runInfo_df, reference_genome, outdir_gettingID, replace=replace, threads=threads, coverage_subset_reads=coverage_subset_reads, SNPthreshold=SNPthreshold_sameSample)
@@ -5192,9 +5237,7 @@ def get_close_shortReads_table_close_to_taxID(target_taxID, reference_genome, ou
                 sampleID_to_nRuns = Counter(SRA_runInfo_df.sampleID)
                 SRA_runInfo_df["nRuns_with_sampleID"] = SRA_runInfo_df.sampleID.apply(lambda x: sampleID_to_nRuns[x])
 
-                print(sorted(sampleID_to_nRuns.values()))
-
-                # keep only the SRA_runInfo_df that has above 
+                # keep only the SRA_runInfo_df that has above the desired nruns per sample
                 SRA_runInfo_df = SRA_runInfo_df[SRA_runInfo_df.nRuns_with_sampleID>=nruns_per_sample]
 
                 # debug
@@ -5249,6 +5292,12 @@ def get_close_shortReads_table_close_to_taxID(target_taxID, reference_genome, ou
                 # break the loop
                 break
 
+            # if there are no new nodes, break
+            runs_in_this_node = set(SRA_runInfo_df.Run)
+            if len(runs_in_this_node.difference(runs_previous_nodes))==0: break
+            runs_previous_nodes.update(runs_in_this_node)
+
+            # if you already found the IDs, break
             if len(SRA_runInfo_df)==total_nruns: break
 
         # debug
@@ -5259,8 +5308,11 @@ def get_close_shortReads_table_close_to_taxID(target_taxID, reference_genome, ou
 
     else: SRA_runInfo_df = load_object(SRA_runInfo_df_file)
 
+    print("these are the samples chosen:\n:", SRA_runInfo_df[["Run", "sampleID", "SampleName"]].sort_values("sampleID"))
 
-    hgfghfhgfhg
+    if StopAfter_sampleIndexingFromSRA is True: 
+        print("stopping after generation of SRA_runInfo_df into %s"%SRA_runInfo_df_file)
+        exit(0)
 
     ###### GETTING THE FINAL DATASETS ######
 
@@ -9222,19 +9274,27 @@ def plot_fraction_overlapping_realSVs(df_benchmarking, filename):
     svtype_to_shortSVtype = {"deletions":"del", "tandemDuplications":"tan", "insertions":"ins", "translocations":"tra", "inversions":"inv", "integrated":"all", "remaining":"rem"}
     df_benchmarking["svtype"] = df_benchmarking.svtype.apply(lambda x: svtype_to_shortSVtype[x])
 
-    fig = plt.figure(figsize=(len(set(df_benchmarking.svtype)), 6))
+    fig = plt.figure(figsize=(len(set(df_benchmarking.svtype))*2, 5))
 
-    for I, y in enumerate(["fraction_overlapping", "n_SVs"]):
+    for I, y in enumerate(["precision", "recall", "n_SVs", "n_HighConfidence_SVs"]):
 
-        ax = plt.subplot(2, 1, I+1)
+        ax = plt.subplot(2, 2, I+1)
+
+        df_benchmarking[y] = df_benchmarking[y].astype(float)
 
         # get a violin plot
-        ax = sns.swarmplot(x="svtype", y=y, hue="simulationID", data=df_benchmarking, palette=palette, dodge=True)
+        ax = sns.boxplot(x="svtype", y=y, data=df_benchmarking, hue="simulationID", palette=palette, boxprops=dict(alpha=.65))
+
+        ax = sns.swarmplot(x="svtype", y=y, hue="simulationID", data=df_benchmarking, palette=palette, dodge=True, linewidth=.5, edgecolor="k")
 
         ax.legend(bbox_to_anchor=(1, 1))
+        ax.set_xlabel("")
+
+        if I in [0,2]: ax.get_legend().remove()
 
 
     fig.savefig(filename, bbox_inches='tight')
+    plt.close(fig)
 
 
 
@@ -9364,8 +9424,19 @@ def report_accuracy_realSVs(close_shortReads_table, reference_genome, outdir, re
     # map each runID to the IDs of the same sample 
     runID_to_replicateIDs = {runID : set(df_reads[df_reads.sampleID==df_reads.loc[runID, "sampleID"]].index).difference({runID}) for runID in df_reads.runID}
 
+
+    # map each ID to the svIDs 
+    ID_to_svIDs = {ID : set.union(*[set(svDF.svID) for svDF in svtype_to_svDF.values() if len(svDF)>0]) for ID, svtype_to_svDF in ID_to_svtype_to_svDF.items()}
+
+    # define the fraction of samples with this ID
+    svID_to_fractionIDsPresent = {svID : sum([svID in svIDs for svIDs in ID_to_svIDs.values()])/len(ID_to_svIDs) for svID in set.union(*ID_to_svIDs.values())}
+
+    # define the wrong svIDs as those that are present in >75% of the samples. These are likely errors in the assembly
+    wrong_svIDs = {svID for svID, fraction in svID_to_fractionIDsPresent.items() if fraction>0.75}
+
     # map each runID to the svtype to the svIDs
-    ID_to_svtype_to_svIDs = {ID : {svtype : set(svDF.svID) for svtype, svDF in svtype_to_svDF.items() if len(svDF)>0} for ID, svtype_to_svDF in ID_to_svtype_to_svDF.items()}
+    ID_to_svtype_to_svIDs = {ID : {svtype : set(svDF.svID).difference(wrong_svIDs) for svtype, svDF in svtype_to_svDF.items() if len(svDF)>0} for ID, svtype_to_svDF in ID_to_svtype_to_svDF.items()}
+
 
     # initialize a benchmarking dict
     df_benchmarking_realSVs_dict = {}
@@ -9380,40 +9451,38 @@ def report_accuracy_realSVs(close_shortReads_table, reference_genome, outdir, re
             if len(svIDs)>=5: 
 
                 # define the svIDs in other runs of the same sample
-                other_svIDs = set.union(*[ID_to_svtype_to_svIDs["%s||||%s"%(simulationID, otherRunID)][svtype] for otherRunID in runID_to_replicateIDs[runID]])
+                list_other_svIDs = [ID_to_svtype_to_svIDs["%s||||%s"%(simulationID, otherRunID)][svtype] for otherRunID in runID_to_replicateIDs[runID]]
 
-                # define the overlap
+                # define all the others
+                all_other_svIDs = set.union(*list_other_svIDs)
+
+                # define the true even
+                intersection_other_svIDs = set.intersection(*list_other_svIDs)
+
+                # define the precision
                 n_SVs = len(svIDs)
-                n_overlapping = len(other_svIDs.intersection(svIDs))
-                fraction_overlapping = n_overlapping/len(svIDs)
+                n_overlapping = len(all_other_svIDs.intersection(svIDs))
+                precision = n_overlapping/len(svIDs)
+
+                # define the 'recall' of real vars
+                TPs = intersection_other_svIDs.intersection(svIDs)
+                recall = len(TPs)/len(intersection_other_svIDs)
 
                 # keep
                 IDdict = "%s||||%s"%(ID, svtype)
 
-                df_benchmarking_realSVs_dict[IDdict] = {"simulationID":simulationID, "runID":runID, "sampleID":df_reads.loc[runID, "sampleID"], "svtype":svtype, "fraction_overlapping":fraction_overlapping, "n_overlapping":n_overlapping, "n_SVs":n_SVs}   
+                df_benchmarking_realSVs_dict[IDdict] = {"simulationID":simulationID, "runID":runID, "sampleID":df_reads.loc[runID, "sampleID"], "svtype":svtype, "precision":precision, "n_overlapping":n_overlapping, "n_SVs":n_SVs, "recall":recall, "n_HighConfidence_SVs":len(intersection_other_svIDs)}   
 
-    
     df_benchmarking_realSVs = pd.DataFrame(df_benchmarking_realSVs_dict).transpose()
 
+
+    # plot the frac
     filename = "%s/accuracy_realSVs.pdf"%plots_dir
     plot_fraction_overlapping_realSVs(df_benchmarking_realSVs, filename)
-
-
-    ajdakadkdahhjda
-
-
-
-
-
-    
     
     # plot the accuracy on simulations
     filename = "%s/accuracy_simulations.pdf"%plots_dir
     plot_accuracy_simulations_from_all_sampleID_to_dfBestAccuracy(all_sampleID_to_dfBestAccuracy, filename)
-
-
-
-    nadjkadjkhadjkhasd
 
 
 def get_simulated_bamFile(outdir, reference_genome, replace=False, threads=4, total_nread_pairs=10000000, read_length=150, median_insert_size=500, median_insert_size_sd=50):
