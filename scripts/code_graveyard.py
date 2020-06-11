@@ -849,3 +849,32 @@ def transform_cut_and_paste_to_copy_and_paste_insertions(reference_genome, rearr
                 # find the real vars
                 svtype_to_svfile, df_gridss = generate_tables_of_SV_between_genomes_gridssClove(dest_genomeFile, reference_genome, replace=replace, threads=threads)
 
+
+
+# if you stated auto in the reads, generate a 30x coverage bam file
+if any([x=="auto" for x in {opt.fastq1, opt.fastq2}]):
+
+    # define the number of reads as a function of the coverage
+    read_length = 150
+    total_nread_pairs = int((genome_length*30)/read_length)
+    print("Simulating %.2fM reads"%(total_nread_pairs/1000000))
+
+    sorted_bam, index_bam = fun.get_simulated_bamFile(opt.outdir, opt.ref, replace=opt.replace, threads=opt.threads, total_nread_pairs=total_nread_pairs, read_length=read_length)
+    print("using simulated bam file from %s"%sorted_bam)
+
+
+
+   #SNPthreshold_sameSample = get_fractionGenome_different_samplings_from_sorted_bam(sorted_bam, reference_genome, outdir_resamplingBam, replace=replace, threads=threads, coverage_subset_reads=coverage_subset_reads)
+
+    print("We will say that if two samples differ by less than %.4f pct of the genome they are from the same sample. This has been calculated by resampling the input sorted bam with %ix coverage many times. We take twice the value of maxium divergence observed from these value."%(SNPthreshold_sameSample*100, coverage_subset_reads))
+
+
+
+    # download the reference genome from GenBank given the taxID and also the gff annotation
+    if opt.ref=="auto": opt.ref, opt.gff = fun.get_reference_genome_from_GenBank(opt.target_taxID, new_reference_genome_file, replace=opt.replace)
+
+    # get by GenBank annotation
+    elif opt.ref.startswith("GCA_"): opt.ref, opt.gff = fun.get_reference_genome_from_GenBank(opt.ref, new_reference_genome_file, replace=opt.replace)
+
+    # just move the ref genome in the outdir
+    else:

@@ -35,35 +35,59 @@ outdir_genomes_and_annotations = "%s/scripts/perSVade/perSVade_repository/testin
 
 ################################
 
+
+"""
+This is how the genomes were obtained:
+
+C. glabrata: reference genome from CGD: the latest version by 12/03/2019, which is v_s02-m07-r35 
+
+C. albicans: 
+
+    ref genome CGD: http://www.candidagenome.org/download/sequence/C_albicans_SC5314/Assembly22/current/C_albicans_SC5314_version_A22-s07-m01-r110_chromosomes.fasta.gz
+
+    gff from CGD: http://www.candidagenome.org/download/gff/C_albicans_SC5314/Assembly22/C_albicans_SC5314_version_A22-s07-m01-r110_features.gff
+
+    From here I keep 'haplotype A' for both files
+
+C. neoformans: ref genome from GenBank GCA_000149245.3
+
+A. fumigatus: 
+
+    gDNA from reference NCBI:
+
+    https://ftp.ncbi.nlm.nih.gov/genomes/all/GCF/000/002/655/GCF_000002655.1_ASM265v1/GCF_000002655.1_ASM265v1_genomic.fna.gz
+    https://ftp.ncbi.nlm.nih.gov/genomes/all/GCF/000/002/655/GCF_000002655.1_ASM265v1/GCF_000002655.1_ASM265v1_genomic.gff.gz
+    
+    mtDNA from https://www.ncbi.nlm.nih.gov/nuccore/CM016889.1
+
+A. thaliana: ref genome from GenBank GCA_000001735.2
+
+D. melanogaster: ref genome from GenBank GCA_000001215.4
+
+D. rerio: ref genome from GenBank removing the alternate haplotypes. (this is GCA_000002035.4)
+
+H. sapiens: ref genome from GenBank removing the alternate haplotypes. (this is GCA_000001405.28)
+"""
+
 # define important info about each species: taxID, spName, ploidy
-species_Info = [("5478", "Candida_glabrata", 1, "mito_C_glabrata_CBS138", "C_glabrata_CBS138_current_chromosomes.fasta", "C_glabrata_CBS138_current_features.gff"),
-
-                ("5476", "Candia_albicans", 2, "no_mitochondria", "Calbicans_chromosomes.fasta", "Calbicans_features.gff"),
-
-                ("5207", "Cryptococcus_neoformans", 1, "CP003834.1", "GCA_000149245.3", "GCA_000149245.3"),
-
-                ("746128", "Aspergillus_fumigatus", 1, "no_mitochondria", "GCA_000002655.1", "GCA_000002655.1"),
-                ("3702", "Arabidopsis_thaliana", 2, "BK010421.1,AP000423.1", "GCA_000001735.2", " GCA_000001735.2"),
-                ("7227", "Drosophila_melanogaster", 2, "KJ947872.2", "GCA_000001215.4", "GCA_000001215.4"),
-                ("7955", "Danio_rerio", 2, "NC_002333.2", "Drerio_chromosomes.fasta", "Drerio_features.gff"),
-                ("9606", "Homo_sapiens", 2, "J01415.2", "GCA_000001405.28", "GCA_000001405.28")]
-
-"""
-These are the links:
-C. albicans:
-https://ftp.ncbi.nlm.nih.gov/genomes/all/GCF/000/182/965/GCF_000182965.3_ASM18296v3/GCF_000182965.3_ASM18296v3_genomic.fna.gz
-https://ftp.ncbi.nlm.nih.gov/genomes/all/GCF/000/182/965/GCF_000182965.3_ASM18296v3/GCF_000182965.3_ASM18296v3_genomic.gff.gz
-
-D. rerio:
-https://ftp.ncbi.nlm.nih.gov/genomes/all/GCF/000/002/035/GCF_000002035.6_GRCz11/GCF_000002035.6_GRCz11_genomic.fna.gz
-https://ftp.ncbi.nlm.nih.gov/genomes/all/GCF/000/002/035/GCF_000002035.6_GRCz11/GCF_000002035.6_GRCz11_genomic.gff.gz
-
-"""
-
+species_Info = [("5478", "Candida_glabrata", 1, "mito_C_glabrata_CBS138"),
+                ("5476", "Candida_albicans", 2, "Ca22chrM_C_albicans_SC5314"),
+                ("5207", "Cryptococcus_neoformans", 1, "CP003834.1"),
+                ("746128", "Aspergillus_fumigatus", 1, "CM016889.1"),
+                ("3702", "Arabidopsis_thaliana", 2, "BK010421.1,AP000423.1"),
+                ("7227", "Drosophila_melanogaster", 2, "KJ947872.2"),
+                ("7955", "Danio_rerio", 2, "NC_002333.2"),
+                ("9606", "Homo_sapiens", 2, "NC_012920.1")]
 
 # go through each species
-for taxID, spName, ploidy, mitochondrial_chromosome, genome, gff in species_Info:
+for taxID, spName, ploidy, mitochondrial_chromosome in species_Info:
     print(taxID, spName)
+
+    # define  the genome and annotations
+    genome = "%s/%s.fasta"%(outdir_genomes_and_annotations, spName)
+    gff = "%s/%s.gff"%(outdir_genomes_and_annotations, spName)
+
+
 
     if genome!="auto" and not genome.startswith("GCA_"): 
         genome = "%s/%s"%(outdir_genomes_and_annotations, genome)
@@ -72,8 +96,9 @@ for taxID, spName, ploidy, mitochondrial_chromosome, genome, gff in species_Info
     # create an outdir
     outdir_perSVade = "%s/%s_%s"%(outdir_testing, taxID, spName); fun.make_folder(outdir_perSVade)
 
-    # get the reads from SRA. 5 samples, 3 runs per sample
-    fun.run_cmd("%s --ref %s --threads %i -o %s --close_shortReads_table auto --target_taxID %s --n_close_samples 5 --nruns_per_sample 3 --StopAfter_readObtentionFromSRA -f1 auto -f2 auto %s --mitochondrial_chromosome %s --gff %s --StopAfter_bamFileObtention"%(perSVade_py, genome, threads, outdir_perSVade, taxID, run_in_slurm_cmd, mitochondrial_chromosome, gff))
+    # get the reads from SRA. 3 samples, 3 runs per sample
+    fun.run_cmd("%s --ref %s --threads %i -o %s --close_shortReads_table auto --target_taxID %s --n_close_samples 3 --nruns_per_sample 3 -f1 skip -f2 skip %s --mitochondrial_chromosome %s --gff %s --StopAfter_readObtentionFromSRA --StopAfter_sampleIndexingFromSRA"%(perSVade_py, genome, threads, outdir_perSVade, taxID, run_in_slurm_cmd, mitochondrial_chromosome, gff))
+
 
 
 

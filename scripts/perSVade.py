@@ -45,7 +45,7 @@ Runs perSVade pipeline on an input set of paired end short ends. It is expected 
 parser = argparse.ArgumentParser(description=description, formatter_class=RawTextHelpFormatter)
 
 # general args
-parser.add_argument("-r", "--ref", dest="ref", required=True, help="Reference genome. Has to end with .fasta. It can also be 'auto', in which case the pipeline will download the reference genome from GenBank, if the taxID is specified with --target_taxID. It can also be a specific GenBank accession to be downloaded, like  GCA_000149245.3.")
+parser.add_argument("-r", "--ref", dest="ref", required=True, help="Reference genome. Has to end with .fasta.")
 parser.add_argument("-thr", "--threads", dest="threads", default=16, type=int, help="Number of threads, Default: 16")
 parser.add_argument("-o", "--outdir", dest="outdir", action="store", required=True, help="Directory where the data will be stored")
 parser.add_argument("--replace", dest="replace", action="store_true", help="Replace existing files")
@@ -71,6 +71,7 @@ parser.add_argument("--skip_SVcalling", dest="skip_SVcalling", action="store_tru
 
 # pipeline stopping options
 parser.add_argument("--StopAfter_readObtentionFromSRA", dest="StopAfter_readObtentionFromSRA", action="store_true", default=False, help="Stop after obtaining reads from SRA.")
+parser.add_argument("--StopAfter_sampleIndexingFromSRA", dest="StopAfter_sampleIndexingFromSRA", action="store_true", default=False, help="It will stop after indexing the samples of SRA. You can use this if, for example, your local machine has internet connection and your slurm cluster does not. You can first obtain the SRA indexes in the local machine. And then run again this pipeline without this option in the slurm cluster.")
 parser.add_argument("--StopAfter_genomeObtention", dest="StopAfter_genomeObtention", action="store_true", default=False, help="Stop after genome obtention.")
 parser.add_argument("--StopAfter_bamFileObtention", dest="StopAfter_bamFileObtention", action="store_true", default=False, help="Stop after obtaining the BAM file of aligned reads.")
 
@@ -91,8 +92,8 @@ parser.add_argument("--simulation_ploidies", dest="simulation_ploidies", type=st
 parser.add_argument("--range_filtering_benchmark", dest="range_filtering_benchmark", type=str, default="theoretically_meaningful", help='The range of parameters that should be tested in the SV optimisation pipeline. It can be any of large, medium, small, theoretically_meaningful or single.')
 
 # alignment args
-parser.add_argument("-f1", "--fastq1", dest="fastq1", default=None, help="fastq_1 file. Option required to obtain bam files. It can be 'auto', in which case a set of 10M reads will be generated.")
-parser.add_argument("-f2", "--fastq2", dest="fastq2", default=None, help="fastq_2 file. Option required to obtain bam files. It can be 'auto', in which case a set of 10M reads will be generated.")
+parser.add_argument("-f1", "--fastq1", dest="fastq1", default=None, help="fastq_1 file. Option required to obtain bam files. It can be 'skip'")
+parser.add_argument("-f2", "--fastq2", dest="fastq2", default=None, help="fastq_2 file. Option required to obtain bam files. It can be 'skip'")
 parser.add_argument("-sbam", "--sortedbam", dest="sortedbam", default=None, help="The path to the sorted bam file, which should have a bam.bai file in the same dir. This is mutually exclusive with providing reads")
 parser.add_argument("--run_qualimap", dest="run_qualimap", action="store_true", default=False, help="Run qualimap for quality assessment of bam files. This may be inefficient sometimes because of the ")
 
@@ -100,7 +101,7 @@ parser.add_argument("--run_qualimap", dest="run_qualimap", action="store_true", 
 parser.add_argument("--run_in_slurm", dest="run_in_slurm", action="store_true", default=False, help="If provided, it will run in a job arrays the works of --testSimulationsAccuracy and --testRealDataAccuracy. This requires this script to be run on a slurm-based cluster.")
 
 # other args
-parser.add_argument("-mchr", "--mitochondrial_chromosome", dest="mitochondrial_chromosome", default="mito_C_glabrata_CBS138", type=str, help="The name of the mitochondrial chromosome. This is important if you have mitochondrial proteins for which to annotate the impact of nonsynonymous variants, as the mitochondrial genetic code is different. This should be the same as in the gff. If there is no mitochondria just put 'no_mitochondria'. If there is more than one mitochindrial scaffold, provide them as comma-sepparated IDs. It can be auto, in which case the ref genome will be parsed and automatically identified.")
+parser.add_argument("-mchr", "--mitochondrial_chromosome", dest="mitochondrial_chromosome", default="mito_C_glabrata_CBS138", type=str, help="The name of the mitochondrial chromosome. This is important if you have mitochondrial proteins for which to annotate the impact of nonsynonymous variants, as the mitochondrial genetic code is different. This should be the same as in the gff. If there is no mitochondria just put 'no_mitochondria'. If there is more than one mitochindrial scaffold, provide them as comma-sepparated IDs.")
 
 
 # small VarCalk and CNV args
@@ -121,74 +122,55 @@ opt = parser.parse_args()
 if opt.replace is True: fun.delete_folder(opt.outdir)
 fun.make_folder(opt.outdir)
 
-# define the name that will be used as tag, it is the name of the outdir, without the full path
-name_sample = opt.outdir.split("/")[-1]; print("working on %s"%name_sample)
+#### REPLACE THE REF GENOME ####
 
 # define where the reference genome will be stored
 reference_genome_dir = "%s/reference_genome_dir"%(opt.outdir); fun.make_folder(reference_genome_dir)
 new_reference_genome_file = "%s/reference_genome.fasta"%reference_genome_dir
 
+# copy the reference genome were it should
 if fun.file_is_empty(new_reference_genome_file) or opt.replace is True:
 
-    # download the reference genome from GenBank given the taxID and also the gff annotation
-    if opt.ref=="auto": opt.ref, opt.gff = fun.get_reference_genome_from_GenBank(opt.target_taxID, new_reference_genome_file, replace=opt.replace)
-
-    # get by GenBank annotation
-    elif opt.ref.startswith("GCA_"): opt.ref, opt.gff = fun.get_reference_genome_from_GenBank(opt.ref, new_reference_genome_file, replace=opt.replace)
-
-    # just move the ref genome in the outdir
-    else:
-
-        # move the reference genome into the outdir, so that every file is written under outdir
-        try: run_cmd("rm %s"%new_reference_genome_file)
-        except: pass
-        fun.run_cmd("ln -s %s %s"%(opt.ref, new_reference_genome_file))
-
-    if opt.gff is None: print("WARNING: gff was not provided. This will be a problem if you want to annotate small variant calls")
-
-    # check that the mitoChromosomes are in the ref
-    all_chroms = {s.id for s in SeqIO.parse(opt.ref, "fasta")}
-    if any([x not in all_chroms for x in opt.mitochondrial_chromosome.split(",")]) and opt.mitochondrial_chromosome!="no_mitochondria":
-        raise ValueError("The provided mitochondrial_chromosomes are not in the reference genome.")
+    # move the reference genome into the outdir, so that every file is written under outdir
+    try: run_cmd("rm %s"%new_reference_genome_file)
+    except: pass
+    fun.run_cmd("ln -s %s %s"%(opt.ref, new_reference_genome_file))
 
 opt.ref = new_reference_genome_file
 
-# if the gff is not none, move it to the same dir of the reference genome
-target_gff = "%s/reference_genome_features.gff"%reference_genome_dir
-if opt.gff is not None:
-
-    if fun.file_is_empty(target_gff): 
-        try: fun.run_cmd("rm %s"%target_gff)
-        except: pass
-
-        fun.run_cmd("ln -s %s %s"%(opt.gff, target_gff))
-    
-    opt.gff = target_gff
+# check that the mitoChromosomes are in the ref
+all_chroms = {s.id for s in SeqIO.parse(opt.ref, "fasta")}
+if any([x not in all_chroms for x in opt.mitochondrial_chromosome.split(",")]) and opt.mitochondrial_chromosome!="no_mitochondria":
+    raise ValueError("The provided mitochondrial_chromosomes are not in the reference genome.")
 
 # get the genome len
 genome_length = sum(fun.get_chr_to_len(opt.ref).values())
 print("The genome has %.2f Mb"%(genome_length/1000000 ))
 
+##################################
+
+#### REPLACE THE GFF ####
+target_gff = "%s/reference_genome_features.gff"%reference_genome_dir
+
+# copy the gff
+if opt.gff is None: print("WARNING: gff was not provided. This will be a problem if you want to annotate small variant calls")
+else:
+
+    if fun.file_is_empty(target_gff): 
+
+        try: fun.run_cmd("rm %s"%target_gff)
+        except: pass
+
+        fun.run_cmd("ln -s %s %s"%(opt.gff, target_gff))
+
+    # change the path
+    opt.gff = target_gff
+
+#########################
+
 if opt.StopAfter_genomeObtention is True: 
     print("Stopping pipeline after the genome obtention.")
     sys.exit(0)
-
-
-# define files that may be used in many steps of the pipeline
-if opt.sortedbam is None:
-
-    bamfile = "%s/aligned_reads.bam"%opt.outdir
-    sorted_bam = "%s.sorted"%bamfile
-    index_bam = "%s.bai"%sorted_bam
-
-else:
-
-    # debug the fact that you prvided reads and bam. You should just provide one
-    if any([not x is None for x in {opt.fastq1, opt.fastq2}]): raise ValueError("You have provided reads and a bam, you should only provide one")
-
-    # get the files
-    sorted_bam = opt.sortedbam
-    index_bam = "%s.bai"%sorted_bam
 
 ########################################
 ########################################
@@ -199,28 +181,41 @@ else:
 ############# BAM FILE ##############
 #####################################
 
-##### YOU NEED TO RUN THE BAM FILE #####
-
-# if you stated auto in the reads, generate a 30x coverage bam file
-if any([x=="auto" for x in {opt.fastq1, opt.fastq2}]):
-
-    # define the number of reads as a function of the coverage
-    read_length = 150
-    total_nread_pairs = int((genome_length*30)/read_length)
-    print("Simulating %.2fM reads"%(total_nread_pairs/1000000))
-
-    sorted_bam, index_bam = fun.get_simulated_bamFile(opt.outdir, opt.ref, replace=opt.replace, threads=opt.threads, total_nread_pairs=total_nread_pairs, read_length=read_length)
-    print("using simulated bam file from %s"%sorted_bam)
+if not any([x=="skip" for x in {opt.fastq1, opt.fastq2}]):
 
 
-# normal alignment of provided reads
-elif all([not x is None for x in {opt.fastq1, opt.fastq2}]):
+    ##### DEFINE THE SORTED BAM #####
 
-    print("WORKING ON ALIGNMENT")
-    fun.run_bwa_mem(opt.fastq1, opt.fastq2, opt.ref, opt.outdir, bamfile, sorted_bam, index_bam, name_sample, threads=opt.threads, replace=opt.replace)
+    # define files that may be used in many steps of the pipeline
+    if opt.sortedbam is None:
+
+        bamfile = "%s/aligned_reads.bam"%opt.outdir
+        sorted_bam = "%s.sorted"%bamfile
+        index_bam = "%s.bai"%sorted_bam
+
+    else:
+
+        # debug the fact that you prvided reads and bam. You should just provide one
+        if any([not x is None for x in {opt.fastq1, opt.fastq2}]): raise ValueError("You have provided reads and a bam, you should only provide one")
+
+        # get the files
+        sorted_bam = opt.sortedbam
+        index_bam = "%s.bai"%sorted_bam
+
+    ###################################
+
+    # normal alignment of provided reads
+    if all([not x is None for x in {opt.fastq1, opt.fastq2}]):
+
+        print("WORKING ON ALIGNMENT")
+        fun.run_bwa_mem(opt.fastq1, opt.fastq2, opt.ref, opt.outdir, bamfile, sorted_bam, index_bam, name_sample, threads=opt.threads, replace=opt.replace)
 
 
-else: print("Warning: No fastq file given, assuming that you provided a bam file")
+    else: print("Warning: No fastq file given, assuming that you provided a bam file")
+
+
+    # check that all the important files exist
+    if any([fun.file_is_empty(x) for x in {sorted_bam, index_bam}]): raise ValueError("You need the sorted and indexed bam files in ")
 
 #####################################
 #####################################
@@ -231,8 +226,6 @@ else: print("Warning: No fastq file given, assuming that you provided a bam file
 ############# NECESSARY FILES #############
 ###########################################
 
-# check that all the important files exist
-if any([fun.file_is_empty(x) for x in {sorted_bam, index_bam}]): raise ValueError("You need the sorted and indexed bam files in ")
 
 #### bamqc
 if opt.run_qualimap is True:
@@ -326,7 +319,7 @@ elif opt.fast_SVcalling is False and opt.close_shortReads_table is not None:
         # define the outdir where the close genomes whould be downloaded
         outdir_getting_closeReads = "%s/getting_closeReads"%outdir_finding_realVars; fun.make_folder(outdir_getting_closeReads)
 
-        opt.close_shortReads_table = fun.get_close_shortReads_table_close_to_taxID(opt.target_taxID, opt.ref, outdir_getting_closeReads, sorted_bam, n_close_samples=opt.n_close_samples, nruns_per_sample=opt.nruns_per_sample, replace=opt.replace, threads=opt.threads, run_in_slurm=opt.run_in_slurm)
+        opt.close_shortReads_table = fun.get_close_shortReads_table_close_to_taxID(opt.target_taxID, opt.ref, outdir_getting_closeReads, n_close_samples=opt.n_close_samples, nruns_per_sample=opt.nruns_per_sample, replace=opt.replace, threads=opt.threads, run_in_slurm=opt.run_in_slurm, StopAfter_sampleIndexingFromSRA=opt.StopAfter_sampleIndexingFromSRA)
 
         # skip the running of the pipeline 
         if opt.StopAfter_readObtentionFromSRA:
