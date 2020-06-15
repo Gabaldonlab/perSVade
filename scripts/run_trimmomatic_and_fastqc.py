@@ -31,7 +31,7 @@ import sv_functions as fun
 #######
 
 description = """
-Runs fastqc and trimmomatic on an a set of paired WGS samples.
+Runs fastqc and trimmomatic on an a set of paired WGS samples. 
 """
               
 parser = argparse.ArgumentParser(description=description, formatter_class=RawTextHelpFormatter)
