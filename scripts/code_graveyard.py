@@ -878,3 +878,400 @@ if any([x=="auto" for x in {opt.fastq1, opt.fastq2}]):
 
     # just move the ref genome in the outdir
     else:
+
+
+
+
+
+def get_SRA_runInfo_df_with_sampleID(SRA_runInfo_df, reference_genome, outdir, replace=False, threads=4, SNPthreshold=0.0001, coverage_subset_reads=10):
+
+    """This function takes an SRA_runInfo_df and adds the sampleID. samples with the sample sampleID are those that have less tha SNPthreshold fraction of positions of the reference genome with SNPs. By default it is 0.01%. """
+
+    make_folder(outdir)
+
+    # change index
+    SRA_runInfo_df = SRA_runInfo_df.set_index("Run", drop=False)
+
+    # calculate the length of the genome
+    length_genome = sum(get_chr_to_len(reference_genome).values())
+
+    # add the subset_n_reads depending on the coverage and the read length
+    SRA_runInfo_df["subset_n_reads"] = (length_genome*coverage_subset_reads / SRA_runInfo_df.avgLength).apply(int)
+
+    ##### GET THE SNPS AND COVERAGE #####
+
+    # get the SNPs for each run
+    inputs_getSNPs_for_SRR = [(srr, reference_genome, "%s/%s"%(outdir, srr), SRA_runInfo_df.loc[srr, "subset_n_reads"], 1, replace) for srr in SRA_runInfo_df.Run]
+
+    with multiproc.Pool(threads) as pool:
+        list_vars_and_coverage = pool.starmap(getSNPs_for_SRR, inputs_getSNPs_for_SRR)
+        pool.close()
+
+
+    # change the vars
+    list_vars = [x[0] for x in list_vars_and_coverage]
+    list_mean_coverage = [x[1] for x in list_vars_and_coverage]
+    list_fraction_genome_covered = [x[2] for x in list_vars_and_coverage]
+
+    # add to the df
+    SRA_runInfo_df["vars_set"] = list_vars
+    SRA_runInfo_df["mean_coverage"] = list_mean_coverage
+    SRA_runInfo_df["fraction_genome_covered"] = list_fraction_genome_covered
+
+    ###################################
+
+    # add the fraction of mapping reads
+    print("calculating fraction of mapped reads")
+    SRA_runInfo_df["fraction_reads_mapped"] = SRA_runInfo_df.Run.apply(lambda run: get_fraction_readPairsMapped("%s/%s/aligned_reads.bam.sorted"%(outdir, run), replace=replace, threads=threads))
+
+    # add the divergence from the reference genome
+    SRA_runInfo_df["fraction_genome_different_than_reference"] = SRA_runInfo_df.vars_set.apply(lambda x: len(x)/length_genome)
+
+    # add the fraction of reads that were maintained 
+
+    # initialize vars
+    runA_to_runB_to_fraction_different_positions = {}
+
+    # assign the  ID based on the comparison of SNPs 
+    for runA in SRA_runInfo_df.Run:
+
+        # get the snps
+        snpsA = SRA_runInfo_df.loc[runA, "vars_set"]
+
+        for runB in SRA_runInfo_df.Run:
+
+            # get the snps
+            snpsB = SRA_runInfo_df.loc[runB, "vars_set"]
+
+            # calculate the fraction of positions of the genome that are different
+            fraction_different_positions = get_fraction_differing_positions_AvsB(snpsA, snpsB, length_genome)
+            runA_to_runB_to_fraction_different_positions.setdefault(runA, {}).setdefault(runB, fraction_different_positions)
+
+
+    # get a df
+    df_divergence = pd.DataFrame(runA_to_runB_to_fraction_different_positions)
+
+    # get the clusters of IDs through a graph
+    g =  igraph.Graph(directed=False)
+    list_IDs = list(range(len(SRA_runInfo_df.Run)))
+    srr_to_ID = dict(zip(SRA_runInfo_df.Run, list_IDs))
+    ID_to_srr = dict(zip(list_IDs, SRA_runInfo_df.Run))
+    g.add_vertices(list_IDs)
+    pairs_equal_IDs = set.union(*[{tuple(sorted((srr_to_ID[runA], srr_to_ID[runB]))) for runB in SRA_runInfo_df.Run if df_divergence.loc[runA, runB]<SNPthreshold} for runA in SRA_runInfo_df.Run])
+    g.add_edges(pairs_equal_IDs)
+    clustersIDs = list(get_graph_subcomponents(g))
+
+    # map each cluster to the SRRs
+    cluster_names = list(range(len(clustersIDs)))
+    clusterName_to_srrs = {name : {ID_to_srr[ID] for ID in IDs}  for name, IDs in dict(zip(cluster_names, clustersIDs)).items()}
+    run_to_sampleID = {}
+    for clusterName, srrs in clusterName_to_srrs.items():
+        for srr in srrs: run_to_sampleID[srr] = clusterName+1
+
+    # add to the df
+    SRA_runInfo_df["sampleID"] = SRA_runInfo_df.Run.apply(lambda x: run_to_sampleID[x])
+
+    # go through each sampleID and print the sample names
+   # for s in set(SRA_runInfo_df.sampleID): print("Sample %i has these names: "%s, set(SRA_runInfo_df[SRA_runInfo_df.sampleID==s].SampleName))
+
+    # drop the vars
+    SRA_runInfo_df = SRA_runInfo_df.drop("vars_set", axis=1)
+
+    return SRA_runInfo_df, df_divergence
+
+
+
+original function
+def get_close_shortReads_table_close_to_taxID(target_taxID, reference_genome, outdir, n_close_samples=3, nruns_per_sample=3, replace=False, threads=4, max_fraction_genome_different_than_reference=0.15, min_fraction_reads_mapped=0.8, min_fraction_genome_covered=0.8, coverage_subset_reads=5, min_coverage=30, min_fraction_coverage_subset_reads=0.5, run_in_slurm=False, walltime="02:00:00", queue="debug", StopAfter_sampleIndexingFromSRA=False, SNPthreshold_sameSample=0.001):
+
+    """
+    This function takes a taxID and returns the close_shortReads_table that is required to do optimisation of parameters
+    """
+
+    print("Getting genomes for taxID into %s"%(outdir))
+
+    # load the NCBI taxonomy database and upgrade it if not already done
+    print("getting NCBI taxonomy database")
+
+    ncbi = NCBITaxa()
+    ncbiTaxa_updated_file = "%s/ncbiTaxa_updated.txt"%outdir
+    if file_is_empty(ncbiTaxa_updated_file) or replace is True: 
+
+        # update
+        ncbi.update_taxonomy_database()
+
+        # write file
+        open(ncbiTaxa_updated_file, "w").write("NCBItaxa updated\n")
+
+
+    # calculate the expected difference between two runs of the same sample from the given sample
+    outdir_resamplingBam = "%s/resampling_bam_andGetting_fractionDifPositions"%outdir
+
+    print("We will say that if two samples differ by less than %.4f pct of the genome they are from the same sample. This has been provided by this function "%(SNPthreshold_sameSample*100))
+
+    # get sampleID 
+    outdir_gettingID = "%s/getting_sample_IDs"%outdir; make_folder(outdir_gettingID)
+
+    # define the total number of runs that you need
+    total_nruns = n_close_samples*nruns_per_sample
+    print("Looking for %i runs"%total_nruns)
+
+    SRA_runInfo_df_file = "%s/final_SRA_runInfo_df.py"%outdir
+
+    if file_is_empty(SRA_runInfo_df_file) or replace is True:
+        print("getting SRRs")
+
+        # initialize a set that defines the runs of the previous node
+        runs_previous_nodes = set()
+
+        # define all potentially interesting taxIDs close to the target_taxIDs
+        for nancestorNodes in range(1, 100): # one would mean to consider only IDs that are under the current species
+            print("Considering %i ancestor nodes"%nancestorNodes)
+
+            # create a folder for this number of ancestors
+            outdir_ancestors = "%s/all_runsWithWGS_arround_target_taxID_%i_considering%iAncestors"%(outdir, target_taxID, nancestorNodes); make_folder(outdir_ancestors)
+
+            # get the ancestor
+            ancestor_taxID = ncbi.get_lineage(target_taxID)[-nancestorNodes]
+
+            # get the tree
+            tree = ncbi.get_descendant_taxa(ancestor_taxID, collapse_subspecies=False, return_tree=True, intermediate_nodes=True)
+
+            # define interesting taxIDs (the leafs and the species names that may be intermediate)
+            interesting_taxIDs = {int(x) for x in set(tree.get_leaf_names()).union({n.name for n in tree.traverse() if n.rank=="species"})}
+
+            # map the distance between each leave and the target
+            taxID_to_distanceToTarget = {taxID : tree.get_distance(str(target_taxID), str(taxID)) for taxID in interesting_taxIDs.difference({target_taxID})}
+            taxID_to_distanceToTarget[target_taxID] = 0.0
+
+            # get the taxIDs sorted by the distance (so that the closest )
+            interesting_taxIDs_sorted = sorted(interesting_taxIDs, key=(lambda x: taxID_to_distanceToTarget[x]))
+
+            # get the run info of all WGS datasets from SRA
+            print("Getting WGS info")
+            fileprefix = "%s/output"%(outdir_ancestors)
+            all_SRA_runInfo_df = get_allWGS_runInfo_fromSRA_forTaxIDs(fileprefix, interesting_taxIDs_sorted, reference_genome, replace=True, min_coverage=min_coverage).set_index("Run", drop=False)
+
+            # if you did not find anything get to farther ancestors
+            if len(all_SRA_runInfo_df)<total_nruns: continue
+
+            # reorder runs by coverage
+            all_SRA_runInfo_df = all_SRA_runInfo_df.sort_values(by="expected_coverage", ascending=False)
+            print("Looking for %i runs"%total_nruns)
+
+            # go throough several fractions of all_SRA_runInfo_df
+            size_chunk = max([(total_nruns*1), 1])
+
+            # define a list that represents the idx of the runs
+            idx_runs = list(range(len(all_SRA_runInfo_df)))
+
+            # keep growing the all_SRA_runInfo_df until you find the desired number of runs.
+            for chunk_run_idx in chunks(idx_runs, size_chunk):
+
+                # get the runs
+                SRA_runInfo_df = all_SRA_runInfo_df.iloc[0:chunk_run_idx[-1]]
+                nruns = len(SRA_runInfo_df)
+                print("Getting %i/%i runs"%(nruns, len(all_SRA_runInfo_df)))
+
+                # get the sra info of this chunk
+                SRA_runInfo_df, df_divergence = get_SRA_runInfo_df_with_sampleID(SRA_runInfo_df, reference_genome, outdir_gettingID, replace=replace, threads=threads, coverage_subset_reads=coverage_subset_reads, SNPthreshold=SNPthreshold_sameSample)
+
+
+                ljdahjkhdadkjhaad
+
+                # define the minimum coverage that the sample should have in order to pass, as afraction of the expected coverage
+                min_mean_coverage = min_fraction_coverage_subset_reads*coverage_subset_reads
+
+                print("These are the stats of this chunk of data")
+                print(SRA_runInfo_df[["fraction_genome_different_than_reference", "fraction_reads_mapped", "fraction_genome_covered", "mean_coverage", "expected_coverage"]])
+
+                # apply all the filters
+                idx = ((SRA_runInfo_df.fraction_genome_different_than_reference<=max_fraction_genome_different_than_reference) &
+                      (SRA_runInfo_df.fraction_genome_different_than_reference>=SNPthreshold_sameSample) & 
+                      (SRA_runInfo_df.fraction_reads_mapped>=min_fraction_reads_mapped) &
+                      (SRA_runInfo_df.fraction_genome_covered>=min_fraction_genome_covered) &
+                      (SRA_runInfo_df.mean_coverage>=min_mean_coverage))
+
+                SRA_runInfo_df = SRA_runInfo_df[idx]
+
+                print("There are %i/%i runs that pass the filters"%(sum(idx), len(idx)))
+
+                # add the number of runs that each sample has
+                sampleID_to_nRuns = Counter(SRA_runInfo_df.sampleID)
+                SRA_runInfo_df["nRuns_with_sampleID"] = SRA_runInfo_df.sampleID.apply(lambda x: sampleID_to_nRuns[x])
+
+                # keep only the SRA_runInfo_df that has above the desired nruns per sample
+                SRA_runInfo_df = SRA_runInfo_df[SRA_runInfo_df.nRuns_with_sampleID>=nruns_per_sample]
+
+                # debug
+                if len(set(SRA_runInfo_df.sampleID))<n_close_samples: continue
+
+                # map each sampleID to the runs
+                sampleID_to_runs = dict(SRA_runInfo_df.groupby("sampleID").apply(lambda df_s: set(df_s.Run)))
+
+                # for each run, add the divergence to the other runs of the same sample
+                SRA_runInfo_df["median_divergence_from_run_to_runsSameSample"] = SRA_runInfo_df.Run.apply(lambda run: np.median([df_divergence.loc[run][other_run] for other_run in sampleID_to_runs[SRA_runInfo_df.loc[run, "sampleID"]] if run!=other_run]) )
+
+                # keep the nruns_per_sample that have the lowest median_divergence_from_run_to_runsSameSample nruns_per_sample
+                interesting_runs = set.union(*[set(SRA_runInfo_df.loc[runs, "median_divergence_from_run_to_runsSameSample"].sort_values().iloc[0:nruns_per_sample].index) for sampleID, runs in sampleID_to_runs.items()])
+
+                SRA_runInfo_df = SRA_runInfo_df.loc[interesting_runs]
+
+                # redefine sampleID_to_runs with the closest divergence
+                sampleID_to_runs = dict(SRA_runInfo_df.groupby("sampleID").apply(lambda df_s: set(df_s.Run)))
+
+                # keep the n_close_samples that have the highest divergence between each other
+                samplesDivergenceDict = {}; I = 0
+                for sampleA, runsA in sampleID_to_runs.items():
+                    for sampleB, runsB in sampleID_to_runs.items():
+
+                        divergence = np.mean([np.mean(df_divergence.loc[runA][list(runsB)]) for runA in runsA])
+                        samplesDivergenceDict[I] = {"sampleA":sampleA, "sampleB":sampleB, "divergence":divergence}
+
+                        I+=1
+
+                df_divergence_samples = pd.DataFrame(samplesDivergenceDict).transpose()
+                for f in ["sampleA", "sampleB"]: df_divergence_samples[f] = df_divergence_samples[f].apply(int)
+
+                # delete the comparisons that are the same
+                df_divergence_samples["sampleA_and_sampleB"] = df_divergence_samples.apply(lambda r: tuple(sorted([r["sampleA"], r["sampleB"]])), axis=1)
+                df_divergence_samples = df_divergence_samples.drop_duplicates(subset="sampleA_and_sampleB")
+                df_divergence_samples = df_divergence_samples[df_divergence_samples.sampleA!=df_divergence_samples.sampleB].sort_values(by="divergence", ascending=False)
+
+                # iterate through the df_divergence from the most divergent comparisons until you have n_close_samples
+                final_samples = set()
+                for sampleA, sampleB in df_divergence_samples[["sampleA", "sampleB"]].values:
+
+                    # once you have all the samples break
+                    if len(final_samples)>=n_close_samples: break
+
+                    # add the samples
+                    final_samples.update({sampleA, sampleB})
+
+                # get the n_close_samples
+                final_samples = list(final_samples)[0:n_close_samples]
+                SRA_runInfo_df = SRA_runInfo_df[SRA_runInfo_df.sampleID.isin(final_samples)]
+
+                # break the loop
+                break
+
+            # if there are no new nodes, break
+            runs_in_this_node = set(SRA_runInfo_df.Run)
+            if len(runs_in_this_node.difference(runs_previous_nodes))==0: break
+            runs_previous_nodes.update(runs_in_this_node)
+
+            # if you already found the IDs, break
+            if len(SRA_runInfo_df)==total_nruns: break
+
+        # debug
+        if len(SRA_runInfo_df)!=total_nruns: raise ValueError("You could not find any datasets in SRA that would be useful")
+
+        # load df
+        save_object(SRA_runInfo_df, SRA_runInfo_df_file)
+
+    else: SRA_runInfo_df = load_object(SRA_runInfo_df_file)
+
+    print("these are the samples chosen:\n:", SRA_runInfo_df[["Run", "sampleID", "SampleName"]].sort_values("sampleID"))
+
+    if StopAfter_sampleIndexingFromSRA is True: 
+        print("stopping after generation of SRA_runInfo_df into %s"%SRA_runInfo_df_file)
+        exit(0)
+
+    ###### GETTING THE FINAL DATASETS ######
+
+    # define the path to the final table
+    close_shortReads_table = "%s/close_shortReads_table.tbl"%outdir
+
+    if file_is_empty(close_shortReads_table) or replace is True:
+
+        # change things
+        SRA_runInfo_df["sampleID"] = "sample" + SRA_runInfo_df.sampleID.apply(str)
+        SRA_runInfo_df["runID"] = SRA_runInfo_df.sampleID + "_" + SRA_runInfo_df.Run
+
+        # define dirs
+        downloads_dir = "%s/final_downloading_SRRs"%outdir; make_folder(downloads_dir)
+        final_reads_dir = "%s/final_trimmed_reads_SRRs"%outdir; make_folder(final_reads_dir)
+
+        # download the desired runs (this may be done locally)
+        print("downloading each SRR")
+        for srr in SRA_runInfo_df.Run: download_srr_parallelFastqDump(srr, "%s/%s"%(downloads_dir,srr), threads=threads, replace=replace)
+        
+        # define a dict that maps each srr to the reads of reads 
+        srr_to_readsDict = {}
+
+        # initialize the cmds to submit to the cluster
+        all_cmds = [] 
+
+        # replace each of the downloaded SRRs by the trimmed ones
+        for srr in SRA_runInfo_df.Run:
+            print("trimming %s reads"%srr)
+
+            # define the raw reads
+            reads1 = "%s/%s/%s_1.fastq.gz"%(downloads_dir, srr, srr)
+            reads2 = "%s/%s/%s_2.fastq.gz"%(downloads_dir, srr, srr)
+
+            # define the trimmed reads
+            trimmed_reads1 = "%s.trimmed.fastq.gz"%reads1
+            trimmed_reads2 = "%s.trimmed.fastq.gz"%reads2
+
+            # define the final trimmed reads
+            final_trimmed_reads1 = "%s/%s_1.fastq.gz"%(final_reads_dir, srr)
+            final_trimmed_reads2 = "%s/%s_2.fastq.gz"%(final_reads_dir, srr)
+
+            if file_is_empty(trimmed_reads1) or file_is_empty(trimmed_reads2) or replace is True:
+
+                # get the trimmed reads
+                cmd = "%s -f1 %s -f2 %s --threads %i"%(run_trimmomatic_and_fastqc_py, reads1, reads2, threads)
+                if replace is True: cmd += " --replace"
+
+                # add to cmds
+                if run_in_slurm is True: 
+                    all_cmds.append(cmd)
+                    continue
+                else: 
+
+                    # get the trimmed reads
+                    run_cmd(cmd)
+
+            if file_is_empty(final_trimmed_reads1): os.rename(trimmed_reads1, final_trimmed_reads1)
+            if file_is_empty(final_trimmed_reads2): os.rename(trimmed_reads2, final_trimmed_reads2)
+
+            # add to the dict
+            srr_to_readsDict[srr] = {"short_reads1":final_trimmed_reads1, "short_reads2":final_trimmed_reads2}
+
+        # if there are all_cmds, run them in a job array
+        if len(all_cmds)>0:
+            print("Submitting %i trimmomatic jobs to the MN"%(len(all_cmds)))
+
+
+            STDOUT = "%s/STDOUT"%final_reads_dir
+            STDERR = "%s/STDERR"%final_reads_dir
+
+            jobs_filename = "%s/jobs.trimming_SRAdatasets"%final_reads_dir
+            open(jobs_filename, "w").write("\n".join(all_cmds))
+
+          
+            generate_jobarray_file_slurm(jobs_filename, stderr=STDERR, stdout=STDOUT, walltime=walltime,  name="trimming_SRAreads", queue=queue, sbatch=True, ncores_per_task=threads, rmstd=True, constraint="", number_tasks_to_run_at_once="all" )
+
+            raise ValueError("You need to wait until the trimming of downloaded reads is finsihed")
+
+        # add to the df
+        for f in ["short_reads1", "short_reads2"]: SRA_runInfo_df[f] = SRA_runInfo_df.Run.apply(lambda srr: srr_to_readsDict[srr][f])
+
+        # remove the downloads dir
+        delete_folder(downloads_dir)
+
+        # get the final df
+        final_df = SRA_runInfo_df[["sampleID", "runID", "short_reads1", "short_reads2"]]
+
+        # write
+        final_df.to_csv(close_shortReads_table, sep="\t", header=True, index=False)
+
+
+    print(final_df)
+
+    dlkajhdkhadh
+
+    #########################################
+
+    return close_shortReads_table
