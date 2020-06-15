@@ -75,9 +75,11 @@ species_Info = [("5478", "Candida_glabrata", 1, "mito_C_glabrata_CBS138"),
                 ("5207", "Cryptococcus_neoformans", 1, "CP003834.1"),
                 ("746128", "Aspergillus_fumigatus", 1, "CM016889.1"),
                 ("3702", "Arabidopsis_thaliana", 2, "BK010421.1,AP000423.1"),
-                ("7227", "Drosophila_melanogaster", 2, "KJ947872.2"),
-                ("7955", "Danio_rerio", 2, "NC_002333.2"),
-                ("9606", "Homo_sapiens", 2, "NC_012920.1")]
+                ("7227", "Drosophila_melanogaster", 2, "KJ947872.2")]
+
+
+                #("7955", "Danio_rerio", 2, "NC_002333.2"),
+                #("9606", "Homo_sapiens", 2, "NC_012920.1")]
 
 # go through each species
 for taxID, spName, ploidy, mitochondrial_chromosome in species_Info:
@@ -87,18 +89,14 @@ for taxID, spName, ploidy, mitochondrial_chromosome in species_Info:
     genome = "%s/%s.fasta"%(outdir_genomes_and_annotations, spName)
     gff = "%s/%s.gff"%(outdir_genomes_and_annotations, spName)
 
-
-
-    if genome!="auto" and not genome.startswith("GCA_"): 
-        genome = "%s/%s"%(outdir_genomes_and_annotations, genome)
-        gff = "%s/%s"%(outdir_genomes_and_annotations, gff)
-
     # create an outdir
     outdir_perSVade = "%s/%s_%s"%(outdir_testing, taxID, spName); fun.make_folder(outdir_perSVade)
 
     # get the reads from SRA. 3 samples, 3 runs per sample
     fun.run_cmd("%s --ref %s --threads %i -o %s --close_shortReads_table auto --target_taxID %s --n_close_samples 3 --nruns_per_sample 3 -f1 skip -f2 skip %s --mitochondrial_chromosome %s --gff %s --StopAfter_readObtentionFromSRA --StopAfter_sampleIndexingFromSRA"%(perSVade_py, genome, threads, outdir_perSVade, taxID, run_in_slurm_cmd, mitochondrial_chromosome, gff))
 
+
+    kjadhjkadkjadhkjdh
 
 
 

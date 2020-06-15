@@ -319,7 +319,7 @@ elif opt.fast_SVcalling is False and opt.close_shortReads_table is not None:
         # define the outdir where the close genomes whould be downloaded
         outdir_getting_closeReads = "%s/getting_closeReads"%outdir_finding_realVars; fun.make_folder(outdir_getting_closeReads)
 
-        opt.close_shortReads_table = fun.get_close_shortReads_table_close_to_taxID(opt.target_taxID, opt.ref, outdir_getting_closeReads, n_close_samples=opt.n_close_samples, nruns_per_sample=opt.nruns_per_sample, replace=opt.replace, threads=opt.threads, run_in_slurm=opt.run_in_slurm, StopAfter_sampleIndexingFromSRA=opt.StopAfter_sampleIndexingFromSRA)
+        opt.close_shortReads_table = fun.get_close_shortReads_table_close_to_taxID(opt.target_taxID, opt.ref, outdir_getting_closeReads, opt.ploidy, n_close_samples=opt.n_close_samples, nruns_per_sample=opt.nruns_per_sample, replace=opt.replace, threads=opt.threads, run_in_slurm=opt.run_in_slurm, StopAfter_sampleIndexingFromSRA=opt.StopAfter_sampleIndexingFromSRA)
 
         # skip the running of the pipeline 
         if opt.StopAfter_readObtentionFromSRA:

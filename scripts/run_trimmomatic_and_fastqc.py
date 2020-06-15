@@ -45,5 +45,8 @@ parser.add_argument("--replace", dest="replace", action="store_true", default=Fa
 
 opt = parser.parse_args()
 
-fun.run_trimmomatic(opt.fastq1, opt.fastq2, replace=opt.replace, threads=opt.threas)
+print("running trimmomatic")
 
+fun.run_trimmomatic(opt.fastq1, opt.fastq2, replace=opt.replace, threads=opt.threads)
+
+print("trimmomatic worked")
