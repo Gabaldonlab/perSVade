@@ -96,7 +96,6 @@ for taxID, spName, ploidy, mitochondrial_chromosome in species_Info:
     fun.run_cmd("%s --ref %s --threads %i -o %s --close_shortReads_table auto --target_taxID %s --n_close_samples 3 --nruns_per_sample 3 -f1 skip -f2 skip %s --mitochondrial_chromosome %s --gff %s --StopAfter_readObtentionFromSRA --StopAfter_sampleIndexingFromSRA"%(perSVade_py, genome, threads, outdir_perSVade, taxID, run_in_slurm_cmd, mitochondrial_chromosome, gff))
 
 
-    kjadhjkadkjadhkjdh
 
 
 
