@@ -61,6 +61,11 @@ CWD = "/".join(__file__.split("/")[0:-1]); sys.path.insert(0, CWD)
 # define the EnvDir where the environment is defined
 EnvDir = "/".join(sys.executable.split("/")[0:-2])
 
+# define the conda base dir and the env name
+CondaDir =  "/".join(sys.executable.split("/")[0:-4])
+EnvName = EnvDir.split("/")[-1]
+
+
 # EnvDir executables. These are all the ones installed with conda
 JAVA = "%s/bin/java"%EnvDir
 bcftools = "%s/bin/bcftools"%EnvDir
@@ -122,6 +127,9 @@ analyze_svVCF_simple = "%s/generate_files_from_svVCF_simple.R"%CWD
 TRIMMOMATIC = "%s/run_trimmomatic.py"%CWD 
 perSVade_py = "%s/perSVade.py"%CWD 
 run_trimmomatic_and_fastqc_py = "%s/run_trimmomatic_and_fastqc.py"%CWD
+
+SOURCE_CONDA_CMD = "source %s/etc/profile.d/conda.sh;"%CondaDir
+CONDA_ACTIVATING_CMD = "conda activate %s;"%EnvName
 
 ######################################################
 ######################################################
@@ -4215,23 +4223,22 @@ def get_taxid2name(taxIDs):
 
     return taxid2name
 
-def get_allWGS_runInfo_fromSRA_forTaxIDs(fileprefix, taxIDs, reference_genome, replace=False, min_coverage=30):
+
+
+def get_allWGS_runInfo_fromSRA_forDivision(fileprefix, taxID_division, reference_genome, taxIDs_to_exclude=set(), replace=False, min_coverage=30):
 
     """This function tages all the SRRs that have WGS for the required taxIDs"""
 
     SRA_runInfo_df_file = "%s.SRA_runInfo_df.py"%fileprefix
 
     if file_is_empty(SRA_runInfo_df_file) or replace is True:
+        print("Getting WGS for %i"%taxID_division)
 
         # define the WGS fastq filters
         WGS_filters = '("biomol dna"[Properties] AND "strategy wgs"[Properties] AND "library layout paired"[Properties] AND "platform illumina"[Properties] AND "strategy wgs"[Properties] OR "strategy wga"[Properties] OR "strategy wcs"[Properties] OR "strategy clone"[Properties] OR "strategy finishing"[Properties] OR "strategy validation"[Properties])'
 
-        # get the name of these taxIDs
-        taxid2name = get_taxid2name(taxIDs)
-
         # define the esearch query
-        organism_filters = " OR ".join(['"%s"[orgn:__txid%i]'%(name.split()[0], taxID) for taxID, name in taxid2name.items()])
-        esearch_query = "(%s) AND %s"%(organism_filters, WGS_filters) 
+        esearch_query = "(txid%i[Organism:exp]) AND %s"%(taxID_division, WGS_filters) 
 
         # get esearch
         efetch_outfile = "%s.efetch_output.txt"%fileprefix
@@ -4246,6 +4253,70 @@ def get_allWGS_runInfo_fromSRA_forTaxIDs(fileprefix, taxIDs, reference_genome, r
             SRA_runInfo_df = pd.read_csv(efetch_outfile, sep=",", header=None, names=columns_efetch)
 
         except: SRA_runInfo_df = pd.DataFrame(columns=columns_efetch)
+
+        save_object(SRA_runInfo_df, SRA_runInfo_df_file)
+
+    else: SRA_runInfo_df = load_object(SRA_runInfo_df_file)
+
+    # filter out the undesired taxIDs
+    SRA_runInfo_df = SRA_runInfo_df[~SRA_runInfo_df.TaxID.isin(taxIDs_to_exclude)]
+
+    # define the expected coverage
+    length_genome = sum(get_chr_to_len(reference_genome).values())
+    SRA_runInfo_df["expected_coverage"] = SRA_runInfo_df.apply(lambda r: (r["spots_with_mates"]*r["avgLength"])/length_genome,axis=1)
+
+    # plot the number of spots
+    filename = "%s.distribution_parameters.pdf"%fileprefix
+    if file_is_empty(filename):
+
+        #print("getting parm distribution into %s"%filename)
+        fig = plt.figure(figsize=(5,13))
+        for I, field in enumerate(["spots", "spots_with_mates", "avgLength", "InsertSize", "size_MB", "expected_coverage"]):
+            ax = plt.subplot(6, 1, I+1)
+            sns.distplot(SRA_runInfo_df[field], kde=False, rug=True)
+            ax.set_xlabel(field)
+
+        fig.tight_layout()  # otherwise the right y-label is slightly 
+        fig.savefig(filename, bbox_inches='tight');
+        plt.close(fig)
+
+    # keep only those that have at least a coverage of min_coverage    
+    SRA_runInfo_df = SRA_runInfo_df[SRA_runInfo_df["expected_coverage"]>=min_coverage]
+
+ 
+
+    print("There are %i SRRs ready to use with at least %ix coverage"%(len(SRA_runInfo_df), min_coverage))
+
+    return SRA_runInfo_df
+
+def get_allWGS_runInfo_fromSRA_forTaxIDs(fileprefix, taxIDs, reference_genome, replace=False, min_coverage=30):
+
+    """This function tages all the SRRs that have WGS for the required taxIDs"""
+
+    SRA_runInfo_df_file = "%s.SRA_runInfo_df.py"%fileprefix
+
+    if file_is_empty(SRA_runInfo_df_file) or replace is True:
+
+        # define the WGS fastq filters
+        WGS_filters = '("biomol dna"[Properties] AND "strategy wgs"[Properties] AND "library layout paired"[Properties] AND "platform illumina"[Properties] AND "strategy wgs"[Properties] OR "strategy wga"[Properties] OR "strategy wcs"[Properties] OR "strategy clone"[Properties] OR "strategy finishing"[Properties] OR "strategy validation"[Properties])'
+
+
+        # get the name of these taxIDs
+        taxid2name = get_taxid2name(taxIDs)
+
+        # define the esearch query
+        organism_filters = " OR ".join(['"%s"[orgn:__txid%i]'%(name.split()[0], taxID) for taxID, name in taxid2name.items()])
+        esearch_query = "(%s) AND %s"%(organism_filters, WGS_filters) 
+
+        # get esearch
+        efetch_outfile = "%s.efetch_output.txt"%fileprefix
+
+        columns_efetch = "Run,ReleaseDate,LoadDate,spots,bases,spots_with_mates,avgLength,size_MB,AssemblyName,download_path,Experiment,LibraryName,LibraryStrategy,LibrarySelection,LibrarySource,LibraryLayout,InsertSize,InsertDev,Platform,Model,SRAStudy,BioProject,Study_Pubmed_id,ProjectID,Sample,BioSample,SampleType,TaxID,ScientificName,SampleName,g1k_pop_code,source,g1k_analysis_group,Subject_ID,Sex,Disease,Tumor,Affection_Status,Analyte_Type,Histological_Type,Body_Site,CenterName,Submission,dbgap_study_accession,Consent,RunHash,ReadHash".split(",")
+
+        # if there are no runs, it will run an error
+        run_cmd("%s -db sra -query '%s' | %s -db sra --format runinfo | grep -v '^Run' | grep 'https' > %s"%(esearch, esearch_query, efetch, efetch_outfile))
+
+        SRA_runInfo_df = pd.read_csv(efetch_outfile, sep=",", header=None, names=columns_efetch)
 
         save_object(SRA_runInfo_df, SRA_runInfo_df_file)
 
@@ -4864,6 +4935,60 @@ def get_vcf_and_coverage_for_reads(reads1, reads2, reference_genome, outdir, plo
 
     return vcf, mean_coverage, fraction_genome_covered
 
+
+def get_coverage_for_reads(reads1, reads2, reference_genome, outdir, threads=4, replace=False):
+
+    """This function runs the coverage calculation for sets of reads """
+
+    # get the trimmed reads
+    #print("running trimmomatic")
+    trimmed_reads1, trimmed_reads2 = run_trimmomatic(reads1, reads2, replace=replace, threads=threads)
+
+    # get the aligned reads
+    #print("running bwa mem")
+    bamfile = "%s/aligned_reads.bam"%outdir
+    sorted_bam = "%s.sorted"%bamfile
+    index_bam = "%s.bai"%sorted_bam
+
+    run_bwa_mem(trimmed_reads1, trimmed_reads2, reference_genome, outdir, bamfile, sorted_bam, index_bam, "nameSample", threads=threads, replace=replace)
+      
+    # define the parallel running of mosdepth 
+    if threads==1: run_in_parallel=False
+    else: run_in_parallel = True
+
+    # get the coverage df
+    coverage_df =  pd.read_csv(generate_coverage_per_window_file_parallel(reference_genome, outdir, sorted_bam, windows_file="none", replace=replace, run_in_parallel=True), sep="\t")
+
+    # define stats
+    mean_coverage = np.mean(coverage_df.mediancov_1)
+    fraction_genome_covered = np.mean(coverage_df.percentcovered_1)/100
+
+    #print("The mean coverage is %.3f for windows of %ibp"%(mean_coverage, window_l))
+    #print("The mean fraction coverage for is %.3f for windows of %ibp"%(fraction_genome_covered, window_l))
+
+    return mean_coverage, fraction_genome_covered
+
+
+def get_sorted_bam_for_untrimmed_reads(reads1, reads2, reference_genome, outdir, threads=4, replace=False):
+
+    """Takes some untrimmed reads and returns the sorted_bam"""
+
+    # get the trimmed reads
+    #print("running trimmomatic")
+    trimmed_reads1, trimmed_reads2 = run_trimmomatic(reads1, reads2, replace=replace, threads=threads)
+
+    # get the aligned reads
+    #print("running bwa mem")
+    bamfile = "%s/aligned_reads.bam"%outdir
+    sorted_bam = "%s.sorted"%bamfile
+    index_bam = "%s.bai"%sorted_bam
+
+    run_bwa_mem(trimmed_reads1, trimmed_reads2, reference_genome, outdir, bamfile, sorted_bam, index_bam, "nameSample", threads=threads, replace=replace)
+
+    return sorted_bam
+
+
+
 def get_fraction_differing_positions_AvsB(snpsA, snpsB, length_genome):
 
     """Takes two sets of SNPs and returns the fraction of variable positions in the genome"""
@@ -4882,7 +5007,8 @@ def get_fraction_readPairsMapped(bamfile, replace=False, threads=4):
     # get the fraction mapped
     flagstat_file = "%s.flagstat"%bamfile
 
-    fraction_mapped = [float(l.split("mapped (")[1].split("%")[0])/100 for l in open(flagstat_file, "r").readlines() if "mapped (" in l][0]
+    if npairs==0: fraction_mapped = 0.0
+    else: fraction_mapped = [float(l.split("mapped (")[1].split("%")[0])/100 for l in open(flagstat_file, "r").readlines() if "mapped (" in l][0]
 
     return fraction_mapped
 
@@ -4983,29 +5109,6 @@ def get_SRA_runInfo_df_with_sampleID(SRA_runInfo_df, reference_genome, outdir, r
     return SRA_runInfo_df, df_divergence
 
 
-def get_structure_input_file(vcf_series, outdir, replace=False):
-
-    """Takes a series of vcfs were the index are the IDs and the values are paths to vcf"""
-
-    # define the file that this function will return
-    structure_input_file = "%s/structure_input_file.txt"%outdir
-
-
-
-    return structure_input_file
-
-def get_SRA_runInfo_df_with_populationID(SRA_runInfo_df, outdir, replace=False):
-
-    """This function takes an SRA_runInfo_df where there is a vcf file for each sample and it returns the df with a column called sampleID that reflects the population (it should be numeric). This is calculated from STRCUTURE, and the 'outdir' will contain all the parms."""
-
-    # write the input file of structure
-    structure_input_file = get_structure_input_file(SRA_runInfo_df["vcf"], outdir, replace=replace)
-
-
-    print(structure_input_file)
-
-
-
 
 def get_SRA_runInfo_df_with_sampleID_popStructure(SRA_runInfo_df, reference_genome, outdir, ploidy, replace=False, threads=4, coverage_subset_reads=10):
 
@@ -5044,7 +5147,7 @@ def get_SRA_runInfo_df_with_sampleID_popStructure(SRA_runInfo_df, reference_geno
 
     # get the files
     for I, (reads1, reads2) in enumerate(list_reads_tuples):
-        print("working on sample %i"%I)
+        #print("working on sample %i"%I)
 
         # define the outdir
         srr = SRA_runInfo_df.iloc[I]["Run"]
@@ -5074,11 +5177,6 @@ def get_SRA_runInfo_df_with_sampleID_popStructure(SRA_runInfo_df, reference_geno
     SRA_runInfo_df["fraction_reads_mapped"] = SRA_runInfo_df.Run.apply(lambda run: get_fraction_readPairsMapped("%s/%s/aligned_reads.bam.sorted"%(seq_data_dir, run), replace=replace, threads=threads))
 
     print(SRA_runInfo_df["fraction_reads_mapped"])
-
-    jahdgjdhadg
-
-
-
 
 
 def downsample_bamfile_keeping_pairs(bamfile, fraction_reads=0.1, replace=True, threads=4, name="sampleX", sampled_bamfile=None):
@@ -5233,6 +5331,7 @@ def download_srr_with_prefetch(srr, SRRfile):
 
     return SRRfile
 
+
 def download_srr_parallelFastqDump(srr, destination_dir, is_paired=True, threads=4, replace=False):
 
     """Takes an SRR accession and downloads the fastq files into destination_dir with prefetch"""
@@ -5271,8 +5370,74 @@ def download_srr_parallelFastqDump(srr, destination_dir, is_paired=True, threads
     # at the end remove the downloading dir
     delete_folder(downloading_dir)
 
+def get_SRA_runInfo_df_with_mapping_data(SRA_runInfo_df, reference_genome, outdir, replace=False, threads=4, coverage_subset_reads=10):
 
-def get_SRA_runInfo_df(target_taxID, n_close_samples, nruns_per_sample, outdir, reference_genome, min_coverage, replace, threads, coverage_subset_reads, ploidy):
+    """This function takes a df with info about SRA runs and returns it with fraction_reads_mapped, fraction_genome_covered and mean_coverage"""
+
+    make_folder(outdir)
+
+    # define the outdir that will store the seq data
+    seq_data_dir = "%s/seq_data"%outdir; make_folder(seq_data_dir)
+
+    # change index
+    SRA_runInfo_df = SRA_runInfo_df.set_index("Run", drop=False)
+
+    # calculate the length of the genome
+    length_genome = sum(get_chr_to_len(reference_genome).values())
+
+    # add the subset_n_reads depending on the coverage and the read length
+    SRA_runInfo_df["subset_n_reads"] = (length_genome*coverage_subset_reads / SRA_runInfo_df.avgLength).apply(int) + 1
+
+    ###### DOWNLOAD THE SUBSET OF READS WITH FASTQDUMP ####
+
+    inputs_download_srr = [(srr, "%s/%s/reads_dir"%(seq_data_dir, srr), SRA_runInfo_df.loc[srr, "subset_n_reads"]) for srr in SRA_runInfo_df.Run]
+
+    print("Downloading %i sra datasets"%len(inputs_download_srr))
+    with multiproc.Pool(threads) as pool:
+        list_reads_tuples = pool.starmap(download_srr_subsetReads_onlyFastqDump, inputs_download_srr)
+        pool.close()
+
+    ###################################################################
+
+    ##### GET FRAC READS MAPPED ##### 
+
+    # initialize lists
+    fraction_reads_mapped_list = []
+
+    # get the files
+    for I, (reads1, reads2) in enumerate(list_reads_tuples):
+        #print("working on sample %i"%I)
+
+        # define the outdir
+        srr = SRA_runInfo_df.iloc[I]["Run"]
+        outdir_srr = "%s/%s"%(seq_data_dir, srr)
+
+        # get the sorted_bam
+        try:
+            sorted_bam = get_sorted_bam_for_untrimmed_reads(reads1, reads2, reference_genome, outdir_srr, threads=threads, replace=replace)
+
+            # get fraction reads mapped
+            fraction_mapped = get_fraction_readPairsMapped(sorted_bam)
+
+        except: fraction_mapped = 0.0
+
+        # get the fraction of reads mapped
+        fraction_reads_mapped_list.append(fraction_mapped)
+
+    SRA_runInfo_df["fraction_reads_mapped"] = fraction_reads_mapped_list
+
+    ############################################
+
+    return SRA_runInfo_df
+
+def get_taxID_or_BioSample(r, target_taxID):
+
+    """Takes a row of the all_SRA_runInfo_df and returns the TaxID. If the taxID is the target_taxID it returns the biosample"""
+
+    if r["TaxID"]==target_taxID: return r["BioSample"]
+    else: return r["TaxID"]
+
+def get_SRA_runInfo_df(target_taxID, n_close_samples, nruns_per_sample, outdir, reference_genome, min_coverage, replace, threads, coverage_subset_reads, min_fraction_reads_mapped, add_target_taxIDs=False):
 
     """This function mines the SRA to find n_close_samples and nruns_per_sample, returning the necessary df """
 
@@ -5304,151 +5469,150 @@ def get_SRA_runInfo_df(target_taxID, n_close_samples, nruns_per_sample, outdir, 
     # initialize a set that defines the runs of the previous node
     runs_previous_nodes = set()
 
+    # initialize the final df
+    final_SRA_runInfo_df = pd.DataFrame()
+
     # define all potentially interesting taxIDs close to the target_taxIDs
     for nancestorNodes in range(1, 100): # one would mean to consider only IDs that are under the current species
         print("Considering %i ancestor nodes"%nancestorNodes)
+
+        # initialize a df that stores the tested SRRs for this division
+        df_division_tested = pd.DataFrame()
 
         # create a folder for this number of ancestors
         outdir_ancestors = "%s/all_runsWithWGS_arround_target_taxID_%i_considering%iAncestors"%(outdir, target_taxID, nancestorNodes); make_folder(outdir_ancestors)
 
         # get the ancestor
-        ancestor_taxID = ncbi.get_lineage(target_taxID)[-nancestorNodes]
+        ancestor_taxID = int(ncbi.get_lineage(target_taxID)[-nancestorNodes])
+
+        # get the runs for this division excluding the target taxID
+        print("Getting WGS info")
+        fileprefix = "%s/output"%(outdir_ancestors)
+        all_SRA_runInfo_df = get_allWGS_runInfo_fromSRA_forDivision(fileprefix, ancestor_taxID, reference_genome, taxIDs_to_exclude=set(), replace=False, min_coverage=min_coverage).set_index("Run", drop=False)
+
+        # define the runs with target taxID
+        runs_target_taxID = set(all_SRA_runInfo_df[all_SRA_runInfo_df.TaxID==target_taxID].Run)
+
+        # redefine TaxID to include the BioSample for the target taxID
+        all_SRA_runInfo_df["TaxID"] = all_SRA_runInfo_df.apply(lambda r: get_taxID_or_BioSample(r, target_taxID), axis=1)
+        converted_taxIDs_target = set(all_SRA_runInfo_df.loc[runs_target_taxID, "TaxID"])
+
 
         # get the tree
         tree = ncbi.get_descendant_taxa(ancestor_taxID, collapse_subspecies=False, return_tree=True, intermediate_nodes=True)
+        #print("You can visualize the tree in http://etetoolkit.org/treeview/: \n\n%s\n\n"%(tree.write()))
 
-        # define interesting taxIDs (the leafs and the species names that may be intermediate)
-        interesting_taxIDs = {int(x) for x in set(tree.get_leaf_names()).union({n.name for n in tree.traverse() if n.rank=="species"})}
+        if type(tree)==list:
+            interesting_taxIDs = set(tree)
+            taxID_to_distanceToTarget = {tree[0] : 0}
 
-        # map the distance between each leave and the target
-        taxID_to_distanceToTarget = {taxID : tree.get_distance(str(target_taxID), str(taxID)) for taxID in interesting_taxIDs.difference({target_taxID})}
-        taxID_to_distanceToTarget[target_taxID] = 0.0
+        else:
+
+            # define interesting taxIDs (the leafs and the species names that may be intermediate)
+            interesting_taxIDs = {int(x) for x in set(tree.get_leaf_names()).union({n.name for n in tree.traverse() if n.rank=="species"})}.difference({target_taxID})
+
+            # map the distance between each leave and the target
+            taxID_to_distanceToTarget = {taxID : tree.get_distance(str(target_taxID), str(taxID)) for taxID in interesting_taxIDs}
+
+        # map names
+        taxID_to_sciName = ncbi.get_taxid_translator(interesting_taxIDs)
+
+        # add the sciName
+        all_SRA_runInfo_df["sci_name"] = all_SRA_runInfo_df.TaxID.map(taxID_to_sciName)
+
+        if add_target_taxIDs is True:
+
+            # add the taxIDs of the target
+            for converted_taxID_target in converted_taxIDs_target: 
+                taxID_to_sciName[converted_taxID_target] = "target taxID"
+                taxID_to_distanceToTarget[converted_taxID_target] = 0
+                interesting_taxIDs.add(converted_taxID_target)
 
         # get the taxIDs sorted by the distance (so that the closest )
         interesting_taxIDs_sorted = sorted(interesting_taxIDs, key=(lambda x: taxID_to_distanceToTarget[x]))
 
-        # get the run info of all WGS datasets from SRA
-        print("Getting WGS info")
-        fileprefix = "%s/output"%(outdir_ancestors)
-        all_SRA_runInfo_df = get_allWGS_runInfo_fromSRA_forTaxIDs(fileprefix, interesting_taxIDs_sorted, reference_genome, replace=False, min_coverage=min_coverage).set_index("Run", drop=False)
+        # add the number of runs that each taxID has 
+        taxID_to_nRuns = Counter(all_SRA_runInfo_df.TaxID)
+        all_SRA_runInfo_df["nRuns_with_taxID"] = all_SRA_runInfo_df.TaxID.apply(lambda x: taxID_to_nRuns[x])
+        all_SRA_runInfo_df = all_SRA_runInfo_df[all_SRA_runInfo_df.nRuns_with_taxID>=nruns_per_sample]
 
         # if you did not find anything get to farther ancestors
-        if len(all_SRA_runInfo_df)<total_nruns: continue
+        if len(set(all_SRA_runInfo_df.TaxID).intersection(interesting_taxIDs))<n_close_samples: continue
 
-        # reorder runs by coverage
-        all_SRA_runInfo_df = all_SRA_runInfo_df.sort_values(by="expected_coverage", ascending=False)
-        print("Looking for %i runs"%total_nruns)
+        # iterate through each taxID from closest to farthest
+        for Itax, taxID in enumerate(interesting_taxIDs_sorted):
 
-        # go throough several fractions of all_SRA_runInfo_df
-        size_chunk = max([(total_nruns*2), 1])
+            # get the df for this taxID
+            df_taxID = all_SRA_runInfo_df[all_SRA_runInfo_df.TaxID==taxID].sort_values(by="expected_coverage", ascending=False)
+            if len(df_taxID)==0: continue
 
-        # define a list that represents the idx of the runs
-        idx_runs = list(range(len(all_SRA_runInfo_df)))
+            # define the length of the final_SRA_runInfo_df taxIDs
+            if len(final_SRA_runInfo_df)==0: nFinal_taxIDs = 0
+            else: nFinal_taxIDs = len(set(final_SRA_runInfo_df.TaxID))
 
-        # keep growing the all_SRA_runInfo_df until you find the desired number of runs.
-        for chunk_run_idx in chunks(idx_runs, size_chunk):
+            print("working on taxon %s. It is at %i nodes of the target. It is taxID %i/%i. final_SRA_runInfo_df has %i/%i taxIDs"%(taxID_to_sciName[taxID], taxID_to_distanceToTarget[taxID], Itax+1, len(interesting_taxIDs_sorted), nFinal_taxIDs, n_close_samples))
 
-            # get the runs
-            SRA_runInfo_df = all_SRA_runInfo_df.iloc[0:chunk_run_idx[-1]]
-            nruns = len(SRA_runInfo_df)
-            print("Getting %i/%i runs"%(nruns, len(all_SRA_runInfo_df)))
+            # go through several slices of the taxID df
+            for end_indx in range(nruns_per_sample, len(df_taxID)+1):
 
-            # get the sra info of this chunk
-            SRA_runInfo_df, df_divergence = get_SRA_runInfo_df_with_sampleID_popStructure(SRA_runInfo_df, reference_genome, outdir_gettingID, ploidy, replace=replace, threads=threads, coverage_subset_reads=coverage_subset_reads)
+                # get the df of a slice
+                df_slice = df_taxID.iloc[0:end_indx]
 
-            #SRA_runInfo_df, df_divergence = get_SRA_runInfo_df_with_sampleID(SRA_runInfo_df, reference_genome, outdir_gettingID, replace=replace, threads=threads, coverage_subset_reads=coverage_subset_reads)
+                # add the mapping data 
+                df_slice = get_SRA_runInfo_df_with_mapping_data(df_slice, reference_genome, outdir_gettingID, replace=replace, threads=threads, coverage_subset_reads=coverage_subset_reads)
 
+                # keep
+                df_division_tested = df_division_tested.append(df_slice)
 
-            ljdahjkhdadkjhaad
+                # filter            
+                idx = ((df_slice.fraction_reads_mapped>=min_fraction_reads_mapped))
 
-            # define the minimum coverage that the sample should have in order to pass, as afraction of the expected coverage
-            min_mean_coverage = min_fraction_coverage_subset_reads*coverage_subset_reads
+                print(df_slice[["fraction_reads_mapped"]])
+                print("There are %i/%i files that passed the filters"%(sum(idx), len(idx)), min_fraction_reads_mapped)
 
-            print("These are the stats of this chunk of data")
-            print(SRA_runInfo_df[["fraction_genome_different_than_reference", "fraction_reads_mapped", "fraction_genome_covered", "mean_coverage", "expected_coverage"]])
+                df_slice = df_slice[idx]
 
-            # apply all the filters
-            idx = ((SRA_runInfo_df.fraction_genome_different_than_reference<=max_fraction_genome_different_than_reference) &
-                  (SRA_runInfo_df.fraction_genome_different_than_reference>=SNPthreshold_sameSample) & 
-                  (SRA_runInfo_df.fraction_reads_mapped>=min_fraction_reads_mapped) &
-                  (SRA_runInfo_df.fraction_genome_covered>=min_fraction_genome_covered) &
-                  (SRA_runInfo_df.mean_coverage>=min_mean_coverage))
+                # if there is something left keep it
+                if len(df_slice)>=nruns_per_sample: 
 
-            SRA_runInfo_df = SRA_runInfo_df[idx]
+                    # keep to the final df
+                    final_SRA_runInfo_df = final_SRA_runInfo_df.append(df_slice.iloc[0:nruns_per_sample])
 
-            print("There are %i/%i runs that pass the filters"%(sum(idx), len(idx)))
+                    # break the iteration through this taxID
+                    break
 
-            # add the number of runs that each sample has
-            sampleID_to_nRuns = Counter(SRA_runInfo_df.sampleID)
-            SRA_runInfo_df["nRuns_with_sampleID"] = SRA_runInfo_df.sampleID.apply(lambda x: sampleID_to_nRuns[x])
+                # if none of the df_slice are good and you have tried at least 3 times, break
+                if len(df_slice)==0 and len(idx)>=3: break
 
-            # keep only the SRA_runInfo_df that has above the desired nruns per sample
-            SRA_runInfo_df = SRA_runInfo_df[SRA_runInfo_df.nRuns_with_sampleID>=nruns_per_sample]
+                # if there are more than 5 idxs and more than half are bad, break
+                if len(idx)>=6 and sum(idx)/len(idx)<0.5: break
 
-            # debug
-            if len(set(SRA_runInfo_df.sampleID))<n_close_samples: continue
-
-            # map each sampleID to the runs
-            sampleID_to_runs = dict(SRA_runInfo_df.groupby("sampleID").apply(lambda df_s: set(df_s.Run)))
-
-            # for each run, add the divergence to the other runs of the same sample
-            SRA_runInfo_df["median_divergence_from_run_to_runsSameSample"] = SRA_runInfo_df.Run.apply(lambda run: np.median([df_divergence.loc[run][other_run] for other_run in sampleID_to_runs[SRA_runInfo_df.loc[run, "sampleID"]] if run!=other_run]) )
-
-            # keep the nruns_per_sample that have the lowest median_divergence_from_run_to_runsSameSample nruns_per_sample
-            interesting_runs = set.union(*[set(SRA_runInfo_df.loc[runs, "median_divergence_from_run_to_runsSameSample"].sort_values().iloc[0:nruns_per_sample].index) for sampleID, runs in sampleID_to_runs.items()])
-
-            SRA_runInfo_df = SRA_runInfo_df.loc[interesting_runs]
-
-            # redefine sampleID_to_runs with the closest divergence
-            sampleID_to_runs = dict(SRA_runInfo_df.groupby("sampleID").apply(lambda df_s: set(df_s.Run)))
-
-            # keep the n_close_samples that have the highest divergence between each other
-            samplesDivergenceDict = {}; I = 0
-            for sampleA, runsA in sampleID_to_runs.items():
-                for sampleB, runsB in sampleID_to_runs.items():
-
-                    divergence = np.mean([np.mean(df_divergence.loc[runA][list(runsB)]) for runA in runsA])
-                    samplesDivergenceDict[I] = {"sampleA":sampleA, "sampleB":sampleB, "divergence":divergence}
-
-                    I+=1
-
-            df_divergence_samples = pd.DataFrame(samplesDivergenceDict).transpose()
-            for f in ["sampleA", "sampleB"]: df_divergence_samples[f] = df_divergence_samples[f].apply(int)
-
-            # delete the comparisons that are the same
-            df_divergence_samples["sampleA_and_sampleB"] = df_divergence_samples.apply(lambda r: tuple(sorted([r["sampleA"], r["sampleB"]])), axis=1)
-            df_divergence_samples = df_divergence_samples.drop_duplicates(subset="sampleA_and_sampleB")
-            df_divergence_samples = df_divergence_samples[df_divergence_samples.sampleA!=df_divergence_samples.sampleB].sort_values(by="divergence", ascending=False)
-
-            # iterate through the df_divergence from the most divergent comparisons until you have n_close_samples
-            final_samples = set()
-            for sampleA, sampleB in df_divergence_samples[["sampleA", "sampleB"]].values:
-
-                # once you have all the samples break
-                if len(final_samples)>=n_close_samples: break
-
-                # add the samples
-                final_samples.update({sampleA, sampleB})
-
-            # get the n_close_samples
-            final_samples = list(final_samples)[0:n_close_samples]
-            SRA_runInfo_df = SRA_runInfo_df[SRA_runInfo_df.sampleID.isin(final_samples)]
-
-            # break the loop
-            break
+            # once you already got enough data, break
+            if len(final_SRA_runInfo_df)==total_nruns: break
 
         # if there are no new nodes, break
-        runs_in_this_node = set(SRA_runInfo_df.Run)
+        runs_in_this_node = set(final_SRA_runInfo_df.Run)
         if len(runs_in_this_node.difference(runs_previous_nodes))==0: break
         runs_previous_nodes.update(runs_in_this_node)
 
+        # if more than 90% of the samples tested in this division are below 
+        fraction_runs_tested_correct = sum(df_division_tested.fraction_reads_mapped>=min_fraction_reads_mapped)/len(df_division_tested)
+        print("There are %.3f of runs analyzed that map correctly"%fraction_runs_tested_correct)
+        if fraction_runs_tested_correct<0.1: break
+
+
         # if you already found the IDs, break
-        if len(SRA_runInfo_df)==total_nruns: break
+        if len(final_SRA_runInfo_df)==total_nruns: break
 
     # debug
-    if len(SRA_runInfo_df)!=total_nruns: raise ValueError("You could not find any datasets in SRA that would be useful")
+    if len(final_SRA_runInfo_df)!=total_nruns: raise ValueError("You could not find any datasets in SRA that would be useful")
 
-def get_close_shortReads_table_close_to_taxID(target_taxID, reference_genome, outdir, ploidy, n_close_samples=3, nruns_per_sample=3, replace=False, threads=4, max_fraction_genome_different_than_reference=0.15, min_fraction_reads_mapped=0.8, min_fraction_genome_covered=0.8, coverage_subset_reads=5, min_coverage=30, min_fraction_coverage_subset_reads=0.5, run_in_slurm=False, walltime="02:00:00", queue="debug", StopAfter_sampleIndexingFromSRA=False, SNPthreshold_sameSample=0.001):
+    # change the names
+    final_SRA_runInfo_df["sampleID"] = final_SRA_runInfo_df.TaxID
+
+    return final_SRA_runInfo_df
+
+def get_close_shortReads_table_close_to_taxID(target_taxID, reference_genome, outdir, ploidy, n_close_samples=3, nruns_per_sample=3, replace=False, threads=4, min_fraction_reads_mapped=0.1, coverage_subset_reads=0.1, min_coverage=30, run_in_slurm=False, walltime="02:00:00", queue="debug", StopAfter_sampleIndexingFromSRA=False):
 
     """
     This function takes a taxID and returns the close_shortReads_table that is required to do optimisation of parameters
@@ -5463,14 +5627,14 @@ def get_close_shortReads_table_close_to_taxID(target_taxID, reference_genome, ou
         print("getting SRRs")
 
         # get the df
-        SRA_runInfo_df = get_SRA_runInfo_df(target_taxID, n_close_samples, nruns_per_sample, outdir, reference_genome, min_coverage, replace, threads, coverage_subset_reads, ploidy)
+        SRA_runInfo_df = get_SRA_runInfo_df(target_taxID, n_close_samples, nruns_per_sample, outdir, reference_genome, min_coverage, replace, threads, coverage_subset_reads, min_fraction_reads_mapped)
 
         # load df
         save_object(SRA_runInfo_df, SRA_runInfo_df_file)
 
     else: SRA_runInfo_df = load_object(SRA_runInfo_df_file)
 
-    print("these are the samples chosen:\n:", SRA_runInfo_df[["Run", "sampleID", "SampleName"]].sort_values("sampleID"))
+    print("these are the samples chosen:\n:", SRA_runInfo_df[["Run", "sampleID", "SampleName", "sci_name", "fraction_reads_mapped"]].sort_values("sampleID"))
 
     if StopAfter_sampleIndexingFromSRA is True: 
         print("stopping after generation of SRA_runInfo_df into %s"%SRA_runInfo_df_file)
@@ -6939,7 +7103,7 @@ def count_number_read_pairs(bamfile, replace=False, threads=4):
     # get the total n reads
     if file_is_empty(read_count_file) or replace is True:
 
-        print("calculating n reads")
+        #print("calculating n reads")
         run_cmd("%s flagstat --threads %i %s > %s"%(samtools, threads, bamfile, read_count_file_tmp))
         os.rename(read_count_file_tmp, read_count_file)
 
@@ -9290,6 +9454,98 @@ def report_accuracy_simulations(sorted_bam, reference_genome, outdir, real_svtyp
     # make plots to report the accuracy of each simulation type. 
     filename = "%s/accuracy_on_simulations.pdf"%outdir
     plot_report_accuracy_simulations(df_benchmarking, filename)
+
+
+def generate_jobarray_file_greasy(jobs_filename, stderr="./STDERR", stdout="./STDOUT", walltime="48:00:00",  name="JobArray", queue="bsc_ls", sbatch=False, ncores_per_task=1, rmstd=True, constraint="", email="mikischikora@gmail.com", number_tasks_to_run_at_once="all"):
+    
+    """ This function takes:
+        jobs_filename: a path to a file in which each line is a command that has to be executed in a sepparate cluster node
+        name: the name of the jobs array
+        stderr and stdout: paths to directories that will contains the STDERR and STDOUT files
+        walltime is the time in "dd-hh:mm:ss". It is the sum of job times
+        memory is the RAM: i.e.: 4G, 2M, 200K
+        ncores_per_task is the number of cores that each job gets
+        
+        name is the name prefix
+        queue can be "debug" or "bsc_ls", use bsc_queues to understand which works best
+        rmstd indicates if the previous std has to be removed
+        constraint is a list of constraints to pass to sbatch. For example “highmem” is useful for requesting more memory. You cannot submit a job requesting memory parameters, memory is automatically set for each asked cpu (2G/core by default, 8G/core for highmem)
+
+        number_tasks_to_run_at_once are the number of tasks in a job array to run at once
+        
+        It returns a jobs_filename.run file, which can be sbatch to the cluster directly if sbatch is True
+        This is run in the VarCall_CNV_env
+    """
+
+    def removeSTDfiles(stddir):
+        """ Will remove all files in stddir with name"""
+        for file in os.listdir(stddir):
+            if file.startswith(name): os.unlink("%s/%s"%(stddir, file))
+
+    # prepare the stderr and stdout
+    if not os.path.isdir(stderr): os.mkdir(stderr)
+    elif rmstd is True: removeSTDfiles(stderr)
+
+    if not os.path.isdir(stdout): os.mkdir(stdout)
+    elif rmstd is True: removeSTDfiles(stdout)
+    
+    # Get the number of jobs
+    n_jobs = len(open(jobs_filename, "r").readlines())
+
+    # if default, number_tasks_to_run_at_once is 0, which means that it will try to run all tasks at once
+    if number_tasks_to_run_at_once=="all": 
+
+        queue_to_maxCores = {"debug":768, "bsc_ls":2400}
+        number_tasks_to_run_at_once = min([int(queue_to_maxCores[queue]/ncores_per_task)-1, n_jobs])
+
+    # define the constraint only if it is necessary
+    if constraint!="": constraint_line = "#SBATCH --constraint=%s"%constraint
+    else: constraint_line = ""
+
+    # remove previous rst files
+    name_jobs_filename = get_file(jobs_filename)
+    for file in os.listdir(get_dir(jobs_filename)): 
+
+        if file.startswith("%s-"%name_jobs_filename) and file.endswith(".rst"): 
+            remove_file("%s/%s"%(get_dir(jobs_filename), file))
+
+    #"echo 'sourcing conda to run pipeline...';",
+    #SOURCE_CONDA_CMD,
+    #CONDA_ACTIVATING_CMD,
+
+    # define the greasy log file
+    greasy_logfile = "%s/%s_greasy.log"%(stdout, name)
+
+    # define arguments
+    arguments = ["#!/bin/sh", # the interpreter
+                 "#SBATCH --time=%s"%walltime, # several SBATCH misc commands
+                 "#SBATCH --qos=%s"%queue,
+                 "#SBATCH --job-name=%s"%name,
+                 "#SBATCH --cpus-per-task=%i"%ncores_per_task,
+                 "#SBATCH --error=%s/%s_%sA_%sa.err"%(stderr, name, "%", "%"), # the standard error
+                 "#SBATCH --output=%s/%s_%sA_%sa.out"%(stdout, name, "%", "%"), # the standard error
+                 "#SBATCH --get-user-env", # this is to maintain the environment
+                 "#SBATCH --workdir=.",
+                 "#SBATCH --ntasks=%i"%number_tasks_to_run_at_once,
+                 "#SBATCH --mail-type=all",
+                 "#SBATCH --mail-user=%s"%email,
+                 constraint_line,
+                 "",
+                 "module load greasy",
+                 "export GREASY_LOGFILE=%s;"%(greasy_logfile),
+                 "echo 'running pipeline';",
+                 "greasy %s"%jobs_filename]
+
+
+    # define and write the run filename
+    jobs_filename_run = "%s.run"%jobs_filename
+    with open(jobs_filename_run, "w") as fd: fd.write("\n".join(arguments))
+    
+    # run in cluster if specified
+    if sbatch is True: out_state = os.system("sbatch %s"%jobs_filename_run); print("%s sbatch out state: %i"%(name, out_state))
+
+    # get info about the exit status: sacct -j <jobid> --format=JobID,JobName,MaxRSS,Elapsed
+
 
 
 def generate_jobarray_file_slurm(jobs_filename, stderr="./STDERR", stdout="./STDOUT", walltime="02:00:00",  name="JobArray", queue="bsc_ls", sbatch=False, ncores_per_task=1, rmstd=True, constraint="", number_tasks_to_run_at_once="all", email="mikischikora@gmail.com"):

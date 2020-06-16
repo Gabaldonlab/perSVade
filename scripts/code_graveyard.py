@@ -1275,3 +1275,124 @@ def get_close_shortReads_table_close_to_taxID(target_taxID, reference_genome, ou
     #########################################
 
     return close_shortReads_table
+
+
+
+
+
+
+            idx = ((SRA_runInfo_df.fraction_genome_different_than_reference<=max_fraction_genome_different_than_reference) &
+                  (SRA_runInfo_df.fraction_genome_different_than_reference>=SNPthreshold_sameSample) & 
+
+        # reorder runs by coverage
+        all_SRA_runInfo_df = all_SRA_runInfo_df.sort_values(by="expected_coverage", ascending=False)
+        print("Looking for %i runs"%total_nruns)
+
+        # go throough several fractions of all_SRA_runInfo_df
+        size_chunk = max([(total_nruns*2), 1])
+
+        # define a list that represents the idx of the runs
+        idx_runs = list(range(len(all_SRA_runInfo_df)))
+
+        # keep growing the all_SRA_runInfo_df until you find the desired number of runs.
+        for chunk_run_idx in chunks(idx_runs, size_chunk):
+
+            # get the runs
+            SRA_runInfo_df = all_SRA_runInfo_df.iloc[0:chunk_run_idx[-1]]
+            nruns = len(SRA_runInfo_df)
+            print("Getting %i/%i runs"%(nruns, len(all_SRA_runInfo_df)))
+
+            # get the sra info of this chunk
+            SRA_runInfo_df, df_divergence = get_SRA_runInfo_df_with_sampleID_popStructure(SRA_runInfo_df, reference_genome, outdir_gettingID, ploidy, replace=replace, threads=threads, coverage_subset_reads=coverage_subset_reads)
+
+            #SRA_runInfo_df, df_divergence = get_SRA_runInfo_df_with_sampleID(SRA_runInfo_df, reference_genome, outdir_gettingID, replace=replace, threads=threads, coverage_subset_reads=coverage_subset_reads)
+
+
+            ljdahjkhdadkjhaad
+
+            # define the minimum coverage that the sample should have in order to pass, as afraction of the expected coverage
+            min_mean_coverage = min_fraction_coverage_subset_reads*coverage_subset_reads
+
+            print("These are the stats of this chunk of data")
+            print(SRA_runInfo_df[["fraction_genome_different_than_reference", "fraction_reads_mapped", "fraction_genome_covered", "mean_coverage", "expected_coverage"]])
+
+            # apply all the filters
+            idx = ((SRA_runInfo_df.fraction_genome_different_than_reference<=max_fraction_genome_different_than_reference) &
+                  (SRA_runInfo_df.fraction_genome_different_than_reference>=SNPthreshold_sameSample) & 
+                  (SRA_runInfo_df.fraction_reads_mapped>=min_fraction_reads_mapped) &
+                  (SRA_runInfo_df.fraction_genome_covered>=min_fraction_genome_covered) &
+                  (SRA_runInfo_df.mean_coverage>=min_mean_coverage))
+
+            SRA_runInfo_df = SRA_runInfo_df[idx]
+
+            print("There are %i/%i runs that pass the filters"%(sum(idx), len(idx)))
+
+            # add the number of runs that each sample has
+            sampleID_to_nRuns = Counter(SRA_runInfo_df.sampleID)
+            SRA_runInfo_df["nRuns_with_sampleID"] = SRA_runInfo_df.sampleID.apply(lambda x: sampleID_to_nRuns[x])
+
+            # keep only the SRA_runInfo_df that has above the desired nruns per sample
+            SRA_runInfo_df = SRA_runInfo_df[SRA_runInfo_df.nRuns_with_sampleID>=nruns_per_sample]
+
+            # debug
+            if len(set(SRA_runInfo_df.sampleID))<n_close_samples: continue
+
+            # map each sampleID to the runs
+            sampleID_to_runs = dict(SRA_runInfo_df.groupby("sampleID").apply(lambda df_s: set(df_s.Run)))
+
+            # for each run, add the divergence to the other runs of the same sample
+            SRA_runInfo_df["median_divergence_from_run_to_runsSameSample"] = SRA_runInfo_df.Run.apply(lambda run: np.median([df_divergence.loc[run][other_run] for other_run in sampleID_to_runs[SRA_runInfo_df.loc[run, "sampleID"]] if run!=other_run]) )
+
+            # keep the nruns_per_sample that have the lowest median_divergence_from_run_to_runsSameSample nruns_per_sample
+            interesting_runs = set.union(*[set(SRA_runInfo_df.loc[runs, "median_divergence_from_run_to_runsSameSample"].sort_values().iloc[0:nruns_per_sample].index) for sampleID, runs in sampleID_to_runs.items()])
+
+            SRA_runInfo_df = SRA_runInfo_df.loc[interesting_runs]
+
+            # redefine sampleID_to_runs with the closest divergence
+            sampleID_to_runs = dict(SRA_runInfo_df.groupby("sampleID").apply(lambda df_s: set(df_s.Run)))
+
+            # keep the n_close_samples that have the highest divergence between each other
+            samplesDivergenceDict = {}; I = 0
+            for sampleA, runsA in sampleID_to_runs.items():
+                for sampleB, runsB in sampleID_to_runs.items():
+
+                    divergence = np.mean([np.mean(df_divergence.loc[runA][list(runsB)]) for runA in runsA])
+                    samplesDivergenceDict[I] = {"sampleA":sampleA, "sampleB":sampleB, "divergence":divergence}
+
+                    I+=1
+
+            df_divergence_samples = pd.DataFrame(samplesDivergenceDict).transpose()
+            for f in ["sampleA", "sampleB"]: df_divergence_samples[f] = df_divergence_samples[f].apply(int)
+
+            # delete the comparisons that are the same
+            df_divergence_samples["sampleA_and_sampleB"] = df_divergence_samples.apply(lambda r: tuple(sorted([r["sampleA"], r["sampleB"]])), axis=1)
+            df_divergence_samples = df_divergence_samples.drop_duplicates(subset="sampleA_and_sampleB")
+            df_divergence_samples = df_divergence_samples[df_divergence_samples.sampleA!=df_divergence_samples.sampleB].sort_values(by="divergence", ascending=False)
+
+            # iterate through the df_divergence from the most divergent comparisons until you have n_close_samples
+            final_samples = set()
+            for sampleA, sampleB in df_divergence_samples[["sampleA", "sampleB"]].values:
+
+                # once you have all the samples break
+                if len(final_samples)>=n_close_samples: break
+
+                # add the samples
+                final_samples.update({sampleA, sampleB})
+
+            # get the n_close_samples
+            final_samples = list(final_samples)[0:n_close_samples]
+            SRA_runInfo_df = SRA_runInfo_df[SRA_runInfo_df.sampleID.isin(final_samples)]
+
+            # break the loop
+            break
+
+        # if there are no new nodes, break
+        runs_in_this_node = set(SRA_runInfo_df.Run)
+        if len(runs_in_this_node.difference(runs_previous_nodes))==0: break
+        runs_previous_nodes.update(runs_in_this_node)
+
+        # if you already found the IDs, break
+        if len(SRA_runInfo_df)==total_nruns: break
+
+    # debug
+    if len(SRA_runInfo_df)!=total_nruns: raise ValueError("You could not find any datasets in SRA that would be useful")
