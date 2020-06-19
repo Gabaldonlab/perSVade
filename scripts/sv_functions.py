@@ -127,6 +127,7 @@ analyze_svVCF_simple = "%s/generate_files_from_svVCF_simple.R"%CWD
 TRIMMOMATIC = "%s/run_trimmomatic.py"%CWD 
 perSVade_py = "%s/perSVade.py"%CWD 
 run_trimmomatic_and_fastqc_py = "%s/run_trimmomatic_and_fastqc.py"%CWD
+get_trimmed_reads_for_srr_py = "%s/get_trimmed_reads_for_srr.py"%CWD
 
 SOURCE_CONDA_CMD = "source %s/etc/profile.d/conda.sh;"%CondaDir
 CONDA_ACTIVATING_CMD = "conda activate %s;"%EnvName
@@ -233,6 +234,9 @@ svtype_to_fieldsDict = {"inversions": {"equal_fields": ["Chr"],
                                       "chromosome_fields": ["#CHROM", "CHR2"]
 
                                       }}
+
+# define the golden set reads
+taxID_to_srrs_goldenSet = {3702: {"short_reads":"ERR2173372", "long_reads":"ERR2173373"}} # arabidopsis thaliana sample
 
 ####################################
 ####################################
@@ -413,8 +417,21 @@ def delete_file_or_folder(f):
 
 def get_chr_to_len(genome):
 
-    # define chromosome_to_length for a genome
-    chr_to_len = {seq.id: len(seq.seq) for seq in SeqIO.parse(genome, "fasta")}
+    chr_to_len_file = "%s.chr_to_len.py"%genome
+    chr_to_len_file_tmp = "%s.tmp"%chr_to_len_file
+
+    if file_is_empty(chr_to_len_file):
+
+        remove_file(chr_to_len_file_tmp)
+
+        # define chromosome_to_length for a genome
+        chr_to_len = {seq.id: len(seq.seq) for seq in SeqIO.parse(genome, "fasta")}
+
+        # save
+        save_object(chr_to_len, chr_to_len_file_tmp)
+        os.rename(chr_to_len_file_tmp, chr_to_len_file)
+
+    else: chr_to_len = load_object(chr_to_len_file)
 
     return chr_to_len
 
@@ -2358,17 +2375,19 @@ def generate_coverage_per_window_file_parallel(reference_genome, destination_dir
         if len(all_df)==0: raise ValueError("There is no proper coverage calculation for %s on windows %s"%(sorted_bam, windows_file))
 
         # write
-        all_df.to_csv(coverage_file, sep="\t", header=True, index=False)
+        coverage_file_tmp = "%s.tmp"%coverage_file
+        all_df.to_csv(coverage_file_tmp, sep="\t", header=True, index=False)
 
         # at the end remove all the bam files # at some point I commented the lines below and I don't know why
-        """
-        if delete_bams is True:
+        if delete_bams is True and run_in_parallel is True:
             print("removing chromosomal bamfiles")
 
             for chrom in all_chromosome_IDs: 
                 sorted_bam_chr = "%s.%s.bam"%(sorted_bam, chrom)
-                os.unlink(sorted_bam_chr); os.unlink("%s.bai"%sorted_bam_chr)
-        """
+                remove_file(sorted_bam_chr); remove_file("%s.bai"%sorted_bam_chr)
+
+        # rename
+        os.rename(coverage_file_tmp, coverage_file)
 
     return coverage_file
 
@@ -4223,7 +4242,87 @@ def get_taxid2name(taxIDs):
 
     return taxid2name
 
+def get_allOxfordNanopore_runInfo_fromSRA_forDivision(fileprefix, taxID_division, reference_genome, taxIDs_to_exclude=set(), replace=False, min_coverage=30):
 
+    """This function tages all the SRRs that have WGS for the required taxIDs"""
+
+    SRA_runInfo_df_file = "%s.SRA_runInfo_df.py"%fileprefix
+
+    #if file_is_empty(SRA_runInfo_df_file) or replace is True:
+    if True:
+        print("Getting WGS for %i"%taxID_division)
+
+        # define the WGS fastq filters
+        ONT_filters = '("biomol dna"[Properties] AND "strategy wgs"[Properties] AND "platform oxford nanopore"[Properties] AND ("strategy wgs"[Properties] OR "strategy wga"[Properties] OR "strategy wcs"[Properties] OR "strategy clone"[Properties] OR "strategy finishing"[Properties] OR "strategy validation"[Properties]))'
+    
+        # define the esearch query
+        esearch_query = "(txid%i[Organism:exp]) AND %s"%(taxID_division, ONT_filters) 
+
+        # add the taxIDs_to_exclude 
+        if len(taxIDs_to_exclude)>0: esearch_query += " NOT (%s)"%(" OR ".join(["(txid%i[Organism:exp])"%ID for ID in taxIDs_to_exclude]))
+
+        print("This is the esearch query (you can check it against the SRA):\n\n %s \n\n"%esearch_query)
+
+        # get esearch
+        esearch_outfile = "%s.esearch_output.txt"%fileprefix
+        esearch_stderr = "%s.stderr"%esearch_outfile
+        efetch_outfile = "%s.efetch_output.txt"%fileprefix
+        efetch_stderr = "%s.stderr"%efetch_outfile
+
+        columns_efetch = "Run,ReleaseDate,LoadDate,spots,bases,spots_with_mates,avgLength,size_MB,AssemblyName,download_path,Experiment,LibraryName,LibraryStrategy,LibrarySelection,LibrarySource,LibraryLayout,InsertSize,InsertDev,Platform,Model,SRAStudy,BioProject,Study_Pubmed_id,ProjectID,Sample,BioSample,SampleType,TaxID,ScientificName,SampleName,g1k_pop_code,source,g1k_analysis_group,Subject_ID,Sex,Disease,Tumor,Affection_Status,Analyte_Type,Histological_Type,Body_Site,CenterName,Submission,dbgap_study_accession,Consent,RunHash,ReadHash".split(",")
+
+        # get the esearch
+        run_cmd("%s -db sra -query '%s' > %s 2>%s"%(esearch, esearch_query, esearch_outfile, esearch_stderr))
+
+        # get the number of rows
+        nresults = [int(l.split("<Count>")[1].split("<")[0]) for l in open(esearch_outfile, "r").readlines() if "<Count>" in l and "</Count>" in l][0]
+        print("There are %i results in esearch"%nresults)
+
+        if nresults==0: SRA_runInfo_df = pd.DataFrame(columns=columns_efetch)
+        else:
+
+            # run efetch
+            run_cmd("cat %s | %s -db sra --format runinfo | grep -v '^Run' | grep 'https' > %s 2>%s"%(esearch_outfile, efetch, efetch_outfile, efetch_stderr))
+
+            # get into df
+            SRA_runInfo_df = pd.read_csv(efetch_outfile, sep=",", header=None, names=columns_efetch)
+
+        save_object(SRA_runInfo_df, SRA_runInfo_df_file)
+
+    else: SRA_runInfo_df = load_object(SRA_runInfo_df_file)
+
+    # return if empty 
+    if len(SRA_runInfo_df)==0: return SRA_runInfo_df
+
+    # filter out the undesired taxIDs
+    SRA_runInfo_df = SRA_runInfo_df[~SRA_runInfo_df.TaxID.isin(taxIDs_to_exclude)]
+
+
+    # define the expected coverage
+    length_genome = sum(get_chr_to_len(reference_genome).values())
+    SRA_runInfo_df["expected_coverage"] = SRA_runInfo_df.apply(lambda r: (r["spots"]*r["avgLength"])/length_genome,axis=1)
+
+    # plot the number of spots
+    filename = "%s.distribution_parameters.pdf"%fileprefix
+    if file_is_empty(filename):
+
+        #print("getting parm distribution into %s"%filename)
+        fig = plt.figure(figsize=(5,13))
+        for I, field in enumerate(["spots", "spots_with_mates", "avgLength", "InsertSize", "size_MB", "expected_coverage"]):
+            ax = plt.subplot(6, 1, I+1)
+            sns.distplot(SRA_runInfo_df[field], kde=False, rug=True)
+            ax.set_xlabel(field)
+
+        fig.tight_layout()  # otherwise the right y-label is slightly 
+        fig.savefig(filename, bbox_inches='tight');
+        plt.close(fig)
+
+    # keep only those that have at least a coverage of min_coverage    
+    SRA_runInfo_df = SRA_runInfo_df[SRA_runInfo_df["expected_coverage"]>=min_coverage]
+
+    print("There are %i SRRs ready to use with at least %ix coverage"%(len(SRA_runInfo_df), min_coverage))
+
+    return SRA_runInfo_df
 
 def get_allWGS_runInfo_fromSRA_forDivision(fileprefix, taxID_division, reference_genome, taxIDs_to_exclude=set(), replace=False, min_coverage=30):
 
@@ -4240,23 +4339,41 @@ def get_allWGS_runInfo_fromSRA_forDivision(fileprefix, taxID_division, reference
         # define the esearch query
         esearch_query = "(txid%i[Organism:exp]) AND %s"%(taxID_division, WGS_filters) 
 
+        # add the taxIDs_to_exclude 
+        if len(taxIDs_to_exclude)>0: esearch_query += " NOT (%s)"%(" OR ".join(["(txid%i[Organism:exp])"%ID for ID in taxIDs_to_exclude]))
+
+        print("This is the esearch query (you can check it against the SRA):\n\n %s \n\n"%esearch_query)
+
         # get esearch
+        esearch_outfile = "%s.esearch_output.txt"%fileprefix
+        esearch_stderr = "%s.stderr"%esearch_outfile
         efetch_outfile = "%s.efetch_output.txt"%fileprefix
+        efetch_stderr = "%s.stderr"%efetch_outfile
 
         columns_efetch = "Run,ReleaseDate,LoadDate,spots,bases,spots_with_mates,avgLength,size_MB,AssemblyName,download_path,Experiment,LibraryName,LibraryStrategy,LibrarySelection,LibrarySource,LibraryLayout,InsertSize,InsertDev,Platform,Model,SRAStudy,BioProject,Study_Pubmed_id,ProjectID,Sample,BioSample,SampleType,TaxID,ScientificName,SampleName,g1k_pop_code,source,g1k_analysis_group,Subject_ID,Sex,Disease,Tumor,Affection_Status,Analyte_Type,Histological_Type,Body_Site,CenterName,Submission,dbgap_study_accession,Consent,RunHash,ReadHash".split(",")
 
-        # if there are no runs, it will run an error
-        try:
-            
-            run_cmd("%s -db sra -query '%s' | %s -db sra --format runinfo | grep -v '^Run' | grep 'https' > %s"%(esearch, esearch_query, efetch, efetch_outfile))
+        # get the esearch
+        run_cmd("%s -db sra -query '%s' > %s 2>%s"%(esearch, esearch_query, esearch_outfile, esearch_stderr))
 
+        # get the number of rows
+        nresults = [int(l.split("<Count>")[1].split("<")[0]) for l in open(esearch_outfile, "r").readlines() if "<Count>" in l and "</Count>" in l][0]
+        print("There are %i results in esearch"%nresults)
+
+        if nresults==0: SRA_runInfo_df = pd.DataFrame(columns=columns_efetch)
+        else:
+
+            # run efetch
+            run_cmd("cat %s | %s -db sra --format runinfo | grep -v '^Run' | grep 'https' > %s 2>%s"%(esearch_outfile, efetch, efetch_outfile, efetch_stderr))
+
+            # get into df
             SRA_runInfo_df = pd.read_csv(efetch_outfile, sep=",", header=None, names=columns_efetch)
-
-        except: SRA_runInfo_df = pd.DataFrame(columns=columns_efetch)
 
         save_object(SRA_runInfo_df, SRA_runInfo_df_file)
 
     else: SRA_runInfo_df = load_object(SRA_runInfo_df_file)
+
+    # return if empty 
+    if len(SRA_runInfo_df)==0: return SRA_runInfo_df
 
     # filter out the undesired taxIDs
     SRA_runInfo_df = SRA_runInfo_df[~SRA_runInfo_df.TaxID.isin(taxIDs_to_exclude)]
@@ -4282,8 +4399,6 @@ def get_allWGS_runInfo_fromSRA_forDivision(fileprefix, taxID_division, reference
 
     # keep only those that have at least a coverage of min_coverage    
     SRA_runInfo_df = SRA_runInfo_df[SRA_runInfo_df["expected_coverage"]>=min_coverage]
-
- 
 
     print("There are %i SRRs ready to use with at least %ix coverage"%(len(SRA_runInfo_df), min_coverage))
 
@@ -4974,14 +5089,14 @@ def get_sorted_bam_for_untrimmed_reads(reads1, reads2, reference_genome, outdir,
     """Takes some untrimmed reads and returns the sorted_bam"""
 
     # get the trimmed reads
-    #print("running trimmomatic")
+    print("running trimmomatic")
     trimmed_reads1, trimmed_reads2 = run_trimmomatic(reads1, reads2, replace=replace, threads=threads)
 
     # get the aligned reads
-    #print("running bwa mem")
     bamfile = "%s/aligned_reads.bam"%outdir
     sorted_bam = "%s.sorted"%bamfile
     index_bam = "%s.bai"%sorted_bam
+    print("running bwa mem into %s"%sorted_bam)
 
     run_bwa_mem(trimmed_reads1, trimmed_reads2, reference_genome, outdir, bamfile, sorted_bam, index_bam, "nameSample", threads=threads, replace=replace)
 
@@ -5308,7 +5423,7 @@ def get_fractionGenome_different_samplings_from_sorted_bam(sorted_bam, reference
     return max(all_fraction_different_positions)
 
 
-def download_srr_with_prefetch(srr, SRRfile):
+def download_srr_with_prefetch(srr, SRRfile, replace=False):
 
     """This function downloads an srr file for an srr if not already done"""
 
@@ -5318,18 +5433,85 @@ def download_srr_with_prefetch(srr, SRRfile):
     # make the downloading dir
     make_folder(downloading_dir)
 
+    # try a couple of times
     for Itry in range(2):
 
-        if file_is_empty(SRRfile):
+        if file_is_empty(SRRfile) or replace is True:
+            print("running prefetch for %s"%srr)
 
             # remove the locks of previous runs
             for file in ["%s/%s"%(downloading_dir, f) for f in os.listdir(downloading_dir) if ".lock" in f or ".tmp." in f]: remove_file(file)
 
+            # remove the actual srr
+            remove_file(SRRfile)
+
             # run prefetch
-            try: run_cmd("%s -o %s %s"%(prefetch, SRRfile, srr))
+            prefetch_std = "%s.std.txt"%SRRfile
+            try: run_cmd("%s -o %s --max-size 500G --progress 1 %s > %s 2>&1"%(prefetch, SRRfile, srr, prefetch_std))
             except: print("prefetch did not work for %s"%srr)
 
+            # test that the std of prefetch states that there are no unresolved dependencies
+            std_lines = open(prefetch_std, "r").readlines()
+            successful_download = any(["was downloaded successfully" in l for l in std_lines])
+            no_dependencies_left = any(["has 0 unresolved dependencies" in l for l in std_lines])
+            has_dependencies_line = any(["unresolved dependencies" in l for l in std_lines])
+
+            if not successful_download or (has_dependencies_line and not no_dependencies_left): 
+                print(successful_download, has_dependencies_line, no_dependencies_left)
+                prefetch_std_copy = "%s.copy"%prefetch_std
+                run_cmd("cp %s %s"%(prefetch_std, prefetch_std_copy))
+                print("prefetch did not work for %s. Test the log in %s"%(srr, prefetch_std_copy))
+                remove_file(SRRfile)
+
+    # check that the prefetch works 
+    if file_is_empty(SRRfile): 
+        raise ValueError("prefetch did not work for %s"%srr)
+
     return SRRfile
+
+def run_parallelFastqDump_on_prefetched_SRRfile(SRRfile, replace=False, threads=4):
+
+    """This function runs parallel fastqdump on a tmp dir in SRR file"""
+
+
+    # define the outdir and tmp dir
+    outdir = get_dir(SRRfile)
+    tmpdir = "%s_downloading_tmp"%SRRfile
+
+    # define the final reads
+    reads1 = "%s_1.fastq.gz"%SRRfile
+    reads2 = "%s_2.fastq.gz"%SRRfile
+
+    if any([file_is_empty(f) for f in [reads1, reads2]]) or replace is True:
+
+        # delete previous files
+        for f in [reads1, reads2]: remove_file(f)
+        delete_folder(tmpdir); make_folder(tmpdir)
+
+        # run fastqdump parallel into the tmpdir 
+        stdfile = "%s/std_fastqdump.txt"%tmpdir
+        run_cmd("%s -s %s -t %i -O %s --tmpdir %s --split-files --gzip > %s 2>&1"%(parallel_fastq_dump, SRRfile, threads, tmpdir, tmpdir, stdfile))
+
+        # check that the fastqdump is correct
+        std_lines = open(stdfile, "r").readlines()
+        written_lines_as_threads = len([l for l in std_lines if l.startswith("Written")])==threads
+        any_error = any(["ERROR" in l.upper() for l in std_lines])
+        if not written_lines_as_threads or any_error:
+            raise ValueError("Something went wrong with the fastqdump. Check the log in %s"%stdfile)
+
+        # rename the reads
+        tmp_reads1 = "%s/%s"%(tmpdir, get_file(reads1))
+        tmp_reads2 = "%s/%s"%(tmpdir, get_file(reads2))
+
+        os.rename(tmp_reads1, reads1)
+        os.rename(tmp_reads2, reads2)
+
+    # delete the tmpdir
+    delete_folder(tmpdir)
+
+    return reads1, reads2
+
+
 
 
 def download_srr_parallelFastqDump(srr, destination_dir, is_paired=True, threads=4, replace=False):
@@ -5413,13 +5595,12 @@ def get_SRA_runInfo_df_with_mapping_data(SRA_runInfo_df, reference_genome, outdi
         outdir_srr = "%s/%s"%(seq_data_dir, srr)
 
         # get the sorted_bam
-        try:
-            sorted_bam = get_sorted_bam_for_untrimmed_reads(reads1, reads2, reference_genome, outdir_srr, threads=threads, replace=replace)
+        sorted_bam = get_sorted_bam_for_untrimmed_reads(reads1, reads2, reference_genome, outdir_srr, threads=threads, replace=replace)
 
-            # get fraction reads mapped
-            fraction_mapped = get_fraction_readPairsMapped(sorted_bam)
+        # get fraction reads mapped
+        fraction_mapped = get_fraction_readPairsMapped(sorted_bam)
 
-        except: fraction_mapped = 0.0
+        #except: fraction_mapped = 0.0
 
         # get the fraction of reads mapped
         fraction_reads_mapped_list.append(fraction_mapped)
@@ -5437,7 +5618,7 @@ def get_taxID_or_BioSample(r, target_taxID):
     if r["TaxID"]==target_taxID: return r["BioSample"]
     else: return r["TaxID"]
 
-def get_SRA_runInfo_df(target_taxID, n_close_samples, nruns_per_sample, outdir, reference_genome, min_coverage, replace, threads, coverage_subset_reads, min_fraction_reads_mapped, add_target_taxIDs=False):
+def get_SRA_runInfo_df(target_taxID, n_close_samples, nruns_per_sample, outdir, reference_genome, min_coverage, replace, threads, coverage_subset_reads, min_fraction_reads_mapped):
 
     """This function mines the SRA to find n_close_samples and nruns_per_sample, returning the necessary df """
 
@@ -5488,14 +5669,13 @@ def get_SRA_runInfo_df(target_taxID, n_close_samples, nruns_per_sample, outdir, 
         # get the runs for this division excluding the target taxID
         print("Getting WGS info")
         fileprefix = "%s/output"%(outdir_ancestors)
-        all_SRA_runInfo_df = get_allWGS_runInfo_fromSRA_forDivision(fileprefix, ancestor_taxID, reference_genome, taxIDs_to_exclude=set(), replace=False, min_coverage=min_coverage).set_index("Run", drop=False)
+        all_SRA_runInfo_df = get_allWGS_runInfo_fromSRA_forDivision(fileprefix, ancestor_taxID, reference_genome, taxIDs_to_exclude={target_taxID}, replace=False, min_coverage=min_coverage).set_index("Run", drop=False)
+
+        # if it is empty, continue
+        if len(all_SRA_runInfo_df)==0: continue
 
         # define the runs with target taxID
         runs_target_taxID = set(all_SRA_runInfo_df[all_SRA_runInfo_df.TaxID==target_taxID].Run)
-
-        # redefine TaxID to include the BioSample for the target taxID
-        all_SRA_runInfo_df["TaxID"] = all_SRA_runInfo_df.apply(lambda r: get_taxID_or_BioSample(r, target_taxID), axis=1)
-        converted_taxIDs_target = set(all_SRA_runInfo_df.loc[runs_target_taxID, "TaxID"])
 
 
         # get the tree
@@ -5519,14 +5699,6 @@ def get_SRA_runInfo_df(target_taxID, n_close_samples, nruns_per_sample, outdir, 
 
         # add the sciName
         all_SRA_runInfo_df["sci_name"] = all_SRA_runInfo_df.TaxID.map(taxID_to_sciName)
-
-        if add_target_taxIDs is True:
-
-            # add the taxIDs of the target
-            for converted_taxID_target in converted_taxIDs_target: 
-                taxID_to_sciName[converted_taxID_target] = "target taxID"
-                taxID_to_distanceToTarget[converted_taxID_target] = 0
-                interesting_taxIDs.add(converted_taxID_target)
 
         # get the taxIDs sorted by the distance (so that the closest )
         interesting_taxIDs_sorted = sorted(interesting_taxIDs, key=(lambda x: taxID_to_distanceToTarget[x]))
@@ -5612,7 +5784,18 @@ def get_SRA_runInfo_df(target_taxID, n_close_samples, nruns_per_sample, outdir, 
 
     return final_SRA_runInfo_df
 
-def get_close_shortReads_table_close_to_taxID(target_taxID, reference_genome, outdir, ploidy, n_close_samples=3, nruns_per_sample=3, replace=False, threads=4, min_fraction_reads_mapped=0.1, coverage_subset_reads=0.1, min_coverage=30, run_in_slurm=False, walltime="02:00:00", queue="debug", StopAfter_sampleIndexingFromSRA=False):
+def connected_to_network(test_host='http://google.com'):
+
+    """Returns whether you are connected to the network"""
+
+    try: 
+
+        urllib.request.urlopen(test_host)
+        return True
+
+    except: return False
+
+def get_close_shortReads_table_close_to_taxID(target_taxID, reference_genome, outdir, ploidy, n_close_samples=3, nruns_per_sample=3, replace=False, threads=4, min_fraction_reads_mapped=0.1, coverage_subset_reads=0.1, min_coverage=30, job_array_mode="local", StopAfter_sampleIndexingFromSRA=False, queue_jobs="debug", max_ncores_queue=768, time_read_obtention="02:00:00", StopAfterPrefecth_of_reads=False):
 
     """
     This function takes a taxID and returns the close_shortReads_table that is required to do optimisation of parameters
@@ -5653,78 +5836,85 @@ def get_close_shortReads_table_close_to_taxID(target_taxID, reference_genome, ou
         SRA_runInfo_df["sampleID"] = "sample" + SRA_runInfo_df.sampleID.apply(str)
         SRA_runInfo_df["runID"] = SRA_runInfo_df.sampleID + "_" + SRA_runInfo_df.Run
 
-        # define dirs
-        downloads_dir = "%s/final_downloading_SRRs"%outdir; make_folder(downloads_dir)
-        final_reads_dir = "%s/final_trimmed_reads_SRRs"%outdir; make_folder(final_reads_dir)
+        # define the dir were you will store the reads
+        reads_dir = "%s/reads"%outdir; make_folder(reads_dir)
 
-        # download the desired runs (this may be done locally)
-        print("downloading each SRR")
-        for srr in SRA_runInfo_df.Run: download_srr_parallelFastqDump(srr, "%s/%s"%(downloads_dir,srr), threads=threads, replace=replace)
-        
-        # define a dict that maps each srr to the reads of reads 
+        # initialize the final dict
         srr_to_readsDict = {}
 
-        # initialize the cmds to submit to the cluster
-        all_cmds = [] 
+        # initialize the cmds
+        all_cmds = []
 
-        # replace each of the downloaded SRRs by the trimmed ones
         for srr in SRA_runInfo_df.Run:
             print("trimming %s reads"%srr)
 
-            # define the raw reads
-            reads1 = "%s/%s/%s_1.fastq.gz"%(downloads_dir, srr, srr)
-            reads2 = "%s/%s/%s_2.fastq.gz"%(downloads_dir, srr, srr)
+            # make the outdir for this
+            outdir_srr = "%s/%s"%(reads_dir, srr); make_folder(outdir_srr)
 
-            # define the trimmed reads
-            trimmed_reads1 = "%s.trimmed.fastq.gz"%reads1
-            trimmed_reads2 = "%s.trimmed.fastq.gz"%reads2
+            # define files
+            trimmed_reads1 = "%s/%s_trimmed_reads_1.fastq.gz"%(outdir_srr, srr)
+            trimmed_reads2 = "%s/%s_trimmed_reads_2.fastq.gz"%(outdir_srr, srr)
+            SRRfile = "%s/%s.srr"%(outdir_srr, srr)
 
-            # define the final trimmed reads
-            final_trimmed_reads1 = "%s/%s_1.fastq.gz"%(final_reads_dir, srr)
-            final_trimmed_reads2 = "%s/%s_2.fastq.gz"%(final_reads_dir, srr)
+            # define the finalisation file
+            if StopAfterPrefecth_of_reads is True: final_file = SRRfile
+            else: final_file = trimmed_reads2 # the last one generated
 
-            if file_is_empty(trimmed_reads1) or file_is_empty(trimmed_reads2) or replace is True:
+            # get the cmd if necessary
+            if file_is_empty(final_file) or replace is True:
 
-                # get the trimmed reads
-                cmd = "%s -f1 %s -f2 %s --threads %i"%(run_trimmomatic_and_fastqc_py, reads1, reads2, threads)
-                if replace is True: cmd += " --replace"
+                # define the cmd and add it
+                cmd = "%s --srr %s --outdir %s --threads %i"%(get_trimmed_reads_for_srr_py, srr, outdir_srr, threads)
+                if StopAfterPrefecth_of_reads is True: cmd += " --stop_after_prefetch"
 
-                # add to cmds
-                if run_in_slurm is True: 
-                    all_cmds.append(cmd)
-                    continue
-                else: 
+                all_cmds.append(cmd)
 
-                    # get the trimmed reads
-                    run_cmd(cmd)
-
-            if file_is_empty(final_trimmed_reads1): os.rename(trimmed_reads1, final_trimmed_reads1)
-            if file_is_empty(final_trimmed_reads2): os.rename(trimmed_reads2, final_trimmed_reads2)
-
-            # add to the dict
-            srr_to_readsDict[srr] = {"short_reads1":final_trimmed_reads1, "short_reads2":final_trimmed_reads2}
+            # keep the files
+            srr_to_readsDict[srr] = {"short_reads1":trimmed_reads1, "short_reads2":trimmed_reads2}
 
         # if there are all_cmds, run them in a job array
         if len(all_cmds)>0:
-            print("Submitting %i trimmomatic jobs to the MN"%(len(all_cmds)))
+
+            # if you are in local, run them in parallel. Each job in one threads
+            if job_array_mode=="local" and StopAfterPrefecth_of_reads is True: 
+
+                print(all_cmds)
+
+                print("running prefetch in parallel")
+                with multiproc.Pool(multiproc.cpu_count()) as pool:
+                    pool.starmap(run_cmd, [(x,) for x in all_cmds])
+                    pool.close()
+
+            # local
+            elif job_array_mode=="local" and StopAfterPrefecth_of_reads is False: 
+
+                print("running all files one after the other")
+                for cmd in all_cmds: run_cmd(cmd)
+
+            # if you are in a greasy environment
+            elif job_array_mode=="greasy": 
+
+                read_downloading_dir = "%s/read_downloading_files"%outdir; make_folder(read_downloading_dir)
+                print("Submitting %i downloading reads jobs to greasy. All files will be stored in %s"%(len(all_cmds), read_downloading_dir))
+
+                jobs_filename = "%s/jobs.getting_SRAdatasets"%read_downloading_dir
+                open(jobs_filename, "w").write("\n".join(all_cmds))
+
+                generate_jobarray_file_greasy(jobs_filename, walltime=time_read_obtention,  name="getting_SRAdatasets", queue=queue_jobs, sbatch=True, ncores_per_task=threads, number_tasks_to_run_at_once="all", max_ncores_queue=max_ncores_queue)
+
+            else: raise ValueError("%s is not valid"%job_array_mode)
+
+            # exit before it starts
+            print("You need to wait until the read obtention is is finsihed")
+            exit(0)
 
 
-            STDOUT = "%s/STDOUT"%final_reads_dir
-            STDERR = "%s/STDERR"%final_reads_dir
-
-            jobs_filename = "%s/jobs.trimming_SRAdatasets"%final_reads_dir
-            open(jobs_filename, "w").write("\n".join(all_cmds))
-
-          
-            generate_jobarray_file_slurm(jobs_filename, stderr=STDERR, stdout=STDOUT, walltime=walltime,  name="trimming_SRAreads", queue=queue, sbatch=True, ncores_per_task=threads, rmstd=True, constraint="", number_tasks_to_run_at_once="all" )
-
-            raise ValueError("You need to wait until the trimming of downloaded reads is finsihed")
+        if StopAfterPrefecth_of_reads is True: 
+            print("You need to get the reads, not only stop after prefetch")
+            exit(0)
 
         # add to the df
         for f in ["short_reads1", "short_reads2"]: SRA_runInfo_df[f] = SRA_runInfo_df.Run.apply(lambda srr: srr_to_readsDict[srr][f])
-
-        # remove the downloads dir
-        delete_folder(downloads_dir)
 
         # get the final df
         final_df = SRA_runInfo_df[["sampleID", "runID", "short_reads1", "short_reads2"]]
@@ -5732,11 +5922,7 @@ def get_close_shortReads_table_close_to_taxID(target_taxID, reference_genome, ou
         # write
         final_df.to_csv(close_shortReads_table, sep="\t", header=True, index=False)
 
-
-    print(final_df)
-
-    dlkajhdkhadh
-
+    print("taking reads from %s"%close_shortReads_table)
     #########################################
 
     return close_shortReads_table
@@ -6756,7 +6942,7 @@ def get_svtype_to_svfile_and_df_gridss_from_perSVade_outdir(perSVade_outdir):
 
     return svtype_to_svfile, df_gridss
 
-def get_ID_to_svtype_to_svDF_for_setOfGenomes_highConfidence(close_shortReads_table, reference_genome, outdir, replace=False, threads=4, mitochondrial_chromosome="mito_C_glabrata_CBS138", run_in_slurm=False, walltime="02:00:00", queue="debug"):
+def get_ID_to_svtype_to_svDF_for_setOfGenomes_highConfidence(close_shortReads_table, reference_genome, outdir, replace=False, threads=4, mitochondrial_chromosome="mito_C_glabrata_CBS138", job_array_mode="local", walltime="02:00:00", queue="debug"):
 
     """Generates a dict that maps each sample in genomes_withSV_and_shortReads_table to an svtype and a DF with all the info about several vars. It only gets the high-confidence vars.
 
@@ -6804,10 +6990,12 @@ def get_ID_to_svtype_to_svDF_for_setOfGenomes_highConfidence(close_shortReads_ta
                 if replace is True: cmd += " --replace"
 
                 # if the running in slurm is false, just run the cmd
-                if run_in_slurm is False: run_cmd(cmd)
-                else: 
+                if job_array_mode=="local": run_cmd(cmd)
+                elif job_array_mode=="greasy": 
                     all_cmds.append(cmd)
                     continue
+
+                else: raise ValueError("%s is not valid"%job_array_mode)
 
             # define the svdict
             svtype_to_svfile,  df_gridss = get_svtype_to_svfile_and_df_gridss_from_perSVade_outdir(outdir_gridssClove)
@@ -6817,7 +7005,7 @@ def get_ID_to_svtype_to_svDF_for_setOfGenomes_highConfidence(close_shortReads_ta
             all_sampleID_to_dfGRIDSS[ID] = df_gridss
 
         # if yoy are running on slurm, get it in a job array
-        if run_in_slurm is True: 
+        if job_array_mode=="greasy": 
 
             if len(all_cmds)>0: 
                 print("submitting %i jobs to the cluster for the real data"%len(all_cmds))
@@ -6828,7 +7016,7 @@ def get_ID_to_svtype_to_svDF_for_setOfGenomes_highConfidence(close_shortReads_ta
                 STDERR = "%s/STDERR"%all_realVars_dir
                 STDOUT = "%s/STDOUT"%all_realVars_dir
 
-                generate_jobarray_file_slurm(jobs_filename, stderr=STDERR, stdout=STDOUT, walltime=walltime,  name="getRealSVs", queue=queue, sbatch=True, ncores_per_task=threads, rmstd=True, constraint="", number_tasks_to_run_at_once="all" )
+                generate_jobarray_file_greasy(jobs_filename, stderr=STDERR, stdout=STDOUT, walltime=walltime,  name="getRealSVs", queue=queue, sbatch=True, ncores_per_task=threads, rmstd=True, constraint="", number_tasks_to_run_at_once="all" )
 
                 raise ValueError("You have to wait under all the jobs in testRealSVs are done. Wait until the jobs are done and rerun this pipeline to continue")
 
@@ -6860,7 +7048,7 @@ def set_position_to_max(pos, maxPos):
     if pos>maxPos: return maxPos
     else: return pos
 
-def get_compatible_real_svtype_to_file(close_shortReads_table, reference_genome, outdir, replace=False, threads=4, max_nvars=100, mitochondrial_chromosome="mito_C_glabrata_CBS138", run_in_slurm=False):
+def get_compatible_real_svtype_to_file(close_shortReads_table, reference_genome, outdir, replace=False, threads=4, max_nvars=100, mitochondrial_chromosome="mito_C_glabrata_CBS138", job_array_mode="local"):
 
     """This function generates a dict of svtype to the file for SVs that are compatible and ready to insert into the reference_genome. All the files are written into outdir. Only a set of 'high-confidence' SVs are reported, which are those that, for each sampleID inclose_shortReads_table, have a reasonable minimum allele frequency and all breakpoints with 'PASS' and are found in all the genomes of the same sampleID.
 
@@ -6875,7 +7063,7 @@ def get_compatible_real_svtype_to_file(close_shortReads_table, reference_genome,
     pipeline_start_time = time.time()
 
     # get all the high-confidence real variants
-    ID_to_svtype_to_svDF = get_ID_to_svtype_to_svDF_for_setOfGenomes_highConfidence(close_shortReads_table, reference_genome, outdir, replace=replace, threads=threads, mitochondrial_chromosome=mitochondrial_chromosome, run_in_slurm=run_in_slurm)
+    ID_to_svtype_to_svDF = get_ID_to_svtype_to_svDF_for_setOfGenomes_highConfidence(close_shortReads_table, reference_genome, outdir, replace=replace, threads=threads, mitochondrial_chromosome=mitochondrial_chromosome, job_array_mode=job_array_mode)
 
     # define the df with the realVars info
     all_realVars_dir = "%s/all_realVars"%(outdir)
@@ -8533,8 +8721,6 @@ def get_benchmarking_df_for_testSVs_from_trainSV_filterSets(test_SVdict, outdir,
 ################# GRAPHICS FUNCTIONS #################
 ######################################################
 
-
-
 def plot_clustermap_with_annotation(df, row_colors_df, col_colors_df, filename, title="clustermap", col_cluster=False, row_cluster=False, colorbar_label="default label", adjust_position=True, legend=True, idxs_separator_pattern="_", texts_to_strip={"L001"}, default_label_legend="control", df_annotations=None, cmap=sns.color_palette("RdBu_r", 50), ylabels_graphics_df=None, grid_lines=True, add_to_legend_x=0.5):
 
     """Takes a df were the index is the annotation and the cols are samples. It will be saved under filename. ylabels_graphics_df can be a df containing fontweight and color for each index value in df"""
@@ -8705,8 +8891,6 @@ def plot_clustermap_with_annotation(df, row_colors_df, col_colors_df, filename, 
     cm.savefig(filename)
 
     return cm
-
-
 
 
 def getPlots_filtering_accuracy_across_genomes_and_ploidies(df_cross_benchmark, PlotsDir, simName_to_color={"simulation_1":"black", "simulation_2":"red", "simulation_3":"green"}, simType_to_color={'biased_towards_repeats':"red", 'realData':"black", 'uniform':"blue", "simulated":"blue"}, ploidy_to_color={'consensus_ref': 'gray', 'haploid': 'black', 'diploid_hetero': 'maroon', 'ref:3_var:1': 'red', 'ref:9_var:1': 'lightsalmon', 'ref:99_var:1': 'white'}, svtype_to_color={"tandemDuplications": "gray", "deletions": "black", "inversions": "blue", "translocations": "olive", "insertions": "red", "remaining":"magenta", "integrated":"c"}):
@@ -8894,10 +9078,6 @@ def getPlots_filtering_accuracy_across_genomes_and_ploidies(df_cross_benchmark, 
     return dict(zip(["simName", "simType", "ploidy", "svtype"], best_train_idx.split("||||")))
 
     ##################################################################
-
-
-
-
 
 ######################################################
 ######################################################
@@ -9456,14 +9636,12 @@ def report_accuracy_simulations(sorted_bam, reference_genome, outdir, real_svtyp
     plot_report_accuracy_simulations(df_benchmarking, filename)
 
 
-def generate_jobarray_file_greasy(jobs_filename, stderr="./STDERR", stdout="./STDOUT", walltime="48:00:00",  name="JobArray", queue="bsc_ls", sbatch=False, ncores_per_task=1, rmstd=True, constraint="", email="mikischikora@gmail.com", number_tasks_to_run_at_once="all"):
+def generate_jobarray_file_greasy(jobs_filename, walltime="48:00:00",  name="JobArray", queue="bsc_ls", sbatch=False, ncores_per_task=1, constraint="", email="miquel.schikora@bsc.es", number_tasks_to_run_at_once="all", max_ncores_queue=768):
     
     """ This function takes:
-        jobs_filename: a path to a file in which each line is a command that has to be executed in a sepparate cluster node
+        jobs_filename: a path to a file in which each line is a command that has to be executed as an independent job
         name: the name of the jobs array
-        stderr and stdout: paths to directories that will contains the STDERR and STDOUT files
         walltime is the time in "dd-hh:mm:ss". It is the sum of job times
-        memory is the RAM: i.e.: 4G, 2M, 200K
         ncores_per_task is the number of cores that each job gets
         
         name is the name prefix
@@ -9477,26 +9655,19 @@ def generate_jobarray_file_greasy(jobs_filename, stderr="./STDERR", stdout="./ST
         This is run in the VarCall_CNV_env
     """
 
-    def removeSTDfiles(stddir):
-        """ Will remove all files in stddir with name"""
-        for file in os.listdir(stddir):
-            if file.startswith(name): os.unlink("%s/%s"%(stddir, file))
+    # define the stddir
+    outdir = get_dir(jobs_filename)
+    stddir = "%s/STDfiles"%outdir; make_folder(stddir)
 
-    # prepare the stderr and stdout
-    if not os.path.isdir(stderr): os.mkdir(stderr)
-    elif rmstd is True: removeSTDfiles(stderr)
-
-    if not os.path.isdir(stdout): os.mkdir(stdout)
-    elif rmstd is True: removeSTDfiles(stdout)
+    # remove all previous files from stddir that start with the same name
+    for file in os.listdir(stddir): 
+        if file.startswith(name): remove_file("%s/%s"%(stddir, file))
     
     # Get the number of jobs
     n_jobs = len(open(jobs_filename, "r").readlines())
 
-    # if default, number_tasks_to_run_at_once is 0, which means that it will try to run all tasks at once
-    if number_tasks_to_run_at_once=="all": 
-
-        queue_to_maxCores = {"debug":768, "bsc_ls":2400}
-        number_tasks_to_run_at_once = min([int(queue_to_maxCores[queue]/ncores_per_task)-1, n_jobs])
+    # if default, number_tasks_to_run_at_once is all, which means that it will try to run all tasks at once
+    if number_tasks_to_run_at_once=="all": number_tasks_to_run_at_once = min([int(max_ncores_queue/ncores_per_task)-1, n_jobs])
 
     # define the constraint only if it is necessary
     if constraint!="": constraint_line = "#SBATCH --constraint=%s"%constraint
@@ -9509,12 +9680,20 @@ def generate_jobarray_file_greasy(jobs_filename, stderr="./STDERR", stdout="./ST
         if file.startswith("%s-"%name_jobs_filename) and file.endswith(".rst"): 
             remove_file("%s/%s"%(get_dir(jobs_filename), file))
 
+    # rewrite the jobs_filename so that each std goes to a different file
+    std_perJob_prefix = "%s/%s"%(stddir, name)
+    jobs_filename_lines = ["%s > %s.%i.out 2>&1"%(l.strip(), std_perJob_prefix, I+1) for I, l in enumerate(open(jobs_filename, "r").readlines())]
+    open(jobs_filename, "w").write("\n".join(jobs_filename_lines))
+
+    # define the environment activating parms
     #"echo 'sourcing conda to run pipeline...';",
     #SOURCE_CONDA_CMD,
     #CONDA_ACTIVATING_CMD,
 
-    # define the greasy log file
-    greasy_logfile = "%s/%s_greasy.log"%(stdout, name)
+    # define the std files
+    greasy_logfile = "%s/%s_greasy.log"%(stddir, name)
+    stderr_file = "%s/%s_stderr.txt"%(stddir, name)
+    stdout_file = "%s/%s_stdout.txt"%(stddir, name)
 
     # define arguments
     arguments = ["#!/bin/sh", # the interpreter
@@ -9522,10 +9701,10 @@ def generate_jobarray_file_greasy(jobs_filename, stderr="./STDERR", stdout="./ST
                  "#SBATCH --qos=%s"%queue,
                  "#SBATCH --job-name=%s"%name,
                  "#SBATCH --cpus-per-task=%i"%ncores_per_task,
-                 "#SBATCH --error=%s/%s_%sA_%sa.err"%(stderr, name, "%", "%"), # the standard error
-                 "#SBATCH --output=%s/%s_%sA_%sa.out"%(stdout, name, "%", "%"), # the standard error
+                 "#SBATCH --error=%s"%(stderr_file), # the standard error
+                 "#SBATCH --output=%s"%(stdout_file), # the standard output
                  "#SBATCH --get-user-env", # this is to maintain the environment
-                 "#SBATCH --workdir=.",
+                 "#SBATCH --workdir=%s"%outdir,
                  "#SBATCH --ntasks=%i"%number_tasks_to_run_at_once,
                  "#SBATCH --mail-type=all",
                  "#SBATCH --mail-user=%s"%email,
@@ -9719,7 +9898,7 @@ def plot_fraction_overlapping_realSVs(df_benchmarking, filename):
 
 
 
-def report_accuracy_realSVs(close_shortReads_table, reference_genome, outdir, real_svtype_to_file, outdir_finding_realVars, threads=4, replace=False, n_simulated_genomes=2, mitochondrial_chromosome="mito_C_glabrata_CBS138", simulation_ploidies=["haploid", "diploid_homo", "diploid_hetero", "ref:2_var:1", "ref:3_var:1", "ref:4_var:1", "ref:5_var:1", "ref:9_var:1", "ref:19_var:1", "ref:99_var:1"], range_filtering_benchmark="theoretically_meaningful", nvars=100, run_in_slurm=False, walltime="08:00:00", queue="bsc_ls"):
+def report_accuracy_realSVs(close_shortReads_table, reference_genome, outdir, real_svtype_to_file, outdir_finding_realVars, threads=4, replace=False, n_simulated_genomes=2, mitochondrial_chromosome="mito_C_glabrata_CBS138", simulation_ploidies=["haploid", "diploid_homo", "diploid_hetero", "ref:2_var:1", "ref:3_var:1", "ref:4_var:1", "ref:5_var:1", "ref:9_var:1", "ref:19_var:1", "ref:99_var:1"], range_filtering_benchmark="theoretically_meaningful", nvars=100, job_array_mode="local", walltime="08:00:00", queue="bsc_ls"):
 
 
     """This function runs the SV pipeline for all the datasets in close_shortReads_table with the fastSV, optimisation based on uniform parameters and optimisation based on realSVs (specified in real_svtype_to_file). outdir_finding_realVars is the outdir where you previously found the real vars, which is useful to not repeat the alignment of the reads"""
@@ -9791,10 +9970,12 @@ def report_accuracy_realSVs(close_shortReads_table, reference_genome, outdir, re
                     if len(svtype_to_svfile)>0: cmd += " --SVs_compatible_to_insert_dir %s"%SVs_compatible_to_insert_dir
 
                     # if the running in slurm is false, just run the cmd
-                    if run_in_slurm is False: run_cmd(cmd)
-                    else: 
+                    if job_array_mode=="local": run_cmd(cmd)
+                    elif job_array_mode=="greasy": 
                         all_cmds.append(cmd)
                         continue
+
+                    else: raise ValueError("%s is not valid"%job_array_mode)
 
                 # define the svdict and the df_gridss 
                 svtype_to_svfile, df_gridss = get_svtype_to_svfile_and_df_gridss_from_perSVade_outdir(outdir_runID)
@@ -9808,7 +9989,7 @@ def report_accuracy_realSVs(close_shortReads_table, reference_genome, outdir, re
                 if typeSimulations!="fast": all_sampleID_to_dfBestAccuracy[ID] = pd.read_csv("%s/SVdetection_output/parameter_optimisation/benchmarking_all_filters_for_all_genomes_and_ploidies/df_cross_benchmark_best.tab"%outdir_runID, sep="\t")
 
         # if you are not running on slurm, just execute one cmd after the other
-        if run_in_slurm is True:
+        if job_array_mode=="greasy":
 
             if len(all_cmds)>0: 
                 print("submitting %i jobs to the cluster for testing real-data accuracy"%len(all_cmds))
@@ -9819,7 +10000,7 @@ def report_accuracy_realSVs(close_shortReads_table, reference_genome, outdir, re
                 STDERR = "%s/STDERR"%outdir
                 STDOUT = "%s/STDOUT"%outdir
 
-                generate_jobarray_file_slurm(jobs_filename, stderr=STDERR, stdout=STDOUT, walltime=walltime,  name="testRealSVs", queue=queue, sbatch=True, ncores_per_task=threads, rmstd=True, constraint="", number_tasks_to_run_at_once="all" )
+                generate_jobarray_file_greasy(jobs_filename, stderr=STDERR, stdout=STDOUT, walltime=walltime,  name="testRealSVs", queue=queue, sbatch=True, ncores_per_task=threads, rmstd=True, constraint="", number_tasks_to_run_at_once="all" )
 
                 raise ValueError("You have to wait under all the jobs in testRealSVs are done")
 
@@ -9923,6 +10104,97 @@ def get_simulated_bamFile(outdir, reference_genome, replace=False, threads=4, to
     index_bam = "%s.bai"%simulated_sorted_bam
 
     return simulated_sorted_bam, index_bam
+
+
+def get_short_and_long_reads_sameBioSample(outdir, taxID, reference_genome, replace=False, min_coverage=30):
+
+    """This function takes a taxID and looks in the SRA database if there are short paired Illumina reads and MinION ONT reads for the same BioSample, returning the SRRs."""
+
+    make_folder(outdir)
+
+    # get the WGS dataset for all the datasets under this taxID
+    fileprefix = "%s/wgs_data"%outdir
+    wgs_runInfo_df = get_allWGS_runInfo_fromSRA_forDivision(fileprefix, taxID, reference_genome, replace=False, min_coverage=min_coverage).set_index("Run", drop=False)
+
+    # get the oxford nanopore data
+    fileprefix = "%s/ONT_data"%outdir
+    ONT_runInfo_df = get_allOxfordNanopore_runInfo_fromSRA_forDivision(fileprefix, taxID, reference_genome, replace=replace, min_coverage=min_coverage)
+
+    # get intersecting biosamples
+    intersecting_biosamples = set(wgs_runInfo_df.BioSample).intersection(set(ONT_runInfo_df.BioSample))
+
+    # debug the fact that there are empty datasets
+    if len(intersecting_biosamples)==0: raise ValueError("There are no intersecting BioSamples")
+
+    # map each biosample to the ilumina coverage
+    interseting_BioSamples = wgs_runInfo_df[wgs_runInfo_df.BioSample.isin(intersecting_biosamples)].sort_values("expected_coverage", ascending=False)["BioSample"]
+
+    # get the best SRR
+    for bioSample in interseting_BioSamples:
+        print("\n\n", bioSample)
+
+        # get the df for each
+        df_wgs = wgs_runInfo_df[wgs_runInfo_df.BioSample==bioSample].sort_values("expected_coverage", ascending=False)
+        df_ONT = ONT_runInfo_df[ONT_runInfo_df.BioSample==bioSample].sort_values("expected_coverage", ascending=False)
+
+        wgs_run = df_wgs.iloc[0]["Run"]
+        ONT_run = df_ONT.iloc[0]["Run"]
+
+        print("These are the Illumina reads:\n:", df_wgs[["Run", "SampleName"]].iloc[0])
+        print("These are the ONT reads:\n:", df_ONT[["Run", "SampleName"]].iloc[0])
+
+        break
+
+    return wgs_run, ONT_run
+
+
+def report_accuracy_golden_set(goldenSet_dir, outdir, reference_genome, real_svtype_to_file, threads=4, replace=False, n_simulated_genomes=2, mitochondrial_chromosome="mito_C_glabrata_CBS138", simulation_ploidies=["haploid", "diploid_homo", "diploid_hetero", "ref:2_var:1", "ref:3_var:1", "ref:4_var:1", "ref:5_var:1", "ref:9_var:1", "ref:19_var:1", "ref:99_var:1"], range_filtering_benchmark="theoretically_meaningful", nvars=100, job_array_mode="local", time_read_obtention="02:00:00", time_perSVade_running="48:00:00", queue_jobs="debug", StopAfterPrefecth_of_reads=False, StopAfter_sampleIndexingFromSRA=False, max_ncores_queue=768, target_taxID=None, min_coverage=30):
+
+    """This function takes a directory that has the golden set vars and generates plots reporting the accuracy. If auto, it will find them in the SRA and write them under outdir."""
+
+    print("calculating accuracy for golden set SVcalls")
+    make_folder(outdir)
+
+    ### automatic obtention of golden set reads ###
+    if goldenSet_dir=="auto":
+
+        # create this dir un
+        goldenSet_dir = "%s/automatic_obtention_goldenSetReads"%outdir; make_folder(goldenSet_dir)
+
+        #### define the SRRs to download ####
+
+        # if the tax ID is in taxID_to_srrs_goldenSet, get it
+        if target_taxID in taxID_to_srrs_goldenSet: 
+            short_reads_srr = taxID_to_srrs_goldenSet[target_taxID]["short_reads"]
+            long_reads_srr = taxID_to_srrs_goldenSet[target_taxID]["long_reads"]
+
+        else: short_reads_srr, long_reads_srr = get_short_and_long_reads_sameBioSample("%s/finding_sameBioSample_srrs"%goldenSet_dir, target_taxID, reference_genome, min_coverage=min_coverage, replace=replace)
+
+
+
+
+
+
+
+    # define the reads, they are suposed to be called like this
+    longReads = "%s/long_reads.fastq.gz"%goldenSet_dir
+    short_reads1 = "%s/short_reads_1.fastq.gz"%goldenSet_dir
+    short_reads2 = "%s/short_reads_2.fastq.gz"%goldenSet_dir
+
+    if any([file_is_empty(f) for f in [longReads, short_reads1, short_reads2]]): raise ValueError("Your golden dir %s should contain long_reads.fasta, short_reads_1.fastq.gz and short_reads_2.fastq.gz"%goldenSet_dir)
+
+   
+
+
+
+
+
+
+
+    print(goldenSet_dir)
+
+    ljandjdajadljhad
+
 
 
 

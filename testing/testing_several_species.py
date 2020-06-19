@@ -11,12 +11,12 @@ import sys
 # define the parent dir of the cluster or not
 ParentDir = "%s/samba"%(os.getenv("HOME")); # local
 if os.path.exists(ParentDir):
-    run_in_slurm_cmd = ""    
+    run_in_cluster = False    
     threads = 4
 else:
-    run_in_slurm_cmd = " --run_in_slurm "
+    run_in_cluster = True    
     ParentDir = "/gpfs/projects/bsc40/mschikora"
-    threads = 48
+    threads = 12
 
 
 # define the dir where all perSVade code is
@@ -67,7 +67,13 @@ D. melanogaster: ref genome from GenBank GCA_000001215.4
 D. rerio: ref genome from GenBank removing the alternate haplotypes. (this is GCA_000002035.4)
 
 H. sapiens: ref genome from GenBank removing the alternate haplotypes. (this is GCA_000001405.28)
+
+For C. glabrata I got the nanopore reads from ~/../mmarcet/nanopore/GABALDON02/assembly_files/BG2/nanopore.reads.pass.fastq.gz and the short reads from Ewa's experiment in RUN4_BG2_SRA_WT
+
 """
+
+# define the table for C. glabrata
+close_shortReads_table_Cglabrata = "%s/scripts/perSVade/perSVade_repository/testing/Cglabrata_table_short_reads.tab"%ParentDir
 
 # define important info about each species: taxID, spName, ploidy
 species_Info = [("5478", "Candida_glabrata", 1, "mito_C_glabrata_CBS138"),
@@ -76,10 +82,10 @@ species_Info = [("5478", "Candida_glabrata", 1, "mito_C_glabrata_CBS138"),
                 ("746128", "Aspergillus_fumigatus", 1, "CM016889.1"),
                 ("3702", "Arabidopsis_thaliana", 2, "BK010421.1,AP000423.1"),
                 ("7227", "Drosophila_melanogaster", 2, "KJ947872.2")]
-
-
-                #("7955", "Danio_rerio", 2, "NC_002333.2"),
+                #("7955", "Danio_rerio", 2, "NC_002333.2")]
                 #("9606", "Homo_sapiens", 2, "NC_012920.1")]
+
+taxIDs_with_noON_overalpping = {"5478", "5476", "746128"}
 
 # go through each species
 for taxID, spName, ploidy, mitochondrial_chromosome in species_Info:
@@ -92,8 +98,27 @@ for taxID, spName, ploidy, mitochondrial_chromosome in species_Info:
     # create an outdir
     outdir_perSVade = "%s/%s_%s"%(outdir_testing, taxID, spName); fun.make_folder(outdir_perSVade)
 
-    # get the reads from SRA. 3 samples, 3 runs per sample
-    fun.run_cmd("%s --ref %s --threads %i -o %s --close_shortReads_table auto --target_taxID %s --n_close_samples 3 --nruns_per_sample 3 -f1 skip -f2 skip %s --mitochondrial_chromosome %s --gff %s --StopAfter_readObtentionFromSRA --StopAfter_sampleIndexingFromSRA"%(perSVade_py, genome, threads, outdir_perSVade, taxID, run_in_slurm_cmd, mitochondrial_chromosome, gff))
+    # define the table with short reads
+    if spName=="Candida_glabrata": close_shortReads_table = close_shortReads_table_Cglabrata
+    else: close_shortReads_table = "auto"
+
+
+
+    # get the reads from SRA. 3 samples, 3 runs per sample. Process with the 
+    cmd = "%s --ref %s --threads %i -o %s --close_shortReads_table %s --target_taxID %s --n_close_samples 3 --nruns_per_sample 3 -f1 skip -f2 skip --mitochondrial_chromosome %s --gff %s --StopAfter_readObtentionFromSRA"%(perSVade_py, genome, threads, outdir_perSVade, close_shortReads_table, taxID, mitochondrial_chromosome, gff)
+
+    # get the golden set running 
+    #if taxID in taxIDs_with_noON_overalpping: continue
+    #cmd = "%s --ref %s --threads %i -o %s --target_taxID %s --n_close_samples 3 --nruns_per_sample 3 -f1 skip -f2 skip --mitochondrial_chromosome %s --gff %s --StopAfterPrefecth_of_reads --goldenSet_dir auto --skip_SVcalling"%(perSVade_py, genome, threads, outdir_perSVade, taxID, mitochondrial_chromosome, gff)
+
+    # add options depending on the machine
+    if run_in_cluster is True: cmd += " --job_array_mode greasy --queue_jobs bsc_ls --max_ncores_queue 108 --time_read_obtention 12:00:00 "
+    else: cmd += " --StopAfterPrefecth_of_reads --job_array_mode local"
+
+    fun.run_cmd(cmd)
+
+
+    #if taxID=="5476": adkjhdakg
 
 
 

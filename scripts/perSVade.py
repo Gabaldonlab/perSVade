@@ -69,11 +69,15 @@ parser.add_argument("--fast_SVcalling", dest="fast_SVcalling", action="store_tru
 # pipeline skipping options 
 parser.add_argument("--skip_SVcalling", dest="skip_SVcalling", action="store_true", default=False, help="Do not run SV calling.")
 
+# options of the long reads-based benchmarking
+parser.add_argument("--goldenSet_dir", dest="goldenSet_dir", type=str, default=None, help="This is the path to a directory that has some oxford nanopore reads (should end with'long_reads.fasta') and some  short paired end reads (ending with '1.fastq.gz' and '2.fastq.gz'). These are assumed to be from the exact same sample. If provided, perSVade will call SVs from it using the --nanopore configuration of svim and validate each of the 'real' (if provided), 'uniform' and 'fast' versions from the short reads on it. If you state 'auto', it will look for samples of your --target_taxID in the SRA that are suited. We already provide some automated finding of reads in the SRA for several taxIDs: 3702 (Arabidopsis_thaliana). All the jobs will be run in an squeue as specified by --job_array_mode.")
+
 # pipeline stopping options
 parser.add_argument("--StopAfter_readObtentionFromSRA", dest="StopAfter_readObtentionFromSRA", action="store_true", default=False, help="Stop after obtaining reads from SRA.")
 parser.add_argument("--StopAfter_sampleIndexingFromSRA", dest="StopAfter_sampleIndexingFromSRA", action="store_true", default=False, help="It will stop after indexing the samples of SRA. You can use this if, for example, your local machine has internet connection and your slurm cluster does not. You can first obtain the SRA indexes in the local machine. And then run again this pipeline without this option in the slurm cluster.")
 parser.add_argument("--StopAfter_genomeObtention", dest="StopAfter_genomeObtention", action="store_true", default=False, help="Stop after genome obtention.")
 parser.add_argument("--StopAfter_bamFileObtention", dest="StopAfter_bamFileObtention", action="store_true", default=False, help="Stop after obtaining the BAM file of aligned reads.")
+parser.add_argument("--StopAfterPrefecth_of_reads", dest="StopAfterPrefecth_of_reads", action="store_true", default=False, help="Stop after obtaining the prefetched .srr file in case close_shortReads_table is 'auto'")
 
 
 # testing options
@@ -84,11 +88,8 @@ parser.add_argument("--testSimulationsAccuracy", dest="testSimulationsAccuracy",
 
 # simulation parameter args
 parser.add_argument("--nvars", dest="nvars", default=50, type=int, help="Number of variants to simulate. Note that the number of balanced translocations inserted in simulations will be always as maximum the number of gDNA chromosome-pairs implicated.")
-
 parser.add_argument("--nsimulations", dest="nsimulations", default=2, type=int, help="The number of 'replicate' simulations that will be produced.")
-
 parser.add_argument("--simulation_ploidies", dest="simulation_ploidies", type=str, default="haploid,diploid_hetero", help='A comma-sepparated string of the ploidies to simulate for parameter optimisation. It can have any of "haploid", "diploid_homo", "diploid_hetero", "ref:2_var:1", "ref:3_var:1", "ref:4_var:1", "ref:5_var:1", "ref:9_var:1", "ref:19_var:1", "ref:99_var:1" ')
-
 parser.add_argument("--range_filtering_benchmark", dest="range_filtering_benchmark", type=str, default="theoretically_meaningful", help='The range of parameters that should be tested in the SV optimisation pipeline. It can be any of large, medium, small, theoretically_meaningful or single.')
 
 # alignment args
@@ -98,7 +99,14 @@ parser.add_argument("-sbam", "--sortedbam", dest="sortedbam", default=None, help
 parser.add_argument("--run_qualimap", dest="run_qualimap", action="store_true", default=False, help="Run qualimap for quality assessment of bam files. This may be inefficient sometimes because of the ")
 
 # machine options
-parser.add_argument("--run_in_slurm", dest="run_in_slurm", action="store_true", default=False, help="If provided, it will run in a job arrays the works of --testSimulationsAccuracy and --testRealDataAccuracy. This requires this script to be run on a slurm-based cluster.")
+parser.add_argument("--job_array_mode", dest="job_array_mode", type=str, default="local", help="It specifies in how to run the job arrays for --testSimulationsAccuracy,  --testRealDataAccuracy, the downloading of reads if  --close_shortReads_table is auto, and the SV calling for the table in --close_shortReads_table. It can be 'local' (runs one job after the other or 'greasy' (each job is run on a diferent node of a slurm cluster with the greasy system. It requires the machine to be able to run greasy jobs, as in https://user.cscs.ch/tools/high_throughput/). If 'greasy' is specified, this pipeline will stop with a warning everytime that unfinished jobs have to be submited, and you'll be able to track the job status with the squeue command.")
+
+parser.add_argument("--queue_jobs", dest="queue_jobs", type=str, default="debug", help="The name of the queue were to submit the jobs when running with greasy")
+parser.add_argument("--max_ncores_queue", dest="max_ncores_queue", type=int, default=768, help="The maximum number of cores that the queue can handle in a single job")
+
+# timings of queues
+parser.add_argument("--time_read_obtention", dest="time_read_obtention", type=str, default="02:00:00", help="The time that the fastqdumping and trimming of reads will take to perform this task")
+parser.add_argument("--time_perSVade_running", dest="time_perSVade_running", type=str, default="48:00:00", help="The time that the running of perSVade in nodes of a cluster will take.")
 
 # other args
 parser.add_argument("-mchr", "--mitochondrial_chromosome", dest="mitochondrial_chromosome", default="mito_C_glabrata_CBS138", type=str, help="The name of the mitochondrial chromosome. This is important if you have mitochondrial proteins for which to annotate the impact of nonsynonymous variants, as the mitochondrial genetic code is different. This should be the same as in the gff. If there is no mitochondria just put 'no_mitochondria'. If there is more than one mitochindrial scaffold, provide them as comma-sepparated IDs.")
@@ -122,6 +130,9 @@ opt = parser.parse_args()
 if opt.replace is True: fun.delete_folder(opt.outdir)
 fun.make_folder(opt.outdir)
 
+# define the name as the sample as the first 10 characters of the outdir
+name_sample = fun.get_file(opt.outdir)[0:10]
+
 #### REPLACE THE REF GENOME ####
 
 # define where the reference genome will be stored
@@ -132,7 +143,7 @@ new_reference_genome_file = "%s/reference_genome.fasta"%reference_genome_dir
 if fun.file_is_empty(new_reference_genome_file) or opt.replace is True:
 
     # move the reference genome into the outdir, so that every file is written under outdir
-    try: run_cmd("rm %s"%new_reference_genome_file)
+    try: fun.run_cmd("rm %s"%new_reference_genome_file)
     except: pass
     fun.run_cmd("ln -s %s %s"%(opt.ref, new_reference_genome_file))
 
@@ -221,11 +232,21 @@ if not any([x=="skip" for x in {opt.fastq1, opt.fastq2}]):
 #####################################
 #####################################
 
-
 ###########################################
 ############# NECESSARY FILES #############
 ###########################################
 
+#### define general args ####
+
+# the simulation ploidies as a list
+simulation_ploidies = opt.simulation_ploidies.split(",")
+
+# the window length for all operations
+fun.window_l = int(np.median([len_seq for chrom, len_seq  in fun.get_chr_to_len(opt.ref).items() if chrom not in opt.mitochondrial_chromosome.split(",")])*0.05) + 1
+
+print("using a window length of %i"%fun.window_l)
+
+#############################
 
 #### bamqc
 if opt.run_qualimap is True:
@@ -256,6 +277,16 @@ if fun.file_is_empty("%s.fai"%opt.ref) or opt.replace is True:
     print ("Indexing the reference...")
     cmd_indexRef = "%s faidx %s"%(samtools, opt.ref); fun.run_cmd(cmd_indexRef) # This creates a .bai file of the reference
 
+
+#### calculate coverage per windows of window_l ####
+
+if not any([x=="skip" for x in {opt.fastq1, opt.fastq2}]):
+
+    destination_dir = "%s.calculating_windowcoverage"%sorted_bam
+    coverage_file = fun.generate_coverage_per_window_file_parallel(opt.ref, destination_dir, sorted_bam, windows_file="none", replace=opt.replace, run_in_parallel=True, delete_bams=True)
+
+####################################################
+
 ###########################################
 ###########################################
 ###########################################
@@ -267,19 +298,6 @@ if opt.StopAfter_bamFileObtention is True:
 #####################################
 ##### STRUCTURAL VARIATION ##########
 #####################################
-
-
-#### define general args ####
-
-# the simulation ploidies as a list
-simulation_ploidies = opt.simulation_ploidies.split(",")
-
-# the window length for all operations
-fun.window_l = int(np.median([len_seq for chrom, len_seq  in fun.get_chr_to_len(opt.ref).items() if chrom not in opt.mitochondrial_chromosome.split(",")])*0.05) + 1
-
-print("using a window length of %i"%fun.window_l)
-
-#############################
 
 #### test how well the finding of SVs in an assembly works ####
 if opt.testSVgen_from_DefaulReads:
@@ -319,15 +337,15 @@ elif opt.fast_SVcalling is False and opt.close_shortReads_table is not None:
         # define the outdir where the close genomes whould be downloaded
         outdir_getting_closeReads = "%s/getting_closeReads"%outdir_finding_realVars; fun.make_folder(outdir_getting_closeReads)
 
-        opt.close_shortReads_table = fun.get_close_shortReads_table_close_to_taxID(opt.target_taxID, opt.ref, outdir_getting_closeReads, opt.ploidy, n_close_samples=opt.n_close_samples, nruns_per_sample=opt.nruns_per_sample, replace=opt.replace, threads=opt.threads, run_in_slurm=opt.run_in_slurm, StopAfter_sampleIndexingFromSRA=opt.StopAfter_sampleIndexingFromSRA)
+        opt.close_shortReads_table = fun.get_close_shortReads_table_close_to_taxID(opt.target_taxID, opt.ref, outdir_getting_closeReads, opt.ploidy, n_close_samples=opt.n_close_samples, nruns_per_sample=opt.nruns_per_sample, replace=opt.replace, threads=opt.threads, job_array_mode=opt.job_array_mode, StopAfter_sampleIndexingFromSRA=opt.StopAfter_sampleIndexingFromSRA, queue_jobs=opt.queue_jobs, max_ncores_queue=opt.max_ncores_queue, time_read_obtention=opt.time_read_obtention, StopAfterPrefecth_of_reads=opt.StopAfterPrefecth_of_reads)
 
-        # skip the running of the pipeline 
-        if opt.StopAfter_readObtentionFromSRA:
-            print("Stopping pipeline after the reads obtention from SRA")
-            sys.exit(0) 
+    # skip the running of the pipeline 
+    if opt.StopAfter_readObtentionFromSRA:
+        print("Stopping pipeline after the reads obtention from SRA")
+        sys.exit(0) 
 
     # get the real SVs
-    real_svtype_to_file = fun.get_compatible_real_svtype_to_file(opt.close_shortReads_table, opt.ref, outdir_finding_realVars, replace=opt.replace, threads=opt.threads, max_nvars=opt.nvars, mitochondrial_chromosome=opt.mitochondrial_chromosome, run_in_slurm=opt.run_in_slurm)
+    real_svtype_to_file = fun.get_compatible_real_svtype_to_file(opt.close_shortReads_table, opt.ref, outdir_finding_realVars, replace=opt.replace, threads=opt.threads, max_nvars=opt.nvars, mitochondrial_chromosome=opt.mitochondrial_chromosome, job_array_mode=opt.job_array_mode)
 
 else: 
     print("Avoiding the simulation of real variants. Only inserting randomSV.")
@@ -338,16 +356,23 @@ else:
 ###################################################################################################
 
 # test the accuracy on each of the simulations types
-if opt.testSimulationsAccuracy is True: fun.report_accuracy_simulations(sorted_bam, opt.ref, "%s/testing_SimulationsAccuracy"%opt.outdir, real_svtype_to_file, threads=opt.threads, replace=opt.replace, n_simulated_genomes=opt.nsimulations, mitochondrial_chromosome=opt.mitochondrial_chromosome, simulation_ploidies=simulation_ploidies, range_filtering_benchmark=opt.range_filtering_benchmark, nvars=opt.nvars)
+if opt.testSimulationsAccuracy is True: fun.report_accuracy_simulations(sorted_bam, opt.ref, "%s/testing_SimulationsAccuracy"%opt.outdir, real_svtype_to_file, threads=opt.threads, replace=opt.replace, n_simulated_genomes=opt.nsimulations, mitochondrial_chromosome=opt.mitochondrial_chromosome, simulation_ploidies=simulation_ploidies, range_filtering_benchmark=opt.range_filtering_benchmark, nvars=opt.nvars, job_array_mode=opt.job_array_mode)
 
 # test accuracy on real data
-if opt.testRealDataAccuracy is True:  fun.report_accuracy_realSVs(opt.close_shortReads_table, opt.ref, "%s/testing_RealSVsAccuracy"%opt.outdir, real_svtype_to_file, outdir_finding_realVars, threads=opt.threads, replace=opt.replace, n_simulated_genomes=opt.nsimulations, mitochondrial_chromosome=opt.mitochondrial_chromosome, simulation_ploidies=simulation_ploidies, range_filtering_benchmark=opt.range_filtering_benchmark, nvars=opt.nvars, run_in_slurm=opt.run_in_slurm)
+if opt.testRealDataAccuracy is True:  fun.report_accuracy_realSVs(opt.close_shortReads_table, opt.ref, "%s/testing_RealSVsAccuracy"%opt.outdir, real_svtype_to_file, outdir_finding_realVars, threads=opt.threads, replace=opt.replace, n_simulated_genomes=opt.nsimulations, mitochondrial_chromosome=opt.mitochondrial_chromosome, simulation_ploidies=simulation_ploidies, range_filtering_benchmark=opt.range_filtering_benchmark, nvars=opt.nvars, job_array_mode=opt.job_array_mode)
 
 # run the actual perSVade function optimising parameters
 if opt.skip_SVcalling is False:
 
     SVdetection_outdir = "%s/SVdetection_output"%opt.outdir
     fun.run_GridssClove_optimising_parameters(sorted_bam, opt.ref, SVdetection_outdir, threads=opt.threads, replace=opt.replace, n_simulated_genomes=opt.nsimulations, mitochondrial_chromosome=opt.mitochondrial_chromosome, simulation_ploidies=simulation_ploidies, range_filtering_benchmark=opt.range_filtering_benchmark, nvars=opt.nvars, fast_SVcalling=opt.fast_SVcalling, real_svtype_to_file=real_svtype_to_file)
+
+
+# get the golden set
+if opt.goldenSet_dir is not None:
+
+    outdir_goldenSet = "%s/testing_goldenSetAccuracy"%opt.outdir
+    fun.report_accuracy_golden_set(opt.goldenSet_dir, outdir_goldenSet, opt.ref, real_svtype_to_file, threads=opt.threads, replace=opt.replace, n_simulated_genomes=opt.nsimulations, mitochondrial_chromosome=opt.mitochondrial_chromosome, simulation_ploidies=simulation_ploidies, range_filtering_benchmark=opt.range_filtering_benchmark, nvars=opt.nvars, job_array_mode=opt.job_array_mode, StopAfter_sampleIndexingFromSRA=opt.StopAfter_sampleIndexingFromSRA, time_read_obtention=opt.time_read_obtention, StopAfterPrefecth_of_reads=opt.StopAfterPrefecth_of_reads, queue_jobs=opt.queue_jobs, max_ncores_queue=opt.max_ncores_queue, time_perSVade_running=opt.time_perSVade_running, target_taxID=opt.target_taxID)
 
 print("structural variation analysis with perSVade finished")
 

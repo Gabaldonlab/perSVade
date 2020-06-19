@@ -1396,3 +1396,40 @@ def get_close_shortReads_table_close_to_taxID(target_taxID, reference_genome, ou
 
     # debug
     if len(SRA_runInfo_df)!=total_nruns: raise ValueError("You could not find any datasets in SRA that would be useful")
+
+
+    ##### DOWNLOAD SRR FILES ####
+
+    if run_in_cluster is False:
+
+        threads_available = multiproc.cpu_count()
+
+        # define all SRR files
+        srr_to_SRRfile = {srr : "%s/%s/%s.srr"%(readsDir, srr, srr) for srr in all_SRA_runInfo_df.Run}
+
+        # remove previous files
+        for srr in srrs_to_remove:
+            if srr in srr_to_SRRfile: 
+                print("removing %s"%srr)
+                fun.remove_file(srr_to_SRRfile[srr])
+
+        # define the inputs of the downloads
+        inputs_downloads = [(srr, SRRfile) for srr, SRRfile in srr_to_SRRfile.items() if fun.file_is_empty(SRRfile)]
+
+        if len(inputs_downloads)>0:
+            print("Downloading %i SRR files if not already done on %i threads"%(len(inputs_downloads), threads_available))
+
+            with multiproc.Pool(threads_available) as pool:
+                list_srr_files = pool.starmap(fun.download_srr_with_prefetch, inputs_downloads)
+                pool.close()
+
+        continue
+
+    #############################
+
+
+parser.add_argument("--queue_jobs", dest="queue_jobs", type=str, default="debug", help="The name of the queue were to submit the jobs when running with greasy")
+parser.add_argument("--max_ncores_queue", dest="max_ncores_queue", type=int, default=768, help="The maximum number of cores that the queue can handle in a single job")
+
+# timings of queues
+parser.add_argument("--wallclock_read_obtention", dest="wallclock_read_obtention", type=str, default="02:00:00", help="The time that the fastqdumping of reads will take to perform this task")
