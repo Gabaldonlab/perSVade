@@ -40,8 +40,14 @@ parser = argparse.ArgumentParser(description=description, formatter_class=RawTex
 # general args
 parser.add_argument("--srr", dest="srr", required=True, type=str, help="The SRR")
 parser.add_argument("--outdir", dest="outdir", required=True, type=str, help="The output dir")
+
+# pipeline stopping options
 parser.add_argument("--stop_after_prefetch", dest="stop_after_prefetch", action="store_true", default=False, help="Stop after running the prefetch")
+parser.add_argument("--stop_after_fastqdump", dest="stop_after_fastqdump", action="store_true", default=False, help="Stop after running the fastqdump")
+
+# optional args
 parser.add_argument("--threads", dest="threads", default=16, type=int, help="Number of threads, Default: 16")
+parser.add_argument("--type_data", dest="type_data", default="illumina_paired", type=str, help="The type of data. By default it is illumina paired-end seq (illumina_paired). It can also be 'nanopore'")
 parser.add_argument("--replace", dest="replace", action="store_true", default=False, help="Replace existing files")
 
 opt = parser.parse_args()
@@ -49,10 +55,20 @@ opt = parser.parse_args()
 ####################
 
 # define the final reads
-final_trimmed_reads1 = "%s/%s_trimmed_reads_1.fastq.gz"%(opt.outdir, opt.srr)
-final_trimmed_reads2 = "%s/%s_trimmed_reads_2.fastq.gz"%(opt.outdir, opt.srr)
+if opt.type_data=="illumina_paired": 
 
-if any([fun.file_is_empty(f) for f in [final_trimmed_reads1, final_trimmed_reads2]]) or opt.replace is True:
+    final_trimmed_reads1 = "%s/%s_trimmed_reads_1.fastq.gz"%(opt.outdir, opt.srr)
+    final_trimmed_reads2 = "%s/%s_trimmed_reads_2.fastq.gz"%(opt.outdir, opt.srr)
+
+    final_files = [final_trimmed_reads1, final_trimmed_reads2]
+
+elif opt.type_data=="nanopore": 
+
+    final_trimmed_reads = "%s/%s_trimmed_reads.fastq.gz"%(opt.outdir, opt.srr)
+    final_files = [final_trimmed_reads]
+
+
+if any([fun.file_is_empty(f) for f in final_files]) or opt.replace is True:
 
     # make outdir
     fun.make_folder(opt.outdir)
@@ -67,29 +83,57 @@ if any([fun.file_is_empty(f) for f in [final_trimmed_reads1, final_trimmed_reads
         print("Exiting after prefetch obtention")
         sys.exit(0)
 
-    # get parallel fastqdump
+    # get fastqdump
     print("running parallel fastqdump")
-    raw_reads1, raw_reads2 = fun.run_parallelFastqDump_on_prefetched_SRRfile(SRRfile, replace=opt.replace, threads=opt.threads)
+    if opt.type_data=="illumina_paired": 
 
-    # run trimmomatic
-    print("running trimmomatic")
-    reads1, reads2 = fun.run_trimmomatic(raw_reads1, raw_reads2, replace=opt.replace, threads=opt.threads)
+        raw_reads1, raw_reads2 = fun.run_parallelFastqDump_on_prefetched_SRRfile(SRRfile, replace=opt.replace, threads=opt.threads)
+
+    elif opt.type_data=="nanopore": 
+
+        raw_reads = fun.run_parallelFastqDump_on_prefetched_SRRfile_nanopore(SRRfile, replace=opt.replace, threads=opt.threads)
+
+    # stop after fastqdump
+    if opt.stop_after_fastqdump is True: 
+        print("Exiting after fastqdump")
+        sys.exit(0)
 
     # define the SRRfile
     SRRfile = "%s/%s.srr"%(opt.outdir, opt.srr)
+
+    # trim reads
+    if opt.type_data=="illumina_paired":
+
+        print("running trimmomatic")
+        reads1, reads2 = fun.run_trimmomatic(raw_reads1, raw_reads2, replace=opt.replace, threads=opt.threads)
+
+        files_to_keep = [reads1, reads2, SRRfile]
+
+    elif opt.type_data=="nanopore":
+
+        print("running run_porechop")
+        reads = fun.run_porechop(raw_reads, replace=opt.replace, threads=opt.threads)
+
+        files_to_keep = [reads, SRRfile]
 
     # delete all files that are not the trimmed reads
     for f in os.listdir(opt.outdir): 
         file = "%s/%s"%(opt.outdir, f)
 
-        if file not in {reads1, reads2, SRRfile}: 
+        if file not in files_to_keep: 
             print("removing %s"%file)
             fun.remove_file(file)
             fun.delete_folder(file)
 
-    # move the files
-    os.rename(reads1, final_trimmed_reads1)
-    os.rename(reads2, final_trimmed_reads2)
+    # move the final files
+    if opt.type_data=="illumina_paired":
+
+        os.rename(reads1, final_trimmed_reads1)
+        os.rename(reads2, final_trimmed_reads2)
+
+    elif opt.type_data=="nanopore": os.rename(reads, final_trimmed_reads)
+
+
 
 
 

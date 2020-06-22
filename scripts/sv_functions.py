@@ -110,6 +110,7 @@ prefetch = "%s/bin/prefetch"%EnvDir
 fastqdump = "%s/bin/fastq-dump"%EnvDir
 parallel_fastq_dump = "%s/bin/parallel-fastq-dump"%EnvDir
 FASTQC = "%s/bin/fastqc"%EnvDir
+porechop = "%s/bin/porechop"%EnvDir
 
 # executables that are provided in the repository
 external_software = "%s/../installation/external_software"%CWD
@@ -4935,6 +4936,30 @@ def run_trimmomatic(reads1, reads2, replace=False, threads=1):
     return trimmed_reads1, trimmed_reads2
 
 
+def run_porechop(raw_reads, replace=False, threads=4):
+
+    """This function takes some raw nanopore reads and runs porechop on them to get the trimmed reads, returning them. All files are written under raw_reads """
+
+    # define the trimmed reads
+    trimmed_reads = "%s.trimmed.fastq.gz"%raw_reads
+    trimmed_reads_tmp = "%s.trimmed.tmp.fastq.gz"%raw_reads
+
+    if file_is_empty(trimmed_reads) or replace is True:
+
+        # delete previous files
+        remove_file(trimmed_reads_tmp)
+
+        # run cmd
+        print("running porechop")
+        porechop_std = "%s.std.txt"%trimmed_reads
+        run_cmd("%s -i %s -o %s --threads %i > %s 2>&1"%(porechop, raw_reads, trimmed_reads_tmp, threads, porechop_std))
+
+        # rename
+        os.rename(trimmed_reads_tmp, trimmed_reads)
+
+
+    return trimmed_reads
+
 def get_SNPs_from_bam(sorted_bam, outdir, reference_genome, replace=False, threads=4):
 
     """Runs freebayes on the sorted bam and returns a set with the SNPs found with a fast freebayes for ploidy 1"""
@@ -5512,7 +5537,118 @@ def run_parallelFastqDump_on_prefetched_SRRfile(SRRfile, replace=False, threads=
     return reads1, reads2
 
 
+def run_parallelFastqDump_on_prefetched_SRRfile_nanopore(SRRfile, replace=False, threads=4):
 
+    """This function is equivalent to run_parallelFastqDump_on_prefetched_SRRfile but returning only one fastq. """
+
+    # define the outdir and tmp dir
+    outdir = get_dir(SRRfile)
+    tmpdir = "%s_downloading_tmp"%SRRfile
+
+    # define the final reads
+    reads = "%s.fastq.gz"%SRRfile
+
+    if file_is_empty(reads) or replace is True:
+
+        # delete previous files
+        remove_file(reads)
+        delete_folder(tmpdir); make_folder(tmpdir)
+
+        # run fastqdump parallel into the tmpdir 
+        stdfile = "%s/std_fastqdump.txt"%tmpdir
+        run_cmd("%s -s %s -t %i -O %s --tmpdir %s --gzip > %s 2>&1"%(parallel_fastq_dump, SRRfile, threads, tmpdir, tmpdir, stdfile))
+
+        # check that the fastqdump is correct
+        std_lines = open(stdfile, "r").readlines()
+        written_lines_as_threads = len([l for l in std_lines if l.startswith("Written")])==threads
+        any_error = any(["ERROR" in l.upper() for l in std_lines])
+        if not written_lines_as_threads or any_error:
+            raise ValueError("Something went wrong with the fastqdump. Check the log in %s"%stdfile)
+
+        # rename the reads
+        tmp_reads = "%s/%s"%(tmpdir, get_file(reads))
+
+        os.rename(tmp_reads, reads)
+
+    # delete the tmpdir
+    delete_folder(tmpdir)
+
+    return reads
+
+def run_svim(reads, reference_genome, outdir,  threads=4, replace=False, min_sv_size=50, max_sv_size=1000000000000000000000, aligner="ngmlr", is_nanopore=True, minimum_depth=5):
+
+    """Takes some reads and a reference genome and runs svim. The reads should be in fastq.gz"""
+
+    # get the name of the sorted bam
+    sorted_bam_long = "%s/%s.%s.coordsorted.bam"%(outdir, get_file(reads).rstrip(".gz"), aligner)
+    sorted_bam_long_idx = "%s.bai"%sorted_bam_long
+
+    # change the name so that it is shorter, this is good for making further folders
+    sorted_bam_short = "%s/aligned_reads.sorted.bam"%outdir
+    sorted_bam_short_idx = "%s.bai"%sorted_bam_short
+
+    #if any([not os.path.isfile(x) for x in svType_to_file.values()]) or file_is_empty(sorted_bam_short) or file_is_empty(sorted_bam_short_idx) or replace is True:
+
+    # run svim
+    if file_is_empty(sorted_bam_short) or file_is_empty(sorted_bam_short_idx) or replace is True:
+     
+        # make the folder
+        delete_folder(outdir); make_folder(outdir)
+
+        # run svim with few filters
+        svim_cmd = "%s reads %s %s %s --min_sv_size %i --max_sv_size %i --cores %i --aligner %s --minimum_depth %s --min_mapq 0 --skip_genotyping"%(svim, outdir, reads, reference_genome, min_sv_size, max_sv_size, threads, aligner, minimum_depth)
+        if is_nanopore is True: svim_cmd += " --nanopore"
+        run_cmd(svim_cmd)
+        
+        os.rename(sorted_bam_long, sorted_bam_short)
+        os.rename(sorted_bam_long_idx, sorted_bam_short_idx)
+
+
+    # calculate the coverage
+    destination_dir = "%s.calculating_windowcoverage"%sorted_bam_short
+    coverage_df = pd.read_csv(generate_coverage_per_window_file_parallel(reference_genome, destination_dir, sorted_bam_short, windows_file="none", replace=replace, run_in_parallel=True, delete_bams=True), sep="\t")
+
+    median_coverage = np.median(coverage_df.mediancov_1)
+    fraction_genome_covered = np.mean(coverage_df.percentcovered_1)/100
+
+    print("The median coverage is %.2f and the fraction of the genome covered is %.3f"%(median_coverage, fraction_genome_covered))
+
+    # define the outfiles
+    svType_to_file = {svtype : "%s/candidates/candidates_%s.corrected.bed"%(outdir, svtype) for svtype in {"breakends", "deletions", "int_duplications_dest", "int_duplications_source", "inversions", "novel_insertions", "tan_duplications_dest", "tan_duplications_source"}}
+
+    if any([not os.path.isfile(x) for x in svType_to_file.values()]) or replace is True:
+
+        #### ADD HEADER TO TABLES ####
+
+        # define the column names
+        col3_Bnd_IntDup_TanDup = "svtype;partner_dest;std_pos_across_cluster;std_span_across_cluster"
+        col3_Del_Inv_Ins = "svtype;std_pos_across_cluster;std_span_across_cluster"
+
+        svtype_to_col3_name = {"breakends":col3_Bnd_IntDup_TanDup, "deletions":col3_Del_Inv_Ins, "int_duplications_dest":col3_Bnd_IntDup_TanDup, "int_duplications_source":col3_Bnd_IntDup_TanDup, "inversions":col3_Del_Inv_Ins, "novel_insertions":col3_Del_Inv_Ins, "tan_duplications_dest":col3_Bnd_IntDup_TanDup, "tan_duplications_source":col3_Bnd_IntDup_TanDup}
+
+        colnamesDict_InsDelTanInv = {0:"Chr", 1:"Start", 2:"End", 4:"score", 5:"evidence_deleted_origin", 6:"signatures_making_this_candidate"}
+        colnamesDict_Bnd = {0:"Chr", 1:"Start", 2:"End", 4:"score", 5:"signatures_making_this_candidate"}
+
+        # rewrite the candidates adding header
+        candidates_dir = "%s/candidates"%outdir
+        for file in os.listdir(candidates_dir):
+            svtype = file.split(".")[0].split("candidates_")[1]
+
+            # define the colnames for this svtype
+            if svtype=="breakends": colnames_dict = colnamesDict_Bnd
+            else: colnames_dict = colnamesDict_InsDelTanInv
+            colnames_dict[3] = svtype_to_col3_name[svtype]
+
+            # get the df
+            filename = "%s/%s"%(candidates_dir, file)
+            df = pd.read_csv(filename, sep="\t", header=-1).rename(columns=colnames_dict)
+
+            # write
+            df.to_csv(svType_to_file[svtype], sep="\t", index=False, header=True)
+
+        ############################
+
+    return svType_to_file, sorted_bam_short, median_coverage
 
 def download_srr_parallelFastqDump(srr, destination_dir, is_paired=True, threads=4, replace=False):
 
@@ -10170,30 +10306,54 @@ def report_accuracy_golden_set(goldenSet_dir, outdir, reference_genome, real_svt
 
         else: short_reads_srr, long_reads_srr = get_short_and_long_reads_sameBioSample("%s/finding_sameBioSample_srrs"%goldenSet_dir, target_taxID, reference_genome, min_coverage=min_coverage, replace=replace)
 
+        #####################################
 
+        # download each of the reads (raw). Stop after fastqdump
+        for type_data, srr in [("illumina_paired", short_reads_srr), ("nanopore", long_reads_srr)]:
+            print("Getting raw reads for %s"%type_data)
 
+            # define the outdir
+            outdir_srr = "%s/%s"%(goldenSet_dir, srr)
 
+            # define the cmd downloading after the fastq-dump
+            cmd = "%s --srr %s --outdir %s --threads %i --stop_after_fastqdump --type_data %s"%(get_trimmed_reads_for_srr_py, srr, outdir_srr, threads, type_data)
+            if StopAfterPrefecth_of_reads is True: cmd += " --stop_after_prefetch"
 
+            run_cmd(cmd)
 
+        # define the reads
+        longReads = "%s/%s/%s.srr.fastq.gz"%(goldenSet_dir, long_reads_srr, long_reads_srr)
+        short_reads1 = "%s/%s/%s.srr_1.fastq.gz"%(goldenSet_dir, short_reads_srr, short_reads_srr)
+        short_reads2 = "%s/%s/%s.srr_2.fastq.gz"%(goldenSet_dir, short_reads_srr, short_reads_srr)
 
-    # define the reads, they are suposed to be called like this
-    longReads = "%s/long_reads.fastq.gz"%goldenSet_dir
-    short_reads1 = "%s/short_reads_1.fastq.gz"%goldenSet_dir
-    short_reads2 = "%s/short_reads_2.fastq.gz"%goldenSet_dir
+    #####################################
+    else:
+
+        # define the reads, they are suposed to be called like this
+        longReads = "%s/long_reads.fastq.gz"%goldenSet_dir
+        short_reads1 = "%s/short_reads_1.fastq.gz"%goldenSet_dir
+        short_reads2 = "%s/short_reads_2.fastq.gz"%goldenSet_dir
 
     if any([file_is_empty(f) for f in [longReads, short_reads1, short_reads2]]): raise ValueError("Your golden dir %s should contain long_reads.fasta, short_reads_1.fastq.gz and short_reads_2.fastq.gz"%goldenSet_dir)
 
+    # trim the long reads
+    print("running porechop")
+    trimmed_long_reads = run_porechop(longReads,  replace=replace, threads=threads)
+
+    # trim the reads
+    print("Running trimmomatic")
+    trimmed_reads1, trimmed_reads2 = run_trimmomatic(short_reads1, short_reads2, replace=replace, threads=threads)
+
+    # run svim
+    print("running svim")
+    outdir_svim = "%s/svim_output"%outdir
+    svType_to_file_longReads, sorted_bam_short_longReads, median_coverage_longReads = run_svim(trimmed_long_reads, reference_genome, outdir_svim,  threads=threads, replace=replace, aligner="ngmlr", is_nanopore=True)
+
+    # run perSVade with all the types of optimisat
+
+
    
 
-
-
-
-
-
-
-    print(goldenSet_dir)
-
-    ljandjdajadljhad
 
 
 
