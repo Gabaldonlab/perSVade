@@ -16,7 +16,7 @@ if os.path.exists(ParentDir):
 else:
     run_in_cluster = True    
     ParentDir = "/gpfs/projects/bsc40/mschikora"
-    threads = 12
+    threads = 48
 
 
 # define the dir where all perSVade code is
@@ -74,6 +74,7 @@ For C. glabrata I got the nanopore reads from ~/../mmarcet/nanopore/GABALDON02/a
 
 # define the table for C. glabrata
 close_shortReads_table_Cglabrata = "%s/scripts/perSVade/perSVade_repository/testing/Cglabrata_table_short_reads.tab"%ParentDir
+goldenSet_dir_Cglabrata = "%s/scripts/perSVade/perSVade_repository/testing/Cglabrata_goldenSetReads_BG2"%ParentDir
 
 # define important info about each species: taxID, spName, ploidy
 species_Info = [("5478", "Candida_glabrata", 1, "mito_C_glabrata_CBS138"),
@@ -85,7 +86,11 @@ species_Info = [("5478", "Candida_glabrata", 1, "mito_C_glabrata_CBS138"),
                 #("7955", "Danio_rerio", 2, "NC_002333.2")]
                 #("9606", "Homo_sapiens", 2, "NC_012920.1")]
 
-taxIDs_with_noON_overalpping = {"5478", "5476", "746128"}
+taxIDs_with_noON_overalpping = {"5476", "746128"}
+
+# define the type of run
+type_run = "goldenSet" # can be 'normalRun' or 'goldenSet'
+StopAfterPrefecth_of_reads = False
 
 # go through each species
 for taxID, spName, ploidy, mitochondrial_chromosome in species_Info:
@@ -98,27 +103,34 @@ for taxID, spName, ploidy, mitochondrial_chromosome in species_Info:
     # create an outdir
     outdir_perSVade = "%s/%s_%s"%(outdir_testing, taxID, spName); fun.make_folder(outdir_perSVade)
 
-    # define the table with short reads
-    if spName=="Candida_glabrata": close_shortReads_table = close_shortReads_table_Cglabrata
-    else: close_shortReads_table = "auto"
+    if type_run=="normalRun":
 
+        # define the table with short reads
+        if spName=="Candida_glabrata": close_shortReads_table = close_shortReads_table_Cglabrata
+        else: close_shortReads_table = "auto"
 
+        # get the reads from SRA. 3 samples, 3 runs per sample. Process with the 
+        cmd = "%s --ref %s --threads %i -o %s --close_shortReads_table %s --target_taxID %s --n_close_samples 3 --nruns_per_sample 3 -f1 skip -f2 skip --mitochondrial_chromosome %s --gff %s --StopAfter_readObtentionFromSRA"%(perSVade_py, genome, threads, outdir_perSVade, close_shortReads_table, taxID, mitochondrial_chromosome, gff)
 
-    # get the reads from SRA. 3 samples, 3 runs per sample. Process with the 
-    cmd = "%s --ref %s --threads %i -o %s --close_shortReads_table %s --target_taxID %s --n_close_samples 3 --nruns_per_sample 3 -f1 skip -f2 skip --mitochondrial_chromosome %s --gff %s --StopAfter_readObtentionFromSRA"%(perSVade_py, genome, threads, outdir_perSVade, close_shortReads_table, taxID, mitochondrial_chromosome, gff)
+    elif type_run=="goldenSet":
 
-    # get the golden set running 
-    #if taxID in taxIDs_with_noON_overalpping: continue
-    #cmd = "%s --ref %s --threads %i -o %s --target_taxID %s --n_close_samples 3 --nruns_per_sample 3 -f1 skip -f2 skip --mitochondrial_chromosome %s --gff %s --StopAfterPrefecth_of_reads --goldenSet_dir auto --skip_SVcalling"%(perSVade_py, genome, threads, outdir_perSVade, taxID, mitochondrial_chromosome, gff)
+        # define the goldenSet_dir
+        if spName=="Candida_glabrata": goldenSet_dir = goldenSet_dir_Cglabrata
+        else: goldenSet_dir = "auto"
+
+        # get the golden set running 
+        if taxID in taxIDs_with_noON_overalpping: continue
+        cmd = "%s --ref %s --threads %i -o %s --target_taxID %s --n_close_samples 3 --nruns_per_sample 3 -f1 skip -f2 skip --mitochondrial_chromosome %s --gff %s --goldenSet_dir %s --skip_SVcalling"%(perSVade_py, genome, threads, outdir_perSVade, taxID, mitochondrial_chromosome, gff, goldenSet_dir)
 
     # add options depending on the machine
     if run_in_cluster is True: cmd += " --job_array_mode greasy --queue_jobs bsc_ls --max_ncores_queue 108 --time_read_obtention 12:00:00 "
-    else: cmd += " --StopAfterPrefecth_of_reads --job_array_mode local"
+    else: cmd += " --job_array_mode local"
+
+    if StopAfterPrefecth_of_reads is True: cmd += " --StopAfterPrefecth_of_reads"
 
     fun.run_cmd(cmd)
 
-
-    #if taxID=="5476": adkjhdakg
+    if taxID=="5478": adkjhdakg
 
 
 
