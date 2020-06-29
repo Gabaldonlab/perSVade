@@ -20,7 +20,7 @@ It is expected to print:
 
 This is essential so that all the dependencies of the pipeline are met.
 
-In addition, there are some dependencies that are included in the respository "installation/external_software" (only in the "release" packages). These are gridss (tested on version 2.8.1), clove (tested on version 0.17) and NINJA (we installed it from https://github.com/TravisWheelerLab/NINJA/releases/tag/0.95-cluster_only). 
+In addition, there are some dependencies that are included in the respository "installation/external_software" (only in the "release" packages). These are gridss (tested on version 2.8.1), clove (tested on version 0.17), NINJA (we installed it from https://github.com/TravisWheelerLab/NINJA/releases/tag/0.95-cluster_only) and gztools (installed from https://github.com/circulosmeos/gztool/releases/download/v0.11.5/gztool-linux.x86_64)
 
 ## Comments for the installation of extra dependencies
 The non-conda dependencies can be installed like this (if you wanted to reinstall them):
@@ -38,6 +38,8 @@ The non-conda dependencies can be installed like this (if you wanted to reinstal
 `wget https://github.com/PapenfussLab/clove/releases/download/v0.17/clove-0.17-jar-with-dependencies.jar`
 
 `wget https://github.com/TravisWheelerLab/NINJA/archive/0.95-cluster_only.tar.gz`
+
+`wget https://github.com/circulosmeos/gztool/releases/download/v0.11.5/gztool-linux.x86_64`
 
 3. uncompress the NINJA dir and remove the tar
 

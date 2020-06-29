@@ -109,6 +109,9 @@ if any([fun.file_is_empty(f) for f in final_files]) or opt.replace is True:
 
         files_to_keep = [reads1, reads2, SRRfile]
 
+        # check that the trimmed reads are ok
+        fun.check_that_paired_reads_are_correct(reads1, reads2)
+
     elif opt.type_data=="nanopore":
 
         print("running run_porechop")
@@ -124,6 +127,7 @@ if any([fun.file_is_empty(f) for f in final_files]) or opt.replace is True:
             print("removing %s"%file)
             fun.remove_file(file)
             fun.delete_folder(file)
+
 
     # move the final files
     if opt.type_data=="illumina_paired":
