@@ -41,6 +41,10 @@ from shutil import copyfile
 import igraph
 from ete3 import Tree, NCBITaxa
 import urllib
+from subprocess import STDOUT, check_output
+import subprocess
+import subprocess, datetime, signal
+
 
 warnings.simplefilter(action='ignore', category=pd.core.common.SettingWithCopyWarning) # avoid the slicing warning
 #pd.options.mode.chained_assignment = 'raise'
@@ -111,6 +115,7 @@ fastqdump = "%s/bin/fastq-dump"%EnvDir
 parallel_fastq_dump = "%s/bin/parallel-fastq-dump"%EnvDir
 FASTQC = "%s/bin/fastqc"%EnvDir
 porechop = "%s/bin/porechop"%EnvDir
+fasterq_dump = "%s/bin/fasterq-dump"%EnvDir
 
 # executables that are provided in the repository
 external_software = "%s/../installation/external_software"%CWD
@@ -118,6 +123,7 @@ gridss_run = "%s/gridss.sh"%external_software
 gridss_jar = "%s/gridss-2.9.2-gridss-jar-with-dependencies.jar"%external_software
 clove = "%s/clove-0.17-jar-with-dependencies.jar"%external_software
 ninja_dir = "%s/NINJA-0.95-cluster_only/NINJA"%external_software
+gztool = "%s/gztool-linux.x86_64"%external_software
 
 # scripts that are of this pipeline
 create_random_simulatedSVgenome_R = "%s/create_random_simulatedSVgenome.R"%CWD
@@ -177,6 +183,9 @@ g_filterName_to_filterValue_to_Number = {filterName : dict(zip(filtersList, rang
 
 # define the default window_l
 window_l = 10000
+
+# define the wrong SRRs
+wrong_SRRs = {"ERR2163728", "SRR8373447"}
 
 svtype_to_color={"tandemDuplications": "gray", "deletions": "black", "inversions": "blue", "translocations": "olive", "insertions": "red", "remaining":"magenta", "integrated":"c"}
 
@@ -403,7 +412,10 @@ def remove_file(f):
 
 def delete_folder(f):
 
-    if os.path.isdir(f): shutil.rmtree(f)
+    if os.path.isdir(f): 
+        #run_cmd("rm -rf %s"%f)
+        shutil.rmtree(f)
+
 
 def make_folder(f):
 
@@ -4379,6 +4391,9 @@ def get_allWGS_runInfo_fromSRA_forDivision(fileprefix, taxID_division, reference
     # filter out the undesired taxIDs
     SRA_runInfo_df = SRA_runInfo_df[~SRA_runInfo_df.TaxID.isin(taxIDs_to_exclude)]
 
+    # return if empty 
+    if len(SRA_runInfo_df)==0: return SRA_runInfo_df
+
     # define the expected coverage
     length_genome = sum(get_chr_to_len(reference_genome).values())
     SRA_runInfo_df["expected_coverage"] = SRA_runInfo_df.apply(lambda r: (r["spots_with_mates"]*r["avgLength"])/length_genome,axis=1)
@@ -4494,7 +4509,7 @@ def download_srr_subsetReads_onlyFastqDump(srr, download_dir, subset_n_reads=100
 
             # run dump
             fastqdump_std = "%s/std.txt"%download_dir_tmp
-            fastqdump_cmd = "%s --split-files --gzip --maxSpotId %i --outdir %s %s > %s 2>&1"%(fastqdump, subset_n_reads, download_dir_tmp, srr, fastqdump_std)
+            fastqdump_cmd = "%s --split-3 --gzip --maxSpotId %i --outdir %s %s > %s 2>&1"%(fastqdump, subset_n_reads, download_dir_tmp, srr, fastqdump_std)
             
             try:
                 run_cmd(fastqdump_cmd)
@@ -4933,8 +4948,10 @@ def run_trimmomatic(reads1, reads2, replace=False, threads=1):
 
             run_cmd(trim_cmd)
 
-    return trimmed_reads1, trimmed_reads2
+        # check that the reads are correct
+        check_that_paired_reads_are_correct(trimmed_reads1, trimmed_reads2)
 
+    return trimmed_reads1, trimmed_reads2
 
 def run_porechop(raw_reads, replace=False, threads=4):
 
@@ -5494,6 +5511,66 @@ def download_srr_with_prefetch(srr, SRRfile, replace=False):
 
     return SRRfile
 
+
+def get_n_pairs_in_fastqgz(file):
+
+    """Takes a fastqgz file and returns the number of reads"""
+
+    # get the number of lines into file
+    file_wc = "%s.wc"%file
+    file_wc_tmp = "%s.tmp"%file_wc
+    if file_is_empty(file_wc):
+        print("calculating # reads for %s"%file)
+
+        run_cmd("unpigz -c %s | wc -l > %s"%(file, file_wc_tmp))
+        os.rename(file_wc_tmp, file_wc)
+
+    # get the number
+    nlines = int(open(file_wc, "r").readlines()[0].strip())
+
+    # check that it is multiple of 4
+    if nlines%4!=0: raise ValueError("nlines %i is not valid"%nlines)
+
+    # get the number of lines between 4
+    return nlines/4
+
+def get_last_reads_fastqgz_file(file, nreads=100):
+
+    """Takes a fastq.gz file and returns the read names of the last nreads"""
+
+    # get the last reads
+    file_last_reads = "%s.lastReads%iReads"%(file, nreads)
+    file_last_reads_tmp = "%s.tmp"%file_last_reads
+
+    if file_is_empty(file_last_reads):
+        print("getting last reads for %s"%file)
+
+        cmd_ztail = "%s -t %s -v 0 | tail -%i | sed -n '1~4p' | cut -f1 -d ' ' > %s"%(gztool, file, nreads*4, file_last_reads_tmp)
+        run_cmd(cmd_ztail)
+
+        os.rename(file_last_reads_tmp, file_last_reads)
+
+    # get as list
+    return [l.strip() for l in open(file_last_reads, "r").readlines()]
+
+def check_that_paired_reads_are_correct(reads1, reads2):
+
+    """This function takes some paired end reads and throws an error if the last 500 reads do not have exactly the same reads. And also that the read counts are the same"""
+
+    # get the number of reads
+    """
+    nreads1 = get_n_pairs_in_fastqgz(reads1)
+    nreads2 = get_n_pairs_in_fastqgz(reads2)
+
+    if nreads1!=nreads2: raise ValueError("%s and %s have a different number of reads"%(reads1, reads2))
+    """
+
+    # get the last reads
+    last_reads1 = get_last_reads_fastqgz_file(reads1)
+    last_reads2 = get_last_reads_fastqgz_file(reads2)
+
+    if last_reads1!=last_reads2: raise ValueError("%s and %s do not have a proper read pairing"%(reads1, reads2))
+
 def run_parallelFastqDump_on_prefetched_SRRfile(SRRfile, replace=False, threads=4):
 
     """This function runs parallel fastqdump on a tmp dir in SRR file"""
@@ -5507,32 +5584,69 @@ def run_parallelFastqDump_on_prefetched_SRRfile(SRRfile, replace=False, threads=
     reads1 = "%s_1.fastq.gz"%SRRfile
     reads2 = "%s_2.fastq.gz"%SRRfile
 
+    print("These are the expected final reads:\n%s\n%s. You can create these files and there will not be any downloading"%(reads1, reads2))
+
     if any([file_is_empty(f) for f in [reads1, reads2]]) or replace is True:
 
         # delete previous files
+        print(tmpdir)
         for f in [reads1, reads2]: remove_file(f)
         delete_folder(tmpdir); make_folder(tmpdir)
 
-        # run fastqdump parallel into the tmpdir 
-        stdfile = "%s/std_fastqdump.txt"%tmpdir
-        run_cmd("%s -s %s -t %i -O %s --tmpdir %s --split-files --gzip > %s 2>&1"%(parallel_fastq_dump, SRRfile, threads, tmpdir, tmpdir, stdfile))
+        # test if fastqdump works. Run for 15 seconds into test_dir and check if any files have been generated
+        print("testing fastqdump")
+        test_dir = "%s/testing"%tmpdir
+        delete_folder(test_dir); make_folder(test_dir)
 
-        # check that the fastqdump is correct
-        std_lines = open(stdfile, "r").readlines()
-        written_lines_as_threads = len([l for l in std_lines if l.startswith("Written")])==threads
-        any_error = any(["ERROR" in l.upper() for l in std_lines])
-        if not written_lines_as_threads or any_error:
-            raise ValueError("Something went wrong with the fastqdump. Check the log in %s"%stdfile)
+        # run cmd and kill after 30 seconds
+        test_cmd = "timeout 15 %s -s %s -t %i -O %s --tmpdir %s --split-3 --gzip"%(parallel_fastq_dump, SRRfile, threads, test_dir, test_dir)
+        try: run_cmd(test_cmd)
+        except: print("fastqdump did not work before timeout")
+        any_fastqgz_generated = any([any([file.endswith("fastq.gz") for file in f[2]]) for f in os.walk(test_dir)])
 
-        # rename the reads
-        tmp_reads1 = "%s/%s"%(tmpdir, get_file(reads1))
-        tmp_reads2 = "%s/%s"%(tmpdir, get_file(reads2))
+        if any_fastqgz_generated is True:
+            print("running parallel-fastqdump from prefetch")
 
+            # run fastqdump parallel into the tmpdir 
+            stdfile = "%s/std_fastqdump.txt"%tmpdir
+            run_cmd("%s -s %s -t %i -O %s --tmpdir %s --split-3 --gzip > %s 2>&1 "%(parallel_fastq_dump, SRRfile, threads, tmpdir, tmpdir, stdfile))
+
+            # check that the fastqdump is correct
+            std_lines = open(stdfile, "r").readlines()
+            written_lines_as_threads = len([l for l in std_lines if l.startswith("Written")])==threads
+            any_error = any(["ERROR" in l.upper() for l in std_lines])
+            if not written_lines_as_threads or any_error:
+                raise ValueError("Something went wrong with the fastqdump. Check the log in %s"%stdfile)
+
+            # define the tmp reads
+            tmp_reads1 = "%s/%s"%(tmpdir, get_file(reads1))
+            tmp_reads2 = "%s/%s"%(tmpdir, get_file(reads2))
+
+        else: 
+            print("running normal fastqdump")
+
+            # run fastqdump
+            stdfile = "%s/std_fastqdump.txt"%tmpdir
+            srr = get_file(SRRfile).split(".")[0]
+            #srr = "ERR1597900" # debug with a dataset that works
+            print(stdfile, srr)
+            run_cmd("%s --split-3 --gzip --outdir %s %s > %s 2>&1"%(fastqdump, tmpdir, srr, stdfile))
+
+            # define the tmp reads
+            tmp_reads1 = "%s/%s_1.fastq.gz"%(tmpdir, srr)
+            tmp_reads2 = "%s/%s_2.fastq.gz"%(tmpdir, srr)
+
+        # check that the read pairs are correct
+        check_that_paired_reads_are_correct(tmp_reads1, tmp_reads2)
+
+        # rename
         os.rename(tmp_reads1, reads1)
         os.rename(tmp_reads2, reads2)
 
     # delete the tmpdir
     delete_folder(tmpdir)
+
+    check_that_paired_reads_are_correct(reads1, reads2)
 
     return reads1, reads2
 
@@ -5680,7 +5794,7 @@ def download_srr_parallelFastqDump(srr, destination_dir, is_paired=True, threads
         download_srr_with_prefetch(srr, SRRfile)
 
         # download into fastq split files
-        run_cmd("%s -s %s -t %i -O %s --tmpdir %s --split-files --gzip"%(parallel_fastq_dump, SRRfile, threads, downloading_dir, tmp_dir))
+        run_cmd("%s -s %s -t %i -O %s --tmpdir %s --split-3 --gzip"%(parallel_fastq_dump, SRRfile, threads, downloading_dir, tmp_dir))
 
         # move the fastq files into destination
         for N in isPaired_to_fastqIDXs[is_paired]: os.rename("%s/%s.srr_%i.fastq.gz"%(downloading_dir, srr, N), "%s/%s_%i.fastq.gz"%(destination_dir, srr, N))
@@ -5807,12 +5921,14 @@ def get_SRA_runInfo_df(target_taxID, n_close_samples, nruns_per_sample, outdir, 
         fileprefix = "%s/output"%(outdir_ancestors)
         all_SRA_runInfo_df = get_allWGS_runInfo_fromSRA_forDivision(fileprefix, ancestor_taxID, reference_genome, taxIDs_to_exclude={target_taxID}, replace=False, min_coverage=min_coverage).set_index("Run", drop=False)
 
+        # exclude the wrong SRRs
+        all_SRA_runInfo_df = all_SRA_runInfo_df[~all_SRA_runInfo_df.Run.isin(wrong_SRRs)]
+
         # if it is empty, continue
         if len(all_SRA_runInfo_df)==0: continue
 
         # define the runs with target taxID
         runs_target_taxID = set(all_SRA_runInfo_df[all_SRA_runInfo_df.TaxID==target_taxID].Run)
-
 
         # get the tree
         tree = ncbi.get_descendant_taxa(ancestor_taxID, collapse_subspecies=False, return_tree=True, intermediate_nodes=True)
@@ -5966,7 +6082,8 @@ def get_close_shortReads_table_close_to_taxID(target_taxID, reference_genome, ou
     # define the path to the final table
     close_shortReads_table = "%s/close_shortReads_table.tbl"%outdir
 
-    if file_is_empty(close_shortReads_table) or replace is True:
+    #if file_is_empty(close_shortReads_table) or replace is True:
+    if True:
 
         # change things
         SRA_runInfo_df["sampleID"] = "sample" + SRA_runInfo_df.sampleID.apply(str)
@@ -6008,13 +6125,18 @@ def get_close_shortReads_table_close_to_taxID(target_taxID, reference_genome, ou
             # keep the files
             srr_to_readsDict[srr] = {"short_reads1":trimmed_reads1, "short_reads2":trimmed_reads2}
 
+        # check that the trimmed reads are correct
+        print("checking that all trimmed reads are correct")
+        for srr, rdict in srr_to_readsDict.items(): 
+            if not file_is_empty(rdict["short_reads2"]): 
+                print(srr)
+                check_that_paired_reads_are_correct(rdict["short_reads1"], rdict["short_reads2"])
+
         # if there are all_cmds, run them in a job array
         if len(all_cmds)>0:
 
             # if you are in local, run them in parallel. Each job in one threads
             if job_array_mode=="local" and StopAfterPrefecth_of_reads is True: 
-
-                print(all_cmds)
 
                 print("running prefetch in parallel")
                 with multiproc.Pool(multiproc.cpu_count()) as pool:
@@ -6057,6 +6179,10 @@ def get_close_shortReads_table_close_to_taxID(target_taxID, reference_genome, ou
 
         # write
         final_df.to_csv(close_shortReads_table, sep="\t", header=True, index=False)
+
+    else: 
+
+        print("removing SRR files")
 
     print("taking reads from %s"%close_shortReads_table)
     #########################################
@@ -9803,7 +9929,7 @@ def generate_jobarray_file_greasy(jobs_filename, walltime="48:00:00",  name="Job
     n_jobs = len(open(jobs_filename, "r").readlines())
 
     # if default, number_tasks_to_run_at_once is all, which means that it will try to run all tasks at once
-    if number_tasks_to_run_at_once=="all": number_tasks_to_run_at_once = min([int(max_ncores_queue/ncores_per_task)-1, n_jobs])
+    if number_tasks_to_run_at_once=="all": number_tasks_to_run_at_once = min([int(max_ncores_queue/ncores_per_task), n_jobs])
 
     # define the constraint only if it is necessary
     if constraint!="": constraint_line = "#SBATCH --constraint=%s"%constraint
