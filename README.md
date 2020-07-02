@@ -20,7 +20,7 @@ It is expected to print:
 
 This is essential so that all the dependencies of the pipeline are met.
 
-In addition, there are some dependencies that are included in the respository "installation/external_software" (only in the "release" packages). These are gridss (tested on version 2.8.1), clove (tested on version 0.17), NINJA (we installed it from https://github.com/TravisWheelerLab/NINJA/releases/tag/0.95-cluster_only) and gztools (installed from https://github.com/circulosmeos/gztool/releases/download/v0.11.5/gztool-linux.x86_64)
+In addition, there are some dependencies that are included in the respository "installation/external_software" (only in the "release" packages). These are gridss (tested on version 2.8.1), clove (tested on version 0.17) and gztools (installed from https://github.com/circulosmeos/gztool/releases/download/v0.11.5/gztool-linux.x86_64)
 
 ## Comments for the installation of extra dependencies
 The non-conda dependencies can be installed like this (if you wanted to reinstall them):
@@ -37,31 +37,31 @@ The non-conda dependencies can be installed like this (if you wanted to reinstal
 
 `wget https://github.com/PapenfussLab/clove/releases/download/v0.17/clove-0.17-jar-with-dependencies.jar`
 
-`wget https://github.com/TravisWheelerLab/NINJA/archive/0.95-cluster_only.tar.gz`
-
 `wget https://github.com/circulosmeos/gztool/releases/download/v0.11.5/gztool-linux.x86_64`
 
-3. uncompress the NINJA dir and remove the tar
-
-`tar -xvf 0.95-cluster_only.tar.gz`
-
-`rm 0.95-cluster_only.tar.gz`
-
-4. give execution permssion to all these files:
+3. give execution permssion to all these files:
 
 `chmod u+x *`
-
-5. build NINJA binaries:
-
-`cd <perSVade_installation_dir>/installation/external_software/NINJA-0.95-cluster_only/NINJA`
-
-`make`
 
 You may want to repeat this in case you have problems running any of the programs with the pipeline
 
 The conda environment can be exported to a .yml file with:
 
 `conda env export --no-builds -n perSVade_env --file perSVade_env.yml`
+
+## Running in MareNostrum
+
+If you are working from any cluster that has access to the BSC /gpfs filesystem you can activate the perSVade environment from its location in mschikora. The only risk is that Miki may be editing the environment for the development of perSVade. You should be running this from an interactive node in MN like this:
+
+`salloc -n 1 -c 48 -t 02:00:00 --qos debug` # runs an interactive session. ESSENTIAL
+
+`source /gpfs/projects/bsc40/mschikora/anaconda3/etc/profile.d/conda.sh`  # activate the conda environment of mschikora
+
+`conda activate perSVade_env` # activate the environment
+
+VERY IMPORTANT NOTE:
+
+NEVER activate the enviroment in the login of MN, as this is a large environment and uses a lot of resources. In fact, sometimes the login FAILS for all MN users when you activate this environent, so please don't do it.
 
 ## Running
 Once you have installed all the dependencies, you can call the perSVade pipeline with:
@@ -70,6 +70,22 @@ Once you have installed all the dependencies, you can call the perSVade pipeline
 
 `python ./scripts/perSVade.py -r <path to the reference genome (fasta)> -o <output_directory> -p <ploidy, 1 or 2> -f1 <forward_reads.fastq.gz> -f2 <reverse_reads.fastq.gz>`
 
+
+## Example: running SmallVariant calling and CNV detection for paired-end WGS
+
+perSVade also includes the possibility of running small variant calling. You can do this by skipping SV detection, with a command like:
+
+`./scripts/perSVade.py --ref reference_genome.fasta --threads 4 -o ./output_directory -f1 reads_FWD.fastq.gz -f2 reads_FWD.fastq.gz --mitochondrial_chromosome chr_mito --mitochondrial_code 3 --gDNA_code 12 -gff features.gff  --run_smallVarsCNV --skip_SVcalling --caller all --coverage 20 --ploidy 2 --remove_smallVarsCNV_nonEssentialFiles`
+
+Type `./scripts/perSVade.py -h` to understand wahat is the meaning of these options. Some important remarks:
+
+1. `--mitochondrial_code` and `gDNA_code` are the NCBI translation code of your species, check them in https://www.ncbi.nlm.nih.gov/Taxonomy/Utils/wprintgc.cgi . Note that they may be wrong sometimes, so that it is good to double check with the literature.
+2. `--mitochondrial_chromosome` is supposed to include the name of the chromosome in the reference genome fasta.
+3. `--run_smallVarsCNV` is the cmd that indicates perSVade to also run smallVariant calling.
+4. `--skip_SVcalling` tells the pipeline to skip the calling of structural variation
+5. `--coverage` is the minimum coverage for a variant to be kept
+6. `--remove_smallVarsCNV_nonEssentialFiles` is useful to clean the output directory from non-essential output files.
+7. You may want to understand what the programs of this pipeline do. Check freebayes, bcftools, GATK HaplotypeCaller and ENSEMBL Variant Annotation Predictor.
 
 
 ## Method
