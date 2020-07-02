@@ -412,9 +412,7 @@ def remove_file(f):
 
 def delete_folder(f):
 
-    if os.path.isdir(f): 
-        #run_cmd("rm -rf %s"%f)
-        shutil.rmtree(f)
+    if os.path.isdir(f): shutil.rmtree(f)
 
 
 def make_folder(f):
@@ -6082,15 +6080,15 @@ def get_close_shortReads_table_close_to_taxID(target_taxID, reference_genome, ou
     # define the path to the final table
     close_shortReads_table = "%s/close_shortReads_table.tbl"%outdir
 
-    #if file_is_empty(close_shortReads_table) or replace is True:
-    if True:
+    # define the dir were you will store the reads
+    reads_dir = "%s/reads"%outdir; make_folder(reads_dir)
+
+    if file_is_empty(close_shortReads_table) or replace is True:
 
         # change things
         SRA_runInfo_df["sampleID"] = "sample" + SRA_runInfo_df.sampleID.apply(str)
         SRA_runInfo_df["runID"] = SRA_runInfo_df.sampleID + "_" + SRA_runInfo_df.Run
 
-        # define the dir were you will store the reads
-        reads_dir = "%s/reads"%outdir; make_folder(reads_dir)
 
         # initialize the final dict
         srr_to_readsDict = {}
@@ -6125,12 +6123,6 @@ def get_close_shortReads_table_close_to_taxID(target_taxID, reference_genome, ou
             # keep the files
             srr_to_readsDict[srr] = {"short_reads1":trimmed_reads1, "short_reads2":trimmed_reads2}
 
-        # check that the trimmed reads are correct
-        print("checking that all trimmed reads are correct")
-        for srr, rdict in srr_to_readsDict.items(): 
-            if not file_is_empty(rdict["short_reads2"]): 
-                print(srr)
-                check_that_paired_reads_are_correct(rdict["short_reads1"], rdict["short_reads2"])
 
         # if there are all_cmds, run them in a job array
         if len(all_cmds)>0:
@@ -6180,11 +6172,33 @@ def get_close_shortReads_table_close_to_taxID(target_taxID, reference_genome, ou
         # write
         final_df.to_csv(close_shortReads_table, sep="\t", header=True, index=False)
 
-    else: 
 
-        print("removing SRR files")
+
+    print("removing all files that are not the reads")
+    close_shortReads_table_df = pd.read_csv(close_shortReads_table, sep="\t")
+    
+    # define the important files
+    important_files = set(close_shortReads_table_df["short_reads1"]).union(close_shortReads_table_df["short_reads2"])
+    
+    # remove the others
+    for srr in os.listdir(reads_dir):
+        srr_dir = "%s/%s"%(reads_dir, srr)
+        for file in os.listdir(srr_dir):
+            filepath = "%s/%s"%(srr_dir, file)
+
+            if filepath not in important_files: remove_file(filepath)
+
+    # remove all the other unimportant files and folders
+    for f in os.listdir(outdir):
+
+        if f not in {"close_shortReads_table.tbl", "final_SRA_runInfo_df.py", "reads"}:
+
+            path = "%s/%s"%(outdir, f)
+            delete_folder(path)
+            remove_file(path)
 
     print("taking reads from %s"%close_shortReads_table)
+
     #########################################
 
     return close_shortReads_table
@@ -10478,7 +10492,59 @@ def report_accuracy_golden_set(goldenSet_dir, outdir, reference_genome, real_svt
     # run perSVade with all the types of optimisat
 
 
-   
+def remove_smallVarsCNV_nonEssentialFiles(outdir, ploidy):
+
+    """Removes all the files in outdir that are not essential. The outdir has to be the one of the VarCall outdir. The files to r"""
+
+    print("cleaning %s"%outdir)
+
+    # initialize the files to remove
+    files_to_remove = ["%s/CNV_results/gene_to_coverage_genes.tab"%outdir, # the genes coverage
+                       "%s/CNV_results/gene_to_coverage_regions.tab"%outdir # the regions coverage
+                       ]
+
+    # add the bcftools
+    bcftools_dir = "%s/bcftools_ploidy%i_out"%(outdir, ploidy)
+    HC_dir = "%s/HaplotypeCaller_ploidy%i_out"%(outdir, ploidy)
+    fb_dir = "%s/freebayes_ploidy%i_out"%(outdir, ploidy)
+
+    # go through each dir
+    for vcfDir in [bcftools_dir, HC_dir, fb_dir]:
+
+        if os.path.isdir(vcfDir):
+            for file in os.listdir(vcfDir):
+
+                if file not in {"output.raw.vcf", "output.filt.norm_vcflib.vcf"}: files_to_remove.append("%s/%s"%(vcfDir, file))
+
+    for f in files_to_remove: remove_file(f)
+
+
+def get_sortedBam_with_duplicatesMarked(sorted_bam, threads=4, replace=False):
+
+    """This function takes a sorted bam and returns the equivalent with the duplicates marked with picard MarkDuplicates. It also indexes this bam"""
+
+    # define dirs
+    sorted_bam_dupMarked = "%s.MarkDups.bam"%sorted_bam
+    sorted_bam_dupMarked_tmp = "%s.MarkDups.tmp.bam"%sorted_bam
+    sorted_bam_dupMarked_metrics = "%s.MarkDups.metrics"%sorted_bam
+
+    if file_is_empty(sorted_bam_dupMarked) or replace is True:
+        print("marking duplicate reads")
+
+        run_cmd("%s MarkDuplicates I=%s O=%s M=%s"%(picard_exec, sorted_bam, sorted_bam_dupMarked_tmp, sorted_bam_dupMarked_metrics))
+        #REMOVE_DUPLICATES=Boolean
+
+        # keep
+        os.rename(sorted_bam_dupMarked_tmp, sorted_bam_dupMarked)
+
+    # index the bam with the duplicate reads
+    index_sorted_bam_dupMarked = "%s.bai"%sorted_bam_dupMarked
+    if file_is_empty(index_sorted_bam_dupMarked) or replace is True:
+        index_bam(sorted_bam_dupMarked, threads=threads)
+
+    return sorted_bam_dupMarked
+
+
 
 
 

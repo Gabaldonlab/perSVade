@@ -74,8 +74,15 @@ parser.add_argument("-gcode", "--gDNA_code", dest="gDNA_code", default=1, type=i
 # CNV args
 parser.add_argument("--skip_cnv_analysis", dest="skip_cnv_analysis", action="store_true", default=False, help="Skipp the running of the CNV pipeline, which outputs the number of copies that each gene has according to coverage. The gene ID's are based on the GFF3 files that have been provided in -gff")
 
+# avoid marking duplicates
+parser.add_argument("--skip_MarkingDuplicates", dest="skip_MarkingDuplicates", action="store_true", default=False, help="Skips the marking of duplicates in the bam.")
+
+
 # othe args
 parser.add_argument("-gff", "--gff-file", dest="gff", default=None, help="path to the GFF3 annotation of the reference genome. Make sure that the IDs are completely unique for each 'gene' tag. This is necessary for both the CNV analysis (it will look at genes there) and the annotation of the variants.")
+
+# removing args
+parser.add_argument("--remove_smallVarsCNV_nonEssentialFiles", dest="remove_smallVarsCNV_nonEssentialFiles", action="store_true", default=False, help="Will remove all the varCall files except the integrated final file, the filtered and normalised vcfs, the raw vcf and the CNV files.")
 
 # get arguments
 opt = parser.parse_args()
@@ -139,8 +146,11 @@ if fun.file_is_empty("%s.fai"%opt.ref) or opt.replace is True:
     cmd_indexRef = "%s faidx %s"%(samtools, opt.ref); fun.run_cmd(cmd_indexRef) # This creates a .bai file of the reference
 
 
-# define the sorted bam as the provided one
-sorted_bam = opt.sortedbam
+# marking duplicates or not
+if opt.skip_MarkingDuplicates is False: sorted_bam = fun.get_sortedBam_with_duplicatesMarked(opt.sortedbam, threads=opt.threads, replace=opt.replace)
+
+else: sorted_bam = opt.sortedbam
+print("running VarCall for %s"%sorted_bam)
 
 #####################################
 ############### CNV #################
@@ -471,10 +481,12 @@ else:
 
             print("files saved into %s"%("%s.tab"%fileprefix))
 
-print("Variant annotation with VEP is done")
 
 print("VarCall Finished")
 
 # create outfile
 open("%s/finsihedVarCall_CNV_file_ploidy%i.txt"%(opt.outdir, opt.ploidy), "w").write("finsihed with pipeline\n")
+
+# at the end remove all the non-essential files
+if opt.remove_smallVarsCNV_nonEssentialFiles is True: fun.remove_smallVarsCNV_nonEssentialFiles(opt.outdir, opt.ploidy)
 

@@ -78,7 +78,7 @@ parser.add_argument("--StopAfter_sampleIndexingFromSRA", dest="StopAfter_sampleI
 parser.add_argument("--StopAfter_genomeObtention", dest="StopAfter_genomeObtention", action="store_true", default=False, help="Stop after genome obtention.")
 parser.add_argument("--StopAfter_bamFileObtention", dest="StopAfter_bamFileObtention", action="store_true", default=False, help="Stop after obtaining the BAM file of aligned reads.")
 parser.add_argument("--StopAfterPrefecth_of_reads", dest="StopAfterPrefecth_of_reads", action="store_true", default=False, help="Stop after obtaining the prefetched .srr file in case close_shortReads_table is 'auto'")
-
+parser.add_argument("--StopAfter_obtentionOFcloseSVs", dest="StopAfter_obtentionOFcloseSVs", action="store_true", default=False, help="Stop after obtaining the SVs_compatible_to_insert_dir ")
 
 # testing options
 parser.add_argument("--testRealDataAccuracy", dest="testRealDataAccuracy", action="store_true", default=False, help="Reports the accuracy  of your calling on the real data for all the WGS runs specified in --close_shortReads_table. ")
@@ -119,6 +119,7 @@ parser.add_argument("-caller", "--caller", dest="caller", required=False, defaul
 parser.add_argument("-c", "--coverage", dest="coverage", default=20, type=int, help="minimum Coverage (int)")
 parser.add_argument("-mcode", "--mitochondrial_code", dest="mitochondrial_code", default=3, type=int, help="The code of the NCBI mitochondrial genetic code. For yeasts it is 3. You can find the numbers for your species here https://www.ncbi.nlm.nih.gov/Taxonomy/Utils/wprintgc.cgi")
 parser.add_argument("-gcode", "--gDNA_code", dest="gDNA_code", default=1, type=int, help="The code of the NCBI gDNA genetic code. You can find the numbers for your species here https://www.ncbi.nlm.nih.gov/Taxonomy/Utils/wprintgc.cgi . For C. albicans it is 12. ")
+parser.add_argument("--remove_smallVarsCNV_nonEssentialFiles", dest="remove_smallVarsCNV_nonEssentialFiles", action="store_true", default=False, help="Will remove all the varCall files except the integrated final file and the bam file.")
 
 opt = parser.parse_args()
 
@@ -353,6 +354,13 @@ else:
     # define the set of vars as empty. This will trigger the random generation of vars
     real_svtype_to_file = {}
 
+
+if opt.StopAfter_obtentionOFcloseSVs: 
+    print("stopping pipeline after obtention of close SVs")
+    sys.exit(0)
+
+
+
 ###################################################################################################
 
 # test the accuracy on each of the simulations types
@@ -396,6 +404,7 @@ if opt.run_smallVarsCNV:
     # add options
     if opt.replace is True: varcall_cmd += " --replace"
     if opt.gff is not None: varcall_cmd += " -gff %s"%opt.gff
+    if opt.remove_smallVarsCNV_nonEssentialFiles is True: varcall_cmd += " --remove_smallVarsCNV_nonEssentialFiles"
 
     # run
     fun.run_cmd(varcall_cmd)
