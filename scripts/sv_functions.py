@@ -184,8 +184,11 @@ g_filterName_to_filterValue_to_Number = {filterName : dict(zip(filtersList, rang
 # define the default window_l
 window_l = 10000
 
-# define the wrong SRRs
+# define the wrong SRRs (could not be downloaded)
 wrong_SRRs = {"ERR2163728", "SRR8373447"}
+
+# define the fraction of RAM to dedicate to the pipeline
+fractionRAM_to_dedicate = 0.9
 
 svtype_to_color={"tandemDuplications": "gray", "deletions": "black", "inversions": "blue", "translocations": "olive", "insertions": "red", "remaining":"magenta", "integrated":"c"}
 
@@ -525,6 +528,16 @@ def extract_BEDofGENES_of_gff3(gff, bed, replace=False, reference=""):
     return regions_filename
 
 
+def get_availableGbRAM():
+
+    """This function returns a float with the available memory in your system"""
+
+    lines_availableMem = [float(l.split()[1])/1000000 for l in open("/proc/meminfo", "r").readlines() if l.startswith("MemAvailable:") and l.strip().endswith("kB")]
+
+    if len(lines_availableMem)!=1: raise ValueError("there are more than one correct lines")
+
+    return lines_availableMem[0]
+
 
 def write_coverage_per_gene_mosdepth_and_parallel(sorted_bam, reference_genome, cnv_outdir, bed, gene_to_coverage_file, replace=False):
 
@@ -555,9 +568,6 @@ def write_coverage_per_gene_mosdepth_and_parallel(sorted_bam, reference_genome, 
 
         print("writing %s"%gene_to_coverage_file)
         os.rename(coverage_file_with_ID, gene_to_coverage_file)
-
-
-
 
 def run_gatk_HaplotypeCaller(outdir_gatk, ref, sorted_bam, ploidy, threads, coverage, replace=False):
 
@@ -596,7 +606,6 @@ def run_gatk_HaplotypeCaller(outdir_gatk, ref, sorted_bam, ploidy, threads, cove
     # return the filtered file
     return gatk_out_filtered
 
-
 def run_bwa_mem(fastq1, fastq2, ref, outdir, bamfile, sorted_bam, index_bam, name_sample, threads=1, replace=False):
 
     """Takes a set of files and runs bwa mem getting sorted_bam and index_bam"""
@@ -627,7 +636,7 @@ def run_bwa_mem(fastq1, fastq2, ref, outdir, bamfile, sorted_bam, index_bam, nam
 
         #BWA MEM --> get .sam
         samfile = "%s/aligned_reads.sam"%outdir;
-        if file_is_empty(samfile) or replace is True:
+        if (file_is_empty(samfile) and file_is_empty(bamfile)) or replace is True:
 
             # remove previuous generated temporary file
             if os.path.isfile("%s.tmp"%samfile): os.unlink("%s.tmp"%samfile)
@@ -649,9 +658,14 @@ def run_bwa_mem(fastq1, fastq2, ref, outdir, bamfile, sorted_bam, index_bam, nam
 
             os.rename("%s.tmp"%bamfile , bamfile)
 
+
+        # define the sorted_bam with Dups
+        sorted_bam_noMarkDups = "%s.noMarkDups"%sorted_bam
+        sorted_bam_noMarkDups_tmp = "%s.tmp"%sorted_bam_noMarkDups
+
         # sorting bam
-        if file_is_empty(sorted_bam) or replace is True:
-            #print("Sorting bam")
+        if file_is_empty(sorted_bam_noMarkDups) or replace is True:
+            print("Sorting bam")
 
             # remove all temporary files generated previously in samtools sort (they'd make a new sort to be an error)
             for outdir_file in os.listdir(outdir): 
@@ -660,14 +674,28 @@ def run_bwa_mem(fastq1, fastq2, ref, outdir, bamfile, sorted_bam, index_bam, nam
 
             # sort
             bam_sort_std = "%s.tmp.sortingBam_std.txt"%sorted_bam
-            cmd_sort = "%s sort --threads %i -o %s.tmp %s > %s 2>&1"%(samtools, threads, sorted_bam, bamfile, bam_sort_std); run_cmd(cmd_sort)
+            cmd_sort = "%s sort --threads %i -o %s %s > %s 2>&1"%(samtools, threads, sorted_bam_noMarkDups_tmp, bamfile, bam_sort_std); run_cmd(cmd_sort)
+
+            # rename
+            os.rename(sorted_bam_noMarkDups_tmp, sorted_bam_noMarkDups)
+
+        # mark duplicates
+        if file_is_empty(sorted_bam) or replace is True:
+            print("marking duplicates")
+
+            # mark duplicates
+            sorted_bam_MarkedDuplicates = get_sortedBam_with_duplicatesMarked(sorted_bam_noMarkDups, threads=threads, replace=replace)
 
             # remove the the raw bam file
             #print("Removing unsorted bam")
-            os.unlink(bamfile)
+            remove_file("%s.bai"%sorted_bam_MarkedDuplicates)
 
-            os.rename("%s.tmp"%sorted_bam , sorted_bam)
+            # replace
+            os.rename(sorted_bam_MarkedDuplicates, sorted_bam)
 
+        # remove unnecessary files
+        remove_file(bamfile)
+        remove_file(sorted_bam_noMarkDups)
 
     # indexing bam
     if file_is_empty(index_bam) or replace is True:
@@ -2516,7 +2544,7 @@ def simulate_pairedEndReads_per_chromosome_uniform(chr_obj, coverage, insert_siz
 ################################## RUN GRIDSS AND CLOVE PIPELINE ##################################
 ###################################################################################################
 
-def run_gridss_and_annotateSimpleType(sorted_bam, reference_genome, outdir, replace=False, threads=4, blacklisted_regions="", maxcoverage=50000, max_threads=8):
+def run_gridss_and_annotateSimpleType(sorted_bam, reference_genome, outdir, replace=False, threads=4, blacklisted_regions="", maxcoverage=50000):
 
     """Runs gridss for the sorted_bam in outdir, returning the output vcf. blacklisted_regions is a bed with regions to blacklist"""
 
@@ -2543,8 +2571,6 @@ def run_gridss_and_annotateSimpleType(sorted_bam, reference_genome, outdir, repl
 
         print("blacklisting %s\n"%blacklisted_regions)
         
-        # change the number of threads if more than max_threads, which is the optimum for gridss (8 is the optimum)
-        if threads>max_threads: threads =  max_threads # this is to optimise for the reccommended level of parallelism
 
         # define the out and error of gridss
         #gridss_std = "%s/gridss_run_std.txt"%outdir
@@ -2558,9 +2584,17 @@ def run_gridss_and_annotateSimpleType(sorted_bam, reference_genome, outdir, repl
                 delete_folder(gridss_tmpdir); make_folder(gridss_tmpdir)
                 remove_file(gridss_assemblyBAM)
 
+                # define the ram available
+                allocated_ram = get_availableGbRAM()*fractionRAM_to_dedicate
+
                 # define the heap size, which depends on the cloud or not
                 #jvmheap = "27.5g" # this is the default
-                jvmheap = "20g" # this works in MN. This can be changed to fit the machine
+                #jvmheap = "20g" # this works in MN. This can be changed to fit the machine
+                jvmheap = "%ig"%min([31, int(allocated_ram)]) # this is automatically adjusted for the given machine. Note that due to Java's use of Compressed Oops, specifying a max heap size of between 32-48GB effectively reduces the memory available to GRIDSS so is strongly discouraged.
+
+                # define the maxiumum number of threads so that each thread has 8Gb of ram (jvmheap)
+                max_threads = int(allocated_ram/8 - 1) 
+                if threads>max_threads: threads =  max_threads # this is to optimise for the reccommended level of parallelism
 
                 # run
                 print("running gridss on %s jvmheap"%jvmheap)
@@ -3682,8 +3716,10 @@ def get_clove_output_with_coverage(outfile_clove, reference_genome, sorted_bam, 
             if svtypeName in {"tanDel", "ins"}: 
 
                 # the df with the actual coverage
-                merged_df_svtype = svtype_df_clove.merge(coverage_df, left_on=coord_fields, right_on=["chromosome", "start", "end"], validate="one_to_one", how="left")
+                merged_df_svtype = svtype_df_clove.merge(coverage_df, left_on=coord_fields, right_on=["chromosome", "start", "end"], how="left")
 
+                # check that it is correct
+                if len(merged_df_svtype)!=len(svtype_df_clove) or any(pd.isna(merged_df_svtype.target_coverage)): raise ValueError("There is an error with the merge")
             else: 
 
                 # initialize as clove
@@ -6172,8 +6208,6 @@ def get_close_shortReads_table_close_to_taxID(target_taxID, reference_genome, ou
         # write
         final_df.to_csv(close_shortReads_table, sep="\t", header=True, index=False)
 
-
-
     print("removing all files that are not the reads")
     close_shortReads_table_df = pd.read_csv(close_shortReads_table, sep="\t")
     
@@ -7203,22 +7237,117 @@ def get_svtype_to_svfile_and_df_gridss_from_perSVade_outdir(perSVade_outdir):
 
     """This function takes from the perSVade outdir the svdict and the df_gridss"""
 
-
     # define the paths
     outdir = "%s/SVdetection_output/final_gridss_running"%perSVade_outdir
-    gridss_vcf = "%s/gridss_output.vcf.withSimpleEventType.vcf"%outdir
+    gridss_vcf = "%s/gridss_output.raw.vcf"%outdir
 
     # get the df gridss
     df_gridss = add_info_to_gridssDF(load_single_sample_VCF(gridss_vcf))
 
     # get the svtype_to_svfile
-    svtype_to_svfileList = {svtype : ["%s/%s"%(outdir, f) for f in os.listdir(outdir) if ".structural_variants." in f and f.count(svtype)==1] for svtype in {"insertions", "deletions", "tandemDuplications", "translocations", "remaining", "inversions"}}
+    svtype_to_svfile = {svtype : "%s/%s.tab"%(outdir, svtype)  for svtype in {"insertions", "deletions", "tandemDuplications", "translocations", "inversions"}}
+    svtype_to_svfile["remaining"] = "%s/unclassified_SVs.tab"%outdir 
 
-    svtype_to_svfile = {svtype : svfileList[0]  for svtype, svfileList in svtype_to_svfileList.items() if len(svfileList)==1}
+    # keep only the ones that exist
+    svtype_to_svfile = {svtype : file for svtype, file in svtype_to_svfile.items() if not file_is_empty(file)}
+    print("There are %i svfiles"%len(svtype_to_svfile))
 
     return svtype_to_svfile, df_gridss
 
-def get_ID_to_svtype_to_svDF_for_setOfGenomes_highConfidence(close_shortReads_table, reference_genome, outdir, replace=False, threads=4, mitochondrial_chromosome="mito_C_glabrata_CBS138", job_array_mode="local", walltime="02:00:00", queue="debug"):
+def copy_file(origin, target):
+
+    """Copy a file with tmp"""
+
+    target_tmp = "%s.tmp"%target
+
+    if file_is_empty(target):
+
+        shutil.copy2(origin, target_tmp)
+        os.rename(target_tmp, target)
+
+def clean_perSVade_outdir(outdir):
+
+    """This function takes an outdir of perSVade and cleans it only keeping the most important files """
+
+    # intialize the filenames
+    files_to_remove = []
+    file_to_dest_file = {}
+
+    # add the most immediate files
+    files_to_remove += [
+
+       # immediate files
+       "aligned_reads.bam.sorted.CollectInsertSizeMetrics.out",
+       "aligned_reads.bam.sorted.coverage_per_window.tab",
+       "aligned_reads.bam.sorted.histogram_insertsizes.pdf",
+       "aligned_reads.bam.sorted.tmp.MarkDups.bam.bai",
+       "aligned_reads.bam.sorted.tmp.MarkDups.metrics",
+       "aligned_reads.bam.sorted.tmp.sortingBam_std.txt",
+
+       # files under SVdetection
+       "SVdetection_output/gridss_finished.txt",
+    
+    ]
+
+    ########## FILES IN final_gridss_running  ######### 
+
+    # add the files in the final_gridss_running
+    final_gridss_running = "SVdetection_output/final_gridss_running"
+
+    # add files to remove
+    files_to_remove_final_gridss_running = [
+        "aligned_reads.sorted.bam",
+        "aligned_reads.sorted.bam.bai",
+        "empty_regions.bed",                       
+        "gridss_output.vcf",
+        "gridss_output.vcf.idx",
+        "gridss_output.vcf.withSimpleEventType.vcf.filtered_default.vcf.bedpe",
+        "gridss_output.vcf.withSimpleEventType.vcf.filtered_default.vcf.bedpe.raw.bedpe.clove.vcf.TANDELINS.bed.3.bed", 
+        "gridss_output.vcf.withSimpleEventType.vcf.filtered_default.vcf.bedpe.raw.bedpe.clove.vcf.TANDELINS.bed.5.bed",            
+        "gridss_output.vcf.withSimpleEventType.vcf.filtered_default.vcf.bedpe.raw.bedpe.clove.vcf.TANDELINS.bed.target.bed",
+        "simple_event_annotation.std",
+        "svVCF_analysis_log.out"
+    ]
+
+    # add the names to change
+    file_to_dest_file_final_gridss_running = {
+        "gridss_output.vcf.withSimpleEventType.vcf":"gridss_output.raw.vcf",
+        "gridss_output.vcf.withSimpleEventType.vcf.filtered_default.vcf":"gridss_output.filt.vcf",
+        "gridss_output.vcf.withSimpleEventType.vcf.filtered_default.vcf.bedpe.raw.bedpe":"gridss_output.filt.bedpe",
+        "gridss_output.vcf.withSimpleEventType.vcf.filtered_default.vcf.bedpe.raw.bedpe.clove.vcf":"clove_output.vcf",
+        "gridss_output.vcf.withSimpleEventType.vcf.filtered_default.vcf.bedpe.raw.bedpe.clove.vcf.structural_variants.deletions.bed":"deletions.tab",
+        "gridss_output.vcf.withSimpleEventType.vcf.filtered_default.vcf.bedpe.raw.bedpe.clove.vcf.structural_variants.inversions.bed":"inversions.tab",
+        "gridss_output.vcf.withSimpleEventType.vcf.filtered_default.vcf.bedpe.raw.bedpe.clove.vcf.structural_variants.remaining.tab":"unclassified_SVs.tab",
+        "gridss_output.vcf.withSimpleEventType.vcf.filtered_default.vcf.bedpe.raw.bedpe.clove.vcf.structural_variants.tandemDuplications.bed":"tandemDuplications.tab",
+        "gridss_output.vcf.withSimpleEventType.vcf.filtered_default.vcf.bedpe.raw.bedpe.clove.vcf.structural_variants.translocations.bedpe.withBlancedINFO":"translocations.tab",
+        "gridss_output.vcf.withSimpleEventType.vcf.filtered_default.vcf.bedpe.raw.bedpe.clove.vcf.structural_variants.insertions.bedpe.withCopiedINFO":"insertions.tab"
+    }
+
+    # keep
+    files_to_remove += ["%s/%s"%(final_gridss_running, f) for f in files_to_remove_final_gridss_running]
+    file_to_dest_file = {**file_to_dest_file, **{"%s/%s"%(final_gridss_running, origin) : "%s/%s"%(final_gridss_running, dest) for origin, dest in file_to_dest_file_final_gridss_running.items()}}
+
+    ##################################################
+
+    ####### REMOVE AND CHANGE FILENAMES #######
+
+    # remove 
+    for f in files_to_remove:
+        file = "%s/%s"%(outdir, f)
+        #print("removing %s"%file)
+        remove_file(file)
+        delete_folder(file)
+
+    # change name
+    for o, d in file_to_dest_file.items():
+        origin = "%s/%s"%(outdir, o)
+        dest = "%s/%s"%(outdir, d)
+
+        if not file_is_empty(origin): os.rename(origin, dest)
+
+    ###########################################
+
+def get_ID_to_svtype_to_svDF_for_setOfGenomes_highConfidence(close_shortReads_table, reference_genome, outdir, replace=False, threads=4, mitochondrial_chromosome="mito_C_glabrata_CBS138", job_array_mode="local", max_ncores_queue=768, time_perSVade_running="48:00:00", queue_jobs="bsc_ls"):
 
     """Generates a dict that maps each sample in genomes_withSV_and_shortReads_table to an svtype and a DF with all the info about several vars. It only gets the high-confidence vars.
 
@@ -7253,8 +7382,8 @@ def get_ID_to_svtype_to_svDF_for_setOfGenomes_highConfidence(close_shortReads_ta
             outdir_gridssClove = "%s/shortReads_realVarsDiscovery_%s"%(all_realVars_dir,ID); make_folder(outdir_gridssClove)
 
             # define the previous important files
-            final_file = "%s/SVdetection_output/gridss_finished.txt"%outdir_gridssClove
-
+            final_file = "%s/perSVade_finished.txt"%outdir_gridssClove
+            
             # only contine if the final file is not defined
             if file_is_empty(final_file) or replace is True:
                 print("getting vars for %s"%ID)
@@ -7284,18 +7413,14 @@ def get_ID_to_svtype_to_svDF_for_setOfGenomes_highConfidence(close_shortReads_ta
         if job_array_mode=="greasy": 
 
             if len(all_cmds)>0: 
-                print("submitting %i jobs to the cluster for the real data"%len(all_cmds))
+                print("submitting %i jobs to the cluster for the real data. The files can be monitored from %s"%(len(all_cmds), all_realVars_dir))
                 jobs_filename = "%s/jobs.getting_realSVs"%all_realVars_dir
                 open(jobs_filename, "w").write("\n".join(all_cmds))
 
-                # define and create the STDERR and STDOUT
-                STDERR = "%s/STDERR"%all_realVars_dir
-                STDOUT = "%s/STDOUT"%all_realVars_dir
+                generate_jobarray_file_greasy(jobs_filename, walltime=time_perSVade_running,  name="getRealSVs", queue=queue_jobs, sbatch=True, ncores_per_task=threads, constraint="", number_tasks_to_run_at_once="all", max_ncores_queue=max_ncores_queue )
 
-                generate_jobarray_file_greasy(jobs_filename, stderr=STDERR, stdout=STDOUT, walltime=walltime,  name="getRealSVs", queue=queue, sbatch=True, ncores_per_task=threads, rmstd=True, constraint="", number_tasks_to_run_at_once="all" )
-
-                raise ValueError("You have to wait under all the jobs in testRealSVs are done. Wait until the jobs are done and rerun this pipeline to continue")
-
+                print("Exiting... You have to wait under all the jobs in testRealSVs are done. Wait until the jobs are done and rerun this pipeline to continue")
+                sys.exit(0)
 
         # get a df that has all the info for each SV, and then the df with allele freq, metadata and 
         ID_to_svtype_to_svDF = get_sampleID_to_svtype_to_svDF_filtered(all_sampleID_to_svtype_to_file, all_sampleID_to_dfGRIDSS)
@@ -7307,6 +7432,18 @@ def get_ID_to_svtype_to_svDF_for_setOfGenomes_highConfidence(close_shortReads_ta
         save_object(ID_to_svtype_to_svDF, ID_to_svtype_to_svDF_file)
 
     else: ID_to_svtype_to_svDF = load_object(ID_to_svtype_to_svDF_file)
+
+    # remove the bam files and reference files
+    print("cleaning files")
+    for ID, row in df_genomes.iterrows():
+
+        # run in the gridss and clove with the fast parameters
+        outdir_gridssClove = "%s/shortReads_realVarsDiscovery_%s"%(all_realVars_dir,ID)
+
+        for f in ["aligned_reads.bam.sorted", "aligned_reads.bam.sorted.bai", "reference_genome_dir"]:
+            file = "%s/%s"%(outdir_gridssClove, f)
+            delete_folder(file)
+            remove_file(file)
 
     return ID_to_svtype_to_svDF
 
@@ -7324,7 +7461,7 @@ def set_position_to_max(pos, maxPos):
     if pos>maxPos: return maxPos
     else: return pos
 
-def get_compatible_real_svtype_to_file(close_shortReads_table, reference_genome, outdir, replace=False, threads=4, max_nvars=100, mitochondrial_chromosome="mito_C_glabrata_CBS138", job_array_mode="local"):
+def get_compatible_real_svtype_to_file(close_shortReads_table, reference_genome, outdir, replace=False, threads=4, max_nvars=100, mitochondrial_chromosome="mito_C_glabrata_CBS138", job_array_mode="local", max_ncores_queue=768, time_perSVade_running="48:00:00", queue_jobs="bsc_ls"):
 
     """This function generates a dict of svtype to the file for SVs that are compatible and ready to insert into the reference_genome. All the files are written into outdir. Only a set of 'high-confidence' SVs are reported, which are those that, for each sampleID inclose_shortReads_table, have a reasonable minimum allele frequency and all breakpoints with 'PASS' and are found in all the genomes of the same sampleID.
 
@@ -7339,7 +7476,7 @@ def get_compatible_real_svtype_to_file(close_shortReads_table, reference_genome,
     pipeline_start_time = time.time()
 
     # get all the high-confidence real variants
-    ID_to_svtype_to_svDF = get_ID_to_svtype_to_svDF_for_setOfGenomes_highConfidence(close_shortReads_table, reference_genome, outdir, replace=replace, threads=threads, mitochondrial_chromosome=mitochondrial_chromosome, job_array_mode=job_array_mode)
+    ID_to_svtype_to_svDF = get_ID_to_svtype_to_svDF_for_setOfGenomes_highConfidence(close_shortReads_table, reference_genome, outdir, replace=replace, threads=threads, mitochondrial_chromosome=mitochondrial_chromosome, job_array_mode=job_array_mode, max_ncores_queue=max_ncores_queue, time_perSVade_running=time_perSVade_running, queue_jobs=queue_jobs)
 
     # define the df with the realVars info
     all_realVars_dir = "%s/all_realVars"%(outdir)
@@ -7368,6 +7505,9 @@ def get_compatible_real_svtype_to_file(close_shortReads_table, reference_genome,
 
     # map each chromosome to the len
     chr_to_len = {seq.id: len(seq.seq) for seq in SeqIO.parse(reference_genome, "fasta")}
+
+    # inialize a file that will contain the number of each real SV
+    nSVs_statistics_filecontent = "svtype\tnSVs\n" 
 
     for svtype in all_svtypes:
         outfile_compatible_SVs = "%s/%s.tab"%(SVs_compatible_to_insert_dir, svtype)
@@ -7429,14 +7569,20 @@ def get_compatible_real_svtype_to_file(close_shortReads_table, reference_genome,
                 # if this number exceeds the number of variants it will chop the df
                 if len(compatible_svDF)>max_nvars: compatible_svDF = compatible_svDF.iloc[0:max_nvars]
 
-
-            print("Defining %i compatible %s"%(len(compatible_svDF), svtype))
-
             # write the compatible svDF into the final set of vars
             compatible_svDF.to_csv(outfile_compatible_SVs, sep="\t", header=True, index=False)
 
         # keep 
         compatible_real_svtype_to_file[svtype] = outfile_compatible_SVs
+
+        # write the number
+        nVars = len(pd.read_csv(outfile_compatible_SVs, sep="\t"))
+        print("Defining %i compatible %s"%(nVars, svtype))
+        nSVs_statistics_filecontent += "%s\t%i\n"%(svtype, nVars)
+
+    # write the statistics file
+    open("%s/number_SVs.tab"%SVs_compatible_to_insert_dir, "w").write(nSVs_statistics_filecontent)
+
 
     #####################################################
 
@@ -7462,7 +7608,7 @@ def get_insert_size_distribution(sorted_bam, replace=False, threads=4):
     wrong_foot_lines = [l for l in open(outfile, "r").readlines() if len(l.split("\t"))==2 and not l.startswith("## METRICS CLASS")]
     df = pd.read_csv(outfile, sep="\t", skip_blank_lines=False, header=6, skipfooter=len(wrong_foot_lines)+2, engine='python').iloc[0]
 
-    return (df["MEDIAN_INSERT_SIZE"], df["MEDIAN_ABSOLUTE_DEVIATION"])
+    return (int(df["MEDIAN_INSERT_SIZE"]), int(df["MEDIAN_ABSOLUTE_DEVIATION"]))
 
 
 def get_windows_infoDF_with_predictedFromFeatures_coverage(genome, distToTel_chrom_GC_to_coverage_fn, expected_coverage_per_bp, replace=False, threads=4, make_plots=True):
@@ -9781,8 +9927,8 @@ def run_GridssClove_optimising_parameters(sorted_bam, reference_genome, outdir, 
     print("--- the gridss pipeline optimising parameters took %s seconds in %i cores ---"%(time.time() - pipeline_start_time, threads))
 
     # generate a file that indicates whether the gridss run is finished
-    final_file = "%s/gridss_finished.txt"%outdir
-    open(final_file, "w").write("gridss finished...")
+    final_file = "%s/gridssClove_finished.txt"%outdir
+    open(final_file, "w").write("gridssClove_finished finished...")
 
     ######################################
 
@@ -9997,7 +10143,7 @@ def generate_jobarray_file_greasy(jobs_filename, walltime="48:00:00",  name="Job
     with open(jobs_filename_run, "w") as fd: fd.write("\n".join(arguments))
     
     # run in cluster if specified
-    if sbatch is True: out_state = os.system("sbatch %s"%jobs_filename_run); print("%s sbatch out state: %i"%(name, out_state))
+    if sbatch is True: run_cmd("sbatch %s"%jobs_filename_run)
 
     # get info about the exit status: sacct -j <jobid> --format=JobID,JobName,MaxRSS,Elapsed
 
@@ -10133,10 +10279,6 @@ def plot_accuracy_simulations_from_all_sampleID_to_dfBestAccuracy(all_sampleID_t
     #for y in [0.5, 0.7, 0.8, 0.9]: g.map(plt.axhline, y=y, ls='--', c='k')
 
     g.savefig(filename, bbox_inches='tight')
-
-
-
-
     
 def plot_fraction_overlapping_realSVs(df_benchmarking, filename):
 
@@ -10171,8 +10313,6 @@ def plot_fraction_overlapping_realSVs(df_benchmarking, filename):
 
     fig.savefig(filename, bbox_inches='tight')
     plt.close(fig)
-
-
 
 def report_accuracy_realSVs(close_shortReads_table, reference_genome, outdir, real_svtype_to_file, outdir_finding_realVars, threads=4, replace=False, n_simulated_genomes=2, mitochondrial_chromosome="mito_C_glabrata_CBS138", simulation_ploidies=["haploid", "diploid_homo", "diploid_hetero", "ref:2_var:1", "ref:3_var:1", "ref:4_var:1", "ref:5_var:1", "ref:9_var:1", "ref:19_var:1", "ref:99_var:1"], range_filtering_benchmark="theoretically_meaningful", nvars=100, job_array_mode="local", walltime="08:00:00", queue="bsc_ls"):
 
@@ -10518,7 +10658,6 @@ def remove_smallVarsCNV_nonEssentialFiles(outdir, ploidy):
 
     for f in files_to_remove: remove_file(f)
 
-
 def get_sortedBam_with_duplicatesMarked(sorted_bam, threads=4, replace=False):
 
     """This function takes a sorted bam and returns the equivalent with the duplicates marked with picard MarkDuplicates. It also indexes this bam"""
@@ -10531,7 +10670,10 @@ def get_sortedBam_with_duplicatesMarked(sorted_bam, threads=4, replace=False):
     if file_is_empty(sorted_bam_dupMarked) or replace is True:
         print("marking duplicate reads")
 
-        run_cmd("%s MarkDuplicates I=%s O=%s M=%s"%(picard_exec, sorted_bam, sorted_bam_dupMarked_tmp, sorted_bam_dupMarked_metrics))
+        # define the java memory
+        javaRamGb = int(get_availableGbRAM()*fractionRAM_to_dedicate)
+
+        run_cmd("%s -Xmx%ig MarkDuplicates I=%s O=%s M=%s"%(picard_exec, javaRamGb, sorted_bam, sorted_bam_dupMarked_tmp, sorted_bam_dupMarked_metrics))
         #REMOVE_DUPLICATES=Boolean
 
         # keep

@@ -110,7 +110,7 @@ vep_df = pd.read_csv(outfile_vep_raw, sep="\t", header=len([x for x in open(outf
 
 
 # define the expected vars
-all_expected_consequences = {'stop_gained', 'intron_variant', 'upstream_gene_variant', '5_prime_UTR_variant', 'inframe_insertion', 'synonymous_variant', 'non_coding_transcript_exon_variant', 'intergenic_variant', 'protein_altering_variant', 'coding_sequence_variant', 'downstream_gene_variant', '3_prime_UTR_variant', 'missense_variant', 'splice_region_variant', 'splice_acceptor_variant', 'inframe_deletion', 'stop_lost', 'non_coding_transcript_variant', 'start_retained_variant', 'frameshift_variant', 'stop_retained_variant', 'start_lost', 'incomplete_terminal_codon_variant'}
+all_expected_consequences = {'stop_gained', 'intron_variant', 'upstream_gene_variant', '5_prime_UTR_variant', 'inframe_insertion', 'synonymous_variant', 'non_coding_transcript_exon_variant', 'intergenic_variant', 'protein_altering_variant', 'coding_sequence_variant', 'downstream_gene_variant', '3_prime_UTR_variant', 'missense_variant', 'splice_region_variant', 'splice_acceptor_variant', 'inframe_deletion', 'stop_lost', 'non_coding_transcript_variant', 'start_retained_variant', 'frameshift_variant', 'stop_retained_variant', 'start_lost', 'incomplete_terminal_codon_variant', 'splice_donor_variant'}
 
 # check that all the found consequences are in the expected ones
 all_found_consequences = set.union(*vep_df.Consequence.apply(lambda x: set(x.split(","))))

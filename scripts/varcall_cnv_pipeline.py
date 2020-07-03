@@ -195,8 +195,6 @@ if opt.skip_cnv_analysis is False:
  
     # In Laia's script, she calculates coverage as the median reads per gene (cov per gene) / mean of the cov per gene across all genes
 
-
-   
 print("CNV analysis finished")
 
 #####################################
