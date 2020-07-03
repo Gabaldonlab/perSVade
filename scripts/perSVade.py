@@ -87,7 +87,7 @@ parser.add_argument("--testSimulationsAccuracy", dest="testSimulationsAccuracy",
 
 
 # simulation parameter args
-parser.add_argument("--nvars", dest="nvars", default=50, type=int, help="Number of variants to simulate. Note that the number of balanced translocations inserted in simulations will be always as maximum the number of gDNA chromosome-pairs implicated.")
+parser.add_argument("--nvars", dest="nvars", default=50, type=int, help="Number of variants to simulate for each SVtype.")
 parser.add_argument("--nsimulations", dest="nsimulations", default=2, type=int, help="The number of 'replicate' simulations that will be produced.")
 parser.add_argument("--simulation_ploidies", dest="simulation_ploidies", type=str, default="haploid,diploid_hetero", help='A comma-sepparated string of the ploidies to simulate for parameter optimisation. It can have any of "haploid", "diploid_homo", "diploid_hetero", "ref:2_var:1", "ref:3_var:1", "ref:4_var:1", "ref:5_var:1", "ref:9_var:1", "ref:19_var:1", "ref:99_var:1" ')
 parser.add_argument("--range_filtering_benchmark", dest="range_filtering_benchmark", type=str, default="theoretically_meaningful", help='The range of parameters that should be tested in the SV optimisation pipeline. It can be any of large, medium, small, theoretically_meaningful or single.')
@@ -111,6 +111,8 @@ parser.add_argument("--time_perSVade_running", dest="time_perSVade_running", typ
 # other args
 parser.add_argument("-mchr", "--mitochondrial_chromosome", dest="mitochondrial_chromosome", default="mito_C_glabrata_CBS138", type=str, help="The name of the mitochondrial chromosome. This is important if you have mitochondrial proteins for which to annotate the impact of nonsynonymous variants, as the mitochondrial genetic code is different. This should be the same as in the gff. If there is no mitochondria just put 'no_mitochondria'. If there is more than one mitochindrial scaffold, provide them as comma-sepparated IDs.")
 
+# do not clean the outdir
+parser.add_argument("--skip_cleaning_outdir", dest="skip_cleaning_outdir", action="store_true", default=False, help="Will NOT remove all the unnecessary files of the perSVade outdir")
 
 # small VarCalk and CNV args
 parser.add_argument("--run_smallVarsCNV", dest="run_smallVarsCNV", action="store_true", default=False, help="Will call small variants and CNV.")
@@ -194,7 +196,6 @@ if opt.StopAfter_genomeObtention is True:
 #####################################
 
 if not any([x=="skip" for x in {opt.fastq1, opt.fastq2}]):
-
 
     ##### DEFINE THE SORTED BAM #####
 
@@ -346,7 +347,7 @@ elif opt.fast_SVcalling is False and opt.close_shortReads_table is not None:
         sys.exit(0) 
 
     # get the real SVs
-    real_svtype_to_file = fun.get_compatible_real_svtype_to_file(opt.close_shortReads_table, opt.ref, outdir_finding_realVars, replace=opt.replace, threads=opt.threads, max_nvars=opt.nvars, mitochondrial_chromosome=opt.mitochondrial_chromosome, job_array_mode=opt.job_array_mode)
+    real_svtype_to_file = fun.get_compatible_real_svtype_to_file(opt.close_shortReads_table, opt.ref, outdir_finding_realVars, replace=opt.replace, threads=opt.threads, max_nvars=opt.nvars, mitochondrial_chromosome=opt.mitochondrial_chromosome, job_array_mode=opt.job_array_mode, max_ncores_queue=opt.max_ncores_queue, time_perSVade_running=opt.time_perSVade_running, queue_jobs=opt.queue_jobs)
 
 else: 
     print("Avoiding the simulation of real variants. Only inserting randomSV.")
@@ -369,18 +370,18 @@ if opt.testSimulationsAccuracy is True: fun.report_accuracy_simulations(sorted_b
 # test accuracy on real data
 if opt.testRealDataAccuracy is True:  fun.report_accuracy_realSVs(opt.close_shortReads_table, opt.ref, "%s/testing_RealSVsAccuracy"%opt.outdir, real_svtype_to_file, outdir_finding_realVars, threads=opt.threads, replace=opt.replace, n_simulated_genomes=opt.nsimulations, mitochondrial_chromosome=opt.mitochondrial_chromosome, simulation_ploidies=simulation_ploidies, range_filtering_benchmark=opt.range_filtering_benchmark, nvars=opt.nvars, job_array_mode=opt.job_array_mode)
 
+# get the golden set
+if opt.goldenSet_dir is not None:
+
+    outdir_goldenSet = "%s/testing_goldenSetAccuracy"%opt.outdir
+    fun.report_accuracy_golden_set(opt.goldenSet_dir, outdir_goldenSet, opt.ref, real_svtype_to_file, threads=opt.threads, replace=opt.replace, n_simulated_genomes=opt.nsimulations, mitochondrial_chromosome=opt.mitochondrial_chromosome, simulation_ploidies=simulation_ploidies, range_filtering_benchmark=opt.range_filtering_benchmark, nvars=opt.nvars, job_array_mode=opt.job_array_mode, StopAfter_sampleIndexingFromSRA=opt.StopAfter_sampleIndexingFromSRA, time_read_obtention=opt.time_read_obtention, StopAfterPrefecth_of_reads=opt.StopAfterPrefecth_of_reads, queue_jobs=opt.queue_jobs, max_ncores_queue=opt.max_ncores_queue, time_perSVade_running=opt.time_perSVade_running, target_taxID=opt.target_taxID)
+
 # run the actual perSVade function optimising parameters
 if opt.skip_SVcalling is False:
 
     SVdetection_outdir = "%s/SVdetection_output"%opt.outdir
     fun.run_GridssClove_optimising_parameters(sorted_bam, opt.ref, SVdetection_outdir, threads=opt.threads, replace=opt.replace, n_simulated_genomes=opt.nsimulations, mitochondrial_chromosome=opt.mitochondrial_chromosome, simulation_ploidies=simulation_ploidies, range_filtering_benchmark=opt.range_filtering_benchmark, nvars=opt.nvars, fast_SVcalling=opt.fast_SVcalling, real_svtype_to_file=real_svtype_to_file)
 
-
-# get the golden set
-if opt.goldenSet_dir is not None:
-
-    outdir_goldenSet = "%s/testing_goldenSetAccuracy"%opt.outdir
-    fun.report_accuracy_golden_set(opt.goldenSet_dir, outdir_goldenSet, opt.ref, real_svtype_to_file, threads=opt.threads, replace=opt.replace, n_simulated_genomes=opt.nsimulations, mitochondrial_chromosome=opt.mitochondrial_chromosome, simulation_ploidies=simulation_ploidies, range_filtering_benchmark=opt.range_filtering_benchmark, nvars=opt.nvars, job_array_mode=opt.job_array_mode, StopAfter_sampleIndexingFromSRA=opt.StopAfter_sampleIndexingFromSRA, time_read_obtention=opt.time_read_obtention, StopAfterPrefecth_of_reads=opt.StopAfterPrefecth_of_reads, queue_jobs=opt.queue_jobs, max_ncores_queue=opt.max_ncores_queue, time_perSVade_running=opt.time_perSVade_running, target_taxID=opt.target_taxID)
 
 print("structural variation analysis with perSVade finished")
 
@@ -413,6 +414,12 @@ if opt.run_smallVarsCNV:
 #####################################
 #####################################
 
+# at the end you want to clean the outdir to keep only the essential files
+if opt.skip_cleaning_outdir is False: fun.clean_perSVade_outdir(opt.outdir)
+
+# generate a file that indicates whether the gridss run is finished
+final_file = "%s/perSVade_finished.txt"%opt.outdir
+open(final_file, "w").write("perSVade_finished finished...")
 
 
 print("perSVade Finished")
