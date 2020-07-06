@@ -230,53 +230,57 @@ if opt.caller == "bcftools" or opt.caller == "all":
     outdir_bcftools = "%s/bcftools_ploidy%i_out"%(opt.outdir, opt.ploidy)
     if not os.path.isdir(outdir_bcftools): os.mkdir(outdir_bcftools)
 
-    # look for the mpileup bcf in sister directories, as it is the same for any other ploidy
-    mpileup_output = "%s/output.mpileup.bcf"%outdir_bcftools; mpileup_output_tmp = "%s.tmp"%mpileup_output
-    for folder in os.listdir(opt.outdir):
-        if folder.startswith("bcftools_ploidy") and folder.endswith("_out"):
-
-            # look for the potential previously calculated mpielup outputs
-            potential_previosuly_calculated_mpileup_output = "%s/%s/output.mpileup.bcf"%(opt.outdir, folder)
-            if not fun.file_is_empty(potential_previosuly_calculated_mpileup_output): 
-                print("taking %s from previous run"%potential_previosuly_calculated_mpileup_output)
-                mpileup_output = potential_previosuly_calculated_mpileup_output; break
-
-    # if there is no previous run
-    if fun.file_is_empty(mpileup_output) or opt.replace is True:
-
-        print("Running mpileup...")
-        cmd_bcftools_mpileup = '%s mpileup -a "AD,DP" -O b -f %s -o %s --threads %i %s'%(bcftools, opt.ref, mpileup_output_tmp, opt.threads, sorted_bam); fun.run_cmd(cmd_bcftools_mpileup)
-        os.rename(mpileup_output_tmp, mpileup_output)
-
-
-    # run bcftools call
-    call_output = "%s/output.raw.vcf"%outdir_bcftools; call_output_tmp = "%s.tmp"%call_output
-    if fun.file_is_empty(call_output) or opt.replace is True:
-        print("Running bcftools call ...")
-
-        # define the ploidy specification
-        if opt.ploidy==1: ploidy_cmd = "--ploidy %i"%opt.ploidy # This is all haploid
-        else:
-            # create a ploidy file if ploidy is 2. There's no way to simpli specify ploidy 2
-            ploidy_file_bcftools = "%s/ploidy_file.tab"%outdir_bcftools
-            open(ploidy_file_bcftools, "w").write("* * * * %i\n"%opt.ploidy) # CHROM, FROM, TO, SEX, PLOIDY
-
-            ploidy_cmd = "--ploidy-file %s"%ploidy_file_bcftools
-
-        cmd_bcftools_call = "%s call -m -f GQ,GP -v -O v --threads %i -o %s %s %s"%(bcftools, opt.threads, call_output_tmp, ploidy_cmd, mpileup_output); fun.run_cmd(cmd_bcftools_call)
-
-        os.rename(call_output_tmp, call_output)
-  
-    #As there are no recommendations for bcftools, we decided to apply exclusively the filter for coverage. To apply harder filters please edit this command!
-    
-    # this generates a filtered, vcf, which only has the PASS ones.
-    filtered_output = "%s/output.filt.vcf"%outdir_bcftools; filtered_output_tmp = "%s.tmp"%filtered_output
+    # only continue if the final file is not done
+    filtered_output = "%s/output.filt.vcf"%outdir_bcftools;     
     if fun.file_is_empty(filtered_output) or opt.replace is True:
-        print("Filtering bcftools ... ")
-        cmd_filter = "%s filter -m x -e 'INFO/DP <= %i' -O v --threads %i -o %s %s"%(bcftools, opt.coverage, opt.threads, filtered_output_tmp, call_output); fun.run_cmd(cmd_filter)
-        os.rename(filtered_output_tmp, filtered_output)
 
-    # keep
+        # look for the mpileup bcf in sister directories, as it is the same for any other ploidy
+        mpileup_output = "%s/output.mpileup.bcf"%outdir_bcftools; mpileup_output_tmp = "%s.tmp"%mpileup_output
+        for folder in os.listdir(opt.outdir):
+            if folder.startswith("bcftools_ploidy") and folder.endswith("_out"):
+
+                # look for the potential previously calculated mpielup outputs
+                potential_previosuly_calculated_mpileup_output = "%s/%s/output.mpileup.bcf"%(opt.outdir, folder)
+                if not fun.file_is_empty(potential_previosuly_calculated_mpileup_output): 
+                    print("taking %s from previous run"%potential_previosuly_calculated_mpileup_output)
+                    mpileup_output = potential_previosuly_calculated_mpileup_output; break
+
+        # if there is no previous run
+        if fun.file_is_empty(mpileup_output) or opt.replace is True:
+
+            print("Running mpileup...")
+            cmd_bcftools_mpileup = '%s mpileup -a "AD,DP" -O b -f %s -o %s --threads %i %s'%(bcftools, opt.ref, mpileup_output_tmp, opt.threads, sorted_bam); fun.run_cmd(cmd_bcftools_mpileup)
+            os.rename(mpileup_output_tmp, mpileup_output)
+
+
+        # run bcftools call
+        call_output = "%s/output.raw.vcf"%outdir_bcftools; call_output_tmp = "%s.tmp"%call_output
+        if fun.file_is_empty(call_output) or opt.replace is True:
+            print("Running bcftools call ...")
+
+            # define the ploidy specification
+            if opt.ploidy==1: ploidy_cmd = "--ploidy %i"%opt.ploidy # This is all haploid
+            else:
+                # create a ploidy file if ploidy is 2. There's no way to simpli specify ploidy 2
+                ploidy_file_bcftools = "%s/ploidy_file.tab"%outdir_bcftools
+                open(ploidy_file_bcftools, "w").write("* * * * %i\n"%opt.ploidy) # CHROM, FROM, TO, SEX, PLOIDY
+
+                ploidy_cmd = "--ploidy-file %s"%ploidy_file_bcftools
+
+            cmd_bcftools_call = "%s call -m -f GQ,GP -v -O v --threads %i -o %s %s %s"%(bcftools, opt.threads, call_output_tmp, ploidy_cmd, mpileup_output); fun.run_cmd(cmd_bcftools_call)
+
+            os.rename(call_output_tmp, call_output)
+      
+        #As there are no recommendations for bcftools, we decided to apply exclusively the filter for coverage. To apply harder filters please edit this command!
+        
+        # this generates a filtered, vcf, which only has the PASS ones.
+        filtered_output_tmp = "%s.tmp"%filtered_output
+        if fun.file_is_empty(filtered_output) or opt.replace is True:
+            print("Filtering bcftools ... ")
+            cmd_filter = "%s filter -m x -e 'INFO/DP <= %i' -O v --threads %i -o %s %s"%(bcftools, opt.coverage, opt.threads, filtered_output_tmp, call_output); fun.run_cmd(cmd_filter)
+            os.rename(filtered_output_tmp, filtered_output)
+
+        # keep
     filtered_vcf_results.append(filtered_output)
 
     print("bcftools is done")
@@ -341,6 +345,7 @@ for unnormalised_vcf in filtered_vcf_results:
 
 print("VCFLIB Normalisation is done")
 
+
 ############################
 # ANNOTATE VARIANTS WITH VEP
 ############################
@@ -348,6 +353,7 @@ print("VCFLIB Normalisation is done")
 if opt.gff is None: print("No gff provided. Skipping the annotation AND integration of the variants")
 
 else:
+    print("getting vep annotations")
 
     # create a dictionary with [typeNormalisation][sofware] = vep_df
     normalisation_to_software_to_vepDf = {}
@@ -403,6 +409,7 @@ else:
 
             # add to the dictionary
             normalisation_to_software_to_vepDf.setdefault(typeNormalisation, {}).setdefault(software, vep_df)
+
 
     # generate integrated table with each software and also the FILTERtag
     for norm, software_to_vepDF in normalisation_to_software_to_vepDf.items():
@@ -479,6 +486,74 @@ else:
 
             print("files saved into %s"%("%s.tab"%fileprefix))
 
+
+
+    # get the variants that are present in more than x programs
+    df = fun.load_object("%s/integrated_variants_norm_vcflib_ploidy%i.py"%(opt.outdir, opt.ploidy))
+
+
+    ##############################################
+    ######## GENERATE THE ANNOTATION FILE ########
+    ##############################################
+
+    variantAnnotation_table = "%s/variant_annotation_ploidy%i.tab"%(opt.outdir, opt.ploidy)
+    if fun.file_is_empty(variantAnnotation_table) or replace is True:
+
+        print("generating variant annotation table")
+
+        # add fields 
+        df['is_snp'] = (df["ref"].apply(len)==1) & (df["ref"]!="-") & (df["alt"].apply(len)==1) & (df["alt"]!="-")
+
+        prot_altering_mutations = {'missense_variant', 'start_lost', 'inframe_deletion', 'protein_altering_variant', 'stop_gained', 'inframe_insertion', 'frameshift_variant', 'stop_lost', 'splice_acceptor_variant', 'splice_donor_variant', 'splice_region_variant', 'non_coding_transcript_exon_variant'}
+        df["consequences_set"] = df.Consequence.apply(lambda x: set(str(x).split(",")))
+        df["is_protein_altering"] = df.consequences_set.apply(lambda x: len(x.intersection(prot_altering_mutations))>0)
+
+        # generate a table that has all the variant annotation info
+        varSpec_fields = ['#Uploaded_variation', 'Gene', 'Feature', 'Feature_type', 'Consequence', 'cDNA_position', 'CDS_position', 'Protein_position', 'Amino_acids', 'Codons', 'is_snp', 'is_protein_altering']
+
+        # write the df were there are some PASS vars
+        programs = {"HaplotypeCaller", "freebayes", "bcftools"}
+        df["number_PASS_programs"] = df.apply(lambda r: sum([r["%s_PASS"%p] for p in programs if "%s_PASS"%p in df.keys()]), axis=1)
+        variantAnnotation_table_PASS = "%s/variant_annotation_ploidy%i_anyPASS.tab"%(opt.outdir, opt.ploidy)
+        df_PASS = df[df.number_PASS_programs>0]
+        df_PASS[varSpec_fields].drop_duplicates().to_csv(variantAnnotation_table_PASS, sep="\t", header=True, index=False)
+
+        # write the final vars
+        variantAnnotation_table_tmp = "%s.tmp"%variantAnnotation_table
+        df[varSpec_fields].drop_duplicates().to_csv(variantAnnotation_table_tmp, sep="\t", header=True, index=False)
+        os.rename(variantAnnotation_table_tmp, variantAnnotation_table)
+
+    ##############################################
+    ##############################################
+    ##############################################
+
+    #################################################
+    ######## GENERATE THE INTERSECTING FILES ########
+    #################################################
+
+    if opt.caller=="all": 
+        print("getting intersecting VCFs")
+     
+        # add the number of programs with PASS
+        programs = {"HaplotypeCaller", "freebayes", "bcftools"}
+        df["number_PASS_programs"] = df.apply(lambda r: sum([r["%s_PASS"%p] for p in programs]), axis=1)
+
+        for minPrograms in [0, 1, 2, 3]:
+
+            # filter
+            df_PASS = df[df.number_PASS_programs>=minPrograms]
+
+            # write a vcf with this df
+            intersecting_vcf = "%s/integrated_variants_PASSatLeast%i_ploidy%i.vcf"%(opt.outdir, minPrograms, opt.ploidy)
+            if fun.file_is_empty(intersecting_vcf) or opt.replace is True:
+
+                print("getting vcf of samples that are called by at least %i programs"%minPrograms)
+                fun.write_integrated_smallVariantsTable_as_vcf(df_PASS, intersecting_vcf, opt.ploidy)
+
+
+    #################################################
+    #################################################
+    #################################################
 
 print("VarCall Finished")
 

@@ -418,7 +418,7 @@ if opt.run_smallVarsCNV:
 if opt.skip_cleaning_outdir is False: fun.clean_perSVade_outdir(opt.outdir)
 
 # generate a file that indicates whether the gridss run is finished
-final_file = "%s/perSVade_finished.txt"%opt.outdir
+final_file = "%s/perSVade_finished_file.txt"%opt.outdir
 open(final_file, "w").write("perSVade_finished finished...")
 
 
