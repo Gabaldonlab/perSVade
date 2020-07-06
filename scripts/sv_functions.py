@@ -24,6 +24,7 @@ import itertools
 import copy as cp
 import re
 import shutil
+import psutil
 from datetime import date
 import multiprocessing as multiproc
 import scipy.stats
@@ -149,9 +150,9 @@ CONDA_ACTIVATING_CMD = "conda activate %s;"%EnvName
 # define the strings that have to be considered as NaN in the VCF parsing
 vcf_strings_as_NaNs = ['', '#N/A', '#N/A N/A', '#NA', '-1.#IND', '-1.#QNAN', '-NaN', '-nan', '1.#IND', '1.#QNAN', 'N/A', 'NULL', 'NaN', 'n/a', 'nan', 'null']
 
-
 # define default parameters for gridss filtering. This has changed from v0
 default_filtersDict_gridss = {"min_Nfragments":5, "min_af":0.25, "wrong_FILTERtags":("NO_ASSEMBLY",), "filter_polyGC":True, "filter_noSplitReads":False, "filter_noReadPairs":False, "maximum_strand_bias":0.99, "maximum_microhomology":50, "maximum_lenght_inexactHomology":50, "range_filt_DEL_breakpoints":(0, 1), "min_length_inversions":40, "dif_between_insert_and_del":5, "max_to_be_considered_small_event":1000, "wrong_INFOtags":('IMPRECISE',), "min_size":50, "min_af_EitherSmallOrLargeEvent":0.25, "min_QUAL":0} # the minimum af is 0.25 to include both heterozygous and homozygous vars as default
+
 
 # define lists of filters ordered from less conservative to most conservative
 g_all_FILTER_tags = ("ASSEMBLY_ONLY", "NO_ASSEMBLY", "ASSEMBLY_TOO_FEW_READ", "ASSEMBLY_TOO_SHORT", "INSUFFICIENT_SUPPORT", "LOW_QUAL", "REF", "SINGLE_ASSEMBLY")
@@ -532,11 +533,28 @@ def get_availableGbRAM():
 
     """This function returns a float with the available memory in your system"""
 
-    lines_availableMem = [float(l.split()[1])/1000000 for l in open("/proc/meminfo", "r").readlines() if l.startswith("MemAvailable:") and l.strip().endswith("kB")]
+    # define the memory available on several ways
 
-    if len(lines_availableMem)!=1: raise ValueError("there are more than one correct lines")
+    # slurm cluster environment
+    if "SLURM_MEM_PER_CPU" in os.environ: 
 
-    return lines_availableMem[0]
+        # the available memory is the number of CPUs x the number of mem per CPU
+        mem_per_cpu = int(os.environ["SLURM_MEM_PER_CPU"])/1000 # the variable is in Mb
+        ncpus = int(os.environ["SLURM_CPUS_PER_TASK"])
+        available_mem = mem_per_cpu*ncpus
+
+    # the /proc/meminfo file
+    elif not file_is_empty("/proc/meminfo"):
+
+        lines_availableMem = [float(l.split()[1])/1000000 for l in open("/proc/meminfo", "r").readlines() if l.startswith("MemAvailable:") and l.strip().endswith("kB")]
+
+        if len(lines_availableMem)!=1: raise ValueError("there are more than one correct lines")
+
+        available_mem = lines_availableMem[0]
+
+    else: raise ValueError("The available memory cannot be determined")
+
+    return available_mem
 
 
 def write_coverage_per_gene_mosdepth_and_parallel(sorted_bam, reference_genome, cnv_outdir, bed, gene_to_coverage_file, replace=False):
@@ -2549,8 +2567,13 @@ def run_gridss_and_annotateSimpleType(sorted_bam, reference_genome, outdir, repl
     """Runs gridss for the sorted_bam in outdir, returning the output vcf. blacklisted_regions is a bed with regions to blacklist"""
 
     # define the output
-    gridss_VCFoutput = "%s/gridss_output.vcf"%outdir; 
+    gridss_VCFoutput = "%s/gridss_output.vcf"%outdir
     if gridss_VCFoutput.split(".")[-1]!="vcf": raise ValueError("gridss needs a .vcf file. this is not the case for"%gridss_VCFoutput)
+
+    # there may be a previous gridss vcf, called 'gridss_output.raw.vcf' that is equally valid. Rename it here
+    previous_gridss_VCFoutput = "%s/gridss_output.raw.vcf"%outdir
+    if not file_is_empty(previous_gridss_VCFoutput) and file_is_empty(gridss_VCFoutput) and replace is False: 
+        os.rename(previous_gridss_VCFoutput, gridss_VCFoutput)
 
     # softlink the sorted_bam under outdir so that the naming is not too long
     sorted_bam_renamed = "%s/aligned_reads.sorted.bam"%outdir
@@ -2586,6 +2609,7 @@ def run_gridss_and_annotateSimpleType(sorted_bam, reference_genome, outdir, repl
 
                 # define the ram available
                 allocated_ram = get_availableGbRAM()*fractionRAM_to_dedicate
+                print("running gridss with %iGb of RAM"%allocated_ram)
 
                 # define the heap size, which depends on the cloud or not
                 #jvmheap = "27.5g" # this is the default
@@ -2724,7 +2748,7 @@ def getNaN_to_0(x):
 
 def add_info_to_gridssDF(df, expected_fields={"allele_frequency", "allele_frequency_SmallEvent", "other_coordinates", "other_chromosome", "other_position", "other_orientation",  "inserted_sequence", "len_inserted_sequence", "length_event", "has_poly16GC", "length_inexactHomology", "length_microHomology"}, median_insert_size=500, median_insert_size_sd=50):
 
-    """This function takes a gridss df and returns the same adding expected_fields"""
+    """This function takes a gridss df and returns the same adding expected_fields. This adds if not already done."""
 
     #print("adding info to gridss df")
     if len(set(df.keys()).intersection(expected_fields))!=len(expected_fields):
@@ -2738,9 +2762,16 @@ def add_info_to_gridssDF(df, expected_fields={"allele_frequency", "allele_freque
 
         # add data to calculate the other breakpoint
         #print("get position of other bend")
+
+        # check that the chromosomes do not start or end with a ".", which would give an error in the calculation of the length of the event
+        if any([c.startswith(".") or c.endswith(".")  for c in set(df["#CHROM"])]): raise ValueError("If chromosome names start or end with a '.' the parsing of the gridss output is incorrect.")
+
         def get_other_position(r):
             
-            if "." in r["ALT"]: return "%s:%i"%(r["#CHROM"], r["POS"])
+            # in case that this is just a bp, without any other chromsomes
+            if r["ALT"].startswith(".") or r["ALT"].endswith("."): return "%s:%i"%(r["#CHROM"], r["POS"])
+
+            # in case it is a breakpoint
             else: return re.split("\]|\[", r["ALT"])[1]
 
         df["other_coordinates"] = df.apply(get_other_position, axis=1)
@@ -3551,8 +3582,8 @@ def get_target_region_row(r, region, breakpoint_positions, maxPos, max_relative_
 
     #############################################################
 
-    # if the region spans the whole chromosome, just set whole chromosome as the 'region'
-    if r["start"]<5 and r["end"]/maxPos>0.95: 
+    # if the region spans the whole chromosome, just set whole region as the 'region'
+    if r["start"]<=min_region_len and (maxPos-r["end"])<=min_region_len: 
         start = r["start"]
         end = r["end"]
 
@@ -3597,6 +3628,11 @@ def get_target_region_row(r, region, breakpoint_positions, maxPos, max_relative_
         else: end = start + max_region_length
 
         ##########################
+
+    # if the start is after the end, exit
+    if start>=end: 
+        print(r, region_name, maxPos, start, end)
+        raise ValueError("start after end")
 
     # return a series of all important fields
     return pd.Series({"chromosome":r["chromosome"], "start":start, "end":end, "region_name":region_name})
@@ -4082,6 +4118,8 @@ def run_gridssClove_given_filters(sorted_bam, reference_genome, working_dir, med
 
     # edit the replace, regarding if filtering from the run of GRIDSS
     if replace is True and replace_FromGridssRun is False: replace_FromGridssRun = True
+
+    # if there is a 
 
     # first obtain the gridss output if it is not provided
     if file_is_empty(gridss_VCFoutput) or replace is True: gridss_VCFoutput = run_gridss_and_annotateSimpleType(sorted_bam, reference_genome, working_dir, replace=replace, threads=threads, blacklisted_regions=gridss_blacklisted_regions, maxcoverage=gridss_maxcoverage)
@@ -7037,7 +7075,7 @@ def get_sampleID_to_svtype_to_svDF_filtered(sampleID_to_svtype_to_file, sampleID
                 if "ID" not in df_sv.keys(): df_sv["ID"] = [""]*len(df_sv)
 
                 # get only the svs that are not in the parents
-                df_sv["IDs_set"] = df_sv.ID.apply(lambda x: set(re.split("\+|\-", x)))
+                df_sv["IDs_set"] = df_sv.ID.apply(lambda x: set([ID[0:-1]+"o" for ID in re.split("\+|\-", x)]))
 
                 if len(df_sv)>0:
 
@@ -7046,7 +7084,7 @@ def get_sampleID_to_svtype_to_svDF_filtered(sampleID_to_svtype_to_file, sampleID
                     breakpoints_not_in_df_gridss = all_breakpoints_in_sv.difference(all_breakpoints)
                     if len(breakpoints_not_in_df_gridss)>0: 
                         print("These are breakpoints not in the df_gridss: %s"%(breakpoints_not_in_df_gridss))
-                        raise ValueError("There are breakpoints not in the df_gridss, suggesting some errors, such as the fact that you are loading ")
+                        raise ValueError("There are breakpoints not in the df_gridss, suggesting some errors, such as the fact that you are loading an incorrect df_gridss")
 
                     # keep only the df with IDs that are not in the parents
                     df_sv = df_sv[df_sv.IDs_set.apply(lambda ids: len(ids.intersection(breakpoints_already_in_parents))==0)]
@@ -7289,6 +7327,9 @@ def clean_perSVade_outdir(outdir):
     
     ]
 
+    # add all the temporary files
+    files_to_remove += [f for f in os.walk(outdir) if "temporary_file" in f] 
+
     ########## FILES IN final_gridss_running  ######### 
 
     # add the files in the final_gridss_running
@@ -7382,7 +7423,7 @@ def get_ID_to_svtype_to_svDF_for_setOfGenomes_highConfidence(close_shortReads_ta
             outdir_gridssClove = "%s/shortReads_realVarsDiscovery_%s"%(all_realVars_dir,ID); make_folder(outdir_gridssClove)
 
             # define the previous important files
-            final_file = "%s/perSVade_finished.txt"%outdir_gridssClove
+            final_file = "%s/perSVade_finished_file.txt"%outdir_gridssClove
             
             # only contine if the final file is not defined
             if file_is_empty(final_file) or replace is True:
@@ -7444,6 +7485,9 @@ def get_ID_to_svtype_to_svDF_for_setOfGenomes_highConfidence(close_shortReads_ta
             file = "%s/%s"%(outdir_gridssClove, f)
             delete_folder(file)
             remove_file(file)
+
+        # clean again
+        clean_perSVade_outdir(outdir_gridssClove)
 
     return ID_to_svtype_to_svDF
 
@@ -7519,12 +7563,14 @@ def get_compatible_real_svtype_to_file(close_shortReads_table, reference_genome,
             compatible_svDF = pd.DataFrame(columns=svtype_to_fieldsDict[svtype]["all_fields"])
 
             # go through each ID
+            print("getting %s"%svtype)
             for ID in ID_to_svtype_to_svDF.keys():
+                print(ID)
 
                 # debug empty dfs
                 if svtype not in ID_to_svtype_to_svDF[ID] or len(ID_to_svtype_to_svDF[ID][svtype])==0: continue
 
-                svDF = ID_to_svtype_to_svDF[ID][svtype].set_index("uniqueID", drop=False)
+                svDF = ID_to_svtype_to_svDF[ID][svtype].set_index("uniqueID", drop=False).iloc[0:max_nvars]
 
                 # write the svDF to the high-confidence dir
                 sampleDir = "%s/%s"%(highConfidenceVars_perGenome_dir, ID); make_folder(sampleDir)
@@ -10654,7 +10700,7 @@ def remove_smallVarsCNV_nonEssentialFiles(outdir, ploidy):
         if os.path.isdir(vcfDir):
             for file in os.listdir(vcfDir):
 
-                if file not in {"output.raw.vcf", "output.filt.norm_vcflib.vcf"}: files_to_remove.append("%s/%s"%(vcfDir, file))
+                if file not in {"output.raw.vcf", "output.filt.vcf", "output.filt.norm_vcflib.vcf"}: files_to_remove.append("%s/%s"%(vcfDir, file))
 
     for f in files_to_remove: remove_file(f)
 
@@ -10672,6 +10718,7 @@ def get_sortedBam_with_duplicatesMarked(sorted_bam, threads=4, replace=False):
 
         # define the java memory
         javaRamGb = int(get_availableGbRAM()*fractionRAM_to_dedicate)
+        print("running MarkDuplicates with %iGb of RAM"%javaRamGb)
 
         run_cmd("%s -Xmx%ig MarkDuplicates I=%s O=%s M=%s"%(picard_exec, javaRamGb, sorted_bam, sorted_bam_dupMarked_tmp, sorted_bam_dupMarked_metrics))
         #REMOVE_DUPLICATES=Boolean
@@ -10686,9 +10733,93 @@ def get_sortedBam_with_duplicatesMarked(sorted_bam, threads=4, replace=False):
 
     return sorted_bam_dupMarked
 
+def write_integrated_smallVariantsTable_as_vcf(df, filename, ploidy):
+
+    """This function takes a df table with the ouptut of VEP and writes a vcf only with the variants (no annotation)"""
 
 
+    # get a df that has unique vars
+    df = cp.deepcopy(df)
+    df = df.drop_duplicates(subset="#Uploaded_variation")
 
+    # get the vcf df with info
+    df["#CHROM"] = df.chromosome
+    df["POS"] = df.position
+    df["REF"] = df.ref
+    df["ALT"] = df.alt
+
+    # get an empty ID and quality
+    df["ID"] = df["#Uploaded_variation"]
+    df["QUAL"] = "."
+
+    # get the filter as the number of programs that pass the calling
+    df["FILTER"] = df.number_PASS_programs.apply(str) + "xPASS"
+
+    # the sample will contain the genotype and the allele frequency
+    df["FORMAT"] = "GT:AF"  
+
+    # define the programs
+    programs = ["freebayes", "HaplotypeCaller", "bcftools"]
+
+    # add the PASS programs
+    print("getting PASS programs")
+    df["PASS_programs"] = df.apply(lambda r: [p for p in programs if r["%s_PASS"%p]], axis=1)
+    df["PASS_programs_str"] = df.PASS_programs.apply(lambda x: ",".join(x))
+
+    # add the ploidies
+    if ploidy==1: df["GT"] = "."
+    elif ploidy==2:
+
+        print("adding ploidies")
+
+        # add the ploidies
+        df["all_ploidies"] =  df.apply(lambda r: {"/".join(re.split("/|\|", r["%s_GT"%p])) for p in r["PASS_programs"]}, axis=1)
+        df["all_ploidies_len"] = df.all_ploidies.apply(len)
+
+        # add the final ploidy depending on the len
+        def get_ploidy_diploid(all_ploidies):
+
+            if len(all_ploidies)==1: return next(iter(all_ploidies))
+            else: return "."
+
+        df["GT"] = df.all_ploidies.apply(get_ploidy_diploid)
+
+    else: raise ValueError("There is no proper testing on ploidy %i about the representation"%ploidy)
+
+    # get the AF as the mean of the pass programs
+    print("getting allele frequency")
+    df["AF"] = df.apply(lambda r: "%.4f"%np.mean([r["%s_fractionReadsCoveringThisVariant"%p] for p in r["PASS_programs"]]), axis=1)
+
+    # add the INFO
+    print("getting INFO")
+    df["GT_eachPASSprogram"] = df.apply(lambda r: ";".join(["%s_GT=%s"%(p, r["%s_GT"%p]) for p in r["PASS_programs"]]), axis=1)
+    df["INFO"] = "PASSALGS=" + df.PASS_programs_str + ";" + df.GT_eachPASSprogram
+
+    # add to df
+    df["SAMPLE"] = df.GT + ":" + df.AF
+
+    # write the final vcf
+    vcf_fields = ["#CHROM", "POS", "ID", "REF", "ALT", "QUAL", "FILTER", "INFO", "FORMAT", "SAMPLE"]
+    df_vcf = df[vcf_fields].sort_values(by=["#CHROM", "POS", "REF"])
+
+    if len(df_vcf)!=len(set(df["#Uploaded_variation"])): raise ValueError("There are some duplicated fields")
+
+    # get the vcf content
+    vcf_lines = df_vcf.to_csv(sep="\t", header=True, index=False)
+
+    # get the header
+    header_lines = ["##fileformat=VCFv4.2",
+                    "##perSVade small variant calling pipeline. This is the merged output of freebayes, GATK Haplotype Caller and bcftools for variants that PASS the filters in at least %i algorithms."%min(df.number_PASS_programs),
+                    "##FILTER indicates the number of algorithms were this variant was called and PASSed the filters",
+                    "##FORMAT includes the GT (genotype) and AF (allele frequency)",
+                    "##GT includes the genotype in the case that all the PASS algorithms called the same GT, and '.' otherwise",
+                    "##AF includes the mean fraction of reads calling this variant across PASS alorithms",
+                    "##INFO includes the name of the algorithms that called this variant (PASSALGS) and the GT of each of these"
+                    ]
+    
+    filename_tmp = "%s.tmp"%filename
+    open(filename_tmp, "w").write("\n".join(header_lines) + "\n" + vcf_lines)
+    os.rename(filename_tmp, filename)
 
 
 
