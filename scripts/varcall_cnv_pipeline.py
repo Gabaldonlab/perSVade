@@ -491,7 +491,6 @@ else:
     # get the variants that are present in more than x programs
     df = fun.load_object("%s/integrated_variants_norm_vcflib_ploidy%i.py"%(opt.outdir, opt.ploidy))
 
-
     ##############################################
     ######## GENERATE THE ANNOTATION FILE ########
     ##############################################
@@ -545,7 +544,8 @@ else:
 
             # write a vcf with this df
             intersecting_vcf = "%s/integrated_variants_PASSatLeast%i_ploidy%i.vcf"%(opt.outdir, minPrograms, opt.ploidy)
-            if fun.file_is_empty(intersecting_vcf) or opt.replace is True:
+            #if fun.file_is_empty(intersecting_vcf) or opt.replace is True:
+            if True: # debug
 
                 print("getting vcf of samples that are called by at least %i programs"%minPrograms)
                 fun.write_integrated_smallVariantsTable_as_vcf(df_PASS, intersecting_vcf, opt.ploidy)
@@ -558,7 +558,7 @@ else:
 print("VarCall Finished")
 
 # create outfile
-open("%s/finsihedVarCall_CNV_file_ploidy%i.txt"%(opt.outdir, opt.ploidy), "w").write("finsihed with pipeline\n")
+open("%s/file_finsihedVarCall_CNV_ploidy%i.txt"%(opt.outdir, opt.ploidy), "w").write("finsihed with pipeline\n")
 
 # at the end remove all the non-essential files
 if opt.remove_smallVarsCNV_nonEssentialFiles is True: fun.remove_smallVarsCNV_nonEssentialFiles(opt.outdir, opt.ploidy)

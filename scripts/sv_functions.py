@@ -2562,6 +2562,18 @@ def simulate_pairedEndReads_per_chromosome_uniform(chr_obj, coverage, insert_siz
 ################################## RUN GRIDSS AND CLOVE PIPELINE ##################################
 ###################################################################################################
 
+def soft_link_files(origin, target):
+
+    """This function takes an origin file and makes it accessible through a link (targe)"""
+
+    if file_is_empty(target):
+
+        # remove previous link
+        try: run_cmd("rm %s"%target)
+        except: pass
+
+        run_cmd("ln -s %s %s"%(origin, target))
+
 def run_gridss_and_annotateSimpleType(sorted_bam, reference_genome, outdir, replace=False, threads=4, blacklisted_regions="", maxcoverage=50000):
 
     """Runs gridss for the sorted_bam in outdir, returning the output vcf. blacklisted_regions is a bed with regions to blacklist"""
@@ -2578,8 +2590,8 @@ def run_gridss_and_annotateSimpleType(sorted_bam, reference_genome, outdir, repl
     # softlink the sorted_bam under outdir so that the naming is not too long
     sorted_bam_renamed = "%s/aligned_reads.sorted.bam"%outdir
     index_bam_renamed = "%s/aligned_reads.sorted.bam.bai"%outdir
-    if file_is_empty(sorted_bam_renamed): run_cmd("ln -s %s %s"%(sorted_bam, sorted_bam_renamed))
-    if file_is_empty(index_bam_renamed): run_cmd("ln -s %s.bai %s"%(sorted_bam, index_bam_renamed))
+    soft_link_files(sorted_bam, sorted_bam_renamed)
+    soft_link_files("%s.bai"%sorted_bam, index_bam_renamed)
 
     if file_is_empty(gridss_VCFoutput) or replace is True:
 
@@ -5606,6 +5618,12 @@ def get_n_pairs_in_fastqgz(file):
     # get the number of lines between 4
     return nlines/4
 
+def readIDs_are_correct(readIDs):
+
+    """Takes an iterable of fastq IDs and returns whether they look good"""
+
+    return all([r.startswith("@") for r in readIDs])
+
 def get_last_reads_fastqgz_file(file, nreads=100):
 
     """Takes a fastq.gz file and returns the read names of the last nreads"""
@@ -5614,16 +5632,44 @@ def get_last_reads_fastqgz_file(file, nreads=100):
     file_last_reads = "%s.lastReads%iReads"%(file, nreads)
     file_last_reads_tmp = "%s.tmp"%file_last_reads
 
-    if file_is_empty(file_last_reads):
-        print("getting last reads for %s"%file)
+    # try twice
+    for Itry in range(2):
 
-        cmd_ztail = "%s -t %s -v 0 | tail -%i | sed -n '1~4p' | cut -f1 -d ' ' > %s"%(gztool, file, nreads*4, file_last_reads_tmp)
-        run_cmd(cmd_ztail)
+        if file_is_empty(file_last_reads):
+            print("getting last reads for %s"%file)
+
+            # remove the gz index file
+            remove_file("%si"%file)
+
+            cmd_ztail = "%s -t %s -v 0 | tail -%i | sed -n '1~4p' | cut -f1 -d ' ' > %s"%(gztool, file, int(nreads*4), file_last_reads_tmp)
+            run_cmd(cmd_ztail)
+
+            os.rename(file_last_reads_tmp, file_last_reads)
+
+        # get as list
+        last_reads = [l.strip() for l in open(file_last_reads, "r").readlines()]
+
+        if not readIDs_are_correct(last_reads): remove_file(file_last_reads) # remove the file and try again
+
+    # if the reads are incorrect, get them by another, slower way
+    if not readIDs_are_correct(last_reads): 
+
+        print("These are the wrong reads:", last_reads)
+
+        # getting last reads in a more traditional way
+        print("getting last reads for %s in a slower way (zcat + tail)"%file)
+        run_cmd("zcat %s | tail -%i | sed -n '1~4p' | cut -f1 -d ' ' > %s"%(file, int(nreads*4), file_last_reads_tmp))
 
         os.rename(file_last_reads_tmp, file_last_reads)
 
-    # get as list
-    return [l.strip() for l in open(file_last_reads, "r").readlines()]
+        last_reads = [l.strip() for l in open(file_last_reads, "r").readlines()]
+
+        if not readIDs_are_correct(last_reads): 
+
+            print("These are the wrong reads:", last_reads)
+            raise ValueError("There are some incorrect reads in %s"%file)
+
+    return last_reads
 
 def check_that_paired_reads_are_correct(reads1, reads2):
 
@@ -7328,7 +7374,7 @@ def clean_perSVade_outdir(outdir):
     ]
 
     # add all the temporary files
-    files_to_remove += [f for f in os.walk(outdir) if "temporary_file" in f] 
+    files_to_remove += [f for f in os.listdir(outdir) if "temporary_file" in f or f.endswith(".tmp")] 
 
     ########## FILES IN final_gridss_running  ######### 
 
@@ -7388,7 +7434,7 @@ def clean_perSVade_outdir(outdir):
 
     ###########################################
 
-def get_ID_to_svtype_to_svDF_for_setOfGenomes_highConfidence(close_shortReads_table, reference_genome, outdir, replace=False, threads=4, mitochondrial_chromosome="mito_C_glabrata_CBS138", job_array_mode="local", max_ncores_queue=768, time_perSVade_running="48:00:00", queue_jobs="bsc_ls"):
+def get_ID_to_svtype_to_svDF_for_setOfGenomes_highConfidence(close_shortReads_table, reference_genome, outdir, replace=False, threads=4, mitochondrial_chromosome="mito_C_glabrata_CBS138", job_array_mode="local", max_ncores_queue=768, time_perSVade_running="48:00:00", queue_jobs="bsc_ls", max_nvars=100):
 
     """Generates a dict that maps each sample in genomes_withSV_and_shortReads_table to an svtype and a DF with all the info about several vars. It only gets the high-confidence vars.
 
@@ -7419,32 +7465,46 @@ def get_ID_to_svtype_to_svDF_for_setOfGenomes_highConfidence(close_shortReads_ta
         for ID, row in df_genomes.iterrows():
             print(ID)
 
-            # run in the gridss and clove with the fast parameters
-            outdir_gridssClove = "%s/shortReads_realVarsDiscovery_%s"%(all_realVars_dir,ID); make_folder(outdir_gridssClove)
+            # define a file with the df_gridss and svtype_to_svfile
+            df_gridss_svtype_to_svfile_objectFile = "%s/df_gridss_svtype_to_svfile_tuple_%s.py"%(all_realVars_dir,ID)
 
-            # define the previous important files
-            final_file = "%s/perSVade_finished_file.txt"%outdir_gridssClove
-            
-            # only contine if the final file is not defined
-            if file_is_empty(final_file) or replace is True:
-                print("getting vars for %s"%ID)
+            if file_is_empty(df_gridss_svtype_to_svfile_objectFile) or replace is True:
 
-                # define the cmd. This is a normal perSvade.py run with the vars of the previous dir  
-                cmd = "python %s -r %s --threads %i --outdir %s  --mitochondrial_chromosome %s -f1 %s -f2 %s --fast_SVcalling"%(perSVade_py, reference_genome, threads, outdir_gridssClove, mitochondrial_chromosome, row["short_reads1"], row["short_reads2"])
+                # run in the gridss and clove with the fast parameters
+                outdir_gridssClove = "%s/shortReads_realVarsDiscovery_%s"%(all_realVars_dir,ID); make_folder(outdir_gridssClove)
 
-                # add arguments depending on the pipeline
-                if replace is True: cmd += " --replace"
+                # define the previous important files
+                final_file = "%s/perSVade_finished_file.txt"%outdir_gridssClove
+                
+                # only contine if the final file is not defined
+                if file_is_empty(final_file) or replace is True:
+                    print("getting vars for %s"%ID)
 
-                # if the running in slurm is false, just run the cmd
-                if job_array_mode=="local": run_cmd(cmd)
-                elif job_array_mode=="greasy": 
-                    all_cmds.append(cmd)
-                    continue
+                    # define the cmd. This is a normal perSvade.py run with the vars of the previous dir  
+                    cmd = "python %s -r %s --threads %i --outdir %s  --mitochondrial_chromosome %s -f1 %s -f2 %s --fast_SVcalling"%(perSVade_py, reference_genome, threads, outdir_gridssClove, mitochondrial_chromosome, row["short_reads1"], row["short_reads2"])
 
-                else: raise ValueError("%s is not valid"%job_array_mode)
+                    # add arguments depending on the pipeline
+                    if replace is True: cmd += " --replace"
 
-            # define the svdict
-            svtype_to_svfile,  df_gridss = get_svtype_to_svfile_and_df_gridss_from_perSVade_outdir(outdir_gridssClove)
+                    # if the running in slurm is false, just run the cmd
+                    if job_array_mode=="local": run_cmd(cmd)
+                    elif job_array_mode=="greasy": 
+                        all_cmds.append(cmd)
+                        continue
+
+                    else: raise ValueError("%s is not valid"%job_array_mode)
+
+                # define the svdict
+                print("running get_svtype_to_svfile_and_df_gridss_from_perSVade_outdir")
+                svtype_to_svfile,  df_gridss = get_svtype_to_svfile_and_df_gridss_from_perSVade_outdir(outdir_gridssClove)
+
+                # save
+                print("saving %s"%df_gridss_svtype_to_svfile_objectFile)
+                df_gridss_svtype_to_svfile_objectFile_tmp = "%s.tmp"%df_gridss_svtype_to_svfile_objectFile
+                save_object((svtype_to_svfile , df_gridss), df_gridss_svtype_to_svfile_objectFile_tmp)
+                os.rename(df_gridss_svtype_to_svfile_objectFile_tmp, df_gridss_svtype_to_svfile_objectFile)
+
+            else: svtype_to_svfile , df_gridss = load_object(df_gridss_svtype_to_svfile_objectFile)
 
             # keep 
             all_sampleID_to_svtype_to_file[ID] =  svtype_to_svfile
@@ -7464,12 +7524,18 @@ def get_ID_to_svtype_to_svDF_for_setOfGenomes_highConfidence(close_shortReads_ta
                 sys.exit(0)
 
         # get a df that has all the info for each SV, and then the df with allele freq, metadata and 
+        print("running get_sampleID_to_svtype_to_svDF_filtered")
         ID_to_svtype_to_svDF = get_sampleID_to_svtype_to_svDF_filtered(all_sampleID_to_svtype_to_file, all_sampleID_to_dfGRIDSS)
 
+        # keep 5x the maximum number of vars
+        ID_to_svtype_to_svDF = {ID : {svtype : svDF.iloc[0:max_nvars*5] for svtype,svDF in svtype_to_svDF.items()} for ID,svtype_to_svDF in ID_to_svtype_to_svDF.items()}
+
         # preseve only the high confidence vars from ID_to_svtype_to_svDF
+        print("running prune_IDtoSVTYPEtoDF_keeping_HighConfidenceVars")
         prune_IDtoSVTYPEtoDF_keeping_HighConfidenceVars(ID_to_svtype_to_svDF, df_genomes)
 
         # save
+        print("saving")
         save_object(ID_to_svtype_to_svDF, ID_to_svtype_to_svDF_file)
 
     else: ID_to_svtype_to_svDF = load_object(ID_to_svtype_to_svDF_file)
@@ -7488,6 +7554,9 @@ def get_ID_to_svtype_to_svDF_for_setOfGenomes_highConfidence(close_shortReads_ta
 
         # clean again
         clean_perSVade_outdir(outdir_gridssClove)
+
+        # remove the file that has the sample
+        remove_file("%s/df_gridss_svtype_to_svfile_tuple_%s.py"%(all_realVars_dir,ID))
 
     return ID_to_svtype_to_svDF
 
@@ -7520,7 +7589,7 @@ def get_compatible_real_svtype_to_file(close_shortReads_table, reference_genome,
     pipeline_start_time = time.time()
 
     # get all the high-confidence real variants
-    ID_to_svtype_to_svDF = get_ID_to_svtype_to_svDF_for_setOfGenomes_highConfidence(close_shortReads_table, reference_genome, outdir, replace=replace, threads=threads, mitochondrial_chromosome=mitochondrial_chromosome, job_array_mode=job_array_mode, max_ncores_queue=max_ncores_queue, time_perSVade_running=time_perSVade_running, queue_jobs=queue_jobs)
+    ID_to_svtype_to_svDF = get_ID_to_svtype_to_svDF_for_setOfGenomes_highConfidence(close_shortReads_table, reference_genome, outdir, replace=replace, threads=threads, mitochondrial_chromosome=mitochondrial_chromosome, job_array_mode=job_array_mode, max_ncores_queue=max_ncores_queue, time_perSVade_running=time_perSVade_running, queue_jobs=queue_jobs, max_nvars=max_nvars)
 
     # define the df with the realVars info
     all_realVars_dir = "%s/all_realVars"%(outdir)
@@ -10733,11 +10802,11 @@ def get_sortedBam_with_duplicatesMarked(sorted_bam, threads=4, replace=False):
 
     return sorted_bam_dupMarked
 
-def write_integrated_smallVariantsTable_as_vcf(df, filename, ploidy):
+def write_integrated_smallVariantsTable_as_vcf_old(df, filename, ploidy):
 
     """This function takes a df table with the ouptut of VEP and writes a vcf only with the variants (no annotation)"""
 
-
+    print("getting vcf intersection")
     # get a df that has unique vars
     df = cp.deepcopy(df)
     df = df.drop_duplicates(subset="#Uploaded_variation")
@@ -10792,8 +10861,8 @@ def write_integrated_smallVariantsTable_as_vcf(df, filename, ploidy):
 
     # add the INFO
     print("getting INFO")
-    df["GT_eachPASSprogram"] = df.apply(lambda r: ";".join(["%s_GT=%s"%(p, r["%s_GT"%p]) for p in r["PASS_programs"]]), axis=1)
-    df["INFO"] = "PASSALGS=" + df.PASS_programs_str + ";" + df.GT_eachPASSprogram
+    df["GT_eachProgram"] = df.apply(lambda r: ";".join(["%s_GT=%s"%(p, r["%s_GT"%p]) for p in programs]), axis=1)
+    df["INFO"] = "PASSALGS=" + df.PASS_programs_str + ";" + df.GT_eachProgram
 
     # add to df
     df["SAMPLE"] = df.GT + ":" + df.AF
@@ -10822,5 +10891,196 @@ def write_integrated_smallVariantsTable_as_vcf(df, filename, ploidy):
     os.rename(filename_tmp, filename)
 
 
+def convert_NaN_to0(x):
+    
+    if pd.isna(x): return 0.0
+    else: return x
+    
+def get_nChroms_with_var(r, p):
+    
+    GT = r["%s_GT"%p]
+    index = r["%s_GT_index"%p]
+    
+    if GT=="" or index=="": return 0
+    else: return GT.count(index)
 
+def get_numberChromosomes_withVar(r):
+    
+    all_PASS_nChroms = {r["%s_numberChromosomes_withVar"%p] for p in r["PASS_programs"]}
+    
+    # if there are none, just get a 0
+    if len(all_PASS_nChroms)==0: return 0
+    
+    # if there are is one, take it
+    elif len(all_PASS_nChroms)==1: return next(iter(all_PASS_nChroms))
+    
+    # if there are more than one option get the minimum (most conservative one)
+    elif len(all_PASS_nChroms)>1: return min(all_PASS_nChroms)
+    
+    else: raise ValueError("There are incorrect numbers of all_PASS_nChroms")
+    
+def get_corrected_INFO(x):
+    
+    return x.replace("freebayes", "fb").replace("HaplotypeCaller", "HC").replace("bcftools", "bt")
+    
+def get_row_vcf(df_pos, ploidy):
+    
+    # takes a df with the position and returns a series that has all the vcf fields
+                      
+    # initialize the row with unique vals
+    r = pd.Series()
+    r["#CHROM"] = df_pos["#CHROM"].iloc[0]
+    r["POS"] = df_pos["POS"].iloc[0]
+    r["REF"] = df_pos["REF"].iloc[0]
+    r["QUAL"] = "."
+    r["FORMAT"] = "GT:AF" 
+    
+    # initialize with shared vals
+    r["ALT"] = ",".join(df_pos["ALT"])
+    r["ID"] = ",".join(df_pos["#Uploaded_variation"])
+    r["FILTER"] = ",".join(df_pos.FILTER)
+    r["PASS_programs_str"] =  ",".join(df_pos["PASS_programs_str"])
+    
+    # define the index of each var (so that they start on 1)
+    df_pos["var_index"] = list(range(1, len(df_pos)+1))
+    df_pos["var_index"] = df_pos["var_index"].apply(str)
+    
+    # define the allele frequency of each program
+    programs = ["freebayes", "HaplotypeCaller", "bcftools"]
+    r["AF_programs_str"] = ";".join(["%s_AF="%p + ",".join(df_pos["%s_fractionReadsCoveringThisVariant"%p].apply(lambda x: "%.4f"%x)) for p in programs if "%s_called"%p in df_pos.keys()])
+    
+    # define the info
+    r["INFO"] = get_corrected_INFO("PASSALGS=" + r["PASS_programs_str"] + ";" + r.AF_programs_str)
+
+    # initialize a list that will contain the var_index
+    p_GTlist = []
+    
+    # define a df with the GT info
+    df_GT = df_pos[df_pos.numberChromosomes_withVar>0]
+    if 0<sum(df_GT.numberChromosomes_withVar)<=ploidy:
+        
+        p_GTlist += make_flat_listOflists(df_GT.apply(lambda x: [x["var_index"]]*x["numberChromosomes_withVar"], axis=1))
+        
+    # add missing chromosomes
+    p_GTlist = ["0"]*(ploidy-len(p_GTlist)) + p_GTlist
+    if len(p_GTlist)!=ploidy: raise ValueError("The genotype was not properly calculated")
+        
+    r["GT"] = "/".join(p_GTlist)
+    
+    # add the sample
+    r["SAMPLE"] = r.GT + ":" + ",".join(df_pos.AF)
+    
+    vcf_fields = ["#CHROM", "POS", "ID", "REF", "ALT", "QUAL", "FILTER", "INFO", "FORMAT", "SAMPLE"]
+    return r[vcf_fields]
+
+        
+def write_integrated_smallVariantsTable_as_vcf(df, filename, ploidy):
+
+    """This function takes a df table with the ouptut of VEP and writes a vcf only with the variants (no annotation)"""
+
+    print("getting vcf intersection")
+    
+    # get a df that has unique vars
+    df = cp.deepcopy(df)
+    df = df.drop_duplicates(subset="#Uploaded_variation")
+                                
+    # get the vcf df with info
+    df["#CHROM"] = df.chromosome
+    df["POS"] = df.position
+    df["REF"] = df.ref
+    df["ALT"] = df.alt
+
+    # get the filter as the number of programs that pass the calling
+    df["FILTER"] = df.number_PASS_programs.apply(str) + "xPASS"
+
+    # define the programs
+    programs = ["freebayes", "HaplotypeCaller", "bcftools"]
+
+    # add the PASS programs
+    print("getting PASS programs")
+    df["PASS_programs"] = df.apply(lambda r: [p for p in programs if r["%s_PASS"%p]], axis=1)
+    df["PASS_programs_str"] = df.PASS_programs.apply(lambda x: "|".join(x))
+    
+    # get the AF as the mean of the pass programs
+    print("getting allele frequency")
+
+    df["AF"] = df.apply(lambda r: "%.4f"%convert_NaN_to0(np.mean([r["%s_fractionReadsCoveringThisVariant"%p] for p in r["PASS_programs"]])), axis=1)
+    
+    # get the AF for each program
+    df["AF_programs"] = df.apply(lambda r: ["%s_AF=%.4f"%(p, r["%s_fractionReadsCoveringThisVariant"%p]) for p in programs], axis=1)
+            
+    # define the vcffields
+    vcf_fields = ["#CHROM", "POS", "ID", "REF", "ALT", "QUAL", "FILTER", "INFO", "FORMAT", "SAMPLE"]
+    
+    # if it is haploid, avoid any issues with the genotyping
+    if ploidy==1:
+        
+        # define the vcf fields
+        df["ID"] = df["#Uploaded_variation"]
+        df["QUAL"] = "."
+        df["FORMAT"] = "GT:AF" 
+        
+        # add genotyping fields
+        df["GT"] = "."
+        
+        # add to the info the agorithms that PASS the str
+        df["AF_programs_str"] = df.AF_programs.apply(lambda x: ";".join(x))
+        df["INFO"] = ("PASSALGS=" + df.PASS_programs_str + ";" + df.AF_programs_str).apply(get_corrected_INFO)
+        
+        # add the sample
+        df["SAMPLE"] = df.GT + ":" + df.AF
+        
+        # the df_vcf is equivalent to the df
+        df_vcf = df[vcf_fields].sort_values(by=["#CHROM", "POS", "REF"])
+        
+    else:
+        
+        # add the number of chromosomes with this variant according to each genotype
+        for p in programs: 
+            
+            # change vars
+            df["%s_GT"%p] = df["%s_GT"%p].apply(lambda x: "/".join(re.split("/|\|", x)))
+            df["%s_GTset"%p] = df["%s_GT"%p].apply(lambda x: set(x.split("/")))
+            df["%s_GT_index"%p] =  df["%s_GT_index"%p].apply(str)
+                        
+            # add n chromosomes
+            df["%s_numberChromosomes_withVar"%p] = df.apply(lambda r: get_nChroms_with_var(r, p), axis=1)
+                    
+            # test        
+            if sum(df["%s_numberChromosomes_withVar"%p]>0)!=sum(df["%s_called"%p]): 
+            
+                # check that there are no rows with GT and not called
+                df_notCalled_withGT = df[(df["%s_numberChromosomes_withVar"%p]>0) & ~(df["%s_called"%p])] 
+                if len(df_notCalled_withGT)>0: raise ValueError("There are some uncalled vars with GT")
+                
+        # add the numberChromosomes_withVar considering only PASS vars
+        df["numberChromosomes_withVar"] = df.apply(get_numberChromosomes_withVar, axis=1) 
+       
+        # report if there is any POS 
+        nvars_consideringREF =  len(df.drop_duplicates(subset=["#CHROM", "POS", "REF"]))
+        nvars_not_consideringREF =  len(df.drop_duplicates(subset=["#CHROM", "POS"]))
+        if nvars_consideringREF!=nvars_not_consideringREF: print("Warning there are some positions with >1 REF")                                                        
+                
+        # get the grouped df per chromosome and position  
+        print("getting vcf lines")
+        df_vcf = df.groupby(["#CHROM", "POS", "REF"], as_index=False).apply(lambda df_pos: get_row_vcf(df_pos, ploidy))
+        df_vcf.index = list(range(len(df_vcf)))
+                
+    # get the vcf content
+    vcf_lines = df_vcf[vcf_fields].sort_values(by=["#CHROM", "POS", "REF"]).to_csv(sep="\t", header=True, index=False)
+
+    # get the header
+    header_lines = ["##fileformat=VCFv4.2",
+                    "##perSVade small variant calling pipeline. This is the merged output of freebayes (fb), GATK Haplotype Caller (HC) and bcftools (bt) for variants that PASS the filters in at least %i algorithms."%min(df.number_PASS_programs),
+                    "##FILTER indicates the number of algorithms were this variant was called and PASSed the filters",
+                    "##FORMAT includes the GT (genotype) and AF (allele frequency).",
+                    "##GT includes the genotype in the case that all the PASS algorithms called the same GT, and the one that implies least varying positions otherwise.",
+                    "##AF includes the mean fraction of reads calling this variant across PASS alorithms",
+                    "##INFO includes the name of the algorithms that called this variant (PASSALGS) and the AF of each of the programs. Note that for multiallelic positions the ',' indicates each of the alleles in the order of 'ALT'"
+                    ]
+    
+    print("writing %s"%(filename))
+    filename_tmp = "%s.tmp"%filename
+    open(filename_tmp, "w").write("\n".join(header_lines) + "\n" + vcf_lines)
+    os.rename(filename_tmp, filename)
 
