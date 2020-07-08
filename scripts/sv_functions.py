@@ -3820,6 +3820,9 @@ def get_bedpeDF_for_clovebalTRA_5with5_or_3with3(df_clove, tol_bp=50):
     # initialize a dict
     data_dict = {}
 
+    # initialize the already used breakpoints
+    already_used_bps = set()
+
     # go through each combination
     for I1 in df_ITX1.index:
         I1s = df_ITX1.loc[I1]
@@ -3829,6 +3832,12 @@ def get_bedpeDF_for_clovebalTRA_5with5_or_3with3(df_clove, tol_bp=50):
 
             # ask whether this combination can be close
             if I1s["#CHROM"]==I2s["#CHROM"] and I1s["CHR2"]==I2s["CHR2"] and abs(I1s["POS"]-I2s["POS"])<=tol_bp and abs(I1s["END"]-I2s["END"])<=tol_bp:
+
+                # if any of the bp has been used, skip
+                if I1 in already_used_bps or I2 in already_used_bps: continue
+
+                # keep the already used bps
+                already_used_bps.update({I1, I2})
 
                 # keep in a way that it is in the same order as in the clove VCF
                 data_dict[(I1, I2)] = {"ChrA":I1s["#CHROM"], "StartA":0, "EndA":I1s["POS"], "ChrB":I1s["CHR2"], "StartB":0, "EndB":I1s["END"], "Balanced":True} # all the starts are 0s
@@ -3848,6 +3857,9 @@ def get_bedpeDF_for_clovebalTRA_5with3_or_3with5_INVTXbreakpoints(df_clove, chr_
     # initialize a dict
     data_dict = {}
 
+    # initialize the already used breakpoints
+    already_used_bps = set()
+
     # go through each combination
     for I1 in df_INVTX1.index:
         I1s = df_INVTX1.loc[I1]
@@ -3857,6 +3869,12 @@ def get_bedpeDF_for_clovebalTRA_5with3_or_3with5_INVTXbreakpoints(df_clove, chr_
 
             # ask whether this combination can be close
             if I1s["#CHROM"]==I2s["#CHROM"] and I1s["CHR2"]==I2s["CHR2"] and abs(I1s["POS"]-I2s["POS"])<=tol_bp and abs(I1s["END"]-I2s["END"])<=tol_bp:
+
+                # if any of the bp has been used, skip
+                if I1 in already_used_bps or I2 in already_used_bps: continue
+
+                # keep the already used bps
+                already_used_bps.update({I1, I2})
 
                 # keep in a way that it is in the same order as in the clove VCF
                 data_dict[(I1, I2)] = {"ChrA":I1s["#CHROM"], "StartA":0, "EndA":I1s["POS"], "ChrB":I1s["CHR2"], "StartB":I1s["END"], "EndB":chr_to_len[I1s["CHR2"]], "Balanced":True} # all the starts are 0s
@@ -3914,6 +3932,7 @@ def write_clove_df_into_bedORbedpe_files_like_RSVSim(df_clove, fileprefix, refer
     print("getting SVs from clove")
 
     # initialize as a copy
+    df_clove_initial = cp.deepcopy(df_clove)
     df_clove = cp.deepcopy(df_clove)
 
     # initialize the final dict
@@ -3922,6 +3941,9 @@ def write_clove_df_into_bedORbedpe_files_like_RSVSim(df_clove, fileprefix, refer
     # initialize the considered idxs
     df_clove.index = list(range(len(df_clove)))
     considered_idxs = []
+
+    # initialize a df with the considered IDX types
+    series_considered_idxs = pd.Series()
 
     # map each index to the ID
     cloveIDX_to_ID = dict(df_clove.ID)
@@ -3943,14 +3965,17 @@ def write_clove_df_into_bedORbedpe_files_like_RSVSim(df_clove, fileprefix, refer
         # balanced translocations 5with5
         df_balTRA_5with5_or_3with3 = get_bedpeDF_for_clovebalTRA_5with5_or_3with3(df_clove, tol_bp=tol_bp) # here the index is not balanced
         considered_idxs += make_flat_listOflists(df_balTRA_5with5_or_3with3.index); df_clove = df_clove.loc[set(df_clove.index).difference(set(considered_idxs))]
+        series_considered_idxs["balTRA_5with5_or_3with3"] = make_flat_listOflists(df_balTRA_5with5_or_3with3.index)
 
         # balanced translocations 5with3 (these are the ones with an IVD field, assigned by clove)
         df_balTRA_5with3_IVD = df_clove[(df_clove.SVTYPE=="IVD") & ((df_clove.START - df_clove.END)<=tol_bp)].apply(lambda r: get_bedpe_for_clovebalTRA_5with3(r, chr_to_len), axis=1)
         considered_idxs += list(df_balTRA_5with3_IVD.index); df_clove = df_clove.loc[set(df_clove.index).difference(set(considered_idxs))]
+        series_considered_idxs["balTRA_5with3_IVD"] = list(df_balTRA_5with3_IVD.index)
 
         # balanced translocations 5with3 where there are two close INVTX breakpoints
         df_balTRA_5with3_INVTXbps = get_bedpeDF_for_clovebalTRA_5with3_or_3with5_INVTXbreakpoints(df_clove, chr_to_len, tol_bp=tol_bp).apply(lambda r: get_bedpe_for_clovebalTRA_5with3(r, chr_to_len), axis=1)
-        considered_idxs += list(df_balTRA_5with3_INVTXbps.index); df_clove = df_clove.loc[set(df_clove.index).difference(set(considered_idxs))]
+        considered_idxs += make_flat_listOflists(df_balTRA_5with3_INVTXbps.index); df_clove = df_clove.loc[set(df_clove.index).difference(set(considered_idxs))]
+        series_considered_idxs["balTRA_5with3_INVTXbps"] = make_flat_listOflists(df_balTRA_5with3_INVTXbps.index)
 
         # merge both
         df_balTRA_5with3 = df_balTRA_5with3_IVD.append(df_balTRA_5with3_INVTXbps)
@@ -3998,6 +4023,8 @@ def write_clove_df_into_bedORbedpe_files_like_RSVSim(df_clove, fileprefix, refer
 
         considered_idxs += list(df_inversions.index); df_clove = df_clove.loc[set(df_clove.index).difference(set(considered_idxs))]
         svtype_to_svfile["inversions"] = inversions_bed
+        series_considered_idxs["inversions"] = list(df_inversions.index)
+
 
         print("There are %i inversions"%len(df_inversions))
 
@@ -4033,6 +4060,7 @@ def write_clove_df_into_bedORbedpe_files_like_RSVSim(df_clove, fileprefix, refer
         # keep
         svtype_to_svfile["insertions"] = bedpe_insertions
         considered_idxs += list(df_ins.index); df_clove = df_clove.loc[set(df_clove.index).difference(set(considered_idxs))]
+        series_considered_idxs["insertions"] = list(df_ins.index)
 
         print("There are %i insertions, %i of which are copy-and-paste"%(len(df_ins), sum(df_ins.Copied=="TRUE")))
 
@@ -4054,6 +4082,7 @@ def write_clove_df_into_bedORbedpe_files_like_RSVSim(df_clove, fileprefix, refer
             # keep
             svtype_to_svfile[typeSV] = bed_filename
             considered_idxs += list(df_svtype.index)
+            series_considered_idxs[typeSV] = list(df_svtype.index)
 
             print("There are %i %s"%(len(df_svtype), typeSV))
 
@@ -4073,7 +4102,22 @@ def write_clove_df_into_bedORbedpe_files_like_RSVSim(df_clove, fileprefix, refer
 
     # at the end make sure that the considered idxs are unique
     if len(considered_idxs)!=len(set(considered_idxs)): 
-        print(fileprefix, considered_idxs)
+
+        print(series_considered_idxs)
+
+        print("These are the IDXs considered more than once, with the number:", [(k,v) for k,v in Counter(considered_idxs).items() if v!=1])
+
+        # save the df_clove
+        df_clove_filename = "%s_df_clove_initial.py"%fileprefix
+        save_object(df_clove_initial, df_clove_filename)
+
+        cmds_write = ["import sys; sys.path.insert(0, '%s')"%CWD,
+                      "import sv_functions as fun",
+                      "df_clove = fun.load_object('%s')"%df_clove_filename,
+                      "fun.write_clove_df_into_bedORbedpe_files_like_RSVSim(df_clove, '%s', '%s', '%s', tol_bp=%i, define_insertions_based_on_coverage='%s')"%(fileprefix, reference_genome, sorted_bam, tol_bp, define_insertions_based_on_coverage)]
+
+        print("ERROR log: \n---saving the untouched df_clove into %s---\n\n. You can  with the following cmds to reproduce the ERROR:---\n%s\n---"%(df_clove_filename, "\n".join(cmds_write)))
+
         raise ValueError("ERROR: Some clove events are assigned to more than one cathegory. Check the insertions and translocations calling")
         #print("WARNING: Some clove events are assigned to more than one cathegory. Check the insertions and translocations calling")
 
@@ -11083,4 +11127,272 @@ def write_integrated_smallVariantsTable_as_vcf(df, filename, ploidy):
     filename_tmp = "%s.tmp"%filename
     open(filename_tmp, "w").write("\n".join(header_lines) + "\n" + vcf_lines)
     os.rename(filename_tmp, filename)
+
+def get_PASS_vcf(vcf, replace=False):
+
+    """This function takes a vcf and writes and returns the PASS one"""
+
+    # define
+    pass_vcf = "%s.PASS.vcf"%vcf
+    pass_vcf_tmp = "%s.tmp"%pass_vcf
+
+    if file_is_empty(pass_vcf) or replace is True:
+
+        # get the vcf lines with PASS
+        linesPASS = "%s.PASSvcflines"%vcf
+        run_cmd("grep $'\tPASS\t' %s | grep -v '^#' > %s"%(vcf, linesPASS))
+
+        # get the header
+        header = "%s.header"%vcf
+        run_cmd("grep '^#' %s > %s"%(vcf, header))
+        
+        # merge into the tmp
+        run_cmd("cat %s %s > %s"%(header, linesPASS, pass_vcf_tmp))
+
+        # remove intermediate files
+        for f in [linesPASS, header]: remove_file(f)
+
+        # keep
+        os.rename(pass_vcf_tmp, pass_vcf)
+
+    return pass_vcf
+
+
+def get_gzipped_file(file, replace=False):
+
+    """Takes a file and returns the gzipped version"""
+
+    gz_file = "%s.gz"%file
+    gz_file_tmp = "%s.gz_tmp"%file
+
+    if file_is_empty(gz_file) or replace is True:
+
+        # run pigz with the 'gz_vcf' suffix
+        run_cmd("pigz --keep --suffix .gz_tmp %s"%file)
+
+        # rename 
+        os.rename(gz_file_tmp, gz_file)
+
+    return gz_file
+
+
+def get_vcf_as_df_simple_oneSample(vcf_file):
+
+    """Takes a vcf file and returns as df"""
+
+    # get the df (avoid NA as a default NaN)
+    df = pd.read_csv(vcf_file, skiprows=list(range(len([line for line in open(vcf_file, "r", encoding='utf-8', errors='ignore') if line.startswith("##")]))), sep="\t", na_values=vcf_strings_as_NaNs, keep_default_na=False)
+
+    # set the index to be a tuple of (chromosome, location, ref, alt)
+    df["CHROM_POS_REF_ALT"] = [tuple(x) for x in df[["#CHROM", "POS", "REF", "ALT"]].values]; df = df.set_index("CHROM_POS_REF_ALT")
+
+    # add a colum that will result from the merging of FORMAT and the last column (which are the values of FORMAT)
+    data_colname = list(df.keys())[-1]
+    df["METADATA"] = [dict(zip(x[0].split(":"), x[1].split(":"))) for x in df[["FORMAT", data_colname]].values]
+    features = df.iloc[0].METADATA.keys()
+
+    # add as columns all the fetaures
+    for feature in features: 
+
+        # go through each data record
+        data = []
+        for rec in df.METADATA:
+
+            if feature in rec: data.append(rec[feature])
+            else: data.append("")
+        df[feature] = data
+
+    return df
+
+def get_program_that_called_vcf(vcf):
+
+    """Takes a vcf filename and returns the program that called it"""
+
+    all_programs = []
+    for p in ["freebayes", "bcftools", "HaplotypeCaller"]:
+
+        if p in vcf: all_programs.append(p)
+
+    if len(all_programs)!=1: raise ValueError("The sample could not be identified")
+    else: return all_programs[0]
+
+def get_GTto0(x):
+
+    """This function returns 0 if GT is provided, and 1 otherwise"""
+
+    if x=="GT": return 0
+    else: return 1
+
+def get_bgzip_and_tabix_vcf_file(file, replace=False):
+
+    """This function takes a file and gzips it, creating a tabix index file"""
+
+    file_gz = "%s.gz"%file
+    file_tmp_gz = "%s.tmp.gz"%file
+    file_gz_tbi = "%s.gz.tbi"%file
+    file_tmp_gz_tbi = "%s.tmp.gz.tbi"%file
+    sorted_vcf = "%s.sorted.vcf"%file
+
+    if file_is_empty(file_gz) or replace is True:
+
+        # remove previous files
+        for f in [file_tmp_gz, file_gz_tbi, file_tmp_gz_tbi, sorted_vcf]: remove_file(f)
+
+        # sort with bedtools
+        print("sorting vcf")
+        run_cmd("%s sort -header -i %s > %s"%(bedtools, file, sorted_vcf))
+
+        # bgzip
+        print("bgzipping")
+        run_cmd("%s -c %s > %s"%(bgzip, sorted_vcf, file_tmp_gz))
+
+        print("tabix-ing")
+        run_cmd("%s -p vcf %s"%(tabix, file_tmp_gz))
+
+        # rename files
+        os.rename(file_tmp_gz_tbi, file_gz_tbi)
+        os.rename(file_tmp_gz, file_gz)
+
+    return file_gz
+
+def merge_several_vcfsSameSample_into_oneMultiSample_vcf(normalised_vcfs, outdir, replace=False, threads=4):
+
+    """This function takes an iterable of vcf files (that have been previously left-trimmed) and gets the merged output. It writes a vcf into outdir. It only considers PASS vars"""
+
+    # map each vcf to it's program
+    program_to_vcf = {get_program_that_called_vcf(vcf) : vcf for vcf in normalised_vcfs}
+
+    # get the vcfs into a df
+    program_to_vcf_df = {p : get_vcf_as_df_simple_oneSample(vcf) for p,vcf in program_to_vcf.items()}
+
+    # define the common 'FORMAT' fields
+    common_format_fields = sorted(set.intersection(*[set(df.FORMAT.iloc[0].split(":")) for df in program_to_vcf_df.values()]), key=get_GTto0)
+    print("These are the common FORMAT fields:", common_format_fields)
+    if len(common_format_fields)==0: raise ValueError("There are no common FORMAT fields")
+
+    # get the sampleID
+    sampleIDs = {df.columns[9] for df in program_to_vcf_df.values()}
+    if len(sampleIDs)!=1: raise ValueError("You are not trying to merge vcfs from the same sample")
+    sampleID = next(iter(sampleIDs))
+
+    # define the vcf fields (it is missing the sample)
+    backbone_vcf_fields = ["#CHROM", "POS", "ID", "REF", "ALT", "QUAL", "FILTER", "INFO", "FORMAT"]
+
+    # map each caller to an abbrebiations
+    program_to_abbreviation = {"HaplotypeCaller":"HC", "freebayes":"fb", "bcftools":"bt"}
+    
+
+    # go through the types of filters
+    for type_filters in ["all", "onlyPASS"]:
+        print(type_filters)
+
+        # deepcopy the df
+        p_to_df = cp.deepcopy(program_to_vcf_df)
+
+        # define the outfile
+        merged_vcf = "%s/merged_vcfs_%sVars.vcf"%(outdir, type_filters)
+        merged_vcf_tmp = "%s/merged_vcfs_%sVars.tmp.vcf"%(outdir, type_filters)
+
+        if file_is_empty(merged_vcf) or replace is True:
+        #if True:
+
+            # initialize a list of the important vcfs
+            vcfs_to_merge = []
+
+            # go through each vcf and format the fields
+            for program, vcf_df in p_to_df.items():
+                print(program)
+
+                # define the formatted vcf
+                formatted_vcf = "%s.formatted.%sVars.vcf"%(program_to_vcf[program], type_filters)
+                formatted_vcf_gz = "%s.gz"%formatted_vcf
+
+                #if file_is_empty(formatted_vcf_gz) or replace is True:
+                if True:
+
+                    print("formatting vcf")
+
+                    # keep only the PASS variants if necessary
+                    if type_filters=="onlyPASS": vcf_df = vcf_df[vcf_df.FILTER=="PASS"]
+
+                    # format the FORMAT to include only 
+                    vcf_df["FORMAT"] = ":".join(common_format_fields)
+                    vcf_df[program] = vcf_df.apply(lambda r: ":".join([r[f] for f in common_format_fields]), axis=1)
+
+                    # format the INFO to include the INFO, FILTER, QUAL and common_format_fields
+                    abb = program_to_abbreviation[program]
+                    vcf_df["INFO_with_abb"] = vcf_df.INFO.apply(lambda x: ";".join(["%s_%s"%(abb, I) for I in x.split(";")]))
+                    vcf_df["FILTER_and_QUAL_with_abb"] = vcf_df.apply(lambda r: "%s_FILTER=%s;%s_QUAL=%.2f"%(abb, r["FILTER"], abb, r["QUAL"]) , axis=1)
+                    vcf_df["INFO"] = vcf_df.FILTER_and_QUAL_with_abb + ";" + vcf_df.INFO_with_abb + ";%s_DATA="%abb + vcf_df[program]
+
+                    # write
+                    vcf_lines = vcf_df[backbone_vcf_fields + [program]].to_csv(sep="\t", header=True, index=False)
+                    
+                    # get the header
+                    header = "%s.header"%(program_to_vcf[program])
+                    run_cmd("grep '^##' %s  > %s"%(program_to_vcf[program], header))
+                    header_lines = "".join(open(header, "r").readlines())
+
+ 
+                    # write vcf
+                    open(formatted_vcf, "w").write(header_lines + vcf_lines)
+
+                    # bgzip and tabix
+                    get_bgzip_and_tabix_vcf_file(formatted_vcf, replace=True)
+
+                # keep
+                vcfs_to_merge.append(formatted_vcf_gz)
+
+            # run bcftools merge
+            run_cmd("%s merge --merge both -o %s -Ov %s"%(bcftools, merged_vcf_tmp, " ".join(vcfs_to_merge)))
+            os.rename(merged_vcf_tmp, merged_vcf)
+
+            ajhdhdadhj
+
+
+        kjahkahhgas
+
+
+
+
+    print(vcf_fields)
+
+    kjaghdkjdahd
+
+    # get the 
+
+
+
+    # get only PASS records
+    print("getting PASS vars")
+    program_to_vcf_PASS = {p : get_PASS_vcf(vcf, replace=replace) for p, vcf in program_to_vcf.items()}
+
+  
+
+
+ 
+    # get the gzipped vcfs
+    pass_gz_vcfs = [get_gzipped_file(x, replace=replace) for x in pass_vcfs]
+
+    # define the output
+    integrated_vcf = "%s/integrated_variants.vcf"%outdir
+
+    print(pass_gz_vcfs)
+
+    mnbdhdahad
+
+
+    """
+    # define the picard merge command
+    print("running picard MergeVcfs into %s"%integrated_vcf)
+    inputs_picard = " ".join(["I=%s"%x for x in pass_vcfs])
+    picard_merge_cmd = "%s MergeVcfs %s O=%s"%(picard_exec, inputs_picard, integrated_vcf)
+    run_cmd(picard_merge_cmd)
+    # This gives problems when the genomes do not have only ACTGN bases
+    """
+
+
+
+
+    ndjdda
 

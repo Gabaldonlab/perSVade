@@ -42,6 +42,8 @@ bcftools = "%s/bin/bcftools"%EnvDir
 bgzip = "%s/bin/bgzip"%EnvDir
 tabix = "%s/bin/tabix"%EnvDir
 bedtools = "%s/bin/bedtools"%EnvDir
+picard = "%s/share/picard-2.18.26-0/picard.jar"%EnvDir
+
 
 # scripts installed with perSVade
 run_vep = "%s/run_vep.py"%CWD
@@ -73,6 +75,9 @@ parser.add_argument("-gcode", "--gDNA_code", dest="gDNA_code", default=1, type=i
 
 # CNV args
 parser.add_argument("--skip_cnv_analysis", dest="skip_cnv_analysis", action="store_true", default=False, help="Skipp the running of the CNV pipeline, which outputs the number of copies that each gene has according to coverage. The gene ID's are based on the GFF3 files that have been provided in -gff")
+
+# perform the vcf integration
+parser.add_argument("--get_merged_vcf", dest="get_merged_vcf", action="store_true", default=False, help="Get the integrated vcf")
 
 # avoid marking duplicates
 parser.add_argument("--skip_MarkingDuplicates", dest="skip_MarkingDuplicates", action="store_true", default=False, help="Skips the marking of duplicates in the bam.")
@@ -309,21 +314,6 @@ if opt.caller == "freebayes" or opt.caller == "all":
 
 print("Performing variant normalisation. For in/del variants, several programs may yield various variant representations. This is performed here with VCFLIB ")
 
-# first modify the vcfs so that the ref and alt alleles are uppercase. This is important for the vcflib normalisation
-print("Puting all REF and ALT alleles to uppercase.")
-for unnormalised_vcf in filtered_vcf_results:
-
-    # load into df
-    initial_lines_list = [line for line in open(unnormalised_vcf, "r", encoding='utf-8', errors='ignore') if line.startswith("##")]
-    vcf_df = pd.read_csv(unnormalised_vcf, skiprows=list(range(len(initial_lines_list))), sep="\t", na_values=fun.vcf_strings_as_NaNs, keep_default_na=False)
-
-    # put to uppercase
-    vcf_df["REF"]  = vcf_df["REF"].apply(lambda x: x.upper())
-    vcf_df["ALT"]  = vcf_df["ALT"].apply(lambda x: x.upper())
-
-    # write to the same file, including the initial lines of the vcf for consistency
-    open(unnormalised_vcf, "w").write("".join(initial_lines_list) + vcf_df.to_csv(sep="\t", index=False))
-
 # initialize an array that will keep the path to the normalised VCFS
 all_normalised_vcfs = set()
 
@@ -336,14 +326,65 @@ for unnormalised_vcf in filtered_vcf_results:
 
     # generate an unifyed representation of the vcfs
     if fun.file_is_empty(normalised_vcf) or opt.replace is True:
+    #if True:
+
+        ##### GET AS UPPERCASE #####
+
+        print("Puting all REF and ALT alleles to uppercase")
+
+        # load into df
+        initial_lines_list = [line for line in open(unnormalised_vcf, "r", encoding='utf-8', errors='ignore') if line.startswith("##")]
+        vcf_df = pd.read_csv(unnormalised_vcf, skiprows=list(range(len(initial_lines_list))), sep="\t", na_values=fun.vcf_strings_as_NaNs, keep_default_na=False)
+
+        # put to uppercase
+        vcf_df["REF"]  = vcf_df["REF"].apply(lambda x: x.upper())
+        vcf_df["ALT"]  = vcf_df["ALT"].apply(lambda x: x.upper())
+
+        # write to the same file, including the initial lines of the vcf for consistency
+        open(unnormalised_vcf, "w").write("".join(initial_lines_list) + vcf_df.to_csv(sep="\t", index=False))
+
+        #############################
+
         print("Running vcfallelicprimitives for vcf %s"%unnormalised_vcf)
-        cmd_normalise = "%s --keep-geno %s > %s"%(vcfallelicprimitives, unnormalised_vcf, normalised_vcf_tmp); fun.run_cmd(cmd_normalise)
+        normalised_vcf_tmp_lines = "%s.lines.vcf"%normalised_vcf_tmp
+        cmd_normalise = "%s --keep-geno %s > %s"%(vcfallelicprimitives, unnormalised_vcf, normalised_vcf_tmp_lines); fun.run_cmd(cmd_normalise)
+
+        # get the header. vcfallelicprimitives removes the header info
+        header_lines = "%s.header"%unnormalised_vcf
+        fun.run_cmd("grep '^##' %s > %s"%(unnormalised_vcf, header_lines))
+
+        # add header
+        fun.run_cmd("cat %s %s > %s"%(header_lines, normalised_vcf_tmp_lines, normalised_vcf_tmp))
+
+        # remove unnecessary files
+        for f in [header_lines, normalised_vcf_tmp_lines]: fun.remove_file(f)
+
         os.rename(normalised_vcf_tmp, normalised_vcf)
 
     # keep
     all_normalised_vcfs.add(normalised_vcf)
 
 print("VCFLIB Normalisation is done")
+
+
+###################################
+##### GET THE INTEGRATED VARS ##### 
+################################### 
+
+# merge the variants
+if opt.get_merged_vcf is True:
+
+    print("getting merged vcf")
+
+    vcf_several_programs_merged = fun.merge_several_vcfsSameSample_into_oneMultiSample_vcf(all_normalised_vcfs, opt.outdir, replace=opt.replace, threads=opt.threads)
+
+
+
+    adkghdakhgdag
+
+###################################
+###################################
+###################################
 
 
 ############################
@@ -526,10 +567,24 @@ else:
     ##############################################
     ##############################################
 
+    ##############################################
+    ######## GENERATE THE VARIANTS VEP FILE ######
+    ##############################################
+
+    # generate a file that has all the information about the samples
+
+
+
+    ##############################################
+    ##############################################
+    ##############################################
+
+
     #################################################
     ######## GENERATE THE INTERSECTING FILES ########
     #################################################
 
+    """
     if opt.caller=="all": 
         print("getting intersecting VCFs")
      
@@ -537,7 +592,8 @@ else:
         programs = {"HaplotypeCaller", "freebayes", "bcftools"}
         df["number_PASS_programs"] = df.apply(lambda r: sum([r["%s_PASS"%p] for p in programs]), axis=1)
 
-        for minPrograms in [0, 1, 2, 3]:
+
+        for minPrograms in [1, 2, 3]:
 
             # filter
             df_PASS = df[df.number_PASS_programs>=minPrograms]
@@ -549,7 +605,7 @@ else:
 
                 print("getting vcf of samples that are called by at least %i programs"%minPrograms)
                 fun.write_integrated_smallVariantsTable_as_vcf(df_PASS, intersecting_vcf, opt.ploidy)
-
+    """
 
     #################################################
     #################################################
@@ -558,7 +614,7 @@ else:
 print("VarCall Finished")
 
 # create outfile
-open("%s/file_finsihedVarCall_CNV_ploidy%i.txt"%(opt.outdir, opt.ploidy), "w").write("finsihed with pipeline\n")
+open("%s/finsihedVarCall_CNV_file_ploidy%i.txt"%(opt.outdir, opt.ploidy), "w").write("finsihed with pipeline\n")
 
 # at the end remove all the non-essential files
 if opt.remove_smallVarsCNV_nonEssentialFiles is True: fun.remove_smallVarsCNV_nonEssentialFiles(opt.outdir, opt.ploidy)
