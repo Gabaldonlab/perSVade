@@ -123,6 +123,10 @@ parser.add_argument("-mcode", "--mitochondrial_code", dest="mitochondrial_code",
 parser.add_argument("-gcode", "--gDNA_code", dest="gDNA_code", default=1, type=int, help="The code of the NCBI gDNA genetic code. You can find the numbers for your species here https://www.ncbi.nlm.nih.gov/Taxonomy/Utils/wprintgc.cgi . For C. albicans it is 12. ")
 parser.add_argument("--remove_smallVarsCNV_nonEssentialFiles", dest="remove_smallVarsCNV_nonEssentialFiles", action="store_true", default=False, help="Will remove all the varCall files except the integrated final file and the bam file.")
 
+# small varCall stop options
+parser.add_argument("--StopAfter_smallVarCallSimpleRunning", dest="StopAfter_smallVarCallSimpleRunning", action="store_true", default=False, help="Stop after obtaining the filtered vcf outputs of each program.")
+
+
 opt = parser.parse_args()
 
 ########################################
@@ -406,6 +410,11 @@ if opt.run_smallVarsCNV:
     if opt.replace is True: varcall_cmd += " --replace"
     if opt.gff is not None: varcall_cmd += " -gff %s"%opt.gff
     if opt.remove_smallVarsCNV_nonEssentialFiles is True: varcall_cmd += " --remove_smallVarsCNV_nonEssentialFiles"
+    if opt.StopAfter_smallVarCallSimpleRunning is True: varcall_cmd += " --StopAfter_smallVarCallSimpleRunning"
+
+
+
+
 
     # run
     fun.run_cmd(varcall_cmd)

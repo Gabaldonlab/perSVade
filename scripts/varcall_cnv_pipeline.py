@@ -89,6 +89,10 @@ parser.add_argument("-gff", "--gff-file", dest="gff", default=None, help="path t
 # removing args
 parser.add_argument("--remove_smallVarsCNV_nonEssentialFiles", dest="remove_smallVarsCNV_nonEssentialFiles", action="store_true", default=False, help="Will remove all the varCall files except the integrated final file, the filtered and normalised vcfs, the raw vcf and the CNV files.")
 
+# stopping options
+parser.add_argument("--StopAfter_smallVarCallSimpleRunning", dest="StopAfter_smallVarCallSimpleRunning", action="store_true", default=False, help="Stop after obtaining the filtered vcf outputs of each program.")
+
+
 # get arguments
 opt = parser.parse_args()
 
@@ -305,6 +309,9 @@ if opt.caller == "freebayes" or opt.caller == "all":
     
     print("freebayes is done")
 
+if opt.StopAfter_smallVarCallSimpleRunning is True:
+    print("stopping after generation of each variant calling")
+    sys.exit(0)
 
 ##########
 
@@ -374,9 +381,22 @@ print("VCFLIB Normalisation is done")
 # merge the variants
 if opt.get_merged_vcf is True:
 
-    print("getting merged vcf")
+    # get the merged vcf records (these are multiallelic)
+    print("getting merged vcf without multialleles")
+    # merged_vcf_all, merged_vcf_onlyPASS 
+    merged_vcf_all, merged_vcf_onlyPASS = fun.merge_several_vcfsSameSample_into_oneMultiSample_vcf(filtered_vcf_results, opt.ref, opt.outdir, replace=opt.replace, threads=opt.threads)
 
-    vcf_several_programs_merged = fun.merge_several_vcfsSameSample_into_oneMultiSample_vcf(all_normalised_vcfs, opt.outdir, replace=opt.replace, threads=opt.threads)
+    jadhjdkah
+
+    # split the multiallelic records for each of them
+    print("splitting multialleles and bgzipping")
+    merged_vcf_all_noMultialleles_gz = fun.get_normed_bgzip_and_tabix_vcf_file(merged_vcf_all, opt.ref, replace=opt.replace, threads=opt.threads, multiallelics_cmd="-any")
+    merged_vcf_onlyPASS_noMultialleles_gz = fun.get_normed_bgzip_and_tabix_vcf_file(merged_vcf_onlyPASS, opt.ref, replace=opt.replace, threads=opt.threads, multiallelics_cmd="-any")
+
+    print(merged_vcf_all_noMultialleles_gz, merged_vcf_onlyPASS_noMultialleles_gz)
+
+
+
 
 
 
