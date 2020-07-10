@@ -20,7 +20,7 @@ It is expected to print:
 
 This is essential so that all the dependencies of the pipeline are met.
 
-In addition, there are some dependencies that are included in the respository "installation/external_software" (only in the "release" packages). These are gridss (tested on version 2.8.1), clove (tested on version 0.17) and gztools (installed from https://github.com/circulosmeos/gztool/releases/download/v0.11.5/gztool-linux.x86_64)
+In addition, there are some dependencies that are included in the respository "installation/external_software" (only in the "release" packages). These are gridss (tested on version 2.8.1), clove (tested on version 0.17), gztools (installed from https://github.com/circulosmeos/gztool/releases/download/v0.11.5/gztool-linux.x86_64), vcfvalidator (installed from https://github.com/EBIvariation/vcf-validator/releases/download/v0.9.4/vcf_validator_linux) and bcftools (installed from https://github.com/samtools/bcftools/releases/download/1.10.2/bcftools-1.10.2.tar.bz2)
 
 ## Comments for the installation of extra dependencies
 The non-conda dependencies can be installed like this (if you wanted to reinstall them):
@@ -39,7 +39,26 @@ The non-conda dependencies can be installed like this (if you wanted to reinstal
 
 `wget https://github.com/circulosmeos/gztool/releases/download/v0.11.5/gztool-linux.x86_64`
 
-3. give execution permssion to all these files:
+`wget https://github.com/EBIvariation/vcf-validator/releases/download/v0.9.4/vcf_validator_linux`
+
+`wget https://github.com/samtools/bcftools/releases/download/1.10.2/bcftools-1.10.2.tar.bz2`
+
+3. setup bcftools
+
+`tar -xvf bcftools-1.10.2.tar.bz2`
+
+`rm bcftools-1.10.2.tar.bz2`
+
+`cd bcftools-1.10.2`
+
+`./configure --prefix=$PWD`
+
+`make`
+
+`make install`
+
+
+4. give execution permssion to all the files:
 
 `chmod u+x *`
 

@@ -125,6 +125,8 @@ gridss_jar = "%s/gridss-2.9.2-gridss-jar-with-dependencies.jar"%external_softwar
 clove = "%s/clove-0.17-jar-with-dependencies.jar"%external_software
 ninja_dir = "%s/NINJA-0.95-cluster_only/NINJA"%external_software
 gztool = "%s/gztool-linux.x86_64"%external_software
+vcf_validator = "%s/vcf_validator_linux"%external_software
+bcftools_latest = "%s/bcftools-1.10.2/bin/bcftools"%external_software
 
 # scripts that are of this pipeline
 create_random_simulatedSVgenome_R = "%s/create_random_simulatedSVgenome.R"%CWD
@@ -400,7 +402,7 @@ def load_object(filename):
 def file_is_empty(path): 
     
     """ask if a file is empty or does not exist """
-    
+
     if not os.path.isfile(path):
         return_val = True
     elif os.stat(path).st_size==0:
@@ -535,6 +537,13 @@ def get_availableGbRAM():
 
     # define the memory available on several ways
 
+    # check if meminfo exists
+    try: 
+        if len(open("/proc/meminfo", "r").readlines())>0:
+            meminfo_exists = True
+        else: meminfo_exists = False
+    except: meminfo_exists = False
+
     # slurm cluster environment
     if "SLURM_MEM_PER_CPU" in os.environ: 
 
@@ -544,7 +553,7 @@ def get_availableGbRAM():
         available_mem = mem_per_cpu*ncpus
 
     # the /proc/meminfo file
-    elif not file_is_empty("/proc/meminfo"):
+    elif meminfo_exists:
 
         lines_availableMem = [float(l.split()[1])/1000000 for l in open("/proc/meminfo", "r").readlines() if l.startswith("MemAvailable:") and l.strip().endswith("kB")]
 
@@ -11176,6 +11185,8 @@ def get_gzipped_file(file, replace=False):
     return gz_file
 
 
+
+
 def get_vcf_as_df_simple_oneSample(vcf_file):
 
     """Takes a vcf file and returns as df"""
@@ -11223,15 +11234,18 @@ def get_GTto0(x):
     if x=="GT": return 0
     else: return 1
 
-def get_bgzip_and_tabix_vcf_file(file, replace=False):
+def get_normed_bgzip_and_tabix_vcf_file(file, reference_genome, replace=False, threads=4, multiallelics_cmd="-any"):
 
-    """This function takes a file and gzips it, creating a tabix index file"""
+    """This function takes a file and gzips it, creating a tabix index file.
+    multiallelics_cmd is passed to bcftools norm --multiallelics. By default it joins all the multiallelics."""
 
     file_gz = "%s.gz"%file
     file_tmp_gz = "%s.tmp.gz"%file
     file_gz_tbi = "%s.gz.tbi"%file
     file_tmp_gz_tbi = "%s.tmp.gz.tbi"%file
     sorted_vcf = "%s.sorted.vcf"%file
+    normed_vcf = "%s.norm.vcf"%file
+    normed_vcf_tmp = "%s.norm.tmp.vcf"%file
 
     if file_is_empty(file_gz) or replace is True:
 
@@ -11242,12 +11256,20 @@ def get_bgzip_and_tabix_vcf_file(file, replace=False):
         print("sorting vcf")
         run_cmd("%s sort -header -i %s > %s"%(bedtools, file, sorted_vcf))
 
+        # normalise with bcftools
+        print("normalising vcf")
+        run_cmd("%s norm --check-ref ws --fasta-ref %s --multiallelics %s -o %s --output-type v --threads %i %s"%(bcftools_latest, reference_genome, multiallelics_cmd, normed_vcf_tmp, threads, file))
+        os.rename(normed_vcf_tmp, normed_vcf)
+
         # bgzip
         print("bgzipping")
-        run_cmd("%s -c %s > %s"%(bgzip, sorted_vcf, file_tmp_gz))
+        run_cmd("%s -c %s > %s"%(bgzip, normed_vcf, file_tmp_gz))
 
         print("tabix-ing")
         run_cmd("%s -p vcf %s"%(tabix, file_tmp_gz))
+
+        # delete intermediate unnecessary files
+        for f in [sorted_vcf, normed_vcf]: remove_file(f)
 
         # rename files
         os.rename(file_tmp_gz_tbi, file_gz_tbi)
@@ -11255,12 +11277,38 @@ def get_bgzip_and_tabix_vcf_file(file, replace=False):
 
     return file_gz
 
-def merge_several_vcfsSameSample_into_oneMultiSample_vcf(normalised_vcfs, outdir, replace=False, threads=4):
+def validate_vcf(vcf_file, replace=False):
 
-    """This function takes an iterable of vcf files (that have been previously left-trimmed) and gets the merged output. It writes a vcf into outdir. It only considers PASS vars"""
+    """This function takes a vcf and reports whether it is valid according to vcf_validator"""
+
+    # define the outdir
+    outdir = "%s_vcf_validator_outdir"%vcf_file; 
+    delete_folder(outdir); make_folder(outdir)
+
+    print("running vcf_validator into %s"%outdir)
+
+    run_cmd("%s -i %s -l warning -r summary,text -o %s --require-evidence"%(vcf_validator, vcf_file, outdir))
+
+
+def get_altAllele_freq_noMultiAllele_fromAD(ad):
+
+    """Takes AD and returns the alternative allele freq"""
+    if ad==".": return 0.0
+    else:  
+        ad_split = ad.split(",")
+        if len(ad_split)!=2: raise ValueError("AD %s is not valid"%ad)
+        reads_ref = int(ad_split[0])
+        reads_alt = int(ad_split[1])
+
+        if reads_ref==0: return 0.0
+        else: return reads_alt / (reads_ref + reads_alt)
+
+def merge_several_vcfsSameSample_into_oneMultiSample_vcf(vcf_iterable, reference_genome, outdir, replace=False, threads=4):
+
+    """This function takes an iterable of vcf files and gets the merged output. It writes a vcf into outdir. It only considers PASS vars"""
 
     # map each vcf to it's program
-    program_to_vcf = {get_program_that_called_vcf(vcf) : vcf for vcf in normalised_vcfs}
+    program_to_vcf = {get_program_that_called_vcf(vcf) : vcf for vcf in vcf_iterable}
 
     # get the vcfs into a df
     program_to_vcf_df = {p : get_vcf_as_df_simple_oneSample(vcf) for p,vcf in program_to_vcf.items()}
@@ -11281,7 +11329,6 @@ def merge_several_vcfsSameSample_into_oneMultiSample_vcf(normalised_vcfs, outdir
     # map each caller to an abbrebiations
     program_to_abbreviation = {"HaplotypeCaller":"HC", "freebayes":"fb", "bcftools":"bt"}
     
-
     # go through the types of filters
     for type_filters in ["all", "onlyPASS"]:
         print(type_filters)
@@ -11293,8 +11340,8 @@ def merge_several_vcfsSameSample_into_oneMultiSample_vcf(normalised_vcfs, outdir
         merged_vcf = "%s/merged_vcfs_%sVars.vcf"%(outdir, type_filters)
         merged_vcf_tmp = "%s/merged_vcfs_%sVars.tmp.vcf"%(outdir, type_filters)
 
-        if file_is_empty(merged_vcf) or replace is True:
-        #if True:
+        #if file_is_empty(merged_vcf) or replace is True:
+        if True:
 
             # initialize a list of the important vcfs
             vcfs_to_merge = []
@@ -11307,10 +11354,11 @@ def merge_several_vcfsSameSample_into_oneMultiSample_vcf(normalised_vcfs, outdir
                 formatted_vcf = "%s.formatted.%sVars.vcf"%(program_to_vcf[program], type_filters)
                 formatted_vcf_gz = "%s.gz"%formatted_vcf
 
-                #if file_is_empty(formatted_vcf_gz) or replace is True:
-                if True:
+                if file_is_empty(formatted_vcf_gz) or replace is True:
 
                     print("formatting vcf")
+
+                    ########## FORMAT VCF ##########
 
                     # keep only the PASS variants if necessary
                     if type_filters=="onlyPASS": vcf_df = vcf_df[vcf_df.FILTER=="PASS"]
@@ -11319,80 +11367,146 @@ def merge_several_vcfsSameSample_into_oneMultiSample_vcf(normalised_vcfs, outdir
                     vcf_df["FORMAT"] = ":".join(common_format_fields)
                     vcf_df[program] = vcf_df.apply(lambda r: ":".join([r[f] for f in common_format_fields]), axis=1)
 
+                    # make upper vcfs
+                    vcf_df["REF"]  = vcf_df["REF"].apply(lambda x: x.upper())
+                    vcf_df["ALT"]  = vcf_df["ALT"].apply(lambda x: x.upper())
+
                     # format the INFO to include the INFO, FILTER, QUAL and common_format_fields
                     abb = program_to_abbreviation[program]
                     vcf_df["INFO_with_abb"] = vcf_df.INFO.apply(lambda x: ";".join(["%s_%s"%(abb, I) for I in x.split(";")]))
                     vcf_df["FILTER_and_QUAL_with_abb"] = vcf_df.apply(lambda r: "%s_FILTER=%s;%s_QUAL=%.2f"%(abb, r["FILTER"], abb, r["QUAL"]) , axis=1)
                     vcf_df["INFO"] = vcf_df.FILTER_and_QUAL_with_abb + ";" + vcf_df.INFO_with_abb + ";%s_DATA="%abb + vcf_df[program]
 
-                    # write
+                    #################################
+
+                    # write the vcf lines
                     vcf_lines = vcf_df[backbone_vcf_fields + [program]].to_csv(sep="\t", header=True, index=False)
                     
-                    # get the header
-                    header = "%s.header"%(program_to_vcf[program])
-                    run_cmd("grep '^##' %s  > %s"%(program_to_vcf[program], header))
-                    header_lines = "".join(open(header, "r").readlines())
+                    # get the header lines 
+                    header_lines = [l.strip() for l in open(program_to_vcf[program], "r").readlines() if l.startswith("##")]
 
- 
+                    ##### ADD HEADER LINES #####
+
+                    # map each INFO id to the description
+                    infoID_to_Header = {l.split("ID=")[1].split(",")[0] :l for l in header_lines if l.startswith("##INFO=<")}
+
+                    # map each FORMAT id to the description
+                    formatID_to_Header = {l.split("ID=")[1].split(",")[0] :l for l in header_lines if l.startswith("##FORMAT=<")}
+
+                    # initialize without filter and info
+                    #edited_header_lines = [l for l in header_lines if not any([l.startswith("##%s="%x) for x in ["INFO", "FORMAT"]])]
+                    edited_header_lines = [l for l in header_lines if not any([l.startswith("##%s="%x) for x in ["INFO", "FORMAT", "ALT"]])]
+
+                    # INFO
+
+                    # from info
+                    edited_header_lines += [l.replace("ID=%s"%infoID, "ID=%s_%s"%(abb, infoID)) for infoID, l in infoID_to_Header.items()]
+
+                    # add filter, qual and data
+                    edited_header_lines += ['##INFO=<ID=%s_FILTER,Number=1,Type=String,Description="The FILTER field by %s">'%(abb, program)] # FILTER
+                    edited_header_lines += ['##INFO=<ID=%s_QUAL,Number=1,Type=Float,Description="The QUAL field by %s">'%(abb, program)] # QUAL
+                    edited_header_lines += ['##INFO=<ID=%s_DATA,Number=.,Type=String,Description="The DATA field by %s">'%(abb, program)] # DATA
+
+                    # FORMAT
+
+                    # only keep format lines for the common ones
+                    edited_header_lines += [formatID_to_Header[formatID] for formatID in common_format_fields]
+
                     # write vcf
-                    open(formatted_vcf, "w").write(header_lines + vcf_lines)
+                    open(formatted_vcf, "w").write("\n".join(edited_header_lines) + "\n" + vcf_lines)
+                    
+                    ####################
 
-                    # bgzip and tabix
-                    get_bgzip_and_tabix_vcf_file(formatted_vcf, replace=True)
+                    # bgzip, tabix and split mulrialleles into sepparate records
+                    get_normed_bgzip_and_tabix_vcf_file(formatted_vcf, reference_genome, replace=True, threads=threads)
 
                 # keep
                 vcfs_to_merge.append(formatted_vcf_gz)
 
             # run bcftools merge
-            run_cmd("%s merge --merge both -o %s -Ov %s"%(bcftools, merged_vcf_tmp, " ".join(vcfs_to_merge)))
+            print("running vcf merge")
+            run_cmd("%s merge --merge none -o %s -Ov --threads %i %s"%(bcftools, merged_vcf_tmp, threads, " ".join(vcfs_to_merge)))
+            
+            ######## ADD EXTRA FILEDS TO INFO ######## 
+            print("editing INFO")
+
+            # load into df and add the number of PASS vars and also the PASS programs
+            header_lines = [line.strip() for line in open(merged_vcf_tmp, "r", encoding='utf-8', errors='ignore') if line.startswith("##")]
+            vcf_df = pd.read_csv(merged_vcf_tmp, skiprows=list(range(len(header_lines))), sep="\t", na_values=vcf_strings_as_NaNs, keep_default_na=False)
+
+            # replace by a '.' if empty
+            def get_point_if_empty(x):
+                if len(x)>0: return x
+                else: return ["."]
+
+            # add the called and PASS programs
+            fields = list(vcf_df.columns)
+            all_programs = list(p_to_df)
+            vcf_df["called_programs_list"] = vcf_df[all_programs].apply(lambda r: [program_to_abbreviation[p] for p in all_programs if not r[p].endswith(".")], axis=1)
+            vcf_df["PASS_programs_list"] = vcf_df.INFO.apply(lambda x: [program_to_abbreviation[p] for p in all_programs if "%s_FILTER=PASS"%program_to_abbreviation[p] in x]).apply(get_point_if_empty)
+
+            # check if there are empty programs
+            for f in ["called_programs_list", "PASS_programs_list"]: 
+                if any(vcf_df[f].apply(len)==0): raise ValueError("There are empty programs")
+
+            # debug multialleles
+            if any(vcf_df.ALT.apply(lambda x: "," in x)): raise ValueError("There are multiallelic records")
+
+            # define SNPs
+            strange_nucs = {"*", "-"}
+            vcf_df["is_snp"] = (vcf_df.REF.apply(len)==1) &  (vcf_df.ALT.apply(len)==1) & ~(vcf_df.REF.isin(strange_nucs)==1) & ~(vcf_df.ALT.isin(strange_nucs)==1)
+
+            # add to info
+            info_series = vcf_df.INFO + ";CALLEDALGS=" + vcf_df.called_programs_list.apply(lambda x: "-".join(x)) + ";PASSALGS=" + vcf_df.PASS_programs_list.apply(lambda x: "-".join(x)) + ";NCALLED=" + vcf_df.called_programs_list.apply(len).apply(str) + ";NPASS=" + vcf_df.PASS_programs_list.apply(lambda x: len([y for y in x if y!="."])).apply(str) + ";ISSNP=" + vcf_df.is_snp.apply(str)
+
+
+            # get header lines
+            f_to_description = {"CALLEDALGS":"The algorithms that called this var, sepparated by '-'",
+                                "PASSALGS":"The algorithms where this var PASSed the filters, sepparated by '-'",
+                                "NCALLED":"The number of algorithms that called this var",
+                                "NPASS":"The number of algorithms where this var PASSed the filters",
+                                "ISSNP":"Whether it is a SNP"
+                                }
+            f_to_type = {"CALLEDALGS":"String",
+                         "PASSALGS":"String",
+                         "NCALLED":"Integer",
+                         "NPASS":"Integer",
+                         "ISSNP":"String"}
+
+            # add the allele frequency
+            ADidx = [I for I, field in enumerate(vcf_df.FORMAT.iloc[0].split(":")) if field=="AD"][0]
+            for p in all_programs:
+
+                # add the AD of the program
+                abb = program_to_abbreviation[p]
+                vcf_df["%s_AF"%abb] = vcf_df[p].apply(lambda x: x.split(":")[ADidx]).apply(get_altAllele_freq_noMultiAllele_fromAD)
+                
+                # add to info
+                info_series += ";%s_AF="%abb + vcf_df["%s_AF"%abb].apply(lambda x: "%.4f"%x)
+
+                # add the headers
+                f_to_description["%s_AF"%abb] = "The allele frequency by %s"%p
+                f_to_type["%s_AF"%abb] = "Float"
+
+          
+            vcf_df["INFO"] = info_series
+
+            # add the programs' description
+            for f, description in f_to_description.items(): header_lines += ['##INFO=<ID=%s,Number=1,Type=%s,Description="%s">'%(f, description, f_to_type[f])]
+
+
+            # write vcf
+            vcf_lines = vcf_df[fields].to_csv(sep="\t", header=True, index=False)
+            open(merged_vcf_tmp, "w").write("\n".join(header_lines) +  "\n" + vcf_lines)
             os.rename(merged_vcf_tmp, merged_vcf)
 
-            ajhdhdadhj
+            ################################ 
+            
+        # define variables to return 
+        if type_filters=="all": merged_vcf_all = merged_vcf
+        elif type_filters=="onlyPASS": merged_vcf_onlyPASS = merged_vcf
 
 
-        kjahkahhgas
+    return merged_vcf_all, merged_vcf_onlyPASS
 
-
-
-
-    print(vcf_fields)
-
-    kjaghdkjdahd
-
-    # get the 
-
-
-
-    # get only PASS records
-    print("getting PASS vars")
-    program_to_vcf_PASS = {p : get_PASS_vcf(vcf, replace=replace) for p, vcf in program_to_vcf.items()}
-
-  
-
-
- 
-    # get the gzipped vcfs
-    pass_gz_vcfs = [get_gzipped_file(x, replace=replace) for x in pass_vcfs]
-
-    # define the output
-    integrated_vcf = "%s/integrated_variants.vcf"%outdir
-
-    print(pass_gz_vcfs)
-
-    mnbdhdahad
-
-
-    """
-    # define the picard merge command
-    print("running picard MergeVcfs into %s"%integrated_vcf)
-    inputs_picard = " ".join(["I=%s"%x for x in pass_vcfs])
-    picard_merge_cmd = "%s MergeVcfs %s O=%s"%(picard_exec, inputs_picard, integrated_vcf)
-    run_cmd(picard_merge_cmd)
-    # This gives problems when the genomes do not have only ACTGN bases
-    """
-
-
-
-
-    ndjdda
-
+      

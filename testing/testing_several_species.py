@@ -155,8 +155,16 @@ for taxID, spName, ploidy, mitochondrial_chromosome in species_Info:
 
 
 
+# an example CMD to debug
+"""
+
+cd ~/samba/CandidaMine_data_generation/v1/data/Candida_albicans_5476/varCall_output/SRR6669901/
+
+~/samba/scripts/perSVade/perSVade_repository/scripts/varcall_cnv_pipeline.py -r ~/samba/CandidaMine_data_generation/v1/data/Candida_albicans_5476/genome.fasta -thr 4 -o smallVars_CNV_output -p 2 -sbam aligned_reads.bam.sorted -c 12 -mchr Ca22chrM_C_albicans_SC5314 -mcode 4 -gcode 12 -gff ~/samba/CandidaMine_data_generation/v1/data/Candida_albicans_5476/annotations.gff --get_merged_vcf
 
 
+
+"""
 
 
 
