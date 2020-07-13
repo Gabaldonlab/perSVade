@@ -470,22 +470,34 @@ def extract_BEDofGENES_of_gff3(gff, bed, replace=False, reference=""):
 
     # load the gff
     df_gff3 = pd.read_csv(gff, skiprows=list(range(len([line for line in open(gff, "r") if line.startswith("#")]))), sep="\t", names=["chromosome", "source", "type_feature", "start", "end", "score", "strand", "phase", "attributes"])
-    
+
+    # define the regions you are interested in 
+    interesting_features = {"gene"}
+    df_gff3 = df_gff3[df_gff3.type_feature.isin(interesting_features)]
+
     # define a function that takes attribues and returns ID
     def get_ID_gff(attributes):
 
-        ID = [x.lstrip("ID=") for x in attributes.split(";") if x.startswith("ID=")][0]
+        # get the ID
+        IDlist = [x.lstrip("ID=") for x in attributes.split(";") if x.startswith("ID=")]
+
+        # check that the ID is correct
+        if len(IDlist)!=1: 
+            print(IDlist, attributes)
+            raise ValueError("IDlist has to be of length 1")
+
+        # get the ID
+        ID = IDlist[0]
+
+        # add the part if it is there
         if ";part=" in attributes: ID += "_part%s"%([x.lstrip("part=").split("/")[0] for x in attributes.split(";") if x.startswith("part=")][0])
 
         return ID
 
     df_gff3["ID"] = df_gff3.attributes.apply(get_ID_gff)
 
-    # define the regions you are interested in 
-    interesting_features = {"gene"}
-
     # get the bed of the interesting features
-    df_bed = df_gff3[df_gff3.type_feature.isin(interesting_features)][["chromosome", "start", "end", "ID"]]
+    df_bed = df_gff3[["chromosome", "start", "end", "ID"]]
     if file_is_empty(bed) or replace is True: df_bed.to_csv(path_or_buf=bed, sep="\t", index=False, header=False)
 
     # check that the ID assignation is correct
@@ -11215,6 +11227,18 @@ def get_vcf_as_df_simple_oneSample(vcf_file):
 
     return df
 
+def get_df_and_header_from_vcf(vcf_file):
+
+    """Takes a vcf file and returns the df and the header lines (as a list)"""
+
+    # define the header
+    header_lines = [line.strip() for line in open(vcf_file, "r", encoding='utf-8', errors='ignore') if line.startswith("##")]
+
+    # get the vcf
+    df = pd.read_csv(vcf_file, skiprows=len(header_lines), sep="\t", na_values=vcf_strings_as_NaNs, keep_default_na=False)
+
+    return df, header_lines
+
 def get_program_that_called_vcf(vcf):
 
     """Takes a vcf filename and returns the program that called it"""
@@ -11300,7 +11324,7 @@ def get_altAllele_freq_noMultiAllele_fromAD(ad):
         reads_ref = int(ad_split[0])
         reads_alt = int(ad_split[1])
 
-        if reads_ref==0: return 0.0
+        if reads_alt==0: return 0.0
         else: return reads_alt / (reads_ref + reads_alt)
 
 def merge_several_vcfsSameSample_into_oneMultiSample_vcf(vcf_iterable, reference_genome, outdir, replace=False, threads=4):
@@ -11330,7 +11354,7 @@ def merge_several_vcfsSameSample_into_oneMultiSample_vcf(vcf_iterable, reference
     program_to_abbreviation = {"HaplotypeCaller":"HC", "freebayes":"fb", "bcftools":"bt"}
     
     # go through the types of filters
-    for type_filters in ["all", "onlyPASS"]:
+    for type_filters in ["all"]:
         print(type_filters)
 
         # deepcopy the df
@@ -11340,8 +11364,7 @@ def merge_several_vcfsSameSample_into_oneMultiSample_vcf(vcf_iterable, reference
         merged_vcf = "%s/merged_vcfs_%sVars.vcf"%(outdir, type_filters)
         merged_vcf_tmp = "%s/merged_vcfs_%sVars.tmp.vcf"%(outdir, type_filters)
 
-        #if file_is_empty(merged_vcf) or replace is True:
-        if True:
+        if file_is_empty(merged_vcf) or replace is True:
 
             # initialize a list of the important vcfs
             vcfs_to_merge = []
@@ -11355,6 +11378,7 @@ def merge_several_vcfsSameSample_into_oneMultiSample_vcf(vcf_iterable, reference
                 formatted_vcf_gz = "%s.gz"%formatted_vcf
 
                 if file_is_empty(formatted_vcf_gz) or replace is True:
+
 
                     print("formatting vcf")
 
@@ -11445,6 +11469,12 @@ def merge_several_vcfsSameSample_into_oneMultiSample_vcf(vcf_iterable, reference
             vcf_df["called_programs_list"] = vcf_df[all_programs].apply(lambda r: [program_to_abbreviation[p] for p in all_programs if not r[p].endswith(".")], axis=1)
             vcf_df["PASS_programs_list"] = vcf_df.INFO.apply(lambda x: [program_to_abbreviation[p] for p in all_programs if "%s_FILTER=PASS"%program_to_abbreviation[p] in x]).apply(get_point_if_empty)
 
+            # define the 'ID' in  a way that resembles VEP
+            vcf_df["ID"] = vcf_df["#CHROM"] + "_" + vcf_df.POS.apply(str) + "_" + vcf_df.REF + "/" + vcf_df.ALT
+
+            # check that the ID is unique
+            if len(set(vcf_df.ID))!=len(vcf_df): raise ValueError("The ID has to be unique")
+
             # check if there are empty programs
             for f in ["called_programs_list", "PASS_programs_list"]: 
                 if any(vcf_df[f].apply(len)==0): raise ValueError("There are empty programs")
@@ -11456,6 +11486,10 @@ def merge_several_vcfsSameSample_into_oneMultiSample_vcf(vcf_iterable, reference
             strange_nucs = {"*", "-"}
             vcf_df["is_snp"] = (vcf_df.REF.apply(len)==1) &  (vcf_df.ALT.apply(len)==1) & ~(vcf_df.REF.isin(strange_nucs)==1) & ~(vcf_df.ALT.isin(strange_nucs)==1)
 
+            # change the FILTER and QUAL
+            vcf_df["FILTER"] = "."
+            vcf_df["QUAL"] = "."
+
             # add to info
             info_series = vcf_df.INFO + ";CALLEDALGS=" + vcf_df.called_programs_list.apply(lambda x: "-".join(x)) + ";PASSALGS=" + vcf_df.PASS_programs_list.apply(lambda x: "-".join(x)) + ";NCALLED=" + vcf_df.called_programs_list.apply(len).apply(str) + ";NPASS=" + vcf_df.PASS_programs_list.apply(lambda x: len([y for y in x if y!="."])).apply(str) + ";ISSNP=" + vcf_df.is_snp.apply(str)
 
@@ -11465,34 +11499,102 @@ def merge_several_vcfsSameSample_into_oneMultiSample_vcf(vcf_iterable, reference
                                 "PASSALGS":"The algorithms where this var PASSed the filters, sepparated by '-'",
                                 "NCALLED":"The number of algorithms that called this var",
                                 "NPASS":"The number of algorithms where this var PASSed the filters",
-                                "ISSNP":"Whether it is a SNP"
-                                }
+                                "ISSNP":"Whether it is a SNP"}
+
             f_to_type = {"CALLEDALGS":"String",
                          "PASSALGS":"String",
                          "NCALLED":"Integer",
                          "NPASS":"Integer",
                          "ISSNP":"String"}
 
-            # add the allele frequency
+            # add the sets of algorithms
+            vcf_df["called_algs_set"] = vcf_df.called_programs_list.apply(lambda x: set(x).difference({"."}))
+            vcf_df["PASS_algs_set"] = vcf_df.PASS_programs_list.apply(lambda x: set(x).difference({"."}))
+
+            # add some fields of each program
+            print("adding program specific info")
             ADidx = [I for I, field in enumerate(vcf_df.FORMAT.iloc[0].split(":")) if field=="AD"][0]
+            GTidx = [I for I, field in enumerate(vcf_df.FORMAT.iloc[0].split(":")) if field=="GT"][0]
+
             for p in all_programs:
 
                 # add the AD of the program
                 abb = program_to_abbreviation[p]
                 vcf_df["%s_AF"%abb] = vcf_df[p].apply(lambda x: x.split(":")[ADidx]).apply(get_altAllele_freq_noMultiAllele_fromAD)
+
+                # get the genotype
+                vcf_df["%s_GT"%abb] = vcf_df[p].apply(lambda x: x.split(":")[GTidx].replace("|", "/")) 
+
+                # check that the GTs only include 0s and 1s, so that tehre are no multiallelic records
+                if any(vcf_df["%s_GT"%abb].apply(lambda x: any([gt not in {"0", "1", "."} for gt in x.split("/") ]))):
+                    raise ValueError("There may be some multiallelic records")
+
+                # add the reorderedGT
+                vcf_df["%s_GTreordered"%abb] = vcf_df["%s_GT"%abb].apply(lambda x: "/".join(sorted(x.split("/"))) )
+
+                # add the PASS and called algorithsm
+                vcf_df["%s_called"%abb] = vcf_df.called_algs_set.apply(lambda x: abb in x)
+                vcf_df["%s_PASS"%abb] = vcf_df.PASS_algs_set.apply(lambda x: abb in x)
                 
                 # add to info
-                info_series += ";%s_AF="%abb + vcf_df["%s_AF"%abb].apply(lambda x: "%.4f"%x)
+                info_series += ";%s_fractionReadsCov="%abb + vcf_df["%s_AF"%abb].apply(lambda x: "%.4f"%x) + ";%s_GT="%abb + vcf_df["%s_GT"%abb] + ";%s_called="%abb + vcf_df["%s_called"%abb].apply(str) + ";%s_PASS="%abb + vcf_df["%s_PASS"%abb].apply(str)
 
                 # add the headers
-                f_to_description["%s_AF"%abb] = "The allele frequency by %s"%p
-                f_to_type["%s_AF"%abb] = "Float"
+                f_to_description["%s_fractionReadsCov"%abb] = "The fraction of reads covering this var by %s"%p
+                f_to_type["%s_fractionReadsCov"%abb] = "Float"
+
+                f_to_description["%s_GT"%abb] = "The GT by %s"%p
+                f_to_type["%s_GT"%abb] = "String"
+
+                f_to_description["%s_called"%abb] = "Whether the variant was called by %s"%p
+                f_to_description["%s_PASS"%abb] = "Whether the variant PASSed the filters by %s"%p
+
+                f_to_type["%s_called"%abb] = "String"
+                f_to_type["%s_PASS"%abb] = "String"
+
+            print("getting common genotype")
+
+            # get the common GT
+            def get_commonGT(r):
+
+                # define the important algs to calculate GT
+                if len(r["PASS_algs_set"])>0: interesting_algs = r["PASS_algs_set"]
+                else : interesting_algs = r["called_algs_set"]
+
+                # get all the GTs
+                all_GTs = set([r["%s_GTreordered"%p] for p in interesting_algs])
+
+                if len(all_GTs)!=1: commonGT = "."
+                else: commonGT = next(iter(all_GTs))
+
+                return commonGT
+
+            vcf_df["common_GT"] = vcf_df.apply(get_commonGT, axis=1)
+
+            # keep
+            f_to_description["common_GT"] = "The GT if it is common by all the PASS algorithms (or called if there are none). If there is no agreement between these algorithms it is '.'"
+            f_to_type["common_GT"] = "String"
+            info_series += ";common_GT=" + vcf_df["common_GT"]
+            
+            # add the mean AF for PASS and CALLED programs
+            for targetField in ["called_algs_set", "PASS_algs_set"]: 
+
+                # define the allele frequency  for the given set of algs
+                type_algs = targetField.split("_")[0]
+                new_field = "mean_fractionReadsCov_%s_algs"%type_algs
+                vcf_df[new_field] = vcf_df.apply(lambda r: np.mean([r["%s_AF"%alg] for alg in r[targetField] if alg!="."]), axis=1)
+
+                # keep
+                f_to_description[new_field] = "The mean fraction of reads covering this variant by the %s algorithms"%type_algs
+
+                f_to_type[new_field] = "Float"
+                info_series += ";%s="%new_field + vcf_df[new_field].apply(lambda x: "%.4f"%x)
 
           
             vcf_df["INFO"] = info_series
 
             # add the programs' description
-            for f, description in f_to_description.items(): header_lines += ['##INFO=<ID=%s,Number=1,Type=%s,Description="%s">'%(f, description, f_to_type[f])]
+            for f, description in f_to_description.items(): header_lines += ['##INFO=<ID=%s,Number=1,Type=%s,Description="%s">'%(f, f_to_type[f], description)]
 
 
             # write vcf
@@ -11507,6 +11609,96 @@ def merge_several_vcfsSameSample_into_oneMultiSample_vcf(vcf_iterable, reference
         elif type_filters=="onlyPASS": merged_vcf_onlyPASS = merged_vcf
 
 
-    return merged_vcf_all, merged_vcf_onlyPASS
+    return merged_vcf_all
 
-      
+def get_float_from_string(x):
+
+    """Gets a float from a string, or empty"""
+
+    if x in {"", ".", " "}: return np.nan
+    else: return float(x)
+
+def get_int_from_string(x):
+
+    """Gets a float from a string, or -1"""
+
+    if x in {"", ".", " "}: return np.nan
+    else: return int(x)
+
+
+def get_INFOdict(info, infoField_to_typeFN):
+
+    """Takes an INFO string of a vcf and returns a dict with the transformed types"""
+
+    # get the info that is sepparated by '='
+    infoField_to_content = {x.split("=")[0] : x.split("=")[1] for x in info.split(";") if "=" in x}
+
+    # get the info_dict
+    info_dict = {}
+
+    for infoField, typeFN in infoField_to_typeFN.items():
+
+        # parse the booleans in a special way
+        if typeFN==bool:
+
+            # other Bools are Flags. Keep them if they are in info
+            info_dict[infoField] = (infoField in info)
+
+        else:
+
+            # if it is there, keep it
+            if infoField in infoField_to_content: info_dict[infoField] = typeFN(infoField_to_content[infoField])
+
+            # if not, get the missing value
+            else: info_dict[infoField] = typeFN(".")
+
+    return info_dict
+
+def write_variantInfo_table(vcf, variantInfo_table, replace=False):
+
+    """This function takes a vcf from merge_several_vcfsSameSample_into_oneMultiSample_vcf and writes it in tabular format into variantInfo_table"""
+
+    # define the tmp
+    variantInfo_table_tmp = "%s.tmp"%variantInfo_table
+
+    if file_is_empty(variantInfo_table) or replace is True:
+        print("converting %s to tab"%vcf)
+
+        # load the vcf table
+        df, header_lines = get_df_and_header_from_vcf(vcf)
+
+        # map each info field to the type
+        typeStr_to_typeFN = {"Float":get_float_from_string, "String":str, "Integer":get_int_from_string, "Flag":bool}
+        infoField_to_typeFN = {h.split("<ID=")[1].split(",")[0] : typeStr_to_typeFN[h.split("Type=")[1].split(",")[0]]  for h in header_lines if h.startswith("##INFO=<ID=")}
+
+        # change a couple of types that are incorrectly parsed
+        infoField_to_typeFN["bt_DP4"] = str
+
+        # add the INFO formated as in the df
+        print("getting INFO_dict")
+        df["INFO_dict"] = df.INFO.apply(lambda info: get_INFOdict(info, infoField_to_typeFN))
+        all_INFO_tags = sorted(set.union(*df.INFO_dict.apply(set)))
+
+        # create a field that is uploaded variation
+        df["#Uploaded_variation"] = df.ID
+
+        # initalize the important fields
+        important_fields = ['#Uploaded_variation', '#CHROM', 'POS', 'REF', 'ALT'] + all_INFO_tags
+
+        # add as columns of df
+        print("adding cols to df")
+        for f in all_INFO_tags: df[f] = df.INFO_dict.apply(lambda x: x[f])
+
+        # write the important fields
+        print("saving to %s"%variantInfo_table)
+        df[important_fields].to_csv(variantInfo_table_tmp, sep="\t", index=False, header=True)
+        os.rename(variantInfo_table_tmp, variantInfo_table)
+
+
+    # return as df
+    print("returning df")
+    return pd.read_csv(variantInfo_table, sep="\t")
+
+
+
+
