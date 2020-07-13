@@ -118,7 +118,7 @@ not_expected_consequences = all_found_consequences.difference(all_expected_conse
 
 if len(not_expected_consequences)>0: raise ValueError("%s are not expected consequences. Maybe you are using a different VEP version"%not_expected_consequences)
 
-print("\n\n", vep_df[vep_df.Consequence.apply(lambda x: "incomplete_terminal_codon_variant" in x)], "\n\n")
+#print("\n\n", vep_df[vep_df.Consequence.apply(lambda x: "incomplete_terminal_codon_variant" in x)], "\n\n")
 
 # define the mito chromosomes as a set
 mitochondrial_chromosomes_set = set(opt.mitochondrial_chromosome.split(","))

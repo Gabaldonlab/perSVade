@@ -75,10 +75,7 @@ parser.add_argument("-gcode", "--gDNA_code", dest="gDNA_code", default=1, type=i
 
 # CNV args
 parser.add_argument("--skip_cnv_analysis", dest="skip_cnv_analysis", action="store_true", default=False, help="Skipp the running of the CNV pipeline, which outputs the number of copies that each gene has according to coverage. The gene ID's are based on the GFF3 files that have been provided in -gff")
-
-# perform the vcf integration
-parser.add_argument("--get_merged_vcf", dest="get_merged_vcf", action="store_true", default=False, help="Get the integrated vcf")
-
+ 
 # avoid marking duplicates
 parser.add_argument("--skip_MarkingDuplicates", dest="skip_MarkingDuplicates", action="store_true", default=False, help="Skips the marking of duplicates in the bam.")
 
@@ -101,6 +98,7 @@ opt = parser.parse_args()
 ######################################################
 
 # debug commands
+if opt.replace is True: fun.delete_folder(opt.outdir)
 fun.make_folder(opt.outdir)
 if not opt.gff is None and fun.file_is_empty(opt.gff): raise ValueError("%s is not a valid gff"%opt.gff)
 
@@ -315,92 +313,141 @@ if opt.StopAfter_smallVarCallSimpleRunning is True:
 
 ##########
 
-##############
-# NORMALISATION OF THE VARIANTS. IT IS IMPORTANT TO REPRESENT THE VARIANTS IN THE PRIMITIVE FORM, AS IT ALLOWS TO COMPARE INDELS FROM SEVERAL PROGRAMS.
-##############
-
-print("Performing variant normalisation. For in/del variants, several programs may yield various variant representations. This is performed here with VCFLIB ")
-
-# initialize an array that will keep the path to the normalised VCFS
-all_normalised_vcfs = set()
-
-# normalise all the filtered_vcf_results with vcfallelicprimitives
-for unnormalised_vcf in filtered_vcf_results:
-
-    # define the normalised output
-    folder = "/".join(unnormalised_vcf.split("/")[0:-1])
-    normalised_vcf = "%s/output.filt.norm_vcflib.vcf"%folder; normalised_vcf_tmp = "%s.tmp"%normalised_vcf
-
-    # generate an unifyed representation of the vcfs
-    if fun.file_is_empty(normalised_vcf) or opt.replace is True:
-    #if True:
-
-        ##### GET AS UPPERCASE #####
-
-        print("Puting all REF and ALT alleles to uppercase")
-
-        # load into df
-        initial_lines_list = [line for line in open(unnormalised_vcf, "r", encoding='utf-8', errors='ignore') if line.startswith("##")]
-        vcf_df = pd.read_csv(unnormalised_vcf, skiprows=list(range(len(initial_lines_list))), sep="\t", na_values=fun.vcf_strings_as_NaNs, keep_default_na=False)
-
-        # put to uppercase
-        vcf_df["REF"]  = vcf_df["REF"].apply(lambda x: x.upper())
-        vcf_df["ALT"]  = vcf_df["ALT"].apply(lambda x: x.upper())
-
-        # write to the same file, including the initial lines of the vcf for consistency
-        open(unnormalised_vcf, "w").write("".join(initial_lines_list) + vcf_df.to_csv(sep="\t", index=False))
-
-        #############################
-
-        print("Running vcfallelicprimitives for vcf %s"%unnormalised_vcf)
-        normalised_vcf_tmp_lines = "%s.lines.vcf"%normalised_vcf_tmp
-        cmd_normalise = "%s --keep-geno %s > %s"%(vcfallelicprimitives, unnormalised_vcf, normalised_vcf_tmp_lines); fun.run_cmd(cmd_normalise)
-
-        # get the header. vcfallelicprimitives removes the header info
-        header_lines = "%s.header"%unnormalised_vcf
-        fun.run_cmd("grep '^##' %s > %s"%(unnormalised_vcf, header_lines))
-
-        # add header
-        fun.run_cmd("cat %s %s > %s"%(header_lines, normalised_vcf_tmp_lines, normalised_vcf_tmp))
-
-        # remove unnecessary files
-        for f in [header_lines, normalised_vcf_tmp_lines]: fun.remove_file(f)
-
-        os.rename(normalised_vcf_tmp, normalised_vcf)
-
-    # keep
-    all_normalised_vcfs.add(normalised_vcf)
-
-print("VCFLIB Normalisation is done")
-
-
 ###################################
 ##### GET THE INTEGRATED VARS ##### 
 ################################### 
 
-# merge the variants
-if opt.get_merged_vcf is True:
+# get the merged vcf records (these are multiallelic)
+print("getting merged vcf without multialleles")
+merged_vcf_all = fun.merge_several_vcfsSameSample_into_oneMultiSample_vcf(filtered_vcf_results, opt.ref, opt.outdir, replace=opt.replace, threads=opt.threads)
 
-    # get the merged vcf records (these are multiallelic)
-    print("getting merged vcf without multialleles")
-    # merged_vcf_all, merged_vcf_onlyPASS 
-    merged_vcf_all, merged_vcf_onlyPASS = fun.merge_several_vcfsSameSample_into_oneMultiSample_vcf(filtered_vcf_results, opt.ref, opt.outdir, replace=opt.replace, threads=opt.threads)
+# get the variants in a tabular format
+variantInfo_table = "%s/variant_calling_ploidy%i.tab"%(opt.outdir, opt.ploidy)
+df_variants = fun.write_variantInfo_table(merged_vcf_all, variantInfo_table, replace=opt.replace)
 
-    jadhjdkah
+ 
+##### KEEP VCFS THAT PASS some programs #########
+for minPASS_algs in [1, 2, 3]:
 
-    # split the multiallelic records for each of them
-    print("splitting multialleles and bgzipping")
-    merged_vcf_all_noMultialleles_gz = fun.get_normed_bgzip_and_tabix_vcf_file(merged_vcf_all, opt.ref, replace=opt.replace, threads=opt.threads, multiallelics_cmd="-any")
-    merged_vcf_onlyPASS_noMultialleles_gz = fun.get_normed_bgzip_and_tabix_vcf_file(merged_vcf_onlyPASS, opt.ref, replace=opt.replace, threads=opt.threads, multiallelics_cmd="-any")
+    # define the interesting variants
+    #df_PASS = df_variants[df_variants["NPASSS"]]
 
-    print(merged_vcf_all_noMultialleles_gz, merged_vcf_onlyPASS_noMultialleles_gz)
+    I need to add quality and DP into the first merged df
 
-
-
-
+    print(df_variants, list(df_variants.keys()))
+    pass
 
 
-    adkghdakhgdag
+
+#################################################
+
+
+# stop if there is no GFF provided
+if opt.gff is None: 
+    print("WARNING: No gff provided. Skipping the annotation of the variants")
+    sys.exit(0)
+
+######### RUN VEP AND GENERATE ANNOTATION TABLE #########
+
+# define an output file for VEP
+annotated_vcf = "%s_annotated.tab"%merged_vcf_all; annotated_vcf_tmp = "%s.tmp"%annotated_vcf
+
+# run annotation by VEP
+if fun.file_is_empty(annotated_vcf) or opt.replace is True or opt.replace_vep_integration is True:
+
+    print("Annotating with VEP %s"%merged_vcf_all)
+    fun.remove_file(annotated_vcf)
+    fun.remove_file(annotated_vcf_tmp)
+    for f in os.listdir(fun.get_dir(annotated_vcf)): 
+        if ".tmp.raw." in f: fun.remove_file("%s/%s"%(fun.get_dir(annotated_vcf), f))
+
+    vep_cmd = "%s --input_vcf %s --outfile %s --ref %s --gff %s --mitochondrial_chromosome %s --mito_code %i --gDNA_code %i "%(run_vep, merged_vcf_all, annotated_vcf_tmp, opt.ref, gff_with_biotype, opt.mitochondrial_chromosome, opt.mitochondrial_code, opt.gDNA_code)
+
+    fun.run_cmd(vep_cmd)
+
+    os.rename(annotated_vcf_tmp, annotated_vcf)
+
+# get into df
+df_vep = pd.read_csv(annotated_vcf, sep="\t")
+
+# check that the relationship between the VEP Uploaded_var and merged_vcf_all is 1:1
+uploaded_variation = set(df_vep["#Uploaded_variation"])
+all_variants = set(fun.get_df_and_header_from_vcf(merged_vcf_all)[0]["ID"])
+
+if len(uploaded_variation.difference(all_variants))>0: raise ValueError("There are some uploaded variations that can't be found in all_variants")
+
+# deinfe the unnanotated vars as those that are not in the VEP output and are also not missing 
+missing_vars = all_variants.difference(uploaded_variation)
+unnanotated_vars = {v for v in missing_vars if v.split("/")[-1]!="*"}
+
+if len(unnanotated_vars)>0: 
+    print("WARNING: There are some variants that have not been annotated with VEP:\n%s\n (%i/%i in total)"%("\n".join(unnanotated_vars), len(unnanotated_vars), len(all_variants)))
+
+# get variant annotation table
+variantAnnotation_table = "%s/variant_annotation_ploidy%i.tab"%(opt.outdir, opt.ploidy)
+if fun.file_is_empty(variantAnnotation_table) or opt.replace is True:
+
+    print("generating variant annotation table")
+
+    # add fields 
+    df_vep["ref"] = df_vep["#Uploaded_variation"].apply(lambda x: x.split("/")[-2])
+    df_vep["alt"] = df_vep["#Uploaded_variation"].apply(lambda x: x.split("/")[-1])
+
+    df_vep['is_snp'] = (df_vep["ref"].apply(len)==1) & (df_vep["ref"]!="-") & (df_vep["alt"].apply(len)==1) & (df_vep["alt"]!="-")
+
+    prot_altering_mutations = {'missense_variant', 'start_lost', 'inframe_deletion', 'protein_altering_variant', 'stop_gained', 'inframe_insertion', 'frameshift_variant', 'stop_lost', 'splice_acceptor_variant', 'splice_donor_variant', 'splice_region_variant', 'non_coding_transcript_exon_variant'}
+
+
+    df_vep["consequences_set"] = df_vep.Consequence.apply(lambda x: set(str(x).split(",")))
+    df_vep["is_protein_altering"] = df_vep.consequences_set.apply(lambda x: len(x.intersection(prot_altering_mutations))>0)
+
+    # generate a table that has all the variant annotation info
+    varSpec_fields = ['#Uploaded_variation', 'Gene', 'Feature', 'Feature_type', 'Consequence', 'cDNA_position', 'CDS_position', 'Protein_position', 'Amino_acids', 'Codons', 'is_snp', 'is_protein_altering']
+
+    # write the final vars
+    variantAnnotation_table_tmp = "%s.tmp"%variantAnnotation_table
+    df_vep[varSpec_fields].drop_duplicates().to_csv(variantAnnotation_table_tmp, sep="\t", header=True, index=False)
+    os.rename(variantAnnotation_table_tmp, variantAnnotation_table)
+
+#############################################
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+###### PARSE VEP INFO ######
+
+
+   
+ljhfshsfkjhfskj
+
+
 
 ###################################
 ###################################
