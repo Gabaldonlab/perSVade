@@ -10834,7 +10834,28 @@ def remove_smallVarsCNV_nonEssentialFiles(outdir, ploidy):
         if os.path.isdir(vcfDir):
             for file in os.listdir(vcfDir):
 
-                if file not in {"output.raw.vcf", "output.filt.vcf", "output.filt.norm_vcflib.vcf"}: files_to_remove.append("%s/%s"%(vcfDir, file))
+                if file not in {"output.raw.vcf", "output.filt.vcf"}: files_to_remove.append("%s/%s"%(vcfDir, file))
+
+    # go through the files in the outdir and just keep the essential ones
+    for f in os.listdir(outdir):
+        file = "%s/%s"%(outdir, f)
+
+        if os.path.isfile(file):
+
+            files_to_keep = {"merged_vcfs_allVars_ploidy%i.vcf"%ploidy,
+                             "variant_annotation_ploidy%i.tab"%ploidy,
+                             "variant_calling_ploidy%i.tab"%ploidy,
+
+                             "variants_atLeast1PASS_ploidy%i.vcf"%ploidy,
+                             "variants_atLeast2PASS_ploidy%i.vcf"%ploidy,
+                             "variants_atLeast3PASS_ploidy%i.vcf"%ploidy,
+
+                             "variant_calling_stats_ploidy%i_called.tab"%ploidy,
+                             "variant_calling_stats_ploidy%i_PASS.tab"%ploidy
+                             }
+
+
+            if f not in files_to_keep: files_to_remove.append(file)
 
     for f in files_to_remove: remove_file(f)
 
@@ -11038,6 +11059,12 @@ def get_row_vcf(df_pos, ploidy):
     vcf_fields = ["#CHROM", "POS", "ID", "REF", "ALT", "QUAL", "FILTER", "INFO", "FORMAT", "SAMPLE"]
     return r[vcf_fields]
 
+def get_int_or0(x):
+
+    """Gets an int from a string, or 0"""
+
+    if x in {"", ".", " "}: return 0
+    else: return int(x)
         
 def write_integrated_smallVariantsTable_as_vcf(df, filename, ploidy):
 
@@ -11327,7 +11354,19 @@ def get_altAllele_freq_noMultiAllele_fromAD(ad):
         if reads_alt==0: return 0.0
         else: return reads_alt / (reads_ref + reads_alt)
 
-def merge_several_vcfsSameSample_into_oneMultiSample_vcf(vcf_iterable, reference_genome, outdir, replace=False, threads=4):
+def get_readsCoveringVariant(ad):
+
+    """Takes an AD and returns the reads covering the variant"""
+
+    # empty
+    if ad==".": return 0
+    else:  
+        ad_split = ad.split(",")
+        if len(ad_split)!=2: raise ValueError("AD %s is not valid"%ad)
+
+        return int(ad_split[1])
+
+def merge_several_vcfsSameSample_into_oneMultiSample_vcf(vcf_iterable, reference_genome, outdir, ploidy,  replace=False, threads=4):
 
     """This function takes an iterable of vcf files and gets the merged output. It writes a vcf into outdir. It only considers PASS vars"""
 
@@ -11361,8 +11400,8 @@ def merge_several_vcfsSameSample_into_oneMultiSample_vcf(vcf_iterable, reference
         p_to_df = cp.deepcopy(program_to_vcf_df)
 
         # define the outfile
-        merged_vcf = "%s/merged_vcfs_%sVars.vcf"%(outdir, type_filters)
-        merged_vcf_tmp = "%s/merged_vcfs_%sVars.tmp.vcf"%(outdir, type_filters)
+        merged_vcf = "%s/merged_vcfs_%sVars_ploidy%i.vcf"%(outdir, type_filters, ploidy)
+        merged_vcf_tmp = "%s/merged_vcfs_%sVars_ploidy%i.tmp.vcf"%(outdir, type_filters, ploidy)
 
         if file_is_empty(merged_vcf) or replace is True:
 
@@ -11378,7 +11417,6 @@ def merge_several_vcfsSameSample_into_oneMultiSample_vcf(vcf_iterable, reference
                 formatted_vcf_gz = "%s.gz"%formatted_vcf
 
                 if file_is_empty(formatted_vcf_gz) or replace is True:
-
 
                     print("formatting vcf")
 
@@ -11486,15 +11524,14 @@ def merge_several_vcfsSameSample_into_oneMultiSample_vcf(vcf_iterable, reference
             strange_nucs = {"*", "-"}
             vcf_df["is_snp"] = (vcf_df.REF.apply(len)==1) &  (vcf_df.ALT.apply(len)==1) & ~(vcf_df.REF.isin(strange_nucs)==1) & ~(vcf_df.ALT.isin(strange_nucs)==1)
 
-            # change the FILTER and QUAL
+            # remove the FILTER
             vcf_df["FILTER"] = "."
-            vcf_df["QUAL"] = "."
 
             # add to info
             info_series = vcf_df.INFO + ";CALLEDALGS=" + vcf_df.called_programs_list.apply(lambda x: "-".join(x)) + ";PASSALGS=" + vcf_df.PASS_programs_list.apply(lambda x: "-".join(x)) + ";NCALLED=" + vcf_df.called_programs_list.apply(len).apply(str) + ";NPASS=" + vcf_df.PASS_programs_list.apply(lambda x: len([y for y in x if y!="."])).apply(str) + ";ISSNP=" + vcf_df.is_snp.apply(str)
 
 
-            # get header lines
+            # initialize description and type lines for INFO fields
             f_to_description = {"CALLEDALGS":"The algorithms that called this var, sepparated by '-'",
                                 "PASSALGS":"The algorithms where this var PASSed the filters, sepparated by '-'",
                                 "NCALLED":"The number of algorithms that called this var",
@@ -11511,16 +11548,32 @@ def merge_several_vcfsSameSample_into_oneMultiSample_vcf(vcf_iterable, reference
             vcf_df["called_algs_set"] = vcf_df.called_programs_list.apply(lambda x: set(x).difference({"."}))
             vcf_df["PASS_algs_set"] = vcf_df.PASS_programs_list.apply(lambda x: set(x).difference({"."}))
 
+            # define the interesting_algs as those that are either PASS or called if none are PASS
+            def get_interesting_algs(r):
+
+                if len(r["PASS_algs_set"])>0: interesting_algs = r["PASS_algs_set"]
+                else : interesting_algs = r["called_algs_set"]
+
+                return interesting_algs
+
+            vcf_df["interesting_algs"] = vcf_df.apply(get_interesting_algs, axis=1)
+
             # add some fields of each program
             print("adding program specific info")
             ADidx = [I for I, field in enumerate(vcf_df.FORMAT.iloc[0].split(":")) if field=="AD"][0]
+            DPidx = [I for I, field in enumerate(vcf_df.FORMAT.iloc[0].split(":")) if field=="DP"][0]
             GTidx = [I for I, field in enumerate(vcf_df.FORMAT.iloc[0].split(":")) if field=="GT"][0]
 
             for p in all_programs:
-
-                # add the AD of the program
                 abb = program_to_abbreviation[p]
-                vcf_df["%s_AF"%abb] = vcf_df[p].apply(lambda x: x.split(":")[ADidx]).apply(get_altAllele_freq_noMultiAllele_fromAD)
+
+                # get the reads covering this variant
+                vcf_df["%s_readsCovVar"%abb] = vcf_df[p].apply(lambda x: x.split(":")[ADidx]).apply(get_readsCoveringVariant)
+                # get the total depth at the locus
+                vcf_df["%s_DP"%abb] = vcf_df[p].apply(lambda x: x.split(":")[DPidx]).apply(get_int_or0)
+
+                # add the AF by the program
+                vcf_df["%s_AF"%abb] = vcf_df["%s_readsCovVar"%abb] / vcf_df["%s_DP"%abb]
 
                 # get the genotype
                 vcf_df["%s_GT"%abb] = vcf_df[p].apply(lambda x: x.split(":")[GTidx].replace("|", "/")) 
@@ -11552,17 +11605,14 @@ def merge_several_vcfsSameSample_into_oneMultiSample_vcf(vcf_iterable, reference
                 f_to_type["%s_called"%abb] = "String"
                 f_to_type["%s_PASS"%abb] = "String"
 
-            print("getting common genotype")
 
+
+            print("getting common genotype")
             # get the common GT
             def get_commonGT(r):
 
-                # define the important algs to calculate GT
-                if len(r["PASS_algs_set"])>0: interesting_algs = r["PASS_algs_set"]
-                else : interesting_algs = r["called_algs_set"]
-
                 # get all the GTs
-                all_GTs = set([r["%s_GTreordered"%p] for p in interesting_algs])
+                all_GTs = set([r["%s_GTreordered"%p] for p in r["interesting_algs"]])
 
                 if len(all_GTs)!=1: commonGT = "."
                 else: commonGT = next(iter(all_GTs))
@@ -11575,7 +11625,20 @@ def merge_several_vcfsSameSample_into_oneMultiSample_vcf(vcf_iterable, reference
             f_to_description["common_GT"] = "The GT if it is common by all the PASS algorithms (or called if there are none). If there is no agreement between these algorithms it is '.'"
             f_to_type["common_GT"] = "String"
             info_series += ";common_GT=" + vcf_df["common_GT"]
+
+            # set the QUAL to be the mean by the interesting_algs
+            print("getting QUAL")
+            vcf_df["QUAL"] = vcf_df.apply(lambda r: np.mean([float(r["INFO"].split("%s_QUAL="%p)[1].split(";")[0]) for p in r["interesting_algs"]]), axis=1)
+
+            # get the mean DP 
+            print("getting mean DP")
+            vcf_df["mean_DP"] = vcf_df.apply(lambda r: np.mean([r["%s_DP"%p] for p in r["interesting_algs"]]), axis=1)
             
+            f_to_description["mean_DP"] = "The mean read depth by all programs that are PASS or all called programs if none are PASS"
+            f_to_type["mean_DP"] = "Float"
+            info_series += ";mean_DP=" + vcf_df["mean_DP"].apply(lambda x: "%.4f"%x)
+
+
             # add the mean AF for PASS and CALLED programs
             for targetField in ["called_algs_set", "PASS_algs_set"]: 
 
@@ -11683,7 +11746,7 @@ def write_variantInfo_table(vcf, variantInfo_table, replace=False):
         df["#Uploaded_variation"] = df.ID
 
         # initalize the important fields
-        important_fields = ['#Uploaded_variation', '#CHROM', 'POS', 'REF', 'ALT'] + all_INFO_tags
+        important_fields = ['#Uploaded_variation', '#CHROM', 'POS', 'REF', 'ALT', 'QUAL'] + all_INFO_tags
 
         # add as columns of df
         print("adding cols to df")
@@ -11701,4 +11764,61 @@ def write_variantInfo_table(vcf, variantInfo_table, replace=False):
 
 
 
+def report_variant_calling_statistics(df, variantCallingStats_tablePrefix, programs):
 
+    """This function takes a df with the tabular vcf and generates a report of how the variant calling went. """
+
+    print("generating report of the called variants")
+
+    # define some vars
+    p_to_abb = {"HaplotypeCaller":"HC", "freebayes":"fb", "bcftools":"bt"}
+
+    # define the program combinations
+    prog_combinations = [("HaplotypeCaller",),
+                         ("freebayes",),
+                         ("bcftools",),
+                         ("HaplotypeCaller","freebayes"),
+                         ("HaplotypeCaller","bcftools"),
+                         ("freebayes","bcftools"),
+                         ("HaplotypeCaller","freebayes","bcftools")]
+
+
+    # go through different types of filters
+    for type_filter in ["PASS", "called"]:
+        print(type_filter)
+
+        # initialize dict
+        stats_dict = {}
+
+        # go through each of the SNPs and indels
+        for type_var in ["SNP", "INDEL"]:
+
+            # get the df of the type var
+            if type_var=="SNP": df_type_var = df[df.ISSNP]
+            elif type_var=="INDEL": df_type_var = df[~df.ISSNP]
+
+            # get the vars of each type
+            p_to_vars = {p : set(df_type_var[df_type_var["%s_%s"%(p_to_abb[p], type_filter)]]["#Uploaded_variation"]) for p in programs}
+
+            for prog_comb in prog_combinations: 
+
+                # get if all the programs are in programs 
+                if all([x in programs for x in prog_comb]): 
+
+                    # get as string
+                    prog_comb_name = "-".join(prog_comb)
+
+                    # define the number of vars that are in the intersection of the programs
+                    nVars_in_intersection = len(set.intersection(*[p_to_vars[p] for p in prog_comb]))
+                    nVars_in_Programs = len(set.union(*[p_to_vars[p] for p in prog_comb]))
+                    pctVars_in_intersection = (nVars_in_intersection/nVars_in_Programs)*100
+
+                    # keep 
+                    stats_dict.setdefault("%s_nVars"%type_var, {}).setdefault(prog_comb_name, nVars_in_intersection)
+                    stats_dict.setdefault("%s_pctVars"%type_var, {}).setdefault(prog_comb_name, pctVars_in_intersection)
+
+
+        # get df
+        df_stats = pd.DataFrame(stats_dict)
+        print("\n", df_stats)
+        df_stats.to_csv("%s_%s.tab"%(variantCallingStats_tablePrefix, type_filter), sep="\t")

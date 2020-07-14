@@ -319,25 +319,70 @@ if opt.StopAfter_smallVarCallSimpleRunning is True:
 
 # get the merged vcf records (these are multiallelic)
 print("getting merged vcf without multialleles")
-merged_vcf_all = fun.merge_several_vcfsSameSample_into_oneMultiSample_vcf(filtered_vcf_results, opt.ref, opt.outdir, replace=opt.replace, threads=opt.threads)
+merged_vcf_all = fun.merge_several_vcfsSameSample_into_oneMultiSample_vcf(filtered_vcf_results, opt.ref, opt.outdir, opt.ploidy, replace=opt.replace, threads=opt.threads)
 
 # get the variants in a tabular format
 variantInfo_table = "%s/variant_calling_ploidy%i.tab"%(opt.outdir, opt.ploidy)
 df_variants = fun.write_variantInfo_table(merged_vcf_all, variantInfo_table, replace=opt.replace)
 
- 
+# define the used programs
+if opt.caller=="all": all_programs = sorted(["HaplotypeCaller", "bcftools", "freebayes"])
+else: all_programs = sorted(opt.caller.split(","))
+
+# generate a report of the variant calling
+variantCallingStats_tablePrefix = "%s/variant_calling_stats_ploidy%i"%(opt.outdir, opt.ploidy)
+fun.report_variant_calling_statistics(df_variants, variantCallingStats_tablePrefix, all_programs)
+
 ##### KEEP VCFS THAT PASS some programs #########
+
 for minPASS_algs in [1, 2, 3]:
 
-    # define the interesting variants
-    #df_PASS = df_variants[df_variants["NPASSS"]]
+    simplified_vcf_PASSalgs = "%s/variants_atLeast%iPASS_ploidy%i.vcf"%(opt.outdir, minPASS_algs, opt.ploidy)
+    simplified_vcf_PASSalgs_tmp = "%s.tmp"%simplified_vcf_PASSalgs
 
-    I need to add quality and DP into the first merged df
+    if fun.file_is_empty(simplified_vcf_PASSalgs) or opt.replace is True:
 
-    print(df_variants, list(df_variants.keys()))
-    pass
+        print("getting vcf with vars called by >=%i programs"%minPASS_algs)
 
+        # define the interesting variants
+        df_PASS = df_variants[df_variants["NPASS"]>=minPASS_algs]
 
+        # add the FORMAT
+        vcf_fields = ["#CHROM", "POS", "ID", "REF", "ALT", "QUAL", "FILTER", "INFO", "FORMAT", "SAMPLE"]
+
+        # rename the ID
+        df_PASS = df_PASS.rename(columns={"#Uploaded_variation":"ID"})
+
+        # set the FILTER ad the number of pass programs
+        df_PASS["FILTER"] = df_PASS.NPASS.apply(str) + "xPASS"
+
+        # set an empty INFO
+        df_PASS["INFO"] = "."
+
+        # set the format
+        df_PASS["FORMAT"] = "GT:AF:DP"
+
+        # add the sample according to FORMAT
+        df_PASS["SAMPLE"] = df_PASS.common_GT + ":" + df_PASS.mean_fractionReadsCov_PASS_algs.apply(lambda x: "%.4f"%x) + ":" + df_PASS.mean_DP.apply(lambda x: "%.4f"%x)
+
+        # initialize header lines
+        valid_header_starts = ["fileformat", "contig", "reference", "phasing"]
+        header_lines = [l for l in fun.get_df_and_header_from_vcf(merged_vcf_all)[1] if any([l.startswith("##%s"%x) for x in valid_header_starts])]
+
+        # add headers
+        header_lines += ['##FILTER=<ID=1xPASS,Description="The variant PASSed the filters for 1 algorithm">',
+                         '##FILTER=<ID=2xPASS,Description="The variant PASSed the filters for 2 algorithms">',
+                         '##FILTER=<ID=3xPASS,Description="The variant PASSed the filters for 3 algorithms">',
+
+                         '##FORMAT=<ID=GT,Number=1,Type=String,Description="Genotype. If there are discrepacncies in the GT between the algorithms where this var PASSed the filters GT is set to .">',
+                         '##FORMAT=<ID=DP,Number=1,Type=Float,Description="Mean read depth of the locus from algorithms where this variant PASSed the filters">',
+                         '##FORMAT=<ID=AF,Number=1,Type=Float,Description="Mean fraction of reads covering the ALT allele from algorithms where this variant PASSed the filters">',
+
+                         '##source=%s'%("_".join(all_programs))]
+
+        # write
+        open(simplified_vcf_PASSalgs_tmp, "w").write("\n".join(header_lines) + "\n" + df_PASS[vcf_fields].to_csv(sep="\t", index=False, header=True))
+        os.rename(simplified_vcf_PASSalgs_tmp, simplified_vcf_PASSalgs)
 
 #################################################
 
@@ -349,44 +394,44 @@ if opt.gff is None:
 
 ######### RUN VEP AND GENERATE ANNOTATION TABLE #########
 
-# define an output file for VEP
-annotated_vcf = "%s_annotated.tab"%merged_vcf_all; annotated_vcf_tmp = "%s.tmp"%annotated_vcf
-
-# run annotation by VEP
-if fun.file_is_empty(annotated_vcf) or opt.replace is True or opt.replace_vep_integration is True:
-
-    print("Annotating with VEP %s"%merged_vcf_all)
-    fun.remove_file(annotated_vcf)
-    fun.remove_file(annotated_vcf_tmp)
-    for f in os.listdir(fun.get_dir(annotated_vcf)): 
-        if ".tmp.raw." in f: fun.remove_file("%s/%s"%(fun.get_dir(annotated_vcf), f))
-
-    vep_cmd = "%s --input_vcf %s --outfile %s --ref %s --gff %s --mitochondrial_chromosome %s --mito_code %i --gDNA_code %i "%(run_vep, merged_vcf_all, annotated_vcf_tmp, opt.ref, gff_with_biotype, opt.mitochondrial_chromosome, opt.mitochondrial_code, opt.gDNA_code)
-
-    fun.run_cmd(vep_cmd)
-
-    os.rename(annotated_vcf_tmp, annotated_vcf)
-
-# get into df
-df_vep = pd.read_csv(annotated_vcf, sep="\t")
-
-# check that the relationship between the VEP Uploaded_var and merged_vcf_all is 1:1
-uploaded_variation = set(df_vep["#Uploaded_variation"])
-all_variants = set(fun.get_df_and_header_from_vcf(merged_vcf_all)[0]["ID"])
-
-if len(uploaded_variation.difference(all_variants))>0: raise ValueError("There are some uploaded variations that can't be found in all_variants")
-
-# deinfe the unnanotated vars as those that are not in the VEP output and are also not missing 
-missing_vars = all_variants.difference(uploaded_variation)
-unnanotated_vars = {v for v in missing_vars if v.split("/")[-1]!="*"}
-
-if len(unnanotated_vars)>0: 
-    print("WARNING: There are some variants that have not been annotated with VEP:\n%s\n (%i/%i in total)"%("\n".join(unnanotated_vars), len(unnanotated_vars), len(all_variants)))
-
-# get variant annotation table
 variantAnnotation_table = "%s/variant_annotation_ploidy%i.tab"%(opt.outdir, opt.ploidy)
 if fun.file_is_empty(variantAnnotation_table) or opt.replace is True:
 
+    # define an output file for VEP
+    annotated_vcf = "%s_annotated.tab"%merged_vcf_all; annotated_vcf_tmp = "%s.tmp"%annotated_vcf
+
+    # run annotation by VEP
+    if fun.file_is_empty(annotated_vcf) or opt.replace is True or opt.replace_vep_integration is True:
+
+        print("Annotating with VEP %s"%merged_vcf_all)
+        fun.remove_file(annotated_vcf)
+        fun.remove_file(annotated_vcf_tmp)
+        for f in os.listdir(fun.get_dir(annotated_vcf)): 
+            if ".tmp.raw." in f: fun.remove_file("%s/%s"%(fun.get_dir(annotated_vcf), f))
+
+        vep_cmd = "%s --input_vcf %s --outfile %s --ref %s --gff %s --mitochondrial_chromosome %s --mito_code %i --gDNA_code %i "%(run_vep, merged_vcf_all, annotated_vcf_tmp, opt.ref, gff_with_biotype, opt.mitochondrial_chromosome, opt.mitochondrial_code, opt.gDNA_code)
+
+        fun.run_cmd(vep_cmd)
+
+        os.rename(annotated_vcf_tmp, annotated_vcf)
+
+    # get into df
+    df_vep = pd.read_csv(annotated_vcf, sep="\t")
+
+    # check that the relationship between the VEP Uploaded_var and merged_vcf_all is 1:1
+    uploaded_variation = set(df_vep["#Uploaded_variation"])
+    all_variants = set(fun.get_df_and_header_from_vcf(merged_vcf_all)[0]["ID"])
+
+    if len(uploaded_variation.difference(all_variants))>0: raise ValueError("There are some uploaded variations that can't be found in all_variants")
+
+    # deinfe the unnanotated vars as those that are not in the VEP output and are also not missing 
+    missing_vars = all_variants.difference(uploaded_variation)
+    unnanotated_vars = {v for v in missing_vars if v.split("/")[-1]!="*"}
+
+    if len(unnanotated_vars)>0: 
+        print("WARNING: There are some variants that have not been annotated with VEP:\n%s\n (%i/%i in total)"%("\n".join(unnanotated_vars), len(unnanotated_vars), len(all_variants)))
+
+    # get variant annotation table
     print("generating variant annotation table")
 
     # add fields 
@@ -412,276 +457,7 @@ if fun.file_is_empty(variantAnnotation_table) or opt.replace is True:
 #############################################
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-###### PARSE VEP INFO ######
-
-
-   
-ljhfshsfkjhfskj
-
-
-
-###################################
-###################################
-###################################
-
-
-############################
-# ANNOTATE VARIANTS WITH VEP
-############################
-
-if opt.gff is None: print("No gff provided. Skipping the annotation AND integration of the variants")
-
-else:
-    print("getting vep annotations")
-
-    # create a dictionary with [typeNormalisation][sofware] = vep_df
-    normalisation_to_software_to_vepDf = {}
-
-    # go through each of the vcfs
-    for normalised_vcf in all_normalised_vcfs:
-
-        # get names
-        software = normalised_vcf.split("/")[-2].split("_")[0]
-        typeNormalisation = normalised_vcf.split("/")[-1].split(".")[2]
-        #if software not in {"freebayes"}: continue # DEBUUUG
-
-        # check if any of the integrated datasets are already created
-        fileprefix = "%s/integrated_variants_%s_ploidy%i"%(opt.outdir, typeNormalisation, opt.ploidy)
-        if any([fun.file_is_empty("%s.%s"%(fileprefix, x)) for x in ["py", "tab"]]) or opt.replace is True or opt.replace_vep_integration is True:
-
-            print("Annotating variants with vep for %s"%normalised_vcf)
-
-            # filter
-            print("Loading vcf to calculate the allele frequencies")
-            print(normalised_vcf)
-            vcf_df , variant_to_frequency, variant_to_filter, var_to_GT, var_to_filters = fun.load_vcf_intoDF_GettingFreq_AndFilter(normalised_vcf)
-
-            vcf_df.to_csv(normalised_vcf, sep="\t", index=False)
-
-            # define an output file for VEP
-            annotated_vcf = "%s_annotated.tab"%normalised_vcf; annotated_vcf_tmp = "%s.tmp"%annotated_vcf
-
-            # run annotation by VEP
-            if fun.file_is_empty(annotated_vcf) or opt.replace is True or opt.replace_vep_integration is True:
-            #if True: # DEBUG
-                print("Annotating with VEP %s"%normalised_vcf)
-                fun.remove_file(annotated_vcf)
-                fun.remove_file(annotated_vcf_tmp)
-
-                vep_cmd = "%s --input_vcf %s --outfile %s --ref %s --gff %s --mitochondrial_chromosome %s --mito_code %i --gDNA_code %i "%(run_vep, normalised_vcf, annotated_vcf_tmp, opt.ref, gff_with_biotype, opt.mitochondrial_chromosome, opt.mitochondrial_code, opt.gDNA_code)
-
-                fun.run_cmd(vep_cmd)
-
-                os.rename(annotated_vcf_tmp, annotated_vcf)
-
-
-            # add the allele frequency of each variant, as calculated in alternative_allelle_frequencies
-            print("getting vep table")
-            vep_df = fun.load_vep_table_intoDF(annotated_vcf)
-            vep_df["fraction_reads_coveringThisVariant"] = [variant_to_frequency[idx] for idx in vep_df.index]
-            vep_df["FILTERtag"] = [variant_to_filter[idx] for idx in vep_df.index]
-            vep_df["GT"] = [var_to_GT[idx] for idx in vep_df.index]
-            vep_df["additional_filters"] = [var_to_filters[idx] for idx in vep_df.index]
-
-            annotated_vcf_corrected = "%s.corrected"%annotated_vcf
-            vep_df.to_csv(annotated_vcf_corrected, sep="\t", index=False)
-
-            # add to the dictionary
-            normalisation_to_software_to_vepDf.setdefault(typeNormalisation, {}).setdefault(software, vep_df)
-
-
-    # generate integrated table with each software and also the FILTERtag
-    for norm, software_to_vepDF in normalisation_to_software_to_vepDf.items():
-        print("Working on, ", norm)
-
-        # define the fileprefix and continur if it has not been generated
-        fileprefix = "%s/integrated_variants_%s_ploidy%i"%(opt.outdir, norm, opt.ploidy)
-
-        if any([fun.file_is_empty("%s.%s"%(fileprefix, x)) for x in ["py", "tab"]]) or opt.replace is True or opt.replace_vep_integration is True:
-            print("stacking dfs...")
-
-            # stack all the dfs with the common parts, indicating the software
-            df = pd.DataFrame()
-            for software, vepDF in software_to_vepDF.items(): df = df.append(vepDF[['#Uploaded_variation', 'Location', 'Allele', 'Gene', 'Feature', 'Feature_type', 'Consequence', 'cDNA_position', 'CDS_position', 'Protein_position', 'Amino_acids', 'Codons', 'Existing_variation', 'Extra', 'chromosome', 'position', 'ref', 'alt']])
-
-            # remove the duplicated entries
-            df["is_duplicate"] = df.duplicated(subset=['chromosome', 'position', 'ref', 'alt', 'Gene'], keep="first") # the first occurrence is False
-            df = df[~(df.is_duplicate)] 
-            df["var"] = df.index
-
-            # check that the duplication also applies to the variant + gene combintaion
-            if sum(df["is_duplicate"])!=sum(df.duplicated(subset=['#Uploaded_variation', 'Location', 'Allele', 'Gene', 'Feature', 'Feature_type', 'Consequence', 'cDNA_position', 'CDS_position', 'Protein_position', 'Amino_acids', 'Codons', 'Existing_variation', 'Extra', 'chromosome', 'position', 'ref', 'alt'], keep="first")): raise ValueError("The variants are not equaly annotated (with VEP) in all the callers")
-
-            # add which programs called the variants and with the tags
-            software_to_setVars = {software : set(vepDF.index) for software, vepDF in software_to_vepDF.items()}
-            for software, setVars in software_to_setVars.items(): 
-                print("Working on %s"%software)
-
-                # add the sole calling
-                df["%s_called"%software] = df["var"].apply(lambda x: x in setVars)
-
-                # map each of the vars to a tag
-                var_to_tag = {**dict(zip(software_to_vepDF[software].index, software_to_vepDF[software]["FILTERtag"])), 
-                              **{var : "" for var in df[~df["%s_called"%software]].index}}
-
-                # map the original uploaded variation and the GT filter
-                var_to_GT_index = {**dict(zip(software_to_vepDF[software].index, software_to_vepDF[software]["GT_index"])), 
-                    **{var : "" for var in df[~df["%s_called"%software]].index}}
-
-                var_to_OriginalUploadedVar = {**dict(zip(software_to_vepDF[software].index, software_to_vepDF[software]["#Uploaded_variation_original"])), 
-                    **{var : "" for var in df[~df["%s_called"%software]].index}}
-
-                # map each of the vars to the frequency of calling
-                var_to_freq = {**dict(zip(software_to_vepDF[software].index, software_to_vepDF[software]["fraction_reads_coveringThisVariant"])), 
-                               **{var : 0.0 for var in df[~df["%s_called"%software]].index}}
-
-                # map each of the vars to the GT
-                var_to_GT = {**dict(zip(software_to_vepDF[software].index, software_to_vepDF[software]["GT"])), 
-                               **{var : "" for var in df[~df["%s_called"%software]].index}}
-
-                # map each of the vars to the additional_filters
-                var_to_filters = {**dict(zip(software_to_vepDF[software].index, software_to_vepDF[software]["additional_filters"])), 
-                               **{var : "" for var in df[~df["%s_called"%software]].index}}
-
-
-                # add to df and define if True
-                df["%s_FILTERtag"%software] = df["var"].apply(lambda x: var_to_tag[x])
-                df["%s_fractionReadsCoveringThisVariant"%software] = df["var"].apply(lambda x: var_to_freq[x])
-                df["%s_PASS"%software] = df["%s_FILTERtag"%software].apply(lambda x: x=="PASS")
-                df["%s_GT"%software] = df["var"].apply(lambda x: var_to_GT[x])
-                df["%s_additional_filters"%software] = df["var"].apply(lambda x: var_to_filters[x])
-                df["%s_GT_index"%software] = df["var"].apply(lambda x: var_to_GT_index[x])
-                df["%s_#Uploaded_variation_original"%software] = df["var"].apply(lambda x: var_to_OriginalUploadedVar[x])
-
-                # check that all the variants that have been called by this software also have a fractionReadsCoveringThisVariant
-                if sum(df["%s_fractionReadsCoveringThisVariant"%software]>0.0) <= sum(df["%s_called"%software])*0.95: 
-                    raise ValueError("In %s, %s not almost all the variants that have been called also have a fraction of reads covering them. This may reflect an error in the way how read frequencies are calculated"%(name_sample, software))
-
-            # write and save object
-            df.to_csv("%s.tab.tmp"%fileprefix, sep="\t", index=False)
-            fun.save_object(df, "%s.py.tmp"%fileprefix)
-            os.rename("%s.tab.tmp"%fileprefix, "%s.tab"%fileprefix)
-            os.rename("%s.py.tmp"%fileprefix, "%s.py"%fileprefix)
-
-            print("files saved into %s"%("%s.tab"%fileprefix))
-
-
-
-    # get the variants that are present in more than x programs
-    df = fun.load_object("%s/integrated_variants_norm_vcflib_ploidy%i.py"%(opt.outdir, opt.ploidy))
-
-    ##############################################
-    ######## GENERATE THE ANNOTATION FILE ########
-    ##############################################
-
-    variantAnnotation_table = "%s/variant_annotation_ploidy%i.tab"%(opt.outdir, opt.ploidy)
-    if fun.file_is_empty(variantAnnotation_table) or replace is True:
-
-        print("generating variant annotation table")
-
-        # add fields 
-        df['is_snp'] = (df["ref"].apply(len)==1) & (df["ref"]!="-") & (df["alt"].apply(len)==1) & (df["alt"]!="-")
-
-        prot_altering_mutations = {'missense_variant', 'start_lost', 'inframe_deletion', 'protein_altering_variant', 'stop_gained', 'inframe_insertion', 'frameshift_variant', 'stop_lost', 'splice_acceptor_variant', 'splice_donor_variant', 'splice_region_variant', 'non_coding_transcript_exon_variant'}
-        df["consequences_set"] = df.Consequence.apply(lambda x: set(str(x).split(",")))
-        df["is_protein_altering"] = df.consequences_set.apply(lambda x: len(x.intersection(prot_altering_mutations))>0)
-
-        # generate a table that has all the variant annotation info
-        varSpec_fields = ['#Uploaded_variation', 'Gene', 'Feature', 'Feature_type', 'Consequence', 'cDNA_position', 'CDS_position', 'Protein_position', 'Amino_acids', 'Codons', 'is_snp', 'is_protein_altering']
-
-        # write the df were there are some PASS vars
-        programs = {"HaplotypeCaller", "freebayes", "bcftools"}
-        df["number_PASS_programs"] = df.apply(lambda r: sum([r["%s_PASS"%p] for p in programs if "%s_PASS"%p in df.keys()]), axis=1)
-        variantAnnotation_table_PASS = "%s/variant_annotation_ploidy%i_anyPASS.tab"%(opt.outdir, opt.ploidy)
-        df_PASS = df[df.number_PASS_programs>0]
-        df_PASS[varSpec_fields].drop_duplicates().to_csv(variantAnnotation_table_PASS, sep="\t", header=True, index=False)
-
-        # write the final vars
-        variantAnnotation_table_tmp = "%s.tmp"%variantAnnotation_table
-        df[varSpec_fields].drop_duplicates().to_csv(variantAnnotation_table_tmp, sep="\t", header=True, index=False)
-        os.rename(variantAnnotation_table_tmp, variantAnnotation_table)
-
-    ##############################################
-    ##############################################
-    ##############################################
-
-    ##############################################
-    ######## GENERATE THE VARIANTS VEP FILE ######
-    ##############################################
-
-    # generate a file that has all the information about the samples
-
-
-
-    ##############################################
-    ##############################################
-    ##############################################
-
-
-    #################################################
-    ######## GENERATE THE INTERSECTING FILES ########
-    #################################################
-
-    """
-    if opt.caller=="all": 
-        print("getting intersecting VCFs")
-     
-        # add the number of programs with PASS
-        programs = {"HaplotypeCaller", "freebayes", "bcftools"}
-        df["number_PASS_programs"] = df.apply(lambda r: sum([r["%s_PASS"%p] for p in programs]), axis=1)
-
-
-        for minPrograms in [1, 2, 3]:
-
-            # filter
-            df_PASS = df[df.number_PASS_programs>=minPrograms]
-
-            # write a vcf with this df
-            intersecting_vcf = "%s/integrated_variants_PASSatLeast%i_ploidy%i.vcf"%(opt.outdir, minPrograms, opt.ploidy)
-            #if fun.file_is_empty(intersecting_vcf) or opt.replace is True:
-            if True: # debug
-
-                print("getting vcf of samples that are called by at least %i programs"%minPrograms)
-                fun.write_integrated_smallVariantsTable_as_vcf(df_PASS, intersecting_vcf, opt.ploidy)
-    """
-
-    #################################################
-    #################################################
-    #################################################
-
 print("VarCall Finished")
-
-# create outfile
-open("%s/finsihedVarCall_CNV_file_ploidy%i.txt"%(opt.outdir, opt.ploidy), "w").write("finsihed with pipeline\n")
 
 # at the end remove all the non-essential files
 if opt.remove_smallVarsCNV_nonEssentialFiles is True: fun.remove_smallVarsCNV_nonEssentialFiles(opt.outdir, opt.ploidy)
