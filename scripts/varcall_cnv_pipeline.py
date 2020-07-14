@@ -441,6 +441,7 @@ if fun.file_is_empty(variantAnnotation_table) or opt.replace is True:
     df_vep['is_snp'] = (df_vep["ref"].apply(len)==1) & (df_vep["ref"]!="-") & (df_vep["alt"].apply(len)==1) & (df_vep["alt"]!="-")
 
     prot_altering_mutations = {'missense_variant', 'start_lost', 'inframe_deletion', 'protein_altering_variant', 'stop_gained', 'inframe_insertion', 'frameshift_variant', 'stop_lost', 'splice_acceptor_variant', 'splice_donor_variant', 'splice_region_variant', 'non_coding_transcript_exon_variant'}
+    
 
 
     df_vep["consequences_set"] = df_vep.Consequence.apply(lambda x: set(str(x).split(",")))
