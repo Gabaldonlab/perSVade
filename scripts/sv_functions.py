@@ -10495,7 +10495,7 @@ def plot_fraction_overlapping_realSVs(df_benchmarking, filename):
     fig.savefig(filename, bbox_inches='tight')
     plt.close(fig)
 
-def report_accuracy_realSVs(close_shortReads_table, reference_genome, outdir, real_svtype_to_file, threads=4, replace=False, n_simulated_genomes=2, mitochondrial_chromosome="mito_C_glabrata_CBS138", simulation_ploidies=["haploid", "diploid_homo", "diploid_hetero", "ref:2_var:1", "ref:3_var:1", "ref:4_var:1", "ref:5_var:1", "ref:9_var:1", "ref:19_var:1", "ref:99_var:1"], range_filtering_benchmark="theoretically_meaningful", nvars=100, job_array_mode="local", max_ncores_queue=48, time_perSVade_running="02:00:00", queue_jobs="debug"):
+def report_accuracy_realSVs(close_shortReads_table, reference_genome, outdir, real_svtype_to_file, outdir_finding_realVars, threads=4, replace=False, n_simulated_genomes=2, mitochondrial_chromosome="mito_C_glabrata_CBS138", simulation_ploidies=["haploid", "diploid_homo", "diploid_hetero", "ref:2_var:1", "ref:3_var:1", "ref:4_var:1", "ref:5_var:1", "ref:9_var:1", "ref:19_var:1", "ref:99_var:1"], range_filtering_benchmark="theoretically_meaningful", nvars=100, job_array_mode="local", max_ncores_queue=48, time_perSVade_running="02:00:00", queue_jobs="debug", StopAfter_testAccuracy_perSVadeRunning=False):
 
 
     """This function runs the SV pipeline for all the datasets in close_shortReads_table with the fastSV, optimisation based on uniform parameters and optimisation based on realSVs (specified in real_svtype_to_file). The latter is skipped if real_svtype_to_file is empty"""
@@ -10543,20 +10543,11 @@ def report_accuracy_realSVs(close_shortReads_table, reference_genome, outdir, re
                 outdir_runID = "%s/%s"%(outdir_typeSimulations, runID); make_folder(outdir_runID)
 
                 # define the reads
-                #r1 = df_reads.loc[runID]
-
-                print(df_reads, df_reads.keys())
-
-                kjadhdjkaahd
-
+                r1 = df_reads.loc[runID, "short_reads1"]
+                r2 = df_reads.loc[runID, "short_reads2"]
 
                 # define the final file 
-                final_file = "%s/SVdetection_output/gridss_finished.txt"%outdir_runID
-
-                # softlink bam files
-                sorted_bam_outdir = "%s/aligned_reads.bam.sorted"%outdir_runID
-                if file_is_empty(sorted_bam_outdir): run_cmd("ln -s %s %s"%(sorted_bam, sorted_bam_outdir))
-                if file_is_empty("%s.bai"%sorted_bam_outdir): run_cmd("ln -s %s.bai %s.bai"%(sorted_bam, sorted_bam_outdir))
+                final_file = "%s/perSVade_finished_file.txt"%outdir_runID
 
                 # define the path to the table with previous SVs comparible to insert
                 SVs_compatible_to_insert_dir = "%s/SVs_compatible_to_insert"%outdir_finding_realVars
@@ -10565,7 +10556,7 @@ def report_accuracy_realSVs(close_shortReads_table, reference_genome, outdir, re
                 if file_is_empty(final_file) or replace is True:
 
                     # define the cmd. This is a normal perSvade.py run with the vars of the previous dir  
-                    cmd = "python %s -r %s --threads %i --outdir %s --nvars %i --nsimulations %i --simulation_ploidies %s --range_filtering_benchmark %s --sortedbam %s --mitochondrial_chromosome %s"%(perSVade_py, reference_genome, threads, outdir_runID, nvars, n_simulated_genomes, ",".join(simulation_ploidies), range_filtering_benchmark, sorted_bam_outdir, mitochondrial_chromosome)
+                    cmd = "python %s -r %s --threads %i --outdir %s --nvars %i --nsimulations %i --simulation_ploidies %s --range_filtering_benchmark %s --mitochondrial_chromosome %s -f1 %s -f2 %s"%(perSVade_py, reference_genome, threads, outdir_runID, nvars, n_simulated_genomes, ",".join(simulation_ploidies), range_filtering_benchmark, mitochondrial_chromosome, r1, r2)
 
                     # add arguments depending on the pipeline
                     if replace is True: cmd += " --replace"
@@ -10591,21 +10582,26 @@ def report_accuracy_realSVs(close_shortReads_table, reference_genome, outdir, re
                 # get the df best accuracy
                 if typeSimulations!="fast": all_sampleID_to_dfBestAccuracy[ID] = pd.read_csv("%s/SVdetection_output/parameter_optimisation/benchmarking_all_filters_for_all_genomes_and_ploidies/df_cross_benchmark_best.tab"%outdir_runID, sep="\t")
 
+                # clean the output directory
+                clean_perSVade_outdir(outdir_runID)
+
         # if you are not running on slurm, just execute one cmd after the other
         if job_array_mode=="greasy":
 
             if len(all_cmds)>0: 
-                print("submitting %i jobs to the cluster for testing real-data accuracy"%len(all_cmds))
+                print("submitting %i jobs to the cluster for testing accuracy of perSVade on several combinations of parameters. The files of the submission are in %s"%(len(all_cmds), outdir))
                 jobs_filename = "%s/jobs.testingRealDataAccuracy"%outdir
                 open(jobs_filename, "w").write("\n".join(all_cmds))
 
-                # define and create the STDERR and STDOUT
-                STDERR = "%s/STDERR"%outdir
-                STDOUT = "%s/STDOUT"%outdir
+                generate_jobarray_file_greasy(jobs_filename, walltime=time_perSVade_running,  name="testAccuracy", queue=queue_jobs, sbatch=True, ncores_per_task=threads, constraint="", number_tasks_to_run_at_once="all", max_ncores_queue=max_ncores_queue )
 
-                generate_jobarray_file_greasy(jobs_filename, stderr=STDERR, stdout=STDOUT, walltime=walltime,  name="testRealSVs", queue=queue, sbatch=True, ncores_per_task=threads, rmstd=True, constraint="", number_tasks_to_run_at_once="all" )
+                print("You have to wait under all the jobs in testRealSVs are done")
+                sys.exit(0)
 
-                raise ValueError("You have to wait under all the jobs in testRealSVs are done")
+
+        if StopAfter_testAccuracy_perSVadeRunning is True: 
+            print("You already ran all the configurations of perSVade. Stopping after the running of perSVade on testAccuracy")
+            sys.exit(0)
 
 
         print("getting ID_to_svtype_to_svDF")
@@ -10624,7 +10620,6 @@ def report_accuracy_realSVs(close_shortReads_table, reference_genome, outdir, re
         ID_to_svtype_to_svDF = load_object(ID_to_svtype_to_svDF_file)
         all_sampleID_to_dfBestAccuracy = load_object(all_sampleID_to_dfBestAccuracy_file) 
 
-  
 
     # map each runID to the IDs of the same sample 
     runID_to_replicateIDs = {runID : set(df_reads[df_reads.sampleID==df_reads.loc[runID, "sampleID"]].index).difference({runID}) for runID in df_reads.runID}
@@ -10641,7 +10636,6 @@ def report_accuracy_realSVs(close_shortReads_table, reference_genome, outdir, re
 
     # map each runID to the svtype to the svIDs
     ID_to_svtype_to_svIDs = {ID : {svtype : set(svDF.svID).difference(wrong_svIDs) for svtype, svDF in svtype_to_svDF.items() if len(svDF)>0} for ID, svtype_to_svDF in ID_to_svtype_to_svDF.items()}
-
 
     # initialize a benchmarking dict
     df_benchmarking_realSVs_dict = {}

@@ -96,6 +96,8 @@ perSVade also includes the possibility of running small variant calling. You can
 
 `./scripts/perSVade.py --ref reference_genome.fasta --threads 4 -o ./output_directory -f1 reads_FWD.fastq.gz -f2 reads_FWD.fastq.gz --mitochondrial_chromosome chr_mito --mitochondrial_code 3 --gDNA_code 12 -gff features.gff  --run_smallVarsCNV --skip_SVcalling --caller all --coverage 20 --ploidy 2 --remove_smallVarsCNV_nonEssentialFiles`
 
+This will align the reads with `bwa mem` and run `GATK HaplotypeCaller`, `freebayes` and `bcftools call` on the provided reads. The variants are filtered with the default parameters and the specified coverage. The resulting variants are be merged and annotated with `Ensembl VEP`. In addition, the read depth of each gene will be calculated with `mosdepth`.
+
 Type `./scripts/perSVade.py -h` to understand wahat is the meaning of these options. Some important remarks:
 
 1. `--mitochondrial_code` and `--gDNA_code` are the NCBI translation code of your species, check them in https://www.ncbi.nlm.nih.gov/Taxonomy/Utils/wprintgc.cgi . Note that they may be wrong sometimes, so that it is good to double check with the literature.
@@ -110,28 +112,36 @@ This will output the following files and folders under `./output_directory`:
 
 1. `aligned_reads.sorted.bam` and `aligned_reads.sorted.bam.bai`: the aligned reads sorted by genomic coordinate.
 2. `reference_genome_dir` is a directory that contains files related to the provided genome and annotations. This may be removed if necessary.
-3. `aligned_reads.bam.sorted.calculating_windowcoverage/coverage_windows_<n_nucleotides>bp.tab` contains a table with the coverage for windows of the genome that are as long as 5% of the median chromosome length (n_nucleotides). This table contatins the following fields:
+3. `aligned_reads.bam.sorted.calculating_windowcoverage/coverage_windows_<n_nucleotides>bp.tab` contains a table with the coverage for windows of the genome that are as long as 5% of the median chromosome length (n_nucleotides). This is the output of mosdepth. This table contatins the following fields:
 
-    1. `#chrom`: The chromosome name 
+    1. `#chrom` is the chromosome name.
+    2. `start` is the 0-based start coordinates of the region
+    3. `end` is the 1-based end coordinate of the region
+    4. `length` is the length of the region
+    5. `mediancov_1` is the median read depth in the region
+    6. `percentcovered_1` is the perecentage of the region that is covered with 1 read or more
+    7. `nocoveragebp_1` is the number of bases that have no coverage
+
+4. `smallVars_CNV_output/CNV_results/genes_and_regions_coverage.tab` is a table that contains the coverage of all the genes in the provided gff. These are the fields:
+
+    1. `chromosome`, `start`, `end` and `length` are the coordinates of the gene
+    2. `median_reads_per_gene` is the median read depth for this gene
+    3. `nocoveragebp_1` is the number of bases that have no coverage
+    4. `percentcovered_1` is the perecentage of the region that is covered with 1 read or more
+    5. `ID` is the gene ID in the gff (parsed from the attributes). If there are some duplicated IDs with parts it corresponds to the union of ID and part.
+    6. `fraction_covered_by_MoreThan1read` is equivalent to `percentcovered_1`, but from 0 to 1.
+    7. `relative_coverage` is the `median_reads_per_gene` divided by the median of all `median_reads_per_gene`.
+    8. All the fields with a `_+-10kb_region` sufix are equivalent to the ones that do not have it, but for a region that starts at -10kb of the gene start and ends at +10kb of the gene end. This can be useful for CNV analysis.
+
+5. `smallVars_CNV_output` contains some folders and files related to the small variant calling:
+
+    1. `bcftools_ploidy2_out`, `HaplotypeCaller_ploidy2_out` and `freebayes_ploidy2_out` are folders that contain the raw and filtered vcf files of each fo the programs.
+    2. `merged_vcfs_allVars_ploidy2.vcf` is a vcf file with the merged output of the algorithms used in the variant calling. You can check the header to understand what are all the tags in the `INFO` field. Here, the multiallelic loci are split to ease the analysis. Note that the `ID` field corresponds to the `#Uploaded_variation` field of `variant_annotation_ploidy2.tab`.
+    3. `variant_calling_ploidy2.tab` is a tabular version of `merged_vcfs_allVars_ploidy2.vcf`. Each column contains information parsed from the vcf file. This file is easier to manage because it has all the info in tabular format.
+    4. `variant_annotation_ploidy2.tab` is the output of VEP, where each line corresponds to a particular alteration in a given gene.
+    5. `variants_atLeast<n_PASS_programs>PASS_ploidy2.vcf` are the variants that PASS de filters in at least n_PASS_programs algorithms. The INFO and FORMAT fields are simplified to take less space. It may be useful to take, for example, variants that PASS de filters by at least 2 algorithms.
 
 
-# add the bcftools
-bcftools_dir = "%s/bcftools_ploidy%i_out"%(outdir, ploidy)
-HC_dir = "%s/HaplotypeCaller_ploidy%i_out"%(outdir, ploidy)
-fb_dir = "%s/freebayes_ploidy%i_out"%(outdir, ploidy)
-
-
-files_to_keep = {"merged_vcfs_allVars_ploidy%i.vcf"%ploidy,
- "variant_annotation_ploidy%i.tab"%ploidy,
- "variant_calling_ploidy%i.tab"%ploidy,
-
- "variants_atLeast1PASS_ploidy%i.vcf"%ploidy,
- "variants_atLeast2PASS_ploidy%i.vcf"%ploidy,
- "variants_atLeast3PASS_ploidy%i.vcf"%ploidy,
-
- "variant_calling_stats_ploidy%i_called.tab"%ploidy,
- "variant_calling_stats_ploidy%i_PASS.tab"%ploidy
- }
 
 
 
