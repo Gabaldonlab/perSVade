@@ -98,13 +98,41 @@ perSVade also includes the possibility of running small variant calling. You can
 
 Type `./scripts/perSVade.py -h` to understand wahat is the meaning of these options. Some important remarks:
 
-1. `--mitochondrial_code` and `gDNA_code` are the NCBI translation code of your species, check them in https://www.ncbi.nlm.nih.gov/Taxonomy/Utils/wprintgc.cgi . Note that they may be wrong sometimes, so that it is good to double check with the literature.
+1. `--mitochondrial_code` and `--gDNA_code` are the NCBI translation code of your species, check them in https://www.ncbi.nlm.nih.gov/Taxonomy/Utils/wprintgc.cgi . Note that they may be wrong sometimes, so that it is good to double check with the literature.
 2. `--mitochondrial_chromosome` is supposed to include the name of the chromosome in the reference genome fasta.
 3. `--run_smallVarsCNV` is the cmd that indicates perSVade to also run smallVariant calling.
 4. `--skip_SVcalling` tells the pipeline to skip the calling of structural variation
-5. `--coverage` is the minimum coverage for a variant to be kept
+5. `--coverage` is the minimum coverage for a variant to be kept. This parameter should be related to the coverage of your library. You may be careful with setting it too low (i.e. <15) as it will yield many false positive calls. It is reasonable to check how other similar studies set this parameter.
 6. `--remove_smallVarsCNV_nonEssentialFiles` is useful to clean the output directory from non-essential output files.
-7. You may want to understand what the programs of this pipeline do. Check freebayes, bcftools, GATK HaplotypeCaller and ENSEMBL Variant Annotation Predictor.
+7. If you may want to understand what the programs of this pipeline do. Check freebayes, bcftools, GATK HaplotypeCaller and ENSEMBL Variant Annotation Predictor.
+
+This will output the following files and folders under `./output_directory`:
+
+1. `aligned_reads.sorted.bam` and `aligned_reads.sorted.bam.bai`: the aligned reads sorted by genomic coordinate.
+2. `reference_genome_dir` is a directory that contains files related to the provided genome and annotations. This may be removed if necessary.
+3. `aligned_reads.bam.sorted.calculating_windowcoverage/coverage_windows_<n_nucleotides>bp.tab` contains a table with the coverage for windows of the genome that are as long as 5% of the median chromosome length (n_nucleotides). This table contatins the following fields:
+
+3. 1. `#chrom`: The chromosome name 
+
+
+# add the bcftools
+bcftools_dir = "%s/bcftools_ploidy%i_out"%(outdir, ploidy)
+HC_dir = "%s/HaplotypeCaller_ploidy%i_out"%(outdir, ploidy)
+fb_dir = "%s/freebayes_ploidy%i_out"%(outdir, ploidy)
+
+
+files_to_keep = {"merged_vcfs_allVars_ploidy%i.vcf"%ploidy,
+ "variant_annotation_ploidy%i.tab"%ploidy,
+ "variant_calling_ploidy%i.tab"%ploidy,
+
+ "variants_atLeast1PASS_ploidy%i.vcf"%ploidy,
+ "variants_atLeast2PASS_ploidy%i.vcf"%ploidy,
+ "variants_atLeast3PASS_ploidy%i.vcf"%ploidy,
+
+ "variant_calling_stats_ploidy%i_called.tab"%ploidy,
+ "variant_calling_stats_ploidy%i_PASS.tab"%ploidy
+ }
+
 
 
 ## Method

@@ -10292,6 +10292,9 @@ def generate_jobarray_file_greasy(jobs_filename, walltime="48:00:00",  name="Job
     #SOURCE_CONDA_CMD,
     #CONDA_ACTIVATING_CMD,
 
+    # "#SBATCH --mail-type=all",
+    # "#SBATCH --mail-user=%s"%email,
+
     # define the std files
     greasy_logfile = "%s/%s_greasy.log"%(stddir, name)
     stderr_file = "%s/%s_stderr.txt"%(stddir, name)
@@ -10308,8 +10311,6 @@ def generate_jobarray_file_greasy(jobs_filename, walltime="48:00:00",  name="Job
                  "#SBATCH --get-user-env", # this is to maintain the environment
                  "#SBATCH --workdir=%s"%outdir,
                  "#SBATCH --ntasks=%i"%number_tasks_to_run_at_once,
-                 "#SBATCH --mail-type=all",
-                 "#SBATCH --mail-user=%s"%email,
                  constraint_line,
                  "",
                  "module load greasy",
@@ -10494,10 +10495,10 @@ def plot_fraction_overlapping_realSVs(df_benchmarking, filename):
     fig.savefig(filename, bbox_inches='tight')
     plt.close(fig)
 
-def report_accuracy_realSVs(close_shortReads_table, reference_genome, outdir, real_svtype_to_file, outdir_finding_realVars, threads=4, replace=False, n_simulated_genomes=2, mitochondrial_chromosome="mito_C_glabrata_CBS138", simulation_ploidies=["haploid", "diploid_homo", "diploid_hetero", "ref:2_var:1", "ref:3_var:1", "ref:4_var:1", "ref:5_var:1", "ref:9_var:1", "ref:19_var:1", "ref:99_var:1"], range_filtering_benchmark="theoretically_meaningful", nvars=100, job_array_mode="local", walltime="08:00:00", queue="bsc_ls"):
+def report_accuracy_realSVs(close_shortReads_table, reference_genome, outdir, real_svtype_to_file, threads=4, replace=False, n_simulated_genomes=2, mitochondrial_chromosome="mito_C_glabrata_CBS138", simulation_ploidies=["haploid", "diploid_homo", "diploid_hetero", "ref:2_var:1", "ref:3_var:1", "ref:4_var:1", "ref:5_var:1", "ref:9_var:1", "ref:19_var:1", "ref:99_var:1"], range_filtering_benchmark="theoretically_meaningful", nvars=100, job_array_mode="local", max_ncores_queue=48, time_perSVade_running="02:00:00", queue_jobs="debug"):
 
 
-    """This function runs the SV pipeline for all the datasets in close_shortReads_table with the fastSV, optimisation based on uniform parameters and optimisation based on realSVs (specified in real_svtype_to_file). outdir_finding_realVars is the outdir where you previously found the real vars, which is useful to not repeat the alignment of the reads"""
+    """This function runs the SV pipeline for all the datasets in close_shortReads_table with the fastSV, optimisation based on uniform parameters and optimisation based on realSVs (specified in real_svtype_to_file). The latter is skipped if real_svtype_to_file is empty"""
 
     # this pipeline requires real data and close_shortReads_table that is not none
     if len(real_svtype_to_file)==0: raise ValueError("You need real data if you want to test accuracy")
@@ -10509,7 +10510,7 @@ def report_accuracy_realSVs(close_shortReads_table, reference_genome, outdir, re
     # make a plots dir
     plots_dir = "%s/plots"%outdir; make_folder(plots_dir)
 
-    print("testing the pipeline on real SVs")
+    print("testing the accuracy of perSVade")
 
     # load the real data table
     df_reads = pd.read_csv(close_shortReads_table, sep="\t").set_index("runID", drop=False)
@@ -10541,9 +10542,15 @@ def report_accuracy_realSVs(close_shortReads_table, reference_genome, outdir, re
                 # define an outdir for this runID
                 outdir_runID = "%s/%s"%(outdir_typeSimulations, runID); make_folder(outdir_runID)
 
-                # define the previous important files
-                previous_run_dir = "%s/all_realVars/shortReads_realVarsDiscovery_%s"%(outdir_finding_realVars, runID)
-                sorted_bam = "%s/aligned_reads.bam.sorted"%previous_run_dir
+                # define the reads
+                #r1 = df_reads.loc[runID]
+
+                print(df_reads, df_reads.keys())
+
+                kjadhdjkaahd
+
+
+                # define the final file 
                 final_file = "%s/SVdetection_output/gridss_finished.txt"%outdir_runID
 
                 # softlink bam files
