@@ -112,7 +112,7 @@ This will output the following files and folders under `./output_directory`:
 2. `reference_genome_dir` is a directory that contains files related to the provided genome and annotations. This may be removed if necessary.
 3. `aligned_reads.bam.sorted.calculating_windowcoverage/coverage_windows_<n_nucleotides>bp.tab` contains a table with the coverage for windows of the genome that are as long as 5% of the median chromosome length (n_nucleotides). This table contatins the following fields:
 
-3. 1. `#chrom`: The chromosome name 
+    1. `#chrom`: The chromosome name 
 
 
 # add the bcftools
