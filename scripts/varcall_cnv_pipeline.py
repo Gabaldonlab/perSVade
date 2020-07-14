@@ -77,7 +77,7 @@ parser.add_argument("-gcode", "--gDNA_code", dest="gDNA_code", default=1, type=i
 parser.add_argument("--skip_cnv_analysis", dest="skip_cnv_analysis", action="store_true", default=False, help="Skipp the running of the CNV pipeline, which outputs the number of copies that each gene has according to coverage. The gene ID's are based on the GFF3 files that have been provided in -gff")
  
 # avoid marking duplicates
-parser.add_argument("--skip_MarkingDuplicates", dest="skip_MarkingDuplicates", action="store_true", default=False, help="Skips the marking of duplicates in the bam.")
+parser.add_argument("--smallVarsCNV_markDuplicates_inBam", dest="smallVarsCNV_markDuplicates_inBam", action="store_true", default=False, help="Mark duplicates on the input bam")
 
 
 # othe args
@@ -154,7 +154,7 @@ if fun.file_is_empty("%s.fai"%opt.ref) or opt.replace is True:
 
 
 # marking duplicates or not
-if opt.skip_MarkingDuplicates is False: sorted_bam = fun.get_sortedBam_with_duplicatesMarked(opt.sortedbam, threads=opt.threads, replace=opt.replace)
+if opt.smallVarsCNV_markDuplicates_inBam is True: sorted_bam = fun.get_sortedBam_with_duplicatesMarked(opt.sortedbam, threads=opt.threads, replace=opt.replace)
 
 else: sorted_bam = opt.sortedbam
 print("running VarCall for %s"%sorted_bam)
@@ -441,7 +441,7 @@ if fun.file_is_empty(variantAnnotation_table) or opt.replace is True:
     df_vep['is_snp'] = (df_vep["ref"].apply(len)==1) & (df_vep["ref"]!="-") & (df_vep["alt"].apply(len)==1) & (df_vep["alt"]!="-")
 
     prot_altering_mutations = {'missense_variant', 'start_lost', 'inframe_deletion', 'protein_altering_variant', 'stop_gained', 'inframe_insertion', 'frameshift_variant', 'stop_lost', 'splice_acceptor_variant', 'splice_donor_variant', 'splice_region_variant', 'non_coding_transcript_exon_variant'}
-    
+
 
 
     df_vep["consequences_set"] = df_vep.Consequence.apply(lambda x: set(str(x).split(",")))

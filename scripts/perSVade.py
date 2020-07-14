@@ -81,9 +81,7 @@ parser.add_argument("--StopAfterPrefecth_of_reads", dest="StopAfterPrefecth_of_r
 parser.add_argument("--StopAfter_obtentionOFcloseSVs", dest="StopAfter_obtentionOFcloseSVs", action="store_true", default=False, help="Stop after obtaining the SVs_compatible_to_insert_dir ")
 
 # testing options
-parser.add_argument("--testRealDataAccuracy", dest="testRealDataAccuracy", action="store_true", default=False, help="Reports the accuracy  of your calling on the real data for all the WGS runs specified in --close_shortReads_table. ")
-
-parser.add_argument("--testSimulationsAccuracy", dest="testSimulationsAccuracy", action="store_true", default=False, help="Reports the accuracy  of your calling on the simulations that are uniform, based on realSVs, and without optimisation. ")
+parser.add_argument("--testAccuracy", dest="testAccuracy", action="store_true", default=False, help="Reports the accuracy  of your calling on the real data, simulations and fastSVcalling for all the WGS runs specified in --close_shortReads_table. ")
 
 
 # simulation parameter args
@@ -99,7 +97,7 @@ parser.add_argument("-sbam", "--sortedbam", dest="sortedbam", default=None, help
 parser.add_argument("--run_qualimap", dest="run_qualimap", action="store_true", default=False, help="Run qualimap for quality assessment of bam files. This may be inefficient sometimes because of the ")
 
 # machine options
-parser.add_argument("--job_array_mode", dest="job_array_mode", type=str, default="local", help="It specifies in how to run the job arrays for --testSimulationsAccuracy,  --testRealDataAccuracy, the downloading of reads if  --close_shortReads_table is auto, and the SV calling for the table in --close_shortReads_table. It can be 'local' (runs one job after the other or 'greasy' (each job is run on a diferent node of a slurm cluster with the greasy system. It requires the machine to be able to run greasy jobs, as in https://user.cscs.ch/tools/high_throughput/). If 'greasy' is specified, this pipeline will stop with a warning everytime that unfinished jobs have to be submited, and you'll be able to track the job status with the squeue command.")
+parser.add_argument("--job_array_mode", dest="job_array_mode", type=str, default="local", help="It specifies in how to run the job arrays for,  --testAccuracy, the downloading of reads if  --close_shortReads_table is auto, and the SV calling for the table in --close_shortReads_table. It can be 'local' (runs one job after the other or 'greasy' (each job is run on a diferent node of a slurm cluster with the greasy system. It requires the machine to be able to run greasy jobs, as in https://user.cscs.ch/tools/high_throughput/). If 'greasy' is specified, this pipeline will stop with a warning everytime that unfinished jobs have to be submited, and you'll be able to track the job status with the squeue command.")
 
 parser.add_argument("--queue_jobs", dest="queue_jobs", type=str, default="debug", help="The name of the queue were to submit the jobs when running with greasy")
 parser.add_argument("--max_ncores_queue", dest="max_ncores_queue", type=int, default=768, help="The maximum number of cores that the queue can handle in a single job")
@@ -122,6 +120,7 @@ parser.add_argument("-c", "--coverage", dest="coverage", default=20, type=int, h
 parser.add_argument("-mcode", "--mitochondrial_code", dest="mitochondrial_code", default=3, type=int, help="The code of the NCBI mitochondrial genetic code. For yeasts it is 3. You can find the numbers for your species here https://www.ncbi.nlm.nih.gov/Taxonomy/Utils/wprintgc.cgi")
 parser.add_argument("-gcode", "--gDNA_code", dest="gDNA_code", default=1, type=int, help="The code of the NCBI gDNA genetic code. You can find the numbers for your species here https://www.ncbi.nlm.nih.gov/Taxonomy/Utils/wprintgc.cgi . For C. albicans it is 12. ")
 parser.add_argument("--remove_smallVarsCNV_nonEssentialFiles", dest="remove_smallVarsCNV_nonEssentialFiles", action="store_true", default=False, help="Will remove all the varCall files except the integrated final file and the bam file.")
+parser.add_argument("--smallVarsCNV_markDuplicates_inBam", dest="smallVarsCNV_markDuplicates_inBam", action="store_true", default=False, help="Will mark the duplicates in the bam file in the smallVarsCNV pipeline")
 
 # small varCall stop options
 parser.add_argument("--StopAfter_smallVarCallSimpleRunning", dest="StopAfter_smallVarCallSimpleRunning", action="store_true", default=False, help="Stop after obtaining the filtered vcf outputs of each program.")
@@ -368,11 +367,9 @@ if opt.StopAfter_obtentionOFcloseSVs:
 
 ###################################################################################################
 
-# test the accuracy on each of the simulations types
-if opt.testSimulationsAccuracy is True: fun.report_accuracy_simulations(sorted_bam, opt.ref, "%s/testing_SimulationsAccuracy"%opt.outdir, real_svtype_to_file, threads=opt.threads, replace=opt.replace, n_simulated_genomes=opt.nsimulations, mitochondrial_chromosome=opt.mitochondrial_chromosome, simulation_ploidies=simulation_ploidies, range_filtering_benchmark=opt.range_filtering_benchmark, nvars=opt.nvars, job_array_mode=opt.job_array_mode)
-
 # test accuracy on real data
-if opt.testRealDataAccuracy is True:  fun.report_accuracy_realSVs(opt.close_shortReads_table, opt.ref, "%s/testing_RealSVsAccuracy"%opt.outdir, real_svtype_to_file, outdir_finding_realVars, threads=opt.threads, replace=opt.replace, n_simulated_genomes=opt.nsimulations, mitochondrial_chromosome=opt.mitochondrial_chromosome, simulation_ploidies=simulation_ploidies, range_filtering_benchmark=opt.range_filtering_benchmark, nvars=opt.nvars, job_array_mode=opt.job_array_mode)
+if opt.testAccuracy is True:  fun.report_accuracy_realSVs(opt.close_shortReads_table, opt.ref, "%s/testing_Accuracy"%opt.outdir, real_svtype_to_file, threads=opt.threads, replace=opt.replace, n_simulated_genomes=opt.nsimulations, mitochondrial_chromosome=opt.mitochondrial_chromosome, simulation_ploidies=simulation_ploidies, range_filtering_benchmark=opt.range_filtering_benchmark, nvars=opt.nvars, job_array_mode=opt.job_array_mode, max_ncores_queue=opt.max_ncores_queue, time_perSVade_running=opt.time_perSVade_running, queue_jobs=opt.queue_jobs)
+
 
 # get the golden set
 if opt.goldenSet_dir is not None:
@@ -381,7 +378,7 @@ if opt.goldenSet_dir is not None:
     fun.report_accuracy_golden_set(opt.goldenSet_dir, outdir_goldenSet, opt.ref, real_svtype_to_file, threads=opt.threads, replace=opt.replace, n_simulated_genomes=opt.nsimulations, mitochondrial_chromosome=opt.mitochondrial_chromosome, simulation_ploidies=simulation_ploidies, range_filtering_benchmark=opt.range_filtering_benchmark, nvars=opt.nvars, job_array_mode=opt.job_array_mode, StopAfter_sampleIndexingFromSRA=opt.StopAfter_sampleIndexingFromSRA, time_read_obtention=opt.time_read_obtention, StopAfterPrefecth_of_reads=opt.StopAfterPrefecth_of_reads, queue_jobs=opt.queue_jobs, max_ncores_queue=opt.max_ncores_queue, time_perSVade_running=opt.time_perSVade_running, target_taxID=opt.target_taxID)
 
 # run the actual perSVade function optimising parameters
-if opt.skip_SVcalling is False:
+if opt.skip_SVcalling is False and not any([x=="skip" for x in {opt.fastq1, opt.fastq2}]):
 
     SVdetection_outdir = "%s/SVdetection_output"%opt.outdir
     fun.run_GridssClove_optimising_parameters(sorted_bam, opt.ref, SVdetection_outdir, threads=opt.threads, replace=opt.replace, n_simulated_genomes=opt.nsimulations, mitochondrial_chromosome=opt.mitochondrial_chromosome, simulation_ploidies=simulation_ploidies, range_filtering_benchmark=opt.range_filtering_benchmark, nvars=opt.nvars, fast_SVcalling=opt.fast_SVcalling, real_svtype_to_file=real_svtype_to_file)
@@ -411,10 +408,9 @@ if opt.run_smallVarsCNV:
     if opt.gff is not None: varcall_cmd += " -gff %s"%opt.gff
     if opt.remove_smallVarsCNV_nonEssentialFiles is True: varcall_cmd += " --remove_smallVarsCNV_nonEssentialFiles"
     if opt.StopAfter_smallVarCallSimpleRunning is True: varcall_cmd += " --StopAfter_smallVarCallSimpleRunning"
+    if opt.smallVarsCNV_markDuplicates_inBam is True: varcall_cmd += " --smallVarsCNV_markDuplicates_inBam"
 
-
-
-
+    
 
     # run
     fun.run_cmd(varcall_cmd)
