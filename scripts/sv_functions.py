@@ -117,6 +117,7 @@ parallel_fastq_dump = "%s/bin/parallel-fastq-dump"%EnvDir
 FASTQC = "%s/bin/fastqc"%EnvDir
 porechop = "%s/bin/porechop"%EnvDir
 fasterq_dump = "%s/bin/fasterq-dump"%EnvDir
+seqtk = "%s/bin/seqtk"%EnvDir
 
 # executables that are provided in the repository
 external_software = "%s/../installation/external_software"%CWD
@@ -645,9 +646,9 @@ def run_gatk_HaplotypeCaller(outdir_gatk, ref, sorted_bam, ploidy, threads, cove
     # return the filtered file
     return gatk_out_filtered
 
-def run_bwa_mem(fastq1, fastq2, ref, outdir, bamfile, sorted_bam, index_bam, name_sample, threads=1, replace=False):
+def run_bwa_mem(fastq1, fastq2, ref, outdir, bamfile, sorted_bam, index_bam, name_sample, threads=1, replace=False, MarkDuplicates=True):
 
-    """Takes a set of files and runs bwa mem getting sorted_bam and index_bam"""
+    """Takes a set of files and runs bwa mem getting sorted_bam and index_bam. skip_MarkingDuplicates will not mark duplicates"""
 
     if file_is_empty(sorted_bam) or file_is_empty(index_bam) or replace is True:
 
@@ -718,19 +719,23 @@ def run_bwa_mem(fastq1, fastq2, ref, outdir, bamfile, sorted_bam, index_bam, nam
             # rename
             os.rename(sorted_bam_noMarkDups_tmp, sorted_bam_noMarkDups)
 
-        # mark duplicates
+        # mark duplicates or not, depending on MarkDuplicates
         if file_is_empty(sorted_bam) or replace is True:
-            print("marking duplicates")
 
-            # mark duplicates
-            sorted_bam_MarkedDuplicates = get_sortedBam_with_duplicatesMarked(sorted_bam_noMarkDups, threads=threads, replace=replace)
+            if MarkDuplicates is True:
 
-            # remove the the raw bam file
-            #print("Removing unsorted bam")
-            remove_file("%s.bai"%sorted_bam_MarkedDuplicates)
+                print("marking duplicates")
+                # mark duplicates
+                sorted_bam_MarkedDuplicates = get_sortedBam_with_duplicatesMarked(sorted_bam_noMarkDups, threads=threads, replace=replace)
 
-            # replace
-            os.rename(sorted_bam_MarkedDuplicates, sorted_bam)
+                # remove the the raw bam file
+                #print("Removing unsorted bam")
+                remove_file("%s.bai"%sorted_bam_MarkedDuplicates)
+
+                # replace
+                os.rename(sorted_bam_MarkedDuplicates, sorted_bam)
+
+            else: os.rename(sorted_bam_noMarkDups, sorted_bam)
 
         # remove unnecessary files
         remove_file(bamfile)
@@ -7585,7 +7590,7 @@ def get_ID_to_svtype_to_svDF_for_setOfGenomes_highConfidence(close_shortReads_ta
 
                 generate_jobarray_file_greasy(jobs_filename, walltime=time_perSVade_running,  name="getRealSVs", queue=queue_jobs, sbatch=True, ncores_per_task=threads, constraint="", number_tasks_to_run_at_once="all", max_ncores_queue=max_ncores_queue )
 
-                print("Exiting... You have to wait under all the jobs in testRealSVs are done. Wait until the jobs are done and rerun this pipeline to continue")
+                print("Exiting... You have to wait until all the jobs in testRealSVs are done. Wait until the jobs are done and rerun this pipeline to continue")
                 sys.exit(0)
 
         # get a df that has all the info for each SV, and then the df with allele freq, metadata and 
@@ -7933,7 +7938,7 @@ def run_wgsim_pairedEnd_for_window(genome, chromosome, start, end, readPairs, re
         elif (end + length_to_extend)<=len_chr: end = end + length_to_extend
 
         # if the region is longer than the chrom, just set the whole chromosome
-        if len_chr<min_length_region: 
+        elif len_chr<min_length_region: 
             start = 0
             end = len_chr
 
@@ -8090,133 +8095,169 @@ def run_wgsim_pairedEnd_per_windows_in_parallel(df_windows, genome, outdir, read
 
     return (allChunks_fastqgz_1, allChunks_fastqgz_2) 
 
+def run_seqtk_rename(origin_fastqgz, dest_fastqgz):
+
+    """This function takes an origin and a dest fastq gz and runs seqtk to rename the reads"""
+
+    if file_is_empty(seqtk): raise ValueError("seqtk is expected to be in %s"%seqtk)
+
+    run_cmd("%s rename %s read_ | pigz -c > %s"%(seqtk, origin_fastqgz, dest_fastqgz))
+
+
 def simulate_readPairs_per_window(df_windows, genome, npairs, outdir, read_length,  median_insert_size, median_insert_size_sd, replace=False, threads=4):
 
-    """Simulates npairs of short reads in a way that is consistent with the predicted_relative_coverage of the df_windows"""
+    """Simulates npairs of short reads in a way that is consistent with the predicted_relative_coverage of the df_windows. At the end, this will correct the reads by """
 
     # make the outdir if not there
     make_folder(outdir)
 
     # define the outputdirs
-    all_fastqgz_1 = "%s/all_reads1.fq.gz"%outdir; all_fastqgz_2 = "%s/all_reads2.fq.gz"%outdir
+    all_fastqgz_1 = "%s/all_reads1.fq.gz"%outdir
+    all_fastqgz_2 = "%s/all_reads2.fq.gz"%outdir
+    all_fastqgz_1_correct = "%s/all_reads1.correct.fq.gz"%outdir
+    all_fastqgz_2_correct = "%s/all_reads2.correct.fq.gz"%outdir
     outdir_whole_chromosomes = "%s/whole_chromosomes_simulation_with_min_reads"%outdir
     outdir_per_windows = "%s/per_window_simulation_with_extra_reads"%outdir
 
-    if any([file_is_empty(f) for f in [all_fastqgz_1, all_fastqgz_2]]) or replace is True:
+    if any([file_is_empty(f) for f in [all_fastqgz_1_correct, all_fastqgz_2_correct]]) or replace is True:
 
-        # delete previous folders and files
-        #delete_folder(outdir_whole_chromosomes); delete_folder(outdir_per_windows); remove_file(all_fastqgz_1); remove_file(all_fastqgz_2)
+        # define the tmp files
+        all_fastqgz_1_correct_tmp = "%s/all_reads1.correct.tmp.fq.gz"%outdir
+        all_fastqgz_2_correct_tmp = "%s/all_reads2.correct.tmp.fq.gz"%outdir
 
-        # add the chromosome lengths
-        chr_to_len = {seq.id: len(seq.seq) for seq in SeqIO.parse(genome, "fasta")}
-        df_windows["len_chromosome"] = df_windows.chromosome.apply(lambda x: chr_to_len[x])
+        # get the raw reads from wgsim
+        if any([file_is_empty(f) for f in [all_fastqgz_1, all_fastqgz_2]]) or replace is True:
 
-        # assign the number of readpairs to each window
-        uniform_n_readPairs_per_base = npairs / sum(set(df_windows.len_chromosome))
-        df_windows["window_length"] = df_windows.end - df_windows.start
-        df_windows["total_readPairs"] = (df_windows.window_length*uniform_n_readPairs_per_base) * df_windows.predicted_relative_coverage
+            # delete previous folders and files
+            #delete_folder(outdir_whole_chromosomes); delete_folder(outdir_per_windows); remove_file(all_fastqgz_1); remove_file(all_fastqgz_2)
 
-        # generate a df_windows that have sliding windows, so that each window appears twice and covers the intersection of df_windows. each window will get half of the reads that are expected
-        df_windows_sliding = pd.DataFrame()
+            # add the chromosome lengths
+            chr_to_len = {seq.id: len(seq.seq) for seq in SeqIO.parse(genome, "fasta")}
+            df_windows["len_chromosome"] = df_windows.chromosome.apply(lambda x: chr_to_len[x])
 
-        for chromosome in df_windows.chromosome.unique():
-            print("geting sliding window for %s"%chromosome)
+            # assign the number of readpairs to each window
+            uniform_n_readPairs_per_base = npairs / sum(set(df_windows.len_chromosome))
+            df_windows["window_length"] = df_windows.end - df_windows.start
+            df_windows["total_readPairs"] = (df_windows.window_length*uniform_n_readPairs_per_base) * df_windows.predicted_relative_coverage
 
-            # get the df with a unique numeric index
-            df_c = df_windows[df_windows.chromosome==chromosome][["chromosome", "start", "end", "total_readPairs", "window_length"]].sort_values(by=["chromosome", "start"])
-            df_c.index = list(range(len(df_c)))
+            # generate a df_windows that have sliding windows, so that each window appears twice and covers the intersection of df_windows. each window will get half of the reads that are expected
+            df_windows_sliding = pd.DataFrame()
 
-            if len(df_c)>1:
+            for chromosome in df_windows.chromosome.unique():
+                print("geting sliding window for %s"%chromosome)
 
-                # this only applies when there is more than 1 window
+                # get the df with a unique numeric index
+                df_c = df_windows[df_windows.chromosome==chromosome][["chromosome", "start", "end", "total_readPairs", "window_length"]].sort_values(by=["chromosome", "start"])
+                df_c.index = list(range(len(df_c)))
 
-                ##### define df_c_halfs, which has non_overlapping windows ####
+                if len(df_c)>1:
 
-                # get a df that has halfs of the windows, only from the first to the forelast ones --> this lacks the half of the first window and half of the last window
-                df_c_halfs = cp.deepcopy(df_c).iloc[0:-1][["chromosome", "start", "end", "window_length"]]
+                    # this only applies when there is more than 1 window
 
-                # define the starts
-                starts = list(df_c_halfs.apply(lambda r: r["start"] + int(r["window_length"]*0.5), axis=1)) # start at +half of the window
-                starts[0] = 0 # the first start is 0
+                    ##### define df_c_halfs, which has non_overlapping windows ####
 
-                # define the ends (half of the next window)
-                ends = [df_c_halfs.loc[I, "end"] + int(df_c.loc[I+1, "window_length"]*0.5) for I in df_c_halfs.index]
-                ends[-1] = df_c.iloc[-1].end
+                    # get a df that has halfs of the windows, only from the first to the forelast ones --> this lacks the half of the first window and half of the last window
+                    df_c_halfs = cp.deepcopy(df_c).iloc[0:-1][["chromosome", "start", "end", "window_length"]]
 
-                # add to df
-                df_c_halfs["start"] = starts; df_c_halfs["end"] = ends
-                df_c_halfs["window_length"] = df_c_halfs.end - df_c_halfs.start
+                    # define the starts
+                    starts = list(df_c_halfs.apply(lambda r: r["start"] + int(r["window_length"]*0.5), axis=1)) # start at +half of the window
+                    starts[0] = 0 # the first start is 0
 
-                #################################################################
+                    # define the ends (half of the next window)
+                    ends = [df_c_halfs.loc[I, "end"] + int(df_c.loc[I+1, "window_length"]*0.5) for I in df_c_halfs.index]
+                    ends[-1] = df_c.iloc[-1].end
 
-                # add to df_halfs the expected coverage as a function of the overlapping windows 
-                def get_reads_from_overlap_with_other_windows(r):
+                    # add to df
+                    df_c_halfs["start"] = starts; df_c_halfs["end"] = ends
+                    df_c_halfs["window_length"] = df_c_halfs.end - df_c_halfs.start
 
-                    """Takes a row and of the windows df and returns the reads as a function of the overlap with df_c"""
+                    #################################################################
 
-                    # get the index of this window, which is -500 than df_c
-                    I = r.name
+                    # add to df_halfs the expected coverage as a function of the overlapping windows 
+                    def get_reads_from_overlap_with_other_windows(r):
 
-                    # for the first window, take the first window and half of the second
-                    if I==0: return (df_c.loc[0].total_readPairs + df_c.loc[1].total_readPairs/2)
+                        """Takes a row and of the windows df and returns the reads as a function of the overlap with df_c"""
 
-                    # for the last window, get half of the forelast window and all the last one 
-                    if I==last_w: return (df_c.iloc[-2].total_readPairs/2 + df_c.iloc[-1].total_readPairs)
+                        # get the index of this window, which is -500 than df_c
+                        I = r.name
 
-                    # for the others, take half and half
-                    else: return (df_c.loc[I, "total_readPairs"]/2 + df_c.loc[I+1, "total_readPairs"]/2)
+                        # for the first window, take the first window and half of the second
+                        if I==0: return (df_c.loc[0].total_readPairs + df_c.loc[1].total_readPairs/2)
 
-                last_w = df_c_halfs.index[-1]
-                df_c_halfs["total_readPairs"] = df_c_halfs[["start", "end"]].apply(get_reads_from_overlap_with_other_windows, axis=1)
-                df_c_halfs = df_c_halfs[list(df_c.keys())]
+                        # for the last window, get half of the forelast window and all the last one 
+                        if I==last_w: return (df_c.iloc[-2].total_readPairs/2 + df_c.iloc[-1].total_readPairs)
 
-                # get the concatenated df
-                df_c_both = df_c_halfs.append(df_c, sort=True).sort_values(by=["chromosome", "start"])
+                        # for the others, take half and half
+                        else: return (df_c.loc[I, "total_readPairs"]/2 + df_c.loc[I+1, "total_readPairs"]/2)
 
-                # get half of the total_readPairs, as you have overlapping region
-                df_c_both["total_readPairs"] = (df_c_both.total_readPairs/2).apply(int) + 1 # I also add a pseudocount
+                    last_w = df_c_halfs.index[-1]
+                    df_c_halfs["total_readPairs"] = df_c_halfs[["start", "end"]].apply(get_reads_from_overlap_with_other_windows, axis=1)
+                    df_c_halfs = df_c_halfs[list(df_c.keys())]
 
-            else: 
+                    # get the concatenated df
+                    df_c_both = df_c_halfs.append(df_c, sort=True).sort_values(by=["chromosome", "start"])
 
-                # else all the reads go to this window
-                df_c_both = df_c.sort_values(by=["chromosome", "start"])
-                df_c_both["total_readPairs"] = df_c_both.total_readPairs.apply(int) + 1
+                    # get half of the total_readPairs, as you have overlapping region
+                    df_c_both["total_readPairs"] = (df_c_both.total_readPairs/2).apply(int) + 1 # I also add a pseudocount
 
-            # record the minimum 
-            min_read_pairs = min(df_c_both.total_readPairs)
-            df_c_both["min_readPairs"] = min_read_pairs
-            df_c_both["extra_readPairs"] = (df_c_both.total_readPairs - min_read_pairs) + 1 # also add a pseudocount to have non-empty regions
+                else: 
 
-            # append both dfs in a sorted manner
-            df_windows_sliding = df_windows_sliding.append(df_c_both, sort=True)
+                    # else all the reads go to this window
+                    df_c_both = df_c.sort_values(by=["chromosome", "start"])
+                    df_c_both["total_readPairs"] = df_c_both.total_readPairs.apply(int) + 1
 
-        # get chr as index
-        df_windows_sliding = df_windows_sliding.set_index("chromosome", drop=False)
+                # record the minimum 
+                min_read_pairs = min(df_c_both.total_readPairs)
+                df_c_both["min_readPairs"] = min_read_pairs
+                df_c_both["extra_readPairs"] = (df_c_both.total_readPairs - min_read_pairs) + 1 # also add a pseudocount to have non-empty regions
 
-        # first simulate reads for the whole chromosome, so that we simulate the minimum number of reads for each chromosome. This is useful to have paired end reads that span the whole chromosome, not only regions
-        chrom_to_len = {s.id: len(s.seq) for s in SeqIO.parse(genome, "fasta")}
-        df_windows_chromosomes_minCov = pd.DataFrame({I : {"start": 0, "end": len_chr, "chromosome": chrom, "readPairs": sum(df_windows_sliding[df_windows_sliding.chromosome==chrom]["min_readPairs"])} for I, (chrom, len_chr) in enumerate(chrom_to_len.items())}).transpose()
-        wholeChr_fastqgz1, wholeChr_fastqgz2 = run_wgsim_pairedEnd_per_windows_in_parallel(df_windows_chromosomes_minCov, genome, outdir_whole_chromosomes, read_length, median_insert_size, median_insert_size_sd, replace=replace)
+                # append both dfs in a sorted manner
+                df_windows_sliding = df_windows_sliding.append(df_c_both, sort=True)
 
-        # now simulate the reads for the regions, only considering the extra_readPairs
-        df_windows_sliding["readPairs"] = df_windows_sliding.extra_readPairs        
-        perWindow_fastqgz1, perWindow_fastqgz2 = run_wgsim_pairedEnd_per_windows_in_parallel(df_windows_sliding, genome, outdir_per_windows, read_length, median_insert_size, median_insert_size_sd, replace=replace)
+            # get chr as index
+            df_windows_sliding = df_windows_sliding.set_index("chromosome", drop=False)
 
-        # now concatenate all the simulated reads
-        print("Integrating all in one...")
-        all_fastqgz_1_tmp = "%s.tmp"%all_fastqgz_1; all_fastqgz_2_tmp = "%s.tmp"%all_fastqgz_2; 
+            # first simulate reads for the whole chromosome, so that we simulate the minimum number of reads for each chromosome. This is useful to have paired end reads that span the whole chromosome, not only regions
+            chrom_to_len = {s.id: len(s.seq) for s in SeqIO.parse(genome, "fasta")}
+            df_windows_chromosomes_minCov = pd.DataFrame({I : {"start": 0, "end": len_chr, "chromosome": chrom, "readPairs": sum(df_windows_sliding[df_windows_sliding.chromosome==chrom]["min_readPairs"])} for I, (chrom, len_chr) in enumerate(chrom_to_len.items())}).transpose()
+            wholeChr_fastqgz1, wholeChr_fastqgz2 = run_wgsim_pairedEnd_per_windows_in_parallel(df_windows_chromosomes_minCov, genome, outdir_whole_chromosomes, read_length, median_insert_size, median_insert_size_sd, replace=replace)
 
-        run_cmd("cat %s %s > %s"%(wholeChr_fastqgz1, perWindow_fastqgz1, all_fastqgz_1_tmp))
-        run_cmd("cat %s %s > %s"%(wholeChr_fastqgz2, perWindow_fastqgz2, all_fastqgz_2_tmp))
+            # now simulate the reads for the regions, only considering the extra_readPairs
+            df_windows_sliding["readPairs"] = df_windows_sliding.extra_readPairs        
+            perWindow_fastqgz1, perWindow_fastqgz2 = run_wgsim_pairedEnd_per_windows_in_parallel(df_windows_sliding, genome, outdir_per_windows, read_length, median_insert_size, median_insert_size_sd, replace=replace)
 
-        # rename to keep
-        os.rename(all_fastqgz_1_tmp, all_fastqgz_1); os.rename(all_fastqgz_2_tmp, all_fastqgz_2)
+            # now concatenate all the simulated reads
+            print("Integrating all in one...")
+            all_fastqgz_1_tmp = "%s.tmp"%all_fastqgz_1; all_fastqgz_2_tmp = "%s.tmp"%all_fastqgz_2; 
+
+            run_cmd("cat %s %s > %s"%(wholeChr_fastqgz1, perWindow_fastqgz1, all_fastqgz_1_tmp))
+            run_cmd("cat %s %s > %s"%(wholeChr_fastqgz2, perWindow_fastqgz2, all_fastqgz_2_tmp))
+
+            # rename to keep
+            os.rename(all_fastqgz_1_tmp, all_fastqgz_1); os.rename(all_fastqgz_2_tmp, all_fastqgz_2)
+
+
+        # correct the names with seqtk rename
+        print("running seqtk to correct read names from wgsim")
+        run_seqtk_rename(all_fastqgz_1, all_fastqgz_1_correct_tmp)
+        run_seqtk_rename(all_fastqgz_2, all_fastqgz_2_correct_tmp)
+
+        for f in [all_fastqgz_1_correct_tmp, all_fastqgz_2_correct_tmp]:
+            if file_is_empty(f): raise ValueError("%s is empty. Something went wrong with wgsim"%f)
+
+        # keep
+        os.rename(all_fastqgz_1_correct_tmp, all_fastqgz_1_correct)
+        os.rename(all_fastqgz_2_correct_tmp, all_fastqgz_2_correct)
 
     # remove previously generated folders
     delete_folder(outdir_whole_chromosomes); delete_folder(outdir_per_windows)
 
+    # delete all reads
+    remove_file(all_fastqgz_1)
+    remove_file(all_fastqgz_2)
+
     # return the simulated reads
-    return (all_fastqgz_1, all_fastqgz_2) 
+    return (all_fastqgz_1_correct, all_fastqgz_2_correct) 
 
 def simulate_and_align_PairedReads_perWindow(df_windows, genome_interest, reference_genome, npairs, read_length, outdir, median_insert_size, median_insert_size_sd, replace=False, threads=4):
 
@@ -8245,7 +8286,7 @@ def simulate_and_align_PairedReads_perWindow(df_windows, genome_interest, refere
         ######################################################
 
         ##### align the reads and retun the bam ######
-        run_bwa_mem(read1_fastqgz, read2_fastqgz, reference_genome, outdir, sim_bamfile, sim_sorted_bam, sim_index_bam, name_sample="simulations_reference_genome", threads=threads, replace=replace)
+        run_bwa_mem(read1_fastqgz, read2_fastqgz, reference_genome, outdir, sim_bamfile, sim_sorted_bam, sim_index_bam, name_sample="simulations_reference_genome", threads=threads, replace=True)
 
         # remove the fastq files
         print("deleting reads")
@@ -10495,7 +10536,7 @@ def plot_fraction_overlapping_realSVs(df_benchmarking, filename):
     fig.savefig(filename, bbox_inches='tight')
     plt.close(fig)
 
-def report_accuracy_realSVs(close_shortReads_table, reference_genome, outdir, real_svtype_to_file, outdir_finding_realVars, threads=4, replace=False, n_simulated_genomes=2, mitochondrial_chromosome="mito_C_glabrata_CBS138", simulation_ploidies=["haploid", "diploid_homo", "diploid_hetero", "ref:2_var:1", "ref:3_var:1", "ref:4_var:1", "ref:5_var:1", "ref:9_var:1", "ref:19_var:1", "ref:99_var:1"], range_filtering_benchmark="theoretically_meaningful", nvars=100, job_array_mode="local", max_ncores_queue=48, time_perSVade_running="02:00:00", queue_jobs="debug", StopAfter_testAccuracy_perSVadeRunning=False):
+def report_accuracy_realSVs(close_shortReads_table, reference_genome, outdir, real_svtype_to_file, SVs_compatible_to_insert_dir, threads=4, replace=False, n_simulated_genomes=2, mitochondrial_chromosome="mito_C_glabrata_CBS138", simulation_ploidies=["haploid", "diploid_homo", "diploid_hetero", "ref:2_var:1", "ref:3_var:1", "ref:4_var:1", "ref:5_var:1", "ref:9_var:1", "ref:19_var:1", "ref:99_var:1"], range_filtering_benchmark="theoretically_meaningful", nvars=100, job_array_mode="local", max_ncores_queue=48, time_perSVade_running="02:00:00", queue_jobs="debug", StopAfter_testAccuracy_perSVadeRunning=False):
 
 
     """This function runs the SV pipeline for all the datasets in close_shortReads_table with the fastSV, optimisation based on uniform parameters and optimisation based on realSVs (specified in real_svtype_to_file). The latter is skipped if real_svtype_to_file is empty"""
@@ -10548,9 +10589,6 @@ def report_accuracy_realSVs(close_shortReads_table, reference_genome, outdir, re
 
                 # define the final file 
                 final_file = "%s/perSVade_finished_file.txt"%outdir_runID
-
-                # define the path to the table with previous SVs comparible to insert
-                SVs_compatible_to_insert_dir = "%s/SVs_compatible_to_insert"%outdir_finding_realVars
 
                 # only contine if the final file is not defined
                 if file_is_empty(final_file) or replace is True:
@@ -11574,7 +11612,7 @@ def merge_several_vcfsSameSample_into_oneMultiSample_vcf(vcf_iterable, reference
                 vcf_df["%s_DP"%abb] = vcf_df[p].apply(lambda x: x.split(":")[DPidx]).apply(get_int_or0)
 
                 # add the AF by the program
-                vcf_df["%s_AF"%abb] = vcf_df["%s_readsCovVar"%abb] / vcf_df["%s_DP"%abb]
+                vcf_df["%s_AF"%abb] = (vcf_df["%s_readsCovVar"%abb] / vcf_df["%s_DP"%abb]).apply(getNaN_to_0)
 
                 # get the genotype
                 vcf_df["%s_GT"%abb] = vcf_df[p].apply(lambda x: x.split(":")[GTidx].replace("|", "/")) 
@@ -11605,8 +11643,6 @@ def merge_several_vcfsSameSample_into_oneMultiSample_vcf(vcf_iterable, reference
 
                 f_to_type["%s_called"%abb] = "String"
                 f_to_type["%s_PASS"%abb] = "String"
-
-
 
             print("getting common genotype")
             # get the common GT
@@ -11646,7 +11682,7 @@ def merge_several_vcfsSameSample_into_oneMultiSample_vcf(vcf_iterable, reference
                 # define the allele frequency  for the given set of algs
                 type_algs = targetField.split("_")[0]
                 new_field = "mean_fractionReadsCov_%s_algs"%type_algs
-                vcf_df[new_field] = vcf_df.apply(lambda r: np.mean([r["%s_AF"%alg] for alg in r[targetField] if alg!="."]), axis=1)
+                vcf_df[new_field] = vcf_df.apply(lambda r: np.mean([r["%s_AF"%alg] for alg in r[targetField] if alg!="."]), axis=1).apply(getNaN_to_0)
 
                 # keep
                 f_to_description[new_field] = "The mean fraction of reads covering this variant by the %s algorithms"%type_algs
@@ -11660,6 +11696,9 @@ def merge_several_vcfsSameSample_into_oneMultiSample_vcf(vcf_iterable, reference
             # add the programs' description
             for f, description in f_to_description.items(): header_lines += ['##INFO=<ID=%s,Number=1,Type=%s,Description="%s">'%(f, f_to_type[f], description)]
 
+            # test that some fields have non NaNs
+            for field in ["mean_fractionReadsCov_PASS_algs", "mean_DP", "common_GT"]: 
+                if any(pd.isna(vcf_df[field])): raise ValueError("There are NaNs in %s"%field)
 
             # write vcf
             vcf_lines = vcf_df[fields].to_csv(sep="\t", header=True, index=False)

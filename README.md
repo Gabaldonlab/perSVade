@@ -70,19 +70,23 @@ The conda environment can be exported to a .yml file with:
 
 ## Running in MareNostrum
 
-If you are working from any cluster that has access to the BSC /gpfs filesystem you can activate the perSVade environment from its location in mschikora. The only risk is that Miki may be editing the environment for the development of perSVade. You should be running this from an interactive node in MN like this:
+If you are working from any cluster that has access to the BSC /gpfs filesystem you can activate the perSVade environment from its location in mschikora. You should be running this from an interactive node in MN like this:
 
 `salloc -n 1 -c 48 -t 02:00:00 --qos debug` # runs an interactive session. ESSENTIAL
 
 `source /gpfs/projects/bsc40/mschikora/anaconda3/etc/profile.d/conda.sh`  # activate the conda environment of mschikora
 
-`conda activate perSVade_env` # activate the environment
+`conda activate perSVade_v0.2_env` # activate the environment of perSVade version 0.2. You can change the version
 
 VERY IMPORTANT NOTE:
 
 NEVER activate the enviroment in the login of MN, as this is a large environment and uses a lot of resources. In fact, sometimes the login FAILS for all MN users when you activate this environent, so please don't do it.
 
-## Running
+You can next run perSVade from the releases folder (these are stable versions of the pipeline). For example:
+
+`python /gpfs/projects/bsc40/mschikora/scripts/perSVade/releases/v0.2/scripts/perSVade.py -r <path to the reference genome (fasta)> -o <output_directory> -p <ploidy, 1 or 2> -f1 <forward_reads.fastq.gz> -f2 <reverse_reads.fastq.gz> `
+
+## Running in other systems
 Once you have installed all the dependencies, you can call the perSVade pipeline with:
 
 `conda activate perSVade_env`
