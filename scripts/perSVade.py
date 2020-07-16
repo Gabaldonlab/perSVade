@@ -95,7 +95,7 @@ parser.add_argument("--range_filtering_benchmark", dest="range_filtering_benchma
 # alignment args
 parser.add_argument("-f1", "--fastq1", dest="fastq1", default=None, help="fastq_1 file. Option required to obtain bam files. It can be 'skip'")
 parser.add_argument("-f2", "--fastq2", dest="fastq2", default=None, help="fastq_2 file. Option required to obtain bam files. It can be 'skip'")
-parser.add_argument("-sbam", "--sortedbam", dest="sortedbam", default=None, help="The path to the sorted bam file, which should have a bam.bai file in the same dir. This is mutually exclusive with providing reads")
+parser.add_argument("-sbam", "--sortedbam", dest="sortedbam", default=None, help="The path to the sorted bam file, which should have a bam.bai file in the same dir. This is mutually exclusive with providing reads. By default, it is assumed that this bam has marked duplicates. If not, you can merk them with the option --markDuplicates_inBam.")
 parser.add_argument("--run_qualimap", dest="run_qualimap", action="store_true", default=False, help="Run qualimap for quality assessment of bam files. This may be inefficient sometimes because of the ")
 
 # machine options
@@ -122,7 +122,8 @@ parser.add_argument("-c", "--coverage", dest="coverage", default=20, type=int, h
 parser.add_argument("-mcode", "--mitochondrial_code", dest="mitochondrial_code", default=3, type=int, help="The code of the NCBI mitochondrial genetic code. For yeasts it is 3. You can find the numbers for your species here https://www.ncbi.nlm.nih.gov/Taxonomy/Utils/wprintgc.cgi")
 parser.add_argument("-gcode", "--gDNA_code", dest="gDNA_code", default=1, type=int, help="The code of the NCBI gDNA genetic code. You can find the numbers for your species here https://www.ncbi.nlm.nih.gov/Taxonomy/Utils/wprintgc.cgi . For C. albicans it is 12. ")
 parser.add_argument("--remove_smallVarsCNV_nonEssentialFiles", dest="remove_smallVarsCNV_nonEssentialFiles", action="store_true", default=False, help="Will remove all the varCall files except the integrated final file and the bam file.")
-parser.add_argument("--smallVarsCNV_markDuplicates_inBam", dest="smallVarsCNV_markDuplicates_inBam", action="store_true", default=False, help="Will mark the duplicates in the bam file in the smallVarsCNV pipeline")
+parser.add_argument("--markDuplicates_inBam", dest="markDuplicates_inBam", action="store_true", default=False, help="Will mark the duplicates in the bam file. This is only necessary if the input of the pipeline is a sorted bam (-sbam) instead of raw reads.")
+parser.add_argument("--replace_var_integration", dest="replace_var_integration", action="store_true", help="Replace all the variant integration steps for smallVariantCalling.")
 
 # small varCall stop options
 parser.add_argument("--StopAfter_smallVarCallSimpleRunning", dest="StopAfter_smallVarCallSimpleRunning", action="store_true", default=False, help="Stop after obtaining the filtered vcf outputs of each program.")
@@ -230,6 +231,10 @@ if not any([x=="skip" for x in {opt.fastq1, opt.fastq2}]):
 
 
     else: print("Warning: No fastq file given, assuming that you provided a bam file")
+
+    # mark duplicates if neccessary 
+    if opt.markDuplicates_inBam is True: sorted_bam = fun.get_sortedBam_with_duplicatesMarked(sorted_bam, threads=opt.threads, replace=opt.replace)
+
 
 
     # check that all the important files exist
@@ -354,6 +359,9 @@ elif opt.fast_SVcalling is False and opt.close_shortReads_table is not None:
     # get the real SVs
     real_svtype_to_file = fun.get_compatible_real_svtype_to_file(opt.close_shortReads_table, opt.ref, outdir_finding_realVars, replace=opt.replace, threads=opt.threads, max_nvars=opt.nvars, mitochondrial_chromosome=opt.mitochondrial_chromosome, job_array_mode=opt.job_array_mode, max_ncores_queue=opt.max_ncores_queue, time_perSVade_running=opt.time_perSVade_running, queue_jobs=opt.queue_jobs)
 
+    # redefine the SVs_compatible_to_insert_dir
+    opt.SVs_compatible_to_insert_dir = "%s/SVs_compatible_to_insert"%outdir_finding_realVars
+
 else: 
     print("Avoiding the simulation of real variants. Only inserting randomSV.")
 
@@ -376,7 +384,7 @@ if opt.testAccuracy is True:
     if opt.close_shortReads_table is None or opt.fast_SVcalling is True: 
         raise ValueError("You have to specify a --close_shortReads_table and not run in --fast_SVcalling to test the accuracy of the pipeline on several datasets (--testAccuracy)")
 
-    fun.report_accuracy_realSVs(opt.close_shortReads_table, opt.ref, "%s/testing_Accuracy"%opt.outdir, real_svtype_to_file, outdir_finding_realVars, threads=opt.threads, replace=opt.replace, n_simulated_genomes=opt.nsimulations, mitochondrial_chromosome=opt.mitochondrial_chromosome, simulation_ploidies=simulation_ploidies, range_filtering_benchmark=opt.range_filtering_benchmark, nvars=opt.nvars, job_array_mode=opt.job_array_mode, max_ncores_queue=opt.max_ncores_queue, time_perSVade_running=opt.time_perSVade_running, queue_jobs=opt.queue_jobs, StopAfter_testAccuracy_perSVadeRunning=opt.StopAfter_testAccuracy_perSVadeRunning)
+    fun.report_accuracy_realSVs(opt.close_shortReads_table, opt.ref, "%s/testing_Accuracy"%opt.outdir, real_svtype_to_file, opt.SVs_compatible_to_insert_dir, threads=opt.threads, replace=opt.replace, n_simulated_genomes=opt.nsimulations, mitochondrial_chromosome=opt.mitochondrial_chromosome, simulation_ploidies=simulation_ploidies, range_filtering_benchmark=opt.range_filtering_benchmark, nvars=opt.nvars, job_array_mode=opt.job_array_mode, max_ncores_queue=opt.max_ncores_queue, time_perSVade_running=opt.time_perSVade_running, queue_jobs=opt.queue_jobs, StopAfter_testAccuracy_perSVadeRunning=opt.StopAfter_testAccuracy_perSVadeRunning)
 
 
 # get the golden set
@@ -416,10 +424,8 @@ if opt.run_smallVarsCNV:
     if opt.gff is not None: varcall_cmd += " -gff %s"%opt.gff
     if opt.remove_smallVarsCNV_nonEssentialFiles is True: varcall_cmd += " --remove_smallVarsCNV_nonEssentialFiles"
     if opt.StopAfter_smallVarCallSimpleRunning is True: varcall_cmd += " --StopAfter_smallVarCallSimpleRunning"
-    if opt.smallVarsCNV_markDuplicates_inBam is True: varcall_cmd += " --smallVarsCNV_markDuplicates_inBam"
-
-
-
+    if opt.replace_var_integration is True: varcall_cmd += " --replace_var_integration"
+    
     # run
     fun.run_cmd(varcall_cmd)
 

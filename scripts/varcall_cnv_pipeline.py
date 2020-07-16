@@ -60,7 +60,7 @@ parser.add_argument("-r", "--ref", dest="ref", required=True, help="Reference ge
 parser.add_argument("-thr", "--threads", dest="threads", default=2, type=int, help="Number of threads, Default: 16")
 parser.add_argument("-o", "--outdir", dest="outdir", action="store", required=True, help="Directory where the data will be stored")
 parser.add_argument("--replace", dest="replace", action="store_true", help="Replace existing files")
-parser.add_argument("--replace_vep_integration", dest="replace_vep_integration", action="store_true", help="Replace existing files of the merging of the VEP output and the vcf files. This is for debugging purposes")
+parser.add_argument("--replace_var_integration", dest="replace_var_integration", action="store_true", help="Replace all the variant integration steps")
 parser.add_argument("-p", "--ploidy", dest="ploidy", default=1, type=int, help="Ploidy, can be 1 or 2")
 
 # alignment args
@@ -75,10 +75,6 @@ parser.add_argument("-gcode", "--gDNA_code", dest="gDNA_code", default=1, type=i
 
 # CNV args
 parser.add_argument("--skip_cnv_analysis", dest="skip_cnv_analysis", action="store_true", default=False, help="Skipp the running of the CNV pipeline, which outputs the number of copies that each gene has according to coverage. The gene ID's are based on the GFF3 files that have been provided in -gff")
- 
-# avoid marking duplicates
-parser.add_argument("--smallVarsCNV_markDuplicates_inBam", dest="smallVarsCNV_markDuplicates_inBam", action="store_true", default=False, help="Mark duplicates on the input bam")
-
 
 # othe args
 parser.add_argument("-gff", "--gff-file", dest="gff", default=None, help="path to the GFF3 annotation of the reference genome. Make sure that the IDs are completely unique for each 'gene' tag. This is necessary for both the CNV analysis (it will look at genes there) and the annotation of the variants.")
@@ -153,10 +149,8 @@ if fun.file_is_empty("%s.fai"%opt.ref) or opt.replace is True:
     cmd_indexRef = "%s faidx %s"%(samtools, opt.ref); fun.run_cmd(cmd_indexRef) # This creates a .bai file of the reference
 
 
-# marking duplicates or not
-if opt.smallVarsCNV_markDuplicates_inBam is True: sorted_bam = fun.get_sortedBam_with_duplicatesMarked(opt.sortedbam, threads=opt.threads, replace=opt.replace)
-
-else: sorted_bam = opt.sortedbam
+# define the sorted bam
+sorted_bam = opt.sortedbam
 print("running VarCall for %s"%sorted_bam)
 
 #####################################
@@ -317,6 +311,9 @@ if opt.StopAfter_smallVarCallSimpleRunning is True:
 ##### GET THE INTEGRATED VARS ##### 
 ################################### 
 
+# redefine opt.replace from --replace_var_integration
+opt.replace = opt.replace or opt.replace_var_integration
+
 # get the merged vcf records (these are multiallelic)
 print("getting merged vcf without multialleles")
 merged_vcf_all = fun.merge_several_vcfsSameSample_into_oneMultiSample_vcf(filtered_vcf_results, opt.ref, opt.outdir, opt.ploidy, replace=opt.replace, threads=opt.threads)
@@ -334,7 +331,6 @@ variantCallingStats_tablePrefix = "%s/variant_calling_stats_ploidy%i"%(opt.outdi
 fun.report_variant_calling_statistics(df_variants, variantCallingStats_tablePrefix, all_programs)
 
 ##### KEEP VCFS THAT PASS some programs #########
-
 for minPASS_algs in [1, 2, 3]:
 
     simplified_vcf_PASSalgs = "%s/variants_atLeast%iPASS_ploidy%i.vcf"%(opt.outdir, minPASS_algs, opt.ploidy)
@@ -362,8 +358,15 @@ for minPASS_algs in [1, 2, 3]:
         # set the format
         df_PASS["FORMAT"] = "GT:AF:DP"
 
+        # check that there are no NaNs in mean_fractionReadsCov_PASS_algs and mean_DP
+        for field in ["mean_fractionReadsCov_PASS_algs", "mean_DP", "common_GT"]: 
+            if any(pd.isna(df_PASS[field])): 
+                df_nan = df_PASS[pd.isna(df_PASS[field])]
+                print(df_nan, df_nan.mean_fractionReadsCov_PASS_algs, df_nan.mean_DP, df_nan["ID"])
+                raise ValueError("There are NaNs in %s"%field)
+
         # add the sample according to FORMAT
-        df_PASS["SAMPLE"] = df_PASS.common_GT + ":" + df_PASS.mean_fractionReadsCov_PASS_algs.apply(lambda x: "%.4f"%x) + ":" + df_PASS.mean_DP.apply(lambda x: "%.4f"%x)
+        df_PASS["SAMPLE"] = df_PASS.common_GT.apply(str) + ":" + df_PASS.mean_fractionReadsCov_PASS_algs.apply(lambda x: "%.4f"%x) + ":" + df_PASS.mean_DP.apply(lambda x: "%.4f"%x)
 
         # initialize header lines
         valid_header_starts = ["fileformat", "contig", "reference", "phasing"]
@@ -393,7 +396,6 @@ if opt.gff is None:
     sys.exit(0)
 
 ######### RUN VEP AND GENERATE ANNOTATION TABLE #########
-
 variantAnnotation_table = "%s/variant_annotation_ploidy%i.tab"%(opt.outdir, opt.ploidy)
 if fun.file_is_empty(variantAnnotation_table) or opt.replace is True:
 
@@ -401,7 +403,7 @@ if fun.file_is_empty(variantAnnotation_table) or opt.replace is True:
     annotated_vcf = "%s_annotated.tab"%merged_vcf_all; annotated_vcf_tmp = "%s.tmp"%annotated_vcf
 
     # run annotation by VEP
-    if fun.file_is_empty(annotated_vcf) or opt.replace is True or opt.replace_vep_integration is True:
+    if fun.file_is_empty(annotated_vcf) or opt.replace is True:
 
         print("Annotating with VEP %s"%merged_vcf_all)
         fun.remove_file(annotated_vcf)
@@ -441,8 +443,6 @@ if fun.file_is_empty(variantAnnotation_table) or opt.replace is True:
     df_vep['is_snp'] = (df_vep["ref"].apply(len)==1) & (df_vep["ref"]!="-") & (df_vep["alt"].apply(len)==1) & (df_vep["alt"]!="-")
 
     prot_altering_mutations = {'missense_variant', 'start_lost', 'inframe_deletion', 'protein_altering_variant', 'stop_gained', 'inframe_insertion', 'frameshift_variant', 'stop_lost', 'splice_acceptor_variant', 'splice_donor_variant', 'splice_region_variant', 'non_coding_transcript_exon_variant'}
-
-
 
     df_vep["consequences_set"] = df_vep.Consequence.apply(lambda x: set(str(x).split(",")))
     df_vep["is_protein_altering"] = df_vep.consequences_set.apply(lambda x: len(x.intersection(prot_altering_mutations))>0)
