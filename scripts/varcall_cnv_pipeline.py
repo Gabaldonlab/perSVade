@@ -69,7 +69,7 @@ parser.add_argument("-sbam", "--sortedbam", dest="sortedbam", required=True, typ
 # variant calling args
 parser.add_argument("-caller", "--caller", dest="caller", required=False, default="all", help="SNP caller option to obtain vcf file. options: no/all/HaplotypeCaller/bcftools/freebayes.")
 parser.add_argument("-c", "--coverage", dest="coverage", default=20, type=int, help="minimum Coverage (int)")
-parser.add_argument("-mchr", "--mitochondrial_chromosome", dest="mitochondrial_chromosome", default="mito_C_glabrata_CBS138", type=str, help="The name of the mitochondrial chromosome. This is important if you have mitochondrial proteins for which to annotate the impact of nonsynonymous variants, as the mitochondrial genetic code is different. This should be the same as in the gff. If there is no mitochondria just put no_mitochondria")
+parser.add_argument("-mchr", "--mitochondrial_chromosome", dest="mitochondrial_chromosome", default="mito_C_glabrata_CBS138", type=str, help="The name of the mitochondrial chromosome. This is important if you have mitochondrial proteins for which to annotate the impact of nonsynonymous variants, as the mitochondrial genetic code is different. This should be the same as in the gff. If there is no mitochondria just put 'no_mitochondria'")
 parser.add_argument("-mcode", "--mitochondrial_code", dest="mitochondrial_code", default=3, type=int, help="The code of the NCBI mitochondrial genetic code. For yeasts it is 3. You can find the numbers for your species here https://www.ncbi.nlm.nih.gov/Taxonomy/Utils/wprintgc.cgi")
 parser.add_argument("-gcode", "--gDNA_code", dest="gDNA_code", default=1, type=int, help="The code of the NCBI gDNA genetic code. You can find the numbers for your species here https://www.ncbi.nlm.nih.gov/Taxonomy/Utils/wprintgc.cgi . For C. albicans it is 12. ")
 
@@ -78,6 +78,7 @@ parser.add_argument("--skip_cnv_analysis", dest="skip_cnv_analysis", action="sto
 
 # othe args
 parser.add_argument("-gff", "--gff-file", dest="gff", default=None, help="path to the GFF3 annotation of the reference genome. Make sure that the IDs are completely unique for each 'gene' tag. This is necessary for both the CNV analysis (it will look at genes there) and the annotation of the variants.")
+parser.add_argument("--pooled_sequencing", dest="pooled_sequencing", action="store_true", default=False, help="It is a pooled sequencing run, which means that the small variant calling is not done based on ploidy. If you are also running SV calling, check that the simulation_ploidies, resemble a population,")
 
 # removing args
 parser.add_argument("--remove_smallVarsCNV_nonEssentialFiles", dest="remove_smallVarsCNV_nonEssentialFiles", action="store_true", default=False, help="Will remove all the varCall files except the integrated final file, the filtered and normalised vcfs, the raw vcf and the CNV files.")
@@ -205,10 +206,13 @@ print("CNV analysis finished")
 # initialize an array of files that have the VCF results filtered
 filtered_vcf_results = []
 
+# debug the fact that you don't want any pooled_sequencing for bcftools
+if opt.pooled_sequencing is True: opt.caller = "freebayes"
+
 # Go through the callers, creating in outdir a folder with the results of each
 if opt.caller == "no": print("Stop. Doing the variant calling is not necessary.")
     
-if opt.caller == "HaplotypeCaller" or opt.caller == "all":
+if "HaplotypeCaller" in opt.caller or opt.caller == "all":
 
     print("RUNNING GATK: HaplotypeCaller")
 
@@ -223,7 +227,7 @@ if opt.caller == "HaplotypeCaller" or opt.caller == "all":
     
     print("HaplotypeCaller is done")
 
-if opt.caller == "bcftools" or opt.caller == "all":
+if "bcftools" in opt.caller or opt.caller == "all":
 
     print("RUNNING bcftools")
 
@@ -286,7 +290,7 @@ if opt.caller == "bcftools" or opt.caller == "all":
 
     print("bcftools is done")
 
-if opt.caller == "freebayes" or opt.caller == "all":
+if "freebayes" in opt.caller or opt.caller == "all":
 
     print("RUNNING freebayes")
 
@@ -294,7 +298,7 @@ if opt.caller == "freebayes" or opt.caller == "all":
     outdir_freebayes = "%s/freebayes_ploidy%i_out"%(opt.outdir, opt.ploidy)
 
     # run freebayes
-    freebayes_filtered =  fun.run_freebayes_parallel(outdir_freebayes, opt.ref, sorted_bam, opt.ploidy, opt.coverage, replace=opt.replace) 
+    freebayes_filtered =  fun.run_freebayes_parallel(outdir_freebayes, opt.ref, sorted_bam, opt.ploidy, opt.coverage, replace=opt.replace, pooled_sequencing=opt.pooled_sequencing) 
 
     # keep
     filtered_vcf_results.append(freebayes_filtered)

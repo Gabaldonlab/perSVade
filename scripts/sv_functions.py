@@ -619,9 +619,10 @@ def run_gatk_HaplotypeCaller(outdir_gatk, ref, sorted_bam, ploidy, threads, cove
     # run GATK
     gatk_out = "%s/output.raw.vcf"%outdir_gatk; gatk_out_tmp = "%s.tmp"%gatk_out
     if file_is_empty(gatk_out) or replace is True:
+        print("Running GATK HaplotypeCaller in ploidy mode...")
 
-        print("Running GATK HaplotypeCaller...")
-        gatk_cmd = "%s HaplotypeCaller -R %s -I %s -O %s -ploidy %i --genotyping-mode DISCOVERY --emit-ref-confidence NONE --stand-call-conf 30 --native-pair-hmm-threads %i > %s.log"%(gatk, ref, sorted_bam, gatk_out_tmp, ploidy, threads, gatk_out); run_cmd(gatk_cmd)
+        gatk_cmd = "%s HaplotypeCaller -R %s -I %s -O %s -ploidy %i --genotyping-mode DISCOVERY --emit-ref-confidence NONE --stand-call-conf 30 --native-pair-hmm-threads %i > %s.log"%(gatk, ref, sorted_bam, gatk_out_tmp, ploidy, threads, gatk_out)
+        run_cmd(gatk_cmd)
         os.rename(gatk_out_tmp, gatk_out)
 
         # rename the index as well
@@ -630,7 +631,6 @@ def run_gatk_HaplotypeCaller(outdir_gatk, ref, sorted_bam, ploidy, threads, cove
     # variant filtration. There's a field called filter that has the FILTER argument
     gatk_out_filtered = "%s/output.filt.vcf"%outdir_gatk; gatk_out_filtered_tmp = "%s.tmp"%gatk_out_filtered
     if file_is_empty(gatk_out_filtered) or replace is True:
-
         print("Running GATK HaplotypeCaller Variant filtration...")
 
         # this depends on the ploidy. If ploidy is 2 you don't want to filter out heterozygous positions
@@ -643,6 +643,7 @@ def run_gatk_HaplotypeCaller(outdir_gatk, ref, sorted_bam, ploidy, threads, cove
         # rename the index as well
         os.rename("%s.tmp.idx"%gatk_out_filtered, "%s.idx"%gatk_out_filtered)
 
+   
     # return the filtered file
     return gatk_out_filtered
 
@@ -4678,7 +4679,7 @@ def download_srr_subsetReads_onlyFastqDump(srr, download_dir, subset_n_reads=100
 
     return reads1, reads2
 
-def run_freebayes_for_chromosome(chromosome_id, outvcf_folder, ref, sorted_bam, ploidy, coverage, replace):
+def run_freebayes_for_chromosome(chromosome_id, outvcf_folder, ref, sorted_bam, ploidy, coverage, replace, pooled_sequencing):
 
     """Takes a chromosome ID and the fasta file and an outvcf and runs freebayes on it"""
 
@@ -4700,7 +4701,14 @@ def run_freebayes_for_chromosome(chromosome_id, outvcf_folder, ref, sorted_bam, 
 
         # run freebayes
         freebayes_std = "%s.std"%outvcf_tmp
-        run_cmd("%s -f %s -p %i --min-coverage %i -b %s --haplotype-length -1 -v %s > %s 2>&1"%(freebayes, fasta_chromosome, ploidy, coverage, sorted_bam_chr, outvcf_tmp, freebayes_std))
+        print("running freebayes with STD %s"%freebayes_std)
+
+        if pooled_sequencing is True:
+            print("running for pooled data")
+            run_cmd("%s -f %s --haplotype-length -1 --min-alternate-count %i --min-alternate-fraction 0 --pooled-continuous -b %s -v %s > %s 2>&1"%(freebayes, fasta_chromosome, coverage, sorted_bam_chr, outvcf_tmp, freebayes_std))
+        else: 
+            print("running unpooled sequencing")
+            run_cmd("%s -f %s -p %i --min-coverage %i -b %s --haplotype-length -1 -v %s > %s 2>&1"%(freebayes, fasta_chromosome, ploidy, coverage, sorted_bam_chr, outvcf_tmp, freebayes_std))
 
         # remove the intermediate files
         #print("%s exists %s"%(fasta_chromosome, str(file_is_empty(fasta_chromosome))))
@@ -4939,7 +4947,7 @@ def load_vcf_intoDF_GettingFreq_AndFilter(vcf_file):
     return df[["#CHROM", "POS", "ID", "REF", "ALT", "QUAL", "FILTER", "INFO", "FORMAT",  data_colname]], var_to_frequency, var_to_filter, var_to_GT, var_to_filters
 
 
-def run_freebayes_parallel(outdir_freebayes, ref, sorted_bam, ploidy, coverage, replace=False):
+def run_freebayes_parallel(outdir_freebayes, ref, sorted_bam, ploidy, coverage, replace=False, pooled_sequencing=False):
 
     """It parallelizes over the current CPUs of the system"""
 
@@ -4965,7 +4973,7 @@ def run_freebayes_parallel(outdir_freebayes, ref, sorted_bam, ploidy, coverage, 
         chromosome_vcfs_dir = "%s/chromosome_vcfs"%outdir_freebayes; make_folder(chromosome_vcfs_dir)
 
         # run in parallel the freebayes generation for all the 
-        chromosomal_vcfs = pool.starmap(run_freebayes_for_chromosome, [(ID, chromosome_vcfs_dir, ref, sorted_bam, ploidy, coverage, replace) for ID in all_chromosome_IDs])
+        chromosomal_vcfs = pool.starmap(run_freebayes_for_chromosome, [(ID, chromosome_vcfs_dir, ref, sorted_bam, ploidy, coverage, replace, pooled_sequencing) for ID in all_chromosome_IDs])
 
         # close the pool
         pool.close()
@@ -5008,9 +5016,17 @@ def run_freebayes_parallel(outdir_freebayes, ref, sorted_bam, ploidy, coverage, 
     # filter the freebayes by quality
     freebayes_filtered = "%s/output.filt.vcf"%outdir_freebayes; freebayes_filtered_tmp = "%s.tmp"%freebayes_filtered
     if file_is_empty(freebayes_filtered) or replace is True:
-        #print("filtering freebayes")
-        cmd_filter_fb = '%s -f "QUAL > 1 & QUAL / AO > 10 & SAF > 0 & SAR > 0 & RPR > 1 & RPL > 1" --tag-pass PASS %s > %s'%(vcffilter, freebayes_output, freebayes_filtered_tmp); run_cmd(cmd_filter_fb)
-        os.rename(freebayes_filtered_tmp, freebayes_filtered)
+
+        if pooled_sequencing is True:
+
+            run_cmd("rm %s"%freebayes_filtered)
+            run_cmd("ln -s %s %s"%(freebayes_output, freebayes_filtered))
+
+        else:
+
+            #print("filtering freebayes")
+            cmd_filter_fb = '%s -f "QUAL > 1 & QUAL / AO > 10 & SAF > 0 & SAR > 0 & RPR > 1 & RPL > 1" --tag-pass PASS %s > %s'%(vcffilter, freebayes_output, freebayes_filtered_tmp); run_cmd(cmd_filter_fb)
+            os.rename(freebayes_filtered_tmp, freebayes_filtered)
 
     return freebayes_filtered
 
@@ -11629,11 +11645,14 @@ def merge_several_vcfsSameSample_into_oneMultiSample_vcf(vcf_iterable, reference
                 vcf_df["%s_PASS"%abb] = vcf_df.PASS_algs_set.apply(lambda x: abb in x)
                 
                 # add to info
-                info_series += ";%s_fractionReadsCov="%abb + vcf_df["%s_AF"%abb].apply(lambda x: "%.4f"%x) + ";%s_GT="%abb + vcf_df["%s_GT"%abb] + ";%s_called="%abb + vcf_df["%s_called"%abb].apply(str) + ";%s_PASS="%abb + vcf_df["%s_PASS"%abb].apply(str)
+                info_series += ";%s_fractionReadsCov="%abb + vcf_df["%s_AF"%abb].apply(lambda x: "%.4f"%x) + ";%s_GT="%abb + vcf_df["%s_GT"%abb] + ";%s_called="%abb + vcf_df["%s_called"%abb].apply(str) + ";%s_PASS="%abb + vcf_df["%s_PASS"%abb].apply(str) + ";%s_readsCovVar="%abb + vcf_df["%s_readsCovVar"%abb].apply(str)
 
                 # add the headers
                 f_to_description["%s_fractionReadsCov"%abb] = "The fraction of reads covering this var by %s"%p
                 f_to_type["%s_fractionReadsCov"%abb] = "Float"
+
+                f_to_description["%s_readsCovVar"%abb] = "The number of reads covering this var by %s"%p
+                f_to_type["%s_readsCovVar"%abb] = "Integer"
 
                 f_to_description["%s_GT"%abb] = "The GT by %s"%p
                 f_to_type["%s_GT"%abb] = "String"
@@ -11862,3 +11881,85 @@ def report_variant_calling_statistics(df, variantCallingStats_tablePrefix, progr
         df_stats = pd.DataFrame(stats_dict)
         print("\n", df_stats)
         df_stats.to_csv("%s_%s.tab"%(variantCallingStats_tablePrefix, type_filter), sep="\t")
+
+
+def run_perSVade_severalSamples(paths_df, cwd, common_args, time_greasy="48:00:00", threads=4, sampleID_to_parentIDs={}, samples_to_run=set(), repeat=False, mn_queue="bsc_ls", job_array_mode="greasy", max_ncores_queue=48, ploidy=1):
+
+ 
+    """
+    This function inputs a paths_df, which contains an index as 0-N rows and columns "reads", "sampleID", "readID"  and runs the perSVade pipeline without repeating steps (unless indicated). pths_df can also be a tab-sepparated file were there are this 3 fields. The trimmed_reads_dir has to be the full path to the .fastq file. The sampleID has to be the unique sample identifier and the readID has to be R1 or R2 for paired-end sequencing. The p
+
+    - cwd is the current working directory, where files will be written
+    - repeat is a boolean that indicates whether to repeat all the steps of this function
+    - threads are the number of cores per task allocated. In mn, you can use 48 cores per node. It has not been tested whether more cores can be used per task
+    - samples_to_run is a set of samples for which we want to run all the pipeline
+    - time_greasy is the time greasy gets in DD:HH:MM
+    - mn_queue is the queue were you want to throw the pipeline. You can use "bsc_queues" to see which you have. debug is a faster one, but you can only specify 2h 
+    - job_array_mode can be 'greasy' or 'local'. If local each job will be run after the other
+    - sampleID_to_parentIDs is a dictionary that maps each sampleID to the parent sampleIDs (a set), in a way that there will be a col called parentIDs_with_var, which is a string of ||-joined parent IDs where the variant is also found
+    - common_args is a string with all the perSVade args except the reads. The arguments added will be -o, -f1, -f2
+    - max_ncores_queue is the total number of cores that will be assigned to the job.
+    - ploidy is the ploidy with which to run the varcall
+    """
+
+    print("Running VarCall pipeline...")
+
+    # if it is a path
+    if type(paths_df)==str: paths_df = pd.read_csv(paths_df, sep="\t")
+
+    # create files that are necessary
+    VarCallOutdirs = "%s/VarCallOutdirs"%cwd; make_folder(VarCallOutdirs)
+    
+    # define the samples_to_run
+    if len(samples_to_run)==0: samples_to_run = set(paths_df.sampleID)
+
+    # get the info of all the reads and samples
+    all_cmds = []
+
+    for sampleID in samples_to_run:
+
+        # define the df for this sample
+        df = paths_df[paths_df.sampleID==sampleID]
+        df1 = df[df.readID=="R1"]
+        df2 = df[df.readID=="R2"]
+
+        # define the reads of interest and keep
+        reads1 = df1.reads.values[0]
+        reads2 = df2.reads.values[0]
+
+        # create an outdir
+        outdir = "%s/%s_VarCallresults"%(VarCallOutdirs, sampleID); make_folder(outdir)
+
+        # define the files that shoud be not empty in order not to run this code
+        success_files = ["%s/smallVars_CNV_output/variant_annotation_ploidy%i.tab"%(outdir, ploidy)]
+                   
+        # define the cmd          
+        cmd = "%s -f1 %s -f2 %s -o %s --ploidy %i %s"%(perSVade_py, reads1, reads2, outdir, ploidy, common_args)
+
+        # add cmd if necessary
+        if any([file_is_empty(x) for x in success_files]) or repeat is True: all_cmds.append(cmd)
+
+    # submit to cluster or return True
+    if len(all_cmds)>0:
+
+        if job_array_mode=="local":
+
+            for Icmd, cmd in enumerate(all_cmds):
+                print("running cmd %i/%i"%(Icmd+1, len(all_cmds)))
+                run_cmd(cmd)
+
+        elif job_array_mode=="greasy":
+
+            print("Submitting %i jobs to cluster ..."%len(all_cmds))
+            jobs_filename = "%s/jobs.run_SNPs_CNV"%cwd
+            open(jobs_filename, "w").write("\n".join(all_cmds))
+
+            generate_jobarray_file_greasy(jobs_filename, walltime=time_greasy,  name="perSVade_many_samples", queue=mn_queue, sbatch=True, ncores_per_task=threads, constraint="", number_tasks_to_run_at_once="all", max_ncores_queue=max_ncores_queue )
+
+        else: raise ValueError("%s is not a valid job_array_mode"%job_array_mode)
+
+        return False
+
+    print("Integrating all variants and CNV into one......")
+    pass
+
