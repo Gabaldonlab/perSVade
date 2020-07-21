@@ -95,7 +95,7 @@ parser.add_argument("--range_filtering_benchmark", dest="range_filtering_benchma
 # alignment args
 parser.add_argument("-f1", "--fastq1", dest="fastq1", default=None, help="fastq_1 file. Option required to obtain bam files. It can be 'skip'")
 parser.add_argument("-f2", "--fastq2", dest="fastq2", default=None, help="fastq_2 file. Option required to obtain bam files. It can be 'skip'")
-parser.add_argument("-sbam", "--sortedbam", dest="sortedbam", default=None, help="The path to the sorted bam file, which should have a bam.bai file in the same dir. This is mutually exclusive with providing reads. By default, it is assumed that this bam has marked duplicates. If not, you can merk them with the option --markDuplicates_inBam.")
+parser.add_argument("-sbam", "--sortedbam", dest="sortedbam", default=None, help="The path to the sorted bam file, which should have a bam.bai file in the same dir. For example, if your bam file is called 'aligned_reads.bam', there should be an 'aligned_reads.bam.bai' as well. This is mutually exclusive with providing reads. By default, it is assumed that this bam has marked duplicates. If not, you can mark them with the option --markDuplicates_inBam.")
 parser.add_argument("--run_qualimap", dest="run_qualimap", action="store_true", default=False, help="Run qualimap for quality assessment of bam files. This may be inefficient sometimes because of the ")
 
 # machine options
@@ -114,16 +114,21 @@ parser.add_argument("-mchr", "--mitochondrial_chromosome", dest="mitochondrial_c
 # do not clean the outdir
 parser.add_argument("--skip_cleaning_outdir", dest="skip_cleaning_outdir", action="store_true", default=False, help="Will NOT remove all the unnecessary files of the perSVade outdir")
 
+# arg to run the trimming of the reads
+parser.add_argument("--QC_and_trimming_reads", dest="QC_and_trimming_reads", action="store_true", default=False, help="Will run fastq and trimmomatic of reads")
+
 # small VarCalk and CNV args
 parser.add_argument("--run_smallVarsCNV", dest="run_smallVarsCNV", action="store_true", default=False, help="Will call small variants and CNV.")
 parser.add_argument("-gff", "--gff-file", dest="gff", default=None, help="path to the GFF3 annotation of the reference genome. Make sure that the IDs are completely unique for each 'gene' tag. This is necessary for both the CNV analysis (it will look at genes there) and the annotation of the variants.")
-parser.add_argument("-caller", "--caller", dest="caller", required=False, default="all", help="SNP caller option to obtain vcf file. options: no/all/HaplotypeCaller/bcftools/freebayes.")
+parser.add_argument("-caller", "--caller", dest="caller", required=False, default="all", help="SNP caller option to obtain vcf file. options: no/all/HaplotypeCaller/bcftools/freebayes. It can be a comma-sepparated string, like 'HaplotypeCaller,freebayes'")
 parser.add_argument("-c", "--coverage", dest="coverage", default=20, type=int, help="minimum Coverage (int)")
 parser.add_argument("-mcode", "--mitochondrial_code", dest="mitochondrial_code", default=3, type=int, help="The code of the NCBI mitochondrial genetic code. For yeasts it is 3. You can find the numbers for your species here https://www.ncbi.nlm.nih.gov/Taxonomy/Utils/wprintgc.cgi")
 parser.add_argument("-gcode", "--gDNA_code", dest="gDNA_code", default=1, type=int, help="The code of the NCBI gDNA genetic code. You can find the numbers for your species here https://www.ncbi.nlm.nih.gov/Taxonomy/Utils/wprintgc.cgi . For C. albicans it is 12. ")
 parser.add_argument("--remove_smallVarsCNV_nonEssentialFiles", dest="remove_smallVarsCNV_nonEssentialFiles", action="store_true", default=False, help="Will remove all the varCall files except the integrated final file and the bam file.")
 parser.add_argument("--markDuplicates_inBam", dest="markDuplicates_inBam", action="store_true", default=False, help="Will mark the duplicates in the bam file. This is only necessary if the input of the pipeline is a sorted bam (-sbam) instead of raw reads.")
 parser.add_argument("--replace_var_integration", dest="replace_var_integration", action="store_true", help="Replace all the variant integration steps for smallVariantCalling.")
+
+parser.add_argument("--pooled_sequencing", dest="pooled_sequencing", action="store_true", default=False, help="It is a pooled sequencing run, which means that the small variant calling is not done based on ploidy. If you are also running SV calling, check that the simulation_ploidies, resemble a population,")
 
 # small varCall stop options
 parser.add_argument("--StopAfter_smallVarCallSimpleRunning", dest="StopAfter_smallVarCallSimpleRunning", action="store_true", default=False, help="Stop after obtaining the filtered vcf outputs of each program.")
@@ -226,6 +231,9 @@ if not any([x=="skip" for x in {opt.fastq1, opt.fastq2}]):
     # normal alignment of provided reads
     if all([not x is None for x in {opt.fastq1, opt.fastq2}]):
 
+        # if the reads have to be QC and trimmed:
+        if opt.QC_and_trimming_reads is True: opt.fastq1, opt.fastq2 = fun.run_trimmomatic(opt.fastq1, opt.fastq2, replace=opt.replace, threads=opt.threads)
+
         print("WORKING ON ALIGNMENT")
         fun.run_bwa_mem(opt.fastq1, opt.fastq2, opt.ref, opt.outdir, bamfile, sorted_bam, index_bam, name_sample, threads=opt.threads, replace=opt.replace)
 
@@ -249,6 +257,9 @@ if not any([x=="skip" for x in {opt.fastq1, opt.fastq2}]):
 ###########################################
 
 #### define general args ####
+
+# warn if you are running pooled_sequencing
+if opt.pooled_sequencing is True: print("WARNING: If you are running SV calling, make sure that the pooled sequencing simulation is consistent with these simulated ploidies: %s. For example, you may want to optimise to detect pools of 1/100 of SVs."%(opt.simulation_ploidies))
 
 # the simulation ploidies as a list
 simulation_ploidies = opt.simulation_ploidies.split(",")
@@ -298,6 +309,8 @@ if not any([x=="skip" for x in {opt.fastq1, opt.fastq2}]):
     coverage_file = fun.generate_coverage_per_window_file_parallel(opt.ref, destination_dir, sorted_bam, windows_file="none", replace=opt.replace, run_in_parallel=True, delete_bams=True)
 
 ####################################################
+
+
 
 ###########################################
 ###########################################
@@ -425,6 +438,7 @@ if opt.run_smallVarsCNV:
     if opt.remove_smallVarsCNV_nonEssentialFiles is True: varcall_cmd += " --remove_smallVarsCNV_nonEssentialFiles"
     if opt.StopAfter_smallVarCallSimpleRunning is True: varcall_cmd += " --StopAfter_smallVarCallSimpleRunning"
     if opt.replace_var_integration is True: varcall_cmd += " --replace_var_integration"
+    if opt.pooled_sequencing is True: varcall_cmd += " --pooled_sequencing"
     
     # run
     fun.run_cmd(varcall_cmd)
