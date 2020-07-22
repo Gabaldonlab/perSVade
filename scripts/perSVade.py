@@ -130,6 +130,10 @@ parser.add_argument("--replace_var_integration", dest="replace_var_integration",
 
 parser.add_argument("--pooled_sequencing", dest="pooled_sequencing", action="store_true", default=False, help="It is a pooled sequencing run, which means that the small variant calling is not done based on ploidy. If you are also running SV calling, check that the simulation_ploidies, resemble a population,")
 
+# repeat obtention
+parser.add_argument("--get_repeats_table", dest="get_repeats_table", action="store_true", default=False, help="It will run repeatmodeller and repeat masker to create a table with the coordinates of repeats in your genome (in reference_genome_dir/reference_genome.fasta.repeats.tab)")
+
+
 # small varCall stop options
 parser.add_argument("--StopAfter_smallVarCallSimpleRunning", dest="StopAfter_smallVarCallSimpleRunning", action="store_true", default=False, help="Stop after obtaining the filtered vcf outputs of each program.")
 
@@ -146,6 +150,7 @@ fun.make_folder(opt.outdir)
 
 # define the name as the sample as the first 10 characters of the outdir
 name_sample = fun.get_file(opt.outdir)[0:10]
+print("getting into %s"%opt.outdir)
 
 #### REPLACE THE REF GENOME ####
 
@@ -197,6 +202,27 @@ if opt.StopAfter_genomeObtention is True:
     print("Stopping pipeline after the genome obtention.")
     sys.exit(0)
 
+#### define misc args ####
+
+# warn if you are running pooled_sequencing
+if opt.pooled_sequencing is True: print("WARNING: If you are running SV calling, make sure that the pooled sequencing simulation is consistent with these simulated ploidies: %s. For example, you may want to optimise to detect pools of 1/100 of SVs."%(opt.simulation_ploidies))
+
+# the simulation ploidies as a list
+simulation_ploidies = opt.simulation_ploidies.split(",")
+
+# the window length for all operations
+fun.window_l = int(np.median([len_seq for chrom, len_seq  in fun.get_chr_to_len(opt.ref).items() if chrom not in opt.mitochondrial_chromosome.split(",")])*0.05) + 1
+
+print("using a window length of %i"%fun.window_l)
+
+# get the repeats table
+
+if opt.get_repeats_table is True:
+    print("getting repeats")
+    repeats_df, repeats_table_file = fun.get_repeat_maskerDF(opt.ref, threads=opt.threads, replace=opt.replace)
+
+#############################
+
 ########################################
 ########################################
 ########################################
@@ -232,7 +258,9 @@ if not any([x=="skip" for x in {opt.fastq1, opt.fastq2}]):
     if all([not x is None for x in {opt.fastq1, opt.fastq2}]):
 
         # if the reads have to be QC and trimmed:
-        if opt.QC_and_trimming_reads is True: opt.fastq1, opt.fastq2 = fun.run_trimmomatic(opt.fastq1, opt.fastq2, replace=opt.replace, threads=opt.threads)
+        if opt.QC_and_trimming_reads is True: 
+            print("running trimming and QC of the reads")
+            opt.fastq1, opt.fastq2 = fun.run_trimmomatic(opt.fastq1, opt.fastq2, replace=opt.replace, threads=opt.threads)
 
         print("WORKING ON ALIGNMENT")
         fun.run_bwa_mem(opt.fastq1, opt.fastq2, opt.ref, opt.outdir, bamfile, sorted_bam, index_bam, name_sample, threads=opt.threads, replace=opt.replace)
@@ -242,8 +270,6 @@ if not any([x=="skip" for x in {opt.fastq1, opt.fastq2}]):
 
     # mark duplicates if neccessary 
     if opt.markDuplicates_inBam is True: sorted_bam = fun.get_sortedBam_with_duplicatesMarked(sorted_bam, threads=opt.threads, replace=opt.replace)
-
-
 
     # check that all the important files exist
     if any([fun.file_is_empty(x) for x in {sorted_bam, index_bam}]): raise ValueError("You need the sorted and indexed bam files in ")
@@ -256,20 +282,7 @@ if not any([x=="skip" for x in {opt.fastq1, opt.fastq2}]):
 ############# NECESSARY FILES #############
 ###########################################
 
-#### define general args ####
 
-# warn if you are running pooled_sequencing
-if opt.pooled_sequencing is True: print("WARNING: If you are running SV calling, make sure that the pooled sequencing simulation is consistent with these simulated ploidies: %s. For example, you may want to optimise to detect pools of 1/100 of SVs."%(opt.simulation_ploidies))
-
-# the simulation ploidies as a list
-simulation_ploidies = opt.simulation_ploidies.split(",")
-
-# the window length for all operations
-fun.window_l = int(np.median([len_seq for chrom, len_seq  in fun.get_chr_to_len(opt.ref).items() if chrom not in opt.mitochondrial_chromosome.split(",")])*0.05) + 1
-
-print("using a window length of %i"%fun.window_l)
-
-#############################
 
 #### bamqc
 if opt.run_qualimap is True:
@@ -439,9 +452,10 @@ if opt.run_smallVarsCNV:
     if opt.StopAfter_smallVarCallSimpleRunning is True: varcall_cmd += " --StopAfter_smallVarCallSimpleRunning"
     if opt.replace_var_integration is True: varcall_cmd += " --replace_var_integration"
     if opt.pooled_sequencing is True: varcall_cmd += " --pooled_sequencing"
-    
+    if opt.get_repeats_table is True: varcall_cmd += " --repeats_table %s"%repeats_table_file
+
     # run
-    fun.run_cmd(varcall_cmd)
+    if __name__ == '__main__': fun.run_cmd(varcall_cmd)
 
 #####################################
 #####################################

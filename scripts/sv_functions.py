@@ -94,11 +94,8 @@ svim = "%s/bin/svim"%EnvDir
 bbmap_reformat_sh = "%s/bin/reformat.sh"%EnvDir
 mosdepth = "%s/bin/mosdepth"%EnvDir
 repeat_modeller_BuildDatabase = "%s/bin/BuildDatabase"%EnvDir
-repeat_modeller = "%s/bin/RepeatModeler"%EnvDir
 perl = "%s/bin/perl"%EnvDir
 makeblastdb = "%s/bin/makeblastdb"%EnvDir
-repeatmoder_dir = "%s/share/RepeatModeler"%EnvDir
-repeatmasker_dir = "%s/share/RepeatMasker"%EnvDir
 abblast_dir = "%s/bin"%EnvDir
 cdhit_dir = "%s/bin"%EnvDir
 genometools_dir = "%s/bin"%EnvDir
@@ -118,6 +115,9 @@ FASTQC = "%s/bin/fastqc"%EnvDir
 porechop = "%s/bin/porechop"%EnvDir
 fasterq_dump = "%s/bin/fasterq-dump"%EnvDir
 seqtk = "%s/bin/seqtk"%EnvDir
+repeatmoder_dir = "%s/share/RepeatModeler"%EnvDir
+repeat_modeller = "%s/bin/RepeatModeler"%EnvDir
+repeatmasker_dir = "%s/share/RepeatMasker"%EnvDir
 
 # executables that are provided in the repository
 external_software = "%s/../installation/external_software"%CWD
@@ -4689,6 +4689,7 @@ def run_freebayes_for_chromosome(chromosome_id, outvcf_folder, ref, sorted_bam, 
 
     # remove previously existing files
     if file_is_empty(outvcf) or replace is True:
+        remove_file(outvcf_tmp)
 
         # generate the bam file for this chromosome (and index)
         sorted_bam_chr = "%s.%s.bam"%(sorted_bam, chromosome_id)
@@ -4947,7 +4948,7 @@ def load_vcf_intoDF_GettingFreq_AndFilter(vcf_file):
     return df[["#CHROM", "POS", "ID", "REF", "ALT", "QUAL", "FILTER", "INFO", "FORMAT",  data_colname]], var_to_frequency, var_to_filter, var_to_GT, var_to_filters
 
 
-def run_freebayes_parallel(outdir_freebayes, ref, sorted_bam, ploidy, coverage, replace=False, pooled_sequencing=False):
+def run_freebayes_parallel(outdir_freebayes, ref, sorted_bam, ploidy, coverage, threads=4, max_threads=8, replace=False, pooled_sequencing=False):
 
     """It parallelizes over the current CPUs of the system"""
 
@@ -4967,16 +4968,19 @@ def run_freebayes_parallel(outdir_freebayes, ref, sorted_bam, ploidy, coverage, 
         if not file_is_empty(freebayes_output_tmp): os.unlink(freebayes_output_tmp)
 
         # initialize the pool class with the available CPUs --> this is asyncronous parallelization
-        pool = multiproc.Pool(multiproc.cpu_count())
+        threads = min([max_threads, threads])
+        with multiproc.Pool(threads) as pool:
 
-        # make a dir to store the vcfs
-        chromosome_vcfs_dir = "%s/chromosome_vcfs"%outdir_freebayes; make_folder(chromosome_vcfs_dir)
+            # make a dir to store the vcfs
+            chromosome_vcfs_dir = "%s/chromosome_vcfs"%outdir_freebayes; make_folder(chromosome_vcfs_dir)
 
-        # run in parallel the freebayes generation for all the 
-        chromosomal_vcfs = pool.starmap(run_freebayes_for_chromosome, [(ID, chromosome_vcfs_dir, ref, sorted_bam, ploidy, coverage, replace, pooled_sequencing) for ID in all_chromosome_IDs])
+            # run in parallel the freebayes generation for all the 
+            chromosomal_vcfs = pool.starmap(run_freebayes_for_chromosome, [(ID, chromosome_vcfs_dir, ref, sorted_bam, ploidy, coverage, replace, pooled_sequencing) for ID in all_chromosome_IDs])
 
-        # close the pool
-        pool.close()
+            # close the pool
+            pool.close()
+            pool.terminate()
+
 
         # go through each of the chromosomal vcfs and append to a whole df
         all_df = pd.DataFrame()
@@ -11963,3 +11967,164 @@ def run_perSVade_severalSamples(paths_df, cwd, common_args, time_greasy="48:00:0
     print("Integrating all variants and CNV into one......")
     pass
 
+def run_repeat_modeller(reference_genome, threads=4, replace=False):
+
+    """Runs repeat modeller to get a fasta file were all the repeats are. 
+
+    (not tested) The part of integrating the results does not work very well, so that we have to integrate the results into one with RepeatClassifier afterwards.
+
+    I had to improve the databases.
+    In the RepeatMasker/Libraries I ran ' makeblastdb -in RepeatPeps.lib -input_type fasta -dbtype prot' to get the proteins, and then copied to RepeatModeler/Libraries (cp -r * ../../RepeatModeler/Libraries/)
+
+    and also for the lib  makeblastdb -in RepeatMasker.lib -input_type fasta -dbtype nucl
+
+    and makeblastdb -in simple.lib  -input_type fasta -dbtype nucl in RepeatModeler
+
+    """
+
+    # get the genome into outdir
+    outdir = "%s.repeat_modeler_outdir"%reference_genome
+
+    # define the final files
+    genome_dir = "%s/reference_genome.fasta"%outdir
+    repeat_modeler_outfile = "%s-families.fa"%genome_dir
+
+    if file_is_empty(repeat_modeler_outfile) or replace is True:
+
+        # delete the outdir
+        delete_folder(outdir)
+
+        # create it
+        make_folder(outdir)
+
+        # put the genome under this outdir
+        run_cmd("ln -s %s %s"%(reference_genome, genome_dir))
+
+        # change to the outdir to get the files there
+        os.chdir(outdir)
+
+        # run the database
+        name_database = get_file(genome_dir)
+        run_cmd("%s -name %s %s"%(repeat_modeller_BuildDatabase, name_database, genome_dir))
+
+        # run repeatmodeller
+        njobs = int(threads/4) # Specify the number of parallel search jobs to run. RMBlast jobs wil use 4 cores each and ABBlast jobs will use a single core each. i.e. on a machine with 12 cores and running with RMBlast you would use -pa 3 to fully utilize the machine
+
+        #raise ValueError("This has to be fixed!!!!")
+        cmd = "export PERL5LIB=%s; %s -database %s -pa %i -LTRStruct"%(repeatmoder_dir, repeat_modeller, name_database, njobs)
+
+        # add the location were eveything is installed and run
+        print("running repeatmodeler...")
+        cmd += " -abblast_dir %s -cdhit_dir %s -genometools_dir %s -ltr_retriever_dir %s -mafft_dir %s -ninja_dir %s -recon_dir %s -repeatmasker_dir %s -rmblast_dir %s -rscout_dir %s -trf_prgm %s"%(abblast_dir, cdhit_dir, genometools_dir, ltr_retriever_dir, mafft_dir, ninja_dir, recon_dir, repeatmasker_dir, rmblast_dir, rscout_dir, trf_prgm_dir)
+
+        run_cmd(cmd)
+
+        if file_is_empty(repeat_modeler_outfile): raise ValueError("RepeatModeler did not end properly")
+
+    # remove the folder
+    for f in os.listdir(outdir):
+        path = "%s/%s"%(outdir, f)
+        if os.path.isdir(path) and f.startswith("RM_"): delete_folder(path)
+
+    return repeat_modeler_outfile
+
+
+def run_repeat_masker(reference_genome, threads=4, replace=False, use_repeat_modeller=True):
+
+    """
+    It runs repeat masker for a reference genome, writing the results under a folder where the ref genome is
+    """
+
+    # get the library from repeat_modeller
+    if use_repeat_modeller is True: library_repeats_repeatModeller =  run_repeat_modeller(reference_genome, threads=threads, replace=replace)
+
+    # define the repear masker outdir
+    genome_dir = "/".join(reference_genome.split("/")[0:-1])
+    genome_name = reference_genome.split("/")[-1]
+
+    # define the outdirs for each 
+    repeat_masker_outdir = "%s/%s_repeat_masker_outdir"%(genome_dir, genome_name.split(".")[0]); make_folder(repeat_masker_outdir)
+    repeat_masker_outdir_default = "%s/default"%repeat_masker_outdir; make_folder(repeat_masker_outdir_default)
+    repeat_masker_outdir_personal = "%s/personal"%repeat_masker_outdir; make_folder(repeat_masker_outdir_personal)
+
+    # run in the default configuration
+    repeat_masker_outfile_default = "%s/%s.out"%(repeat_masker_outdir_default, genome_name)
+    if file_is_empty(repeat_masker_outfile_default) or replace is True:
+        print("running repeatmasker to get the repeats of the genome in the default configuration")
+        run_cmd("%s -pa %i -dir %s -poly -html -gff %s"%(repeat_masker, threads, repeat_masker_outdir_default, reference_genome))
+
+
+    # run in the personal configuration
+    repeat_masker_outfile_personal = "%s/%s.out"%(repeat_masker_outdir_personal, genome_name)
+
+    if use_repeat_modeller is True:
+        
+        if file_is_empty(repeat_masker_outfile_personal) or replace is True:
+            print("running repeatmasker to get the repeats of the genome with the lib obtained with RepeatModeler")
+            run_cmd("%s -pa %i -dir %s -poly -html -gff %s -lib %s"%(repeat_masker, threads, repeat_masker_outdir_personal, reference_genome, library_repeats_repeatModeller))
+
+    else: 
+
+        # empty file
+        run_cmd("head -n 3 %s > %s"%(repeat_masker_outfile_default, repeat_masker_outfile_personal))
+
+       
+    return repeat_masker_outfile_personal, repeat_masker_outfile_default
+
+def get_repeat_maskerDF(reference_genome, threads=4, replace=False):
+
+    """gets the repeat masker outfile as a pandas df. The repeatmasker locations are 1-based (https://bedops.readthedocs.io/en/latest/content/reference/file-management/conversion/rmsk2bed.html)"""
+
+    # define the table 
+    repeats_table_file = "%s.repeats.tab"%reference_genome
+    repeats_table_file_tmp = "%s.tmp"%repeats_table_file
+
+    if file_is_empty(repeats_table_file) or replace is True:
+        print("running RepeatModeler and RepeatMasker into %s"%repeats_table_file)
+
+        # get the file
+        repeat_masker_outfile_personal, repeat_masker_outfile_default = run_repeat_masker(reference_genome, threads=threads, replace=replace, use_repeat_modeller=True)
+
+        # load both dfs
+        df_list = []
+        for repeat_masker_outfile in [repeat_masker_outfile_personal, repeat_masker_outfile_default]:
+
+            # define the header
+            header = ["SW_score", "perc_div", "perc_del", "perc_ins", "chromosome", "begin_repeat", "end_repeat", "left_repeat", "strand", "repeat", "type", "position_inRepeat_begin", "position_inRepeat_end", "left_positionINrepeat",  "IDrepeat"]
+            function_map_type = [int, float, float, float, str, int, int, str, str, str, str, str, str, str, int]
+
+            # initialize header
+            dict_repeat_masker = {}
+
+            # go line by line
+            for IDline, line in enumerate(open(repeat_masker_outfile, "r").readlines()):
+
+                # debug lines
+                split_line = line.strip().split()
+                if len(split_line)==0 or split_line[0] in {"SW", "score"}: continue
+                if split_line[-1]=="*": del split_line[-1]
+
+                # keep
+                line_content = [function_map_type[I](content) for I, content in enumerate(split_line)]
+                dict_repeat_masker[IDline] = dict(zip(header, line_content))
+
+            # get as df
+            df = pd.DataFrame(dict_repeat_masker).transpose()
+            df_list.append(df)
+
+        # get df
+        print("getting both repeats df")
+        df = pd.concat(df_list).sort_values(by=["chromosome", "begin_repeat", "end_repeat"])
+        df = df.drop_duplicates(subset=[x for x in df.keys() if x not in {"IDrepeat"}], keep="first")
+        df["IDrepeat"] = list(range(1, len(df)+1))
+        df.index = list(range(1, len(df)+1))
+
+        # write
+        df.to_csv(repeats_table_file_tmp, sep="\t", header=True, index=False)
+        os.rename(repeats_table_file_tmp, repeats_table_file)
+
+        print("repeat inference finished")
+
+    else: df = pd.read_csv(repeats_table_file, sep="\t")
+
+    return df, repeats_table_file
