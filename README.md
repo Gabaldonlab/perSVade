@@ -20,12 +20,28 @@ It is expected to print:
 
 This is essential so that all the dependencies of the pipeline are met.
 
-In addition, there are some dependencies that are included in the respository "installation/external_software" (only in the "release" packages). These are gridss (tested on version 2.8.1), clove (tested on version 0.17), gztools (installed from https://github.com/circulosmeos/gztool/releases/download/v0.11.5/gztool-linux.x86_64), vcfvalidator (installed from https://github.com/EBIvariation/vcf-validator/releases/download/v0.9.4/vcf_validator_linux) and bcftools (installed from https://github.com/samtools/bcftools/releases/download/1.10.2/bcftools-1.10.2.tar.bz2)
+You also need to create the databases for running RepeatMasker. To do so type the following commands:
+
+`cd <path_to_conda>/envs/perSVade_env/share/RepeatMasker` # go to the path where the RepeatMasker is
+
+`./configure` (or `perl configure`) # This is just to create the RepeatMasker.lib. Press Ctrl+C when the program asks for any input
+
+`cd Libraries` # go to the folder where all the pipelines are
+
+`makeblastdb -in RepeatPeps.lib -input_type fasta -dbtype prot` # generate the database for RepeatPeps
+
+`makeblastdb -in RepeatMasker.lib -input_type fasta -dbtype nucl` # make the database for RepeatMasker
+
+Note that `<path_to_conda>` is the path where you have your anaconda installed. For example it may be `/home/username/anaconda3`.
+
+In addition, there are some dependencies that are included in the respository "installation/external_software" (only in the "release" packages). These are gridss (tested on version 2.8.1), clove (tested on version 0.17), gztools (installed from https://github.com/circulosmeos/gztool/releases/download/v0.11.5/gztool-linux.x86_64), vcfvalidator (installed from https://github.com/EBIvariation/vcf-validator/releases/download/v0.9.4/vcf_validator_linux), bcftools (installed from https://github.com/samtools/bcftools/releases/download/1.10.2/bcftools-1.10.2.tar.bz2) and Ninja (installed from https://github.com/TravisWheelerLab/NINJA/archive/0.95-cluster_only.tar.gz). perSVade uses these exact versions.
 
 ## Comments for the installation of extra dependencies
 The non-conda dependencies can be installed like this (if you wanted to reinstall them):
 
 1. change to the directory where you installed the perSVade repository:
+
+`conda activate perSVade_env`
 
 `cd <perSVade_installation_dir>/installation/external_software`
 
@@ -43,6 +59,12 @@ The non-conda dependencies can be installed like this (if you wanted to reinstal
 
 `wget https://github.com/samtools/bcftools/releases/download/1.10.2/bcftools-1.10.2.tar.bz2`
 
+`wget https://github.com/TravisWheelerLab/NINJA/archive/0.95-cluster_only.tar.gz`
+
+`wget http://www.repeatmasker.org/RepeatModeler/RepeatModeler-2.0.1.tar.gz`
+
+`wget http://www.repeatmasker.org/RepeatMasker-4.1.0.tar.gz`
+
 3. setup bcftools
 
 `tar -xvf bcftools-1.10.2.tar.bz2`
@@ -57,16 +79,32 @@ The non-conda dependencies can be installed like this (if you wanted to reinstal
 
 `make install`
 
-
 4. give execution permssion to all the files:
 
 `chmod u+x *`
 
 You may want to repeat this in case you have problems running any of the programs with the pipeline
 
+5. Setup NINJA
+
+`tar -xvf 0.95-cluster_only.tar.gz`
+
+`rm 0.95-cluster_only.tar.gz`
+
+`cd NINJA-0.95-cluster_only/NINJA`
+
+`make`
+
+
+
+
+### Extra remarks
+
 The conda environment can be exported to a .yml file with:
 
 `conda env export --no-builds -n perSVade_env --file perSVade_env.yml`
+
+NOTE that if you download any release it will already include all these non-conda software installed
 
 ## Running in MareNostrum
 

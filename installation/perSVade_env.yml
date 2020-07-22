@@ -4,9 +4,9 @@ channels:
   - compbiocore
   - bioconda/label/cf201901
   - etetoolkit
+  - conda-forge
   - anaconda
   - bioconda
-  - conda-forge
   - defaults
 dependencies:
   - _libgcc_mutex=0.1
