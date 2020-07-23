@@ -73,8 +73,6 @@ parser.add_argument("-mchr", "--mitochondrial_chromosome", dest="mitochondrial_c
 parser.add_argument("-mcode", "--mitochondrial_code", dest="mitochondrial_code", default=3, type=int, help="The code of the NCBI mitochondrial genetic code. For yeasts it is 3. You can find the numbers for your species here https://www.ncbi.nlm.nih.gov/Taxonomy/Utils/wprintgc.cgi")
 parser.add_argument("-gcode", "--gDNA_code", dest="gDNA_code", default=1, type=int, help="The code of the NCBI gDNA genetic code. You can find the numbers for your species here https://www.ncbi.nlm.nih.gov/Taxonomy/Utils/wprintgc.cgi . For C. albicans it is 12. ")
 
-
-
 # CNV args
 parser.add_argument("--skip_cnv_analysis", dest="skip_cnv_analysis", action="store_true", default=False, help="Skipp the running of the CNV pipeline, which outputs the number of copies that each gene has according to coverage. The gene ID's are based on the GFF3 files that have been provided in -gff")
 
@@ -304,8 +302,12 @@ if "freebayes" in opt.caller or opt.caller == "all":
     # create a folder that will contain the output of VCF
     outdir_freebayes = "%s/freebayes_ploidy%i_out"%(opt.outdir, opt.ploidy)
 
-    # run freebayes
+    # run freebayes in normal configuratiom, in parallel
+    #if opt.pooled_sequencing is False:
     freebayes_filtered =  fun.run_freebayes_parallel(outdir_freebayes, opt.ref, sorted_bam, opt.ploidy, opt.coverage, replace=opt.replace, pooled_sequencing=opt.pooled_sequencing, threads=opt.threads) 
+
+    #else:
+    #freebayes_filtered = fun.run_freebayes_pooledSeq(outdir_freebayes, opt.ref, sorted_bam, opt.ploidy, opt.coverage, replace=opt.replace, threads=opt.threads) 
 
     # keep
     filtered_vcf_results.append(freebayes_filtered)
@@ -327,7 +329,7 @@ opt.replace = opt.replace or opt.replace_var_integration
 
 # get the merged vcf records (these are multiallelic)
 print("getting merged vcf without multialleles")
-merged_vcf_all = fun.merge_several_vcfsSameSample_into_oneMultiSample_vcf(filtered_vcf_results, opt.ref, opt.outdir, opt.ploidy, replace=opt.replace, threads=opt.threads)
+merged_vcf_all = fun.merge_several_vcfsSameSample_into_oneMultiSample_vcf(filtered_vcf_results, opt.ref, opt.outdir, opt.ploidy, replace=opt.replace, threads=opt.threads, repeats_table=opt.repeats_table)
 
 # get the variants in a tabular format
 variantInfo_table = "%s/variant_calling_ploidy%i.tab"%(opt.outdir, opt.ploidy)
@@ -356,6 +358,11 @@ for minPASS_algs in [1, 2, 3]:
 
         # add the FORMAT
         vcf_fields = ["#CHROM", "POS", "ID", "REF", "ALT", "QUAL", "FILTER", "INFO", "FORMAT", "SAMPLE"]
+
+        # write empty vcf
+        if len(df_PASS)==0: 
+            open(simplified_vcf_PASSalgs, "w").write("\t".join(vcf_fields) + "\n")
+            continue
 
         # rename the ID
         df_PASS = df_PASS.rename(columns={"#Uploaded_variation":"ID"})
