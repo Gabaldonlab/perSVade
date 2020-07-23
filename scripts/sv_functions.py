@@ -118,6 +118,7 @@ seqtk = "%s/bin/seqtk"%EnvDir
 repeatmoder_dir = "%s/share/RepeatModeler"%EnvDir
 repeat_modeller = "%s/bin/RepeatModeler"%EnvDir
 repeatmasker_dir = "%s/share/RepeatMasker"%EnvDir
+fasta_generate_regions_py = "%s/bin/fasta_generate_regions.py"%EnvDir
 
 # executables that are provided in the repository
 external_software = "%s/../installation/external_software"%CWD
@@ -154,8 +155,13 @@ CONDA_ACTIVATING_CMD = "conda activate %s;"%EnvName
 vcf_strings_as_NaNs = ['', '#N/A', '#N/A N/A', '#NA', '-1.#IND', '-1.#QNAN', '-NaN', '-nan', '1.#IND', '1.#QNAN', 'N/A', 'NULL', 'NaN', 'n/a', 'nan', 'null']
 
 # define default parameters for gridss filtering. This has changed from v0
-default_filtersDict_gridss = {"min_Nfragments":5, "min_af":0.25, "wrong_FILTERtags":("NO_ASSEMBLY",), "filter_polyGC":True, "filter_noSplitReads":False, "filter_noReadPairs":False, "maximum_strand_bias":0.99, "maximum_microhomology":50, "maximum_lenght_inexactHomology":50, "range_filt_DEL_breakpoints":(0, 1), "min_length_inversions":40, "dif_between_insert_and_del":5, "max_to_be_considered_small_event":1000, "wrong_INFOtags":('IMPRECISE',), "min_size":50, "min_af_EitherSmallOrLargeEvent":0.25, "min_QUAL":0} # the minimum af is 0.25 to include both heterozygous and homozygous vars as default
+default_filtersDict_gridss = {"min_Nfragments":5, "min_af":0.25, "wrong_FILTERtags":("NO_ASSEMBLY",), "filter_polyGC":True, "filter_noSplitReads":False, "filter_noReadPairs":False, "maximum_strand_bias":0.99, "maximum_microhomology":50, "maximum_lenght_inexactHomology":50, "range_filt_DEL_breakpoints":(0, 1), "min_length_inversions":40, "dif_between_insert_and_del":5, "max_to_be_considered_small_event":1000, "wrong_INFOtags":('IMPRECISE',), "min_size":50, "min_af_EitherSmallOrLargeEvent":0.25, "min_QUAL":0, "filter_overlappingRepeats":False} # the minimum af is 0.25 to include both heterozygous and homozygous vars as default
 
+# define other default parameters
+default_gridss_blacklisted_regions = ""
+default_gridss_maxcoverage = 50000
+default_max_rel_coverage_to_consider_del = 0.1
+default_min_rel_coverage_to_consider_dup = 1.8
 
 # define lists of filters ordered from less conservative to most conservative
 g_all_FILTER_tags = ("ASSEMBLY_ONLY", "NO_ASSEMBLY", "ASSEMBLY_TOO_FEW_READ", "ASSEMBLY_TOO_SHORT", "INSUFFICIENT_SUPPORT", "LOW_QUAL", "REF", "SINGLE_ASSEMBLY")
@@ -178,9 +184,10 @@ g_max_to_be_considered_small_event_l = [100, 200, 500, 1000, 1500]
 g_wrong_INFOtags_l = [('NONE',), ("IMPRECISE",)]
 g_min_size_l = [50]
 g_min_QUAL_l = [0, 20, 50, 100, 200, 300, 400, 500, 600, 700, 800, 900, 1000]
+g_filter_overlappingRepeats_l = [False, True]
 
 # map each filter to the ordered list
-g_filterName_to_filtersList = {"min_Nfragments":g_min_Nfragments_l, "min_af":g_min_af_l, "wrong_FILTERtags":g_wrong_FILTERtags_l, "filter_polyGC":g_filter_polyGC_l, "filter_noSplitReads":g_filter_noSplitReads_l, "filter_noReadPairs":g_filter_noReadPairs_l, "maximum_strand_bias":g_maximum_strand_bias_l, "maximum_microhomology":g_maximum_microhomology_l, "maximum_lenght_inexactHomology":g_maximum_lenght_inexactHomology_l, "range_filt_DEL_breakpoints":g_range_filt_DEL_breakpoints_l, "min_length_inversions":g_min_length_inversions_l, "dif_between_insert_and_del":g_dif_between_insert_and_del_l, "max_to_be_considered_small_event":g_max_to_be_considered_small_event_l, "wrong_INFOtags":g_wrong_INFOtags_l, "min_size":g_min_size_l, "min_af_EitherSmallOrLargeEvent":g_min_af_EitherSmallOrLargeEvent_l, "min_QUAL":g_min_QUAL_l}
+g_filterName_to_filtersList = {"min_Nfragments":g_min_Nfragments_l, "min_af":g_min_af_l, "wrong_FILTERtags":g_wrong_FILTERtags_l, "filter_polyGC":g_filter_polyGC_l, "filter_noSplitReads":g_filter_noSplitReads_l, "filter_noReadPairs":g_filter_noReadPairs_l, "maximum_strand_bias":g_maximum_strand_bias_l, "maximum_microhomology":g_maximum_microhomology_l, "maximum_lenght_inexactHomology":g_maximum_lenght_inexactHomology_l, "range_filt_DEL_breakpoints":g_range_filt_DEL_breakpoints_l, "min_length_inversions":g_min_length_inversions_l, "dif_between_insert_and_del":g_dif_between_insert_and_del_l, "max_to_be_considered_small_event":g_max_to_be_considered_small_event_l, "wrong_INFOtags":g_wrong_INFOtags_l, "min_size":g_min_size_l, "min_af_EitherSmallOrLargeEvent":g_min_af_EitherSmallOrLargeEvent_l, "min_QUAL":g_min_QUAL_l, "filter_overlappingRepeats":g_filter_overlappingRepeats_l}
 
 # map each value of each filter list to a value depending on the position
 g_filterName_to_filterValue_to_Number = {filterName : dict(zip(filtersList, range(len(filtersList)))) for filterName, filtersList in g_filterName_to_filtersList.items()}
@@ -2785,7 +2792,7 @@ def getNaN_to_0(x):
     if pd.isna(x): return 0.0
     else: return x
 
-def add_info_to_gridssDF(df, expected_fields={"allele_frequency", "allele_frequency_SmallEvent", "other_coordinates", "other_chromosome", "other_position", "other_orientation",  "inserted_sequence", "len_inserted_sequence", "length_event", "has_poly16GC", "length_inexactHomology", "length_microHomology"}, median_insert_size=500, median_insert_size_sd=50):
+def add_info_to_gridssDF(df, reference_genome, expected_fields={"allele_frequency", "allele_frequency_SmallEvent", "other_coordinates", "other_chromosome", "other_position", "other_orientation",  "inserted_sequence", "len_inserted_sequence", "length_event", "has_poly16GC", "length_inexactHomology", "length_microHomology", "overlaps_repeats"}, median_insert_size=500, median_insert_size_sd=50):
 
     """This function takes a gridss df and returns the same adding expected_fields. This adds if not already done."""
 
@@ -2793,6 +2800,30 @@ def add_info_to_gridssDF(df, expected_fields={"allele_frequency", "allele_freque
     if len(set(df.keys()).intersection(expected_fields))!=len(expected_fields):
 
         df = cp.deepcopy(df)
+        print("Adding info to df_gridss")
+
+
+        ####### ADD WHETHER THE VARIANTS OVERLAP REPEATS #######
+
+        # get the repeats table
+        repeats_table = get_repeat_maskerDF(reference_genome, threads=1, replace=False)[1]
+
+        # define the outdir repeats generation
+        outdir_repeats_generation_found = False
+        while outdir_repeats_generation_found is False:
+
+            outdir_repeats_generation = "%s.intersecting_repeats_%s"%(repeats_table, id_generator(8))
+            if not os.path.isdir(outdir_repeats_generation): outdir_repeats_generation_found = True
+
+        print(df, df.keys())
+
+        ladhjhdakdha
+        print("calculating overlapping repeats into %s"%outdir_repeats_generation)
+        df["overlaps_repeats"] = get_series_variant_in_repeats(df, repeats_table, outdir_repeats_generation, replace=False)
+
+        ajhdfgahjsgjhasgdasd
+
+        ########################################################
 
         # add the allele frequencies
         #print("adding allele freq")
@@ -2880,7 +2911,7 @@ def add_info_to_gridssDF(df, expected_fields={"allele_frequency", "allele_freque
 
     return df
 
-def get_gridssDF_filtered(df, min_Nfragments=8, min_af=0.005, wrong_INFOtags={"IMPRECISE"}, wrong_FILTERtags={"NO_ASSEMBLY"}, filter_polyGC=True, filter_noSplitReads=True, filter_noReadPairs=True, maximum_strand_bias=0.95, maximum_microhomology=50, maximum_lenght_inexactHomology=50, range_filt_DEL_breakpoints=[100, 800], min_length_inversions=40, dif_between_insert_and_del=5, max_to_be_considered_small_event=1000, min_size=50, add_columns=True, min_af_EitherSmallOrLargeEvent=0.0, min_QUAL=0 ):
+def get_gridssDF_filtered(df, reference_genome, min_Nfragments=8, min_af=0.005, wrong_INFOtags={"IMPRECISE"}, wrong_FILTERtags={"NO_ASSEMBLY"}, filter_polyGC=True, filter_noSplitReads=True, filter_noReadPairs=True, maximum_strand_bias=0.95, maximum_microhomology=50, maximum_lenght_inexactHomology=50, range_filt_DEL_breakpoints=[100, 800], min_length_inversions=40, dif_between_insert_and_del=5, max_to_be_considered_small_event=1000, min_size=50, add_columns=True, min_af_EitherSmallOrLargeEvent=0.0, min_QUAL=0, filter_overlappingRepeats=False ):
 
     """Takes a gridss df (each line is a breakend and it has the field INFO_SIMPLE_TYPE) and it returns the same df bt with a personalFILTER field, according to all the passed filters .
     Below are the filters with the meaning:
@@ -2903,6 +2934,7 @@ def get_gridssDF_filtered(df, min_Nfragments=8, min_af=0.005, wrong_INFOtags={"I
     min_size is the minimum length that a breakend should have to be considered
     min_af_EitherSmallOrLargeEvent is the minimum allele frequency regardless of if it is a small or a large event, which depends on the insert size that is not always constant. The idea is that any breakend with any AF (calculated as VF/VF+REF+REFPAIR or VF/VF+REF) above min_af_EitherSmallOrLargeEvent will be kept
     min_QUAL is the minimum value of the 'QUAL' field
+    filter_overlappingRepeats indicates whether to filter out the breakends that are overlapping any repeat
 
     add_columns indicates whether to add columns to the df, which may have been done before
 
@@ -2911,7 +2943,7 @@ def get_gridssDF_filtered(df, min_Nfragments=8, min_af=0.005, wrong_INFOtags={"I
     """
 
     ######## ADD COLUMNS TO THE DF FOR FURTHER CALCULATION ##########
-    if add_columns is True: df = add_info_to_gridssDF(df)
+    if add_columns is True: df = add_info_to_gridssDF(df, reference_genome)
 
     # define whether the variant is a small duplication or insertion. These have special filters
     df["is_small_DupDel"] = (df.INFO_SIMPLE_TYPE.isin({"DEL", "DUP"})) & (df.length_event<=max_to_be_considered_small_event)
@@ -2940,12 +2972,12 @@ def get_gridssDF_filtered(df, min_Nfragments=8, min_af=0.005, wrong_INFOtags={"I
     if filter_polyGC: idx = idx & ~(df.has_poly16GC)
     if filter_noSplitReads: idx = idx & (~(df.DATA_SR==0) | ~(df.is_small_DupDel))
     if filter_noReadPairs: idx = idx & (~(df.DATA_RP==0) | (df.is_small_DupDel))
+    if filter_overlappingRepeats: idx = idx & (~df.overlaps_repeats)
 
     # return the filtered df
-
     return df[idx]
 
-def get_gridssDF_filtered_from_filtersDict(df_gridss, filters_dict):
+def get_gridssDF_filtered_from_filtersDict(df_gridss, filters_dict, reference_genome):
 
     """Takes a df gridss and returns the filtered one, according to filters_dict"""
 
@@ -2953,7 +2985,7 @@ def get_gridssDF_filtered_from_filtersDict(df_gridss, filters_dict):
     if "min_af_EitherSmallOrLargeEvent" not in filters_dict: filters_dict["min_af_EitherSmallOrLargeEvent"] = 0.0
 
     # get the filtered df
-    df_filt = get_gridssDF_filtered(df_gridss, min_Nfragments=filters_dict["min_Nfragments"], min_af=filters_dict["min_af"], wrong_INFOtags=filters_dict["wrong_INFOtags"], wrong_FILTERtags=filters_dict["wrong_FILTERtags"], filter_polyGC=filters_dict["filter_polyGC"], filter_noSplitReads=filters_dict["filter_noSplitReads"], filter_noReadPairs=filters_dict["filter_noReadPairs"], maximum_strand_bias=filters_dict["maximum_strand_bias"], maximum_microhomology=filters_dict["maximum_microhomology"], maximum_lenght_inexactHomology=filters_dict["maximum_lenght_inexactHomology"], range_filt_DEL_breakpoints=filters_dict["range_filt_DEL_breakpoints"], min_length_inversions=filters_dict["min_length_inversions"], dif_between_insert_and_del=filters_dict["dif_between_insert_and_del"], max_to_be_considered_small_event=filters_dict["max_to_be_considered_small_event"], min_size=filters_dict["min_size"], add_columns=False, min_af_EitherSmallOrLargeEvent=filters_dict["min_af_EitherSmallOrLargeEvent"], min_QUAL=filters_dict["min_QUAL"] )
+    df_filt = get_gridssDF_filtered(df_gridss, reference_genome, min_Nfragments=filters_dict["min_Nfragments"], min_af=filters_dict["min_af"], wrong_INFOtags=filters_dict["wrong_INFOtags"], wrong_FILTERtags=filters_dict["wrong_FILTERtags"], filter_polyGC=filters_dict["filter_polyGC"], filter_noSplitReads=filters_dict["filter_noSplitReads"], filter_noReadPairs=filters_dict["filter_noReadPairs"], maximum_strand_bias=filters_dict["maximum_strand_bias"], maximum_microhomology=filters_dict["maximum_microhomology"], maximum_lenght_inexactHomology=filters_dict["maximum_lenght_inexactHomology"], range_filt_DEL_breakpoints=filters_dict["range_filt_DEL_breakpoints"], min_length_inversions=filters_dict["min_length_inversions"], dif_between_insert_and_del=filters_dict["dif_between_insert_and_del"], max_to_be_considered_small_event=filters_dict["max_to_be_considered_small_event"], min_size=filters_dict["min_size"], add_columns=False, min_af_EitherSmallOrLargeEvent=filters_dict["min_af_EitherSmallOrLargeEvent"], min_QUAL=filters_dict["min_QUAL"], filter_overlappingRepeats=filters_dict["filter_overlappingRepeats"] )
 
     return df_filt
 
@@ -4214,11 +4246,11 @@ def run_gridssClove_given_filters(sorted_bam, reference_genome, working_dir, med
     
     # get the output of gridss into a df
     print("getting gridss")
-    df_gridss = add_info_to_gridssDF(load_single_sample_VCF(gridss_VCFoutput), median_insert_size=median_insert_size, median_insert_size_sd=median_insert_size_sd) # this is a dataframe with some info
+    df_gridss = add_info_to_gridssDF(load_single_sample_VCF(gridss_VCFoutput), reference_genome, median_insert_size=median_insert_size, median_insert_size_sd=median_insert_size_sd) # this is a dataframe with some info
 
     # filter according to gridss_filters_dict
     print("filtering gridss")
-    df_gridss_filt = get_gridssDF_filtered_from_filtersDict(df_gridss, gridss_filters_dict)
+    df_gridss_filt = get_gridssDF_filtered_from_filtersDict(df_gridss, gridss_filters_dict, reference_genome)
     gridss_VCFoutput_filt = "%s.filtered_default.vcf"%(gridss_VCFoutput)
 
     # write the filtered gridss vcf
@@ -4691,10 +4723,17 @@ def run_freebayes_for_chromosome(chromosome_id, outvcf_folder, ref, sorted_bam, 
     if file_is_empty(outvcf) or replace is True:
         remove_file(outvcf_tmp)
 
+        """
+        optional removal of bam file
         # generate the bam file for this chromosome (and index)
         sorted_bam_chr = "%s.%s.bam"%(sorted_bam, chromosome_id)
         run_cmd("%s view -b %s %s > %s"%(samtools, sorted_bam, chromosome_id, sorted_bam_chr))
         run_cmd("%s index -@ 1 %s"%(samtools, sorted_bam_chr))
+
+        """
+
+        # map each chromosome to a length
+        chr_to_len = get_chr_to_len(ref)
 
         # get the fasta for the chromosome
         fasta_chromosome = "%s.%s.fasta"%(ref, chromosome_id)
@@ -4704,16 +4743,21 @@ def run_freebayes_for_chromosome(chromosome_id, outvcf_folder, ref, sorted_bam, 
         freebayes_std = "%s.std"%outvcf_tmp
         print("running freebayes with STD %s"%freebayes_std)
 
+        # define the region
+        region = "%s:0-%i"%(chromosome_id, chr_to_len[chromosome_id])
+
         if pooled_sequencing is True:
             print("running for pooled data")
-            run_cmd("%s -f %s --haplotype-length -1 --min-alternate-count %i --min-alternate-fraction 0 --pooled-continuous -b %s -v %s > %s 2>&1"%(freebayes, fasta_chromosome, coverage, sorted_bam_chr, outvcf_tmp, freebayes_std))
+            run_cmd("%s -f %s --haplotype-length -1 --use-best-n-alleles 20 --min-alternate-count %i --min-alternate-fraction 0 --pooled-continuous -b %s -v %s --region %s > %s 2>&1"%(freebayes, fasta_chromosome, coverage, sorted_bam, outvcf_tmp, region, freebayes_std))
         else: 
             print("running unpooled sequencing")
-            run_cmd("%s -f %s -p %i --min-coverage %i -b %s --haplotype-length -1 -v %s > %s 2>&1"%(freebayes, fasta_chromosome, ploidy, coverage, sorted_bam_chr, outvcf_tmp, freebayes_std))
+            run_cmd("%s -f %s -p %i --min-coverage %i -b %s --haplotype-length -1 -v %s --region %s > %s 2>&1"%(freebayes, fasta_chromosome, ploidy, coverage, sorted_bam, outvcf_tmp, region, freebayes_std))
 
         # remove the intermediate files
         #print("%s exists %s"%(fasta_chromosome, str(file_is_empty(fasta_chromosome))))
-        remove_file(sorted_bam_chr); remove_file("%s.bai"%sorted_bam_chr); remove_file(fasta_chromosome); remove_file("%s.fai"%fasta_chromosome); remove_file(freebayes_std)
+        remove_file(fasta_chromosome); remove_file("%s.fai"%fasta_chromosome); remove_file(freebayes_std)
+
+        #remove_file(sorted_bam_chr); remove_file("%s.bai"%sorted_bam_chr); remove_file(fasta_chromosome); remove_file("%s.fai"%fasta_chromosome); remove_file(freebayes_std)
 
         # rename
         os.rename(outvcf_tmp, outvcf)
@@ -4946,6 +4990,27 @@ def load_vcf_intoDF_GettingFreq_AndFilter(vcf_file):
 
     # get only the columns that you want to keep the real vcf
     return df[["#CHROM", "POS", "ID", "REF", "ALT", "QUAL", "FILTER", "INFO", "FORMAT",  data_colname]], var_to_frequency, var_to_filter, var_to_GT, var_to_filters
+
+
+
+def run_freebayes_pooledSeq(outdir_freebayes, ref, sorted_bam, ploidy, coverage, replace=False, threads=4):
+
+    """Runs freebayes for pooled sequencing data, it writes the output as output.filt.vcf, although it is not filtered"""
+
+    # define the output
+    outvcf = "%s/output.filt.vcf"%outdir_freebayes; outvcf_tmp = "%s.tmp.vcf"%outvcf
+
+    make_folder(outdir_freebayes)
+
+    if file_is_empty(outvcf) or replace is True:
+        print("running freebayes for pooled data")
+
+        run_cmd("%s -f %s --haplotype-length -1 --min-alternate-count %i --min-alternate-fraction 0 --pooled-continuous -b %s -v %s"%(freebayes, ref, coverage, sorted_bam, outvcf_tmp))
+
+
+        os.rename(outvcf_tmp, outvcf)
+
+    return outvcf
 
 
 def run_freebayes_parallel(outdir_freebayes, ref, sorted_bam, ploidy, coverage, threads=4, max_threads=8, replace=False, pooled_sequencing=False):
@@ -7407,7 +7472,7 @@ def get_is_overlapping_query_vs_target_region(q, r):
     return (q["chromosome"]==r["chromosome"]) and ((r["start"]<=q["start"]<=r["end"]) or (r["start"]<=q["end"]<=r["end"]) or (q["start"]<=r["start"]<=q["end"]) or (q["start"]<=r["end"]<=q["end"]))
 
 
-def get_svtype_to_svfile_and_df_gridss_from_perSVade_outdir(perSVade_outdir):
+def get_svtype_to_svfile_and_df_gridss_from_perSVade_outdir(perSVade_outdir, reference_genome):
 
     """This function takes from the perSVade outdir the svdict and the df_gridss"""
 
@@ -7416,7 +7481,7 @@ def get_svtype_to_svfile_and_df_gridss_from_perSVade_outdir(perSVade_outdir):
     gridss_vcf = "%s/gridss_output.raw.vcf"%outdir
 
     # get the df gridss
-    df_gridss = add_info_to_gridssDF(load_single_sample_VCF(gridss_vcf))
+    df_gridss = add_info_to_gridssDF(load_single_sample_VCF(gridss_vcf), reference_genome)
 
     # get the svtype_to_svfile
     svtype_to_svfile = {svtype : "%s/%s.tab"%(outdir, svtype)  for svtype in {"insertions", "deletions", "tandemDuplications", "translocations", "inversions"}}
@@ -7586,7 +7651,7 @@ def get_ID_to_svtype_to_svDF_for_setOfGenomes_highConfidence(close_shortReads_ta
 
                 # define the svdict
                 print("running get_svtype_to_svfile_and_df_gridss_from_perSVade_outdir")
-                svtype_to_svfile,  df_gridss = get_svtype_to_svfile_and_df_gridss_from_perSVade_outdir(outdir_gridssClove)
+                svtype_to_svfile,  df_gridss = get_svtype_to_svfile_and_df_gridss_from_perSVade_outdir(outdir_gridssClove, reference_genome)
 
                 # save
                 print("saving %s"%df_gridss_svtype_to_svfile_objectFile)
@@ -8306,7 +8371,7 @@ def simulate_and_align_PairedReads_perWindow(df_windows, genome_interest, refere
         ######################################################
 
         ##### align the reads and retun the bam ######
-        run_bwa_mem(read1_fastqgz, read2_fastqgz, reference_genome, outdir, sim_bamfile, sim_sorted_bam, sim_index_bam, name_sample="simulations_reference_genome", threads=threads, replace=True)
+        run_bwa_mem(read1_fastqgz, read2_fastqgz, reference_genome, outdir, sim_bamfile, sim_sorted_bam, sim_index_bam, name_sample="simulations_reference_genome", threads=threads, replace=replace)
 
         # remove the fastq files
         print("deleting reads")
@@ -8441,7 +8506,7 @@ def get_merged_bamfile_for_ploidy(variant_bamfile, reference_bamfile, ploidy, re
 
     return merged_sorted_bam
 
-def get_tupleBreakpoints_for_filters_GRIDSS(df_gridss, filters_dict, return_timing=False):
+def get_tupleBreakpoints_for_filters_GRIDSS(df_gridss, filters_dict, reference_genome, return_timing=False):
 
     """ Takes a df_gridss (the output vcf) and a dictionary with filters, returning a tuple of the breakpoints where both breakends have passed the filters."""
 
@@ -8452,7 +8517,7 @@ def get_tupleBreakpoints_for_filters_GRIDSS(df_gridss, filters_dict, return_timi
     if "min_af_EitherSmallOrLargeEvent" not in filters_dict: filters_dict["min_af_EitherSmallOrLargeEvent"] = 0.0
 
     # get the filtered df
-    df_filt = get_gridssDF_filtered(df_gridss, min_Nfragments=filters_dict["min_Nfragments"], min_af=filters_dict["min_af"], wrong_INFOtags=filters_dict["wrong_INFOtags"], wrong_FILTERtags=filters_dict["wrong_FILTERtags"], filter_polyGC=filters_dict["filter_polyGC"], filter_noSplitReads=filters_dict["filter_noSplitReads"], filter_noReadPairs=filters_dict["filter_noReadPairs"], maximum_strand_bias=filters_dict["maximum_strand_bias"], maximum_microhomology=filters_dict["maximum_microhomology"], maximum_lenght_inexactHomology=filters_dict["maximum_lenght_inexactHomology"], range_filt_DEL_breakpoints=filters_dict["range_filt_DEL_breakpoints"], min_length_inversions=filters_dict["min_length_inversions"], dif_between_insert_and_del=filters_dict["dif_between_insert_and_del"], max_to_be_considered_small_event=filters_dict["max_to_be_considered_small_event"], min_size=filters_dict["min_size"], add_columns=False, min_af_EitherSmallOrLargeEvent=filters_dict["min_af_EitherSmallOrLargeEvent"], min_QUAL=filters_dict["min_QUAL"] )
+    df_filt = get_gridssDF_filtered(df_gridss, reference_genome, min_Nfragments=filters_dict["min_Nfragments"], min_af=filters_dict["min_af"], wrong_INFOtags=filters_dict["wrong_INFOtags"], wrong_FILTERtags=filters_dict["wrong_FILTERtags"], filter_polyGC=filters_dict["filter_polyGC"], filter_noSplitReads=filters_dict["filter_noSplitReads"], filter_noReadPairs=filters_dict["filter_noReadPairs"], maximum_strand_bias=filters_dict["maximum_strand_bias"], maximum_microhomology=filters_dict["maximum_microhomology"], maximum_lenght_inexactHomology=filters_dict["maximum_lenght_inexactHomology"], range_filt_DEL_breakpoints=filters_dict["range_filt_DEL_breakpoints"], min_length_inversions=filters_dict["min_length_inversions"], dif_between_insert_and_del=filters_dict["dif_between_insert_and_del"], max_to_be_considered_small_event=filters_dict["max_to_be_considered_small_event"], min_size=filters_dict["min_size"], add_columns=False, min_af_EitherSmallOrLargeEvent=filters_dict["min_af_EitherSmallOrLargeEvent"], min_QUAL=filters_dict["min_QUAL"], filter_overlappingRepeats=filters_dict["filter_overlappingRepeats"] )
 
     # get the breakpoints that have both breakends
     correct_breakpoints = tuple(sorted([bp for bp, N in Counter(df_filt.breakpointID).items() if N==2]))
@@ -8460,12 +8525,12 @@ def get_tupleBreakpoints_for_filters_GRIDSS(df_gridss, filters_dict, return_timi
     if return_timing: return  (time.time() - start_time)
     else: return correct_breakpoints
 
-def keep_relevant_filters_lists_inparallel(filterName_to_filtersList, df_gridss, type_filtering="keeping_all_filters_that_change",  wrong_INFOtags=("IMPRECISE",), min_size=50):
+def keep_relevant_filters_lists_inparallel(filterName_to_filtersList, df_gridss, reference_genome, type_filtering="keeping_all_filters_that_change",  wrong_INFOtags=("IMPRECISE",), min_size=50):
 
     """Takes a dictionary that maps the filterName to the list of possible filters. It modifies each of the lists in filterName_to_filtersList in a way that only those values that yield a unique set of breakpoints when being applied in the context of a set breakpoints. The final set of filters taken are the less conservative of each. """
 
     # define a set of filters that are very unconservative (they take all the breakpoints)
-    unconservative_filterName_to_filter = {"min_Nfragments":-1, "min_af":-1, "wrong_FILTERtags":("",), "filter_polyGC":False, "filter_noSplitReads":False, "filter_noReadPairs":False, "maximum_strand_bias":1.1, "maximum_microhomology":1000000000000, "maximum_lenght_inexactHomology":1000000000000, "range_filt_DEL_breakpoints":(0,1), "min_length_inversions":-1, "dif_between_insert_and_del":0, "max_to_be_considered_small_event":1, "wrong_INFOtags":wrong_INFOtags, "min_size":min_size, "min_af_EitherSmallOrLargeEvent":-1, "min_QUAL":0}
+    unconservative_filterName_to_filter = {"min_Nfragments":-1, "min_af":-1, "wrong_FILTERtags":("",), "filter_polyGC":False, "filter_noSplitReads":False, "filter_noReadPairs":False, "maximum_strand_bias":1.1, "maximum_microhomology":1000000000000, "maximum_lenght_inexactHomology":1000000000000, "range_filt_DEL_breakpoints":(0,1), "min_length_inversions":-1, "dif_between_insert_and_del":0, "max_to_be_considered_small_event":1, "wrong_INFOtags":wrong_INFOtags, "min_size":min_size, "min_af_EitherSmallOrLargeEvent":-1, "min_QUAL":0, "filter_overlappingRepeats":False}
 
     # define an unconservative set of breakpoints
     unconservative_breakpoints = tuple(sorted([bp for bp, N in Counter(df_gridss.breakpointID).items() if N==2]))
@@ -8486,7 +8551,7 @@ def keep_relevant_filters_lists_inparallel(filterName_to_filtersList, df_gridss,
             filters_dict_list.append(filters_dict)
 
     # run in a map or a pool the obtention of tuples of breakpoints for each parameter combination
-    inputs_fn = [(df_gridss, fd) for fd in filters_dict_list]
+    inputs_fn = [(df_gridss, fd, reference_genome) for fd in filters_dict_list]
 
     # pool
     with  multiproc.Pool(multiproc.cpu_count()) as pool:
@@ -8494,7 +8559,7 @@ def keep_relevant_filters_lists_inparallel(filterName_to_filtersList, df_gridss,
         pool.close()
 
     # map
-    #bp_tuples_list = list(map(lambda x: get_tupleBreakpoints_for_filters_GRIDSS(x[0], x[1]), inputs_fn))
+    #bp_tuples_list = list(map(lambda x: get_tupleBreakpoints_for_filters_GRIDSS(x[0], x[1], x[2]), inputs_fn))
 
     # map the filter changing to the dict and the breakpoints
     filterChanging_to_filtersDict = dict(zip(filter_changing_list, filters_dict_list))
@@ -8555,7 +8620,7 @@ def write_bedpeANDfilterdicts_for_breakpoints(df_bedpe, breakpoints, filterDicts
     less_conservative_filtersDict = get_represenative_filtersDict_for_filtersDict_list(filterDicts, type_filters="less_conservative")
     save_object(less_conservative_filtersDict, "%s/less_conservative_filtersDict.py"%outdir)
 
-def write_breakpoints_for_parameter_combinations_and_get_filterIDtoBpoints_gridss(df_gridss, df_bedpe, outdir, range_filtering="theoretically_meaningful", expected_AF=1.0, replace=False):
+def write_breakpoints_for_parameter_combinations_and_get_filterIDtoBpoints_gridss(df_gridss, df_bedpe, outdir, reference_genome, range_filtering="theoretically_meaningful", expected_AF=1.0, replace=False):
 
     """Gets, for a range of filters defined byrange_filtering, a dictionary that maps a string defining all these filters to a df that has the filtered breakpoints (bedpe) . If range_filtering is large, we expect ~13 h to run on 48 cores for the Candida glabrata genome"""
 
@@ -8617,6 +8682,7 @@ def write_breakpoints_for_parameter_combinations_and_get_filterIDtoBpoints_grids
             dif_between_insert_and_del_l = [0, 1, 5, 10, 20, 10000000]
             max_to_be_considered_small_event_l = [1, 100, 200, 500, 1000, 1500, 1000000000]
             min_QUAL_l = [0, 20, 50, 100, 200, 300, 400, 500, 600, 700, 800, 900, 1000, 1000000000]
+            filter_overlappingRepeats_l = [False, True]
 
         elif range_filtering=="medium":
 
@@ -8635,6 +8701,7 @@ def write_breakpoints_for_parameter_combinations_and_get_filterIDtoBpoints_grids
             dif_between_insert_and_del_l = [5, 10, 20]
             max_to_be_considered_small_event_l = [200, 500, 1000]
             min_QUAL_l = [0, 50, 100, 500, 900, 1000, 1000000000]
+            filter_overlappingRepeats_l = [False, True]
 
         elif range_filtering=="small":
 
@@ -8653,6 +8720,7 @@ def write_breakpoints_for_parameter_combinations_and_get_filterIDtoBpoints_grids
             dif_between_insert_and_del_l = [5, 10]
             max_to_be_considered_small_event_l = [1000]
             min_QUAL_l = [0, 500, 1000, 1000000000]
+            filter_overlappingRepeats_l = [False, True]
 
 
         elif range_filtering=="theoretically_meaningful":
@@ -8672,6 +8740,7 @@ def write_breakpoints_for_parameter_combinations_and_get_filterIDtoBpoints_grids
             dif_between_insert_and_del_l = [0, 5, 10, 1000000000]
             max_to_be_considered_small_event_l = [100, 200, 500, 1000, 1500, 1000000000]
             min_QUAL_l = [0, 100, 300, 500, 800, 1000, 1000000000]
+            filter_overlappingRepeats_l = [False, True]
 
         elif range_filtering=="single":
 
@@ -8690,6 +8759,7 @@ def write_breakpoints_for_parameter_combinations_and_get_filterIDtoBpoints_grids
             dif_between_insert_and_del_l = [5]
             max_to_be_considered_small_event_l = [1000]
             min_QUAL_l = [0]
+            filter_overlappingRepeats_l = [False]
 
         else: raise ValueError("%s is not a valid range_filtering parameter, it has to be 'large', 'medium', 'small' or 'single' "%range_filtering)
 
@@ -8698,10 +8768,10 @@ def write_breakpoints_for_parameter_combinations_and_get_filterIDtoBpoints_grids
         min_size = 50
 
         # map the filters through a dict
-        filterName_to_filtersList = {"min_Nfragments":min_Nfragments_l, "min_af":min_af_l, "wrong_FILTERtags":wrong_FILTERtags_l, "filter_polyGC":filter_polyGC_l, "filter_noSplitReads":filter_noSplitReads_l, "filter_noReadPairs":filter_noReadPairs_l, "maximum_strand_bias":maximum_strand_bias_l, "maximum_microhomology":maximum_microhomology_l, "maximum_lenght_inexactHomology":maximum_lenght_inexactHomology_l, "range_filt_DEL_breakpoints":range_filt_DEL_breakpoints_l, "min_length_inversions":min_length_inversions_l, "dif_between_insert_and_del":dif_between_insert_and_del_l, "max_to_be_considered_small_event":max_to_be_considered_small_event_l, "min_af_EitherSmallOrLargeEvent":min_af_EitherSmallOrLargeEvent_l, "min_QUAL":min_QUAL_l}
+        filterName_to_filtersList = {"min_Nfragments":min_Nfragments_l, "min_af":min_af_l, "wrong_FILTERtags":wrong_FILTERtags_l, "filter_polyGC":filter_polyGC_l, "filter_noSplitReads":filter_noSplitReads_l, "filter_noReadPairs":filter_noReadPairs_l, "maximum_strand_bias":maximum_strand_bias_l, "maximum_microhomology":maximum_microhomology_l, "maximum_lenght_inexactHomology":maximum_lenght_inexactHomology_l, "range_filt_DEL_breakpoints":range_filt_DEL_breakpoints_l, "min_length_inversions":min_length_inversions_l, "dif_between_insert_and_del":dif_between_insert_and_del_l, "max_to_be_considered_small_event":max_to_be_considered_small_event_l, "min_af_EitherSmallOrLargeEvent":min_af_EitherSmallOrLargeEvent_l, "min_QUAL":min_QUAL_l, "filter_overlappingRepeats":filter_overlappingRepeats_l}
 
         # edit the filter list, to keep only those that, when applied, change the called breakpoints
-        keep_relevant_filters_lists_inparallel(filterName_to_filtersList, df_gridss_twoBreakEnds, type_filtering="keeping_filters_that_yield_uniqueBPs", wrong_INFOtags=wrong_INFOtags, min_size=min_size) # it can also be keeping_all_filters_that_change or keeping_filters_that_yield_uniqueBPs or none
+        keep_relevant_filters_lists_inparallel(filterName_to_filtersList, df_gridss_twoBreakEnds, reference_genome, type_filtering="keeping_filters_that_yield_uniqueBPs", wrong_INFOtags=wrong_INFOtags, min_size=min_size) # it can also be keeping_all_filters_that_change or keeping_filters_that_yield_uniqueBPs or none
 
         # initialize objects to store the filtering
         I = 1
@@ -8724,27 +8794,28 @@ def write_breakpoints_for_parameter_combinations_and_get_filterIDtoBpoints_grids
                                   for dif_between_insert_and_del in dif_between_insert_and_del_l:
                                     for max_to_be_considered_small_event in max_to_be_considered_small_event_l:
                                         for min_QUAL in min_QUAL_l:
+                                            for filter_overlappingRepeats in filter_overlappingRepeats_l:
 
-                                            #print("filter %i"%I)
-                                            I+=1
+                                                #print("filter %i"%I)
+                                                I+=1
 
-                                            # get the parameters_dict
-                                            filters_dict = dict(min_Nfragments=min_Nfragments, min_af=min_af, wrong_INFOtags=wrong_INFOtags, wrong_FILTERtags=wrong_FILTERtags, filter_polyGC=filter_polyGC, filter_noSplitReads=filter_noSplitReads, filter_noReadPairs=filter_noReadPairs, maximum_strand_bias=maximum_strand_bias, maximum_microhomology=maximum_microhomology, maximum_lenght_inexactHomology=maximum_lenght_inexactHomology, range_filt_DEL_breakpoints=range_filt_DEL_breakpoints, min_length_inversions=min_length_inversions, dif_between_insert_and_del=dif_between_insert_and_del, max_to_be_considered_small_event=max_to_be_considered_small_event, min_size=min_size, min_af_EitherSmallOrLargeEvent=min_af_EitherSmallOrLargeEvent, min_QUAL=min_QUAL)
+                                                # get the parameters_dict
+                                                filters_dict = dict(min_Nfragments=min_Nfragments, min_af=min_af, wrong_INFOtags=wrong_INFOtags, wrong_FILTERtags=wrong_FILTERtags, filter_polyGC=filter_polyGC, filter_noSplitReads=filter_noSplitReads, filter_noReadPairs=filter_noReadPairs, maximum_strand_bias=maximum_strand_bias, maximum_microhomology=maximum_microhomology, maximum_lenght_inexactHomology=maximum_lenght_inexactHomology, range_filt_DEL_breakpoints=range_filt_DEL_breakpoints, min_length_inversions=min_length_inversions, dif_between_insert_and_del=dif_between_insert_and_del, max_to_be_considered_small_event=max_to_be_considered_small_event, min_size=min_size, min_af_EitherSmallOrLargeEvent=min_af_EitherSmallOrLargeEvent, min_QUAL=min_QUAL, filter_overlappingRepeats=filter_overlappingRepeats)
 
-                                            # keep
-                                            filters_dict_list.append(filters_dict)
+                                                # keep
+                                                filters_dict_list.append(filters_dict)
         
         print("There are %i combinations of parameters"%I)
 
         # first try for some combinations, which will give you the timing 
-        times = [get_tupleBreakpoints_for_filters_GRIDSS(df_gridss_twoBreakEnds, filters_dict, return_timing=True) for filters_dict in random.sample(filters_dict_list, min(10, len(filters_dict_list)))]
+        times = [get_tupleBreakpoints_for_filters_GRIDSS(df_gridss_twoBreakEnds, filters_dict, reference_genome, return_timing=True) for filters_dict in random.sample(filters_dict_list, min(10, len(filters_dict_list)))]
         ncores = multiproc.cpu_count()
         print("Obtaining the list of tuples of breakpoints will take arround %.2f minutes on %i cores"%(((np.mean(times)*I)/ncores)/60, ncores))
 
 
         # obtain the list of tuples for each parameter combintaion
         with  multiproc.Pool(multiproc.cpu_count()) as pool:
-            bp_tuples_list = pool.starmap(get_tupleBreakpoints_for_filters_GRIDSS, [(df_gridss_twoBreakEnds, fd) for fd in filters_dict_list])
+            bp_tuples_list = pool.starmap(get_tupleBreakpoints_for_filters_GRIDSS, [(df_gridss_twoBreakEnds, fd, reference_genome) for fd in filters_dict_list])
             pool.close()
 
         # map each tuple o bp to the dicts of parameters that gave it
@@ -9214,7 +9285,7 @@ def benchmark_GridssClove_for_knownSV(sample_bam, reference_genome, know_SV_dict
 
             # get into dfs with generally interesting info
             #print("adding info")
-            df_gridss = add_info_to_gridssDF(load_single_sample_VCF(gridss_VCFoutput), median_insert_size=median_insert_size, median_insert_size_sd=median_insert_size_sd) # this is a dataframe with some extra info
+            df_gridss = add_info_to_gridssDF(load_single_sample_VCF(gridss_VCFoutput), reference_genome, median_insert_size=median_insert_size, median_insert_size_sd=median_insert_size_sd) # this is a dataframe with some extra info
             #print("info added")
             df_bedpe = pd.read_csv(bedpe_with_adds, sep="\t")
             df_bedpe["IDs_set"] = df_bedpe.IDs.apply(lambda x: set(x.split("||")))
@@ -9224,8 +9295,7 @@ def benchmark_GridssClove_for_knownSV(sample_bam, reference_genome, know_SV_dict
             outdir_parameter_combinations = "%s/several_parameter_combinations_filter_%s_af%.2f"%(gridss_outdir, range_filtering, expected_AF)
             #delete_folder(outdir_parameter_combinations) # DEBUG
             make_folder(outdir_parameter_combinations)
-            filtersID_to_breakpoints = write_breakpoints_for_parameter_combinations_and_get_filterIDtoBpoints_gridss(df_gridss, df_bedpe, outdir_parameter_combinations, range_filtering=range_filtering, expected_AF=expected_AF, replace=replace) # this is a dataframe with all the filter combinations and the map between filterID and the actual filtering
-
+            filtersID_to_breakpoints = write_breakpoints_for_parameter_combinations_and_get_filterIDtoBpoints_gridss(df_gridss, df_bedpe, outdir_parameter_combinations, reference_genome, range_filtering=range_filtering, expected_AF=expected_AF, replace=replace) # this is a dataframe with all the filter combinations and the map between filterID and the actual filtering
 
             # define the paths to the breakpoints
             paths_to_bedpe_breakpoints = ["%s/%s/filtered_breakpoints.bedpe"%(outdir_parameter_combinations, filterID) for filterID in filtersID_to_breakpoints]
@@ -10128,11 +10198,11 @@ def run_GridssClove_optimising_parameters(sorted_bam, reference_genome, outdir, 
         print("running with default un-optimised parameters")
 
         # get the default parameters 
-        gridss_blacklisted_regions = ""
-        gridss_maxcoverage = 50000
+        gridss_blacklisted_regions = default_gridss_blacklisted_regions
+        gridss_maxcoverage = default_gridss_maxcoverage
         gridss_filters_dict = default_filtersDict_gridss
-        max_rel_coverage_to_consider_del = 0.1
-        min_rel_coverage_to_consider_dup = 1.8
+        max_rel_coverage_to_consider_del = default_max_rel_coverage_to_consider_del
+        min_rel_coverage_to_consider_dup = default_min_rel_coverage_to_consider_dup
 
     ###########################
 
@@ -10630,7 +10700,7 @@ def report_accuracy_realSVs(close_shortReads_table, reference_genome, outdir, re
                     else: raise ValueError("%s is not valid"%job_array_mode)
 
                 # define the svdict and the df_gridss 
-                svtype_to_svfile, df_gridss = get_svtype_to_svfile_and_df_gridss_from_perSVade_outdir(outdir_runID)
+                svtype_to_svfile, df_gridss = get_svtype_to_svfile_and_df_gridss_from_perSVade_outdir(outdir_runID, reference_genome)
 
                 # add to dict
                 ID = "%s||||%s"%(typeSimulations, runID)
@@ -11425,7 +11495,58 @@ def get_readsCoveringVariant(ad):
 
         return int(ad_split[1])
 
-def merge_several_vcfsSameSample_into_oneMultiSample_vcf(vcf_iterable, reference_genome, outdir, ploidy,  replace=False, threads=4):
+
+def get_series_variant_in_repeats(vcf_df, repeats_table, outdir, replace=False):
+
+    """Takes a df that has a vcf and returns a series that contains a boolean array with wether the variant intersects the repeats"""
+
+    print("getting the intersection with repeats")
+
+    make_folder(outdir)
+
+    # if the repeats_table is None, override
+    if repeats_table is None: return [False]*len(vcf_df)
+
+    # copy the df
+    vcf_df = cp.deepcopy(vcf_df)
+
+    # define the outdirs
+    repeats_bed = "%s/repeats_table.bed"%outdir
+    vcf_bed = "%s/variant_positions.bed"%outdir
+
+    # make the bed file for the repeats
+    repeats_df = pd.read_csv(repeats_table, sep="\t").rename(columns={"chromosome":"#chrom", "begin_repeat":"start", "end_repeat":"end"})
+    repeats_df[["#chrom", "start", "end"]].to_csv(repeats_bed, sep="\t", header=True, index=False)
+
+    # make a bed for the variants
+    vcf_df["end"] = vcf_df.POS
+    vcf_df.rename(columns={"#CHROM":"#chrom", "POS":"start"})[["#chrom", "start", "end"]].to_csv(vcf_bed, sep="\t", header=True, index=False)
+
+    # run bedtools get the intersecting positions in vcf_df
+    intersection_bed = "%s/intersection_vcf_and_repeats.bed"
+    run_cmd("%s intersect -a %s -b %s -header > %s"%(bedtools, repeats_bed, vcf_bed, intersection_bed))
+
+    # load the df and define the repeats variants
+    intersecting_df = pd.read_csv(intersection_bed, sep="\t")
+    variants_in_repeats = set(intersecting_df["#chrom"] + "_" + intersecting_df["start"].apply(str))
+
+    # check that the start and the end are the same
+    print(intersecting_df)
+    if any(intersecting_df.start!=intersecting_df.end): raise ValueError("Not all the positions are the same in the intersecting vcf are the same")
+
+    # define a series in vcf_df that has the variant as string
+    vcf_df["var_as_str"] = intersecting_df["#CHROM"] + "_" + intersecting_df["POS"].apply(str)
+    vcf_df["overlaps_repeats"] = vcf_df.var_as_str.isin(variants_in_repeats)
+
+    print("There are %i/%i variants overlapping repeats"%(sum(vcf_df["overlaps_repeats"]), len(vcf_df)))
+
+    # clean
+    for f in [repeats_bed, vcf_bed, intersection_bed]: remove_file(f)
+
+    return vcf_df["overlaps_repeats"]
+
+
+def merge_several_vcfsSameSample_into_oneMultiSample_vcf(vcf_iterable, reference_genome, outdir, ploidy,  replace=False, threads=4, repeats_table=None):
 
     """This function takes an iterable of vcf files and gets the merged output. It writes a vcf into outdir. It only considers PASS vars"""
 
@@ -11554,6 +11675,9 @@ def merge_several_vcfsSameSample_into_oneMultiSample_vcf(vcf_iterable, reference
             # load into df and add the number of PASS vars and also the PASS programs
             header_lines = [line.strip() for line in open(merged_vcf_tmp, "r", encoding='utf-8', errors='ignore') if line.startswith("##")]
             vcf_df = pd.read_csv(merged_vcf_tmp, skiprows=list(range(len(header_lines))), sep="\t", na_values=vcf_strings_as_NaNs, keep_default_na=False)
+
+            # get whether the variant overlaps repeats
+            vcf_df["overlaps_repeats"] = get_series_variant_in_repeats(vcf_df, repeats_table, outdir, replace=replace)
 
             # replace by a '.' if empty
             def get_point_if_empty(x):
@@ -11685,6 +11809,13 @@ def merge_several_vcfsSameSample_into_oneMultiSample_vcf(vcf_iterable, reference
             f_to_description["common_GT"] = "The GT if it is common by all the PASS algorithms (or called if there are none). If there is no agreement between these algorithms it is '.'"
             f_to_type["common_GT"] = "String"
             info_series += ";common_GT=" + vcf_df["common_GT"]
+
+            # add whether it overlaps repeats
+            if repeats_table is not None: 
+
+                f_to_description["INREPEATS"] = "A boolean stating whether the variants overlap any repeat as annotated with RepeatModeler and RepeatMasker"
+                f_to_type["INREPEATS"] = "String"
+                info_series += ";INREPEATS=" + vcf_df["overlaps_repeats"].apply(str)
 
             # set the QUAL to be the mean by the interesting_algs
             print("getting QUAL")
@@ -11874,7 +12005,8 @@ def report_variant_calling_statistics(df, variantCallingStats_tablePrefix, progr
                     # define the number of vars that are in the intersection of the programs
                     nVars_in_intersection = len(set.intersection(*[p_to_vars[p] for p in prog_comb]))
                     nVars_in_Programs = len(set.union(*[p_to_vars[p] for p in prog_comb]))
-                    pctVars_in_intersection = (nVars_in_intersection/nVars_in_Programs)*100
+                    if nVars_in_Programs==0: pctVars_in_intersection = 0
+                    else: pctVars_in_intersection = (nVars_in_intersection/nVars_in_Programs)*100
 
                     # keep 
                     stats_dict.setdefault("%s_nVars"%type_var, {}).setdefault(prog_comb_name, nVars_in_intersection)

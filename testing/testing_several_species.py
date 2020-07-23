@@ -155,7 +155,7 @@ for taxID, spName, ploidy, mitochondrial_chromosome in species_Info:
 
 
 
-# an example CMD to debug
+# an example CMD to debug de generation of merged vcfs
 """
 
 cd ~/samba/CandidaMine_data_generation/v1/data/Candida_albicans_5476/varCall_output/SRR6669901/
@@ -163,10 +163,17 @@ cd ~/samba/CandidaMine_data_generation/v1/data/Candida_albicans_5476/varCall_out
 ~/samba/scripts/perSVade/perSVade_repository/scripts/varcall_cnv_pipeline.py -r ~/samba/CandidaMine_data_generation/v1/data/Candida_albicans_5476/genome.fasta -thr 4 -o smallVars_CNV_output -p 2 -sbam aligned_reads.bam.sorted -c 12 -mchr Ca22chrM_C_albicans_SC5314 -mcode 4 -gcode 12 -gff ~/samba/CandidaMine_data_generation/v1/data/Candida_albicans_5476/annotations.gff --get_merged_vcf
 
 
-
 """
 
 
+# an example of running the pipeline for adding the repeats
+
+"""
+
+python /gpfs/projects/bsc40/mschikora/scripts/perSVade/perSVade_repository/scripts/perSVade.py -r /gpfs/projects/bsc40/mschikora/scripts/perSVade/perSVade_repository/testing/outdirs_testing_severalSpecies/5478_Candida_glabrata/reference_genome_dir/reference_genome.fasta --threads 48 --outdir /gpfs/projects/bsc40/mschikora/scripts/perSVade/perSVade_repository/testing/outdirs_testing_severalSpecies/5478_Candida_glabrata/testing_Accuracy/uniform/BG2_ANI --nvars 50 --nsimulations 2 --simulation_ploidies haploid,diploid_hetero --range_filtering_benchmark theoretically_meaningful --mitochondrial_chromosome mito_C_glabrata_CBS138 -f1 /gpfs/projects/bsc40/mschikora/Cglabrata_antifungals/data/trimmed_reads/RUN1_BG2_11B_ANI_R1_trimmed.fq.gz -f2 /gpfs/projects/bsc40/mschikora/Cglabrata_antifungals/data/trimmed_reads/RUN1_BG2_11B_ANI_R2_trimmed.fq.gz
+
+
+"""
 
 
 

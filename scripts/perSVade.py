@@ -131,8 +131,7 @@ parser.add_argument("--replace_var_integration", dest="replace_var_integration",
 parser.add_argument("--pooled_sequencing", dest="pooled_sequencing", action="store_true", default=False, help="It is a pooled sequencing run, which means that the small variant calling is not done based on ploidy. If you are also running SV calling, check that the simulation_ploidies, resemble a population,")
 
 # repeat obtention
-parser.add_argument("--get_repeats_table", dest="get_repeats_table", action="store_true", default=False, help="It will run repeatmodeller and repeat masker to create a table with the coordinates of repeats in your genome (in reference_genome_dir/reference_genome.fasta.repeats.tab)")
-
+parser.add_argument("--get_repeats_table", dest="get_repeats_table", action="store_true", default=False, help="It will run repeatmodeller and repeat masker to create a table with the coordinates of repeats in your genome (in reference_genome_dir/reference_genome.fasta.repeats.tab). If --run_smallVarsCNV, this option will impli that each small  variant will have an annotation of whether it overlaps a repeat region.")
 
 # small varCall stop options
 parser.add_argument("--StopAfter_smallVarCallSimpleRunning", dest="StopAfter_smallVarCallSimpleRunning", action="store_true", default=False, help="Stop after obtaining the filtered vcf outputs of each program.")
@@ -177,6 +176,7 @@ if any([x not in all_chroms for x in opt.mitochondrial_chromosome.split(",")]) a
 genome_length = sum(fun.get_chr_to_len(opt.ref).values())
 print("The genome has %.2f Mb"%(genome_length/1000000 ))
 
+
 ##################################
 
 #### REPLACE THE GFF ####
@@ -216,10 +216,8 @@ fun.window_l = int(np.median([len_seq for chrom, len_seq  in fun.get_chr_to_len(
 print("using a window length of %i"%fun.window_l)
 
 # get the repeats table
-
-if opt.get_repeats_table is True:
-    print("getting repeats")
-    repeats_df, repeats_table_file = fun.get_repeat_maskerDF(opt.ref, threads=opt.threads, replace=opt.replace)
+print("getting repeats")
+repeats_df, repeats_table_file = fun.get_repeat_maskerDF(opt.ref, threads=opt.threads, replace=opt.replace)
 
 #############################
 
