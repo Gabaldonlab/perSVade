@@ -140,6 +140,8 @@ TRIMMOMATIC = "%s/run_trimmomatic.py"%CWD
 perSVade_py = "%s/perSVade.py"%CWD 
 run_trimmomatic_and_fastqc_py = "%s/run_trimmomatic_and_fastqc.py"%CWD
 get_trimmed_reads_for_srr_py = "%s/get_trimmed_reads_for_srr.py"%CWD
+run_vep = "%s/run_vep.py"%CWD
+
 
 SOURCE_CONDA_CMD = "source %s/etc/profile.d/conda.sh;"%CondaDir
 CONDA_ACTIVATING_CMD = "conda activate %s;"%EnvName
@@ -2602,8 +2604,8 @@ def soft_link_files(origin, target):
 
     if file_is_empty(target):
 
-        # remove previous link
-        try: run_cmd("rm %s"%target)
+        # remove previous lisqnk
+        try: run_cmd("rm %s > /dev/null 2>&1"%target)
         except: pass
 
         run_cmd("ln -s %s %s"%(origin, target))
@@ -2807,21 +2809,7 @@ def add_info_to_gridssDF(df, reference_genome, expected_fields={"allele_frequenc
 
         # get the repeats table
         repeats_table = get_repeat_maskerDF(reference_genome, threads=1, replace=False)[1]
-
-        # define the outdir repeats generation
-        outdir_repeats_generation_found = False
-        while outdir_repeats_generation_found is False:
-
-            outdir_repeats_generation = "%s.intersecting_repeats_%s"%(repeats_table, id_generator(8))
-            if not os.path.isdir(outdir_repeats_generation): outdir_repeats_generation_found = True
-
-        print(df, df.keys())
-
-        ladhjhdakdha
-        print("calculating overlapping repeats into %s"%outdir_repeats_generation)
-        df["overlaps_repeats"] = get_series_variant_in_repeats(df, repeats_table, outdir_repeats_generation, replace=False)
-
-        ajhdfgahjsgjhasgdasd
+        df["overlaps_repeats"] = get_series_variant_in_repeats(df, repeats_table, replace=False)
 
         ########################################################
 
@@ -2944,6 +2932,7 @@ def get_gridssDF_filtered(df, reference_genome, min_Nfragments=8, min_af=0.005, 
 
     ######## ADD COLUMNS TO THE DF FOR FURTHER CALCULATION ##########
     if add_columns is True: df = add_info_to_gridssDF(df, reference_genome)
+    print(df.overlaps_repeats, sum(df.overlaps_repeats))
 
     # define whether the variant is a small duplication or insertion. These have special filters
     df["is_small_DupDel"] = (df.INFO_SIMPLE_TYPE.isin({"DEL", "DUP"})) & (df.length_event<=max_to_be_considered_small_event)
@@ -2972,7 +2961,7 @@ def get_gridssDF_filtered(df, reference_genome, min_Nfragments=8, min_af=0.005, 
     if filter_polyGC: idx = idx & ~(df.has_poly16GC)
     if filter_noSplitReads: idx = idx & (~(df.DATA_SR==0) | ~(df.is_small_DupDel))
     if filter_noReadPairs: idx = idx & (~(df.DATA_RP==0) | (df.is_small_DupDel))
-    if filter_overlappingRepeats: idx = idx & (~df.overlaps_repeats)
+    if filter_overlappingRepeats: idx = idx & ~(df.overlaps_repeats)
 
     # return the filtered df
     return df[idx]
@@ -4767,6 +4756,38 @@ def run_freebayes_for_chromosome(chromosome_id, outvcf_folder, ref, sorted_bam, 
 
 
 
+def run_freebayes_for_region(region, outvcf_folder, ref, sorted_bam, ploidy, coverage, replace, pooled_sequencing):
+
+    """Takes a region (chromosome:start-end) and the fasta file and an outvcf and runs freebayes on it"""
+
+    # define the output vcf file
+    outvcf = "%s/%s_freebayes.vcf"%(outvcf_folder, region); outvcf_tmp = "%s.tmp.vcf"%outvcf
+    print("running freebayes for %s"%region)
+
+    # remove previously existing files
+    if file_is_empty(outvcf) or replace is True:
+        remove_file(outvcf_tmp)
+
+        # run freebayes
+        freebayes_std = "%s.std"%outvcf_tmp
+
+        if pooled_sequencing is True:
+            print("running for pooled data")
+            run_cmd("%s -f %s --haplotype-length -1 --use-best-n-alleles 20 --min-alternate-count %i --min-alternate-fraction 0 --pooled-continuous -b %s -v %s --region %s > %s 2>&1"%(freebayes, ref, coverage, sorted_bam, outvcf_tmp, region, freebayes_std))
+        else: 
+            print("running unpooled sequencing")
+            run_cmd("%s -f %s -p %i --min-coverage %i -b %s --haplotype-length -1 -v %s --region %s > %s 2>&1"%(freebayes, ref, ploidy, coverage, sorted_bam, outvcf_tmp, region, freebayes_std))
+
+        # remove the intermediate files
+        remove_file(freebayes_std)
+
+        # rename
+        os.rename(outvcf_tmp, outvcf)
+
+    # return the vcfs
+    return outvcf
+
+
 def leftTrimVariant(pos, ref, alt, onlyOneBp=True):
 
     """Takes a variant with a position, ref and alt alleles and returns the trimmed to the left. onlyOneBp means that it will only trim one basepair. Fo some reason this is how the vcflib and gatk normalisations have the trims. """
@@ -4992,26 +5013,96 @@ def load_vcf_intoDF_GettingFreq_AndFilter(vcf_file):
     return df[["#CHROM", "POS", "ID", "REF", "ALT", "QUAL", "FILTER", "INFO", "FORMAT",  data_colname]], var_to_frequency, var_to_filter, var_to_GT, var_to_filters
 
 
+def run_freebayes_parallel_regions(outdir_freebayes, ref, sorted_bam, ploidy, coverage, threads=4, replace=False, pooled_sequencing=False):
 
-def run_freebayes_pooledSeq(outdir_freebayes, ref, sorted_bam, ploidy, coverage, replace=False, threads=4):
+    """It parallelizes over the provided threads of the system"""
 
-    """Runs freebayes for pooled sequencing data, it writes the output as output.filt.vcf, although it is not filtered"""
-
-    # define the output
-    outvcf = "%s/output.filt.vcf"%outdir_freebayes; outvcf_tmp = "%s.tmp.vcf"%outvcf
-
+    # make the dir if not already done
     make_folder(outdir_freebayes)
 
-    if file_is_empty(outvcf) or replace is True:
-        print("running freebayes for pooled data")
+    #run freebayes
+    freebayes_output ="%s/output.raw.vcf"%outdir_freebayes; freebayes_output_tmp = "%s.tmp"%freebayes_output
+    if file_is_empty(freebayes_output) or replace is True:
 
-        run_cmd("%s -f %s --haplotype-length -1 --min-alternate-count %i --min-alternate-fraction 0 --pooled-continuous -b %s -v %s"%(freebayes, ref, coverage, sorted_bam, outvcf_tmp))
+        print("running freebayes in parallel with %i threads"%(threads))
 
+        # define the regions file
+        window_fb = 20000
+        regions_file = "%s/regions_genome_%ibp.tab"%(outdir_freebayes, window_fb)
+        run_cmd("%s %s.fai %i > %s"%(fasta_generate_regions_py, ref, window_fb, regions_file))
+        regions = [l.strip() for l in open(regions_file, "r").readlines()]
 
-        os.rename(outvcf_tmp, outvcf)
+        # remove the previous tmp file
+        remove_file(freebayes_output_tmp)
 
-    return outvcf
+        # make a dir to store the vcfs
+        regions_vcfs_dir = "%s/regions_vcfs"%outdir_freebayes; make_folder(regions_vcfs_dir)
 
+        # define the inputs of the function
+        inputs_fn = [(region, regions_vcfs_dir, ref, sorted_bam, ploidy, coverage, replace, pooled_sequencing) for region in regions]
+
+        # initialize the pool class with the available CPUs --> this is asyncronous parallelization
+        with multiproc.Pool(threads) as pool:
+
+            # run in parallel the freebayes generation for all the 
+            regions_vcfs = pool.starmap(run_freebayes_for_region, inputs_fn)
+
+            # close the pool
+            pool.close()
+            pool.terminate()
+
+        # go through each of the chromosomal vcfs and append to a whole df
+        print("appending all vcfs of the individual regions together")
+        all_df = pd.DataFrame()
+        all_header_lines = []
+        for Iregion, vcf in enumerate(regions_vcfs):
+            print("Working on region %i/%i"%(Iregion+1, len(regions_vcfs)))
+
+            # load the df keeping the header lines
+            header_lines = [l for l in open(vcf, "r") if l.startswith("##")]
+            df = pd.read_csv(vcf, sep="\t", header = len(header_lines))
+
+            # define the vcf header
+            vcf_header = ["#CHROM", "POS", "ID", "REF", "ALT", "QUAL", "FILTER", "INFO", "FORMAT"]
+            sample_header = [c for c in df.columns if c not in vcf_header][0]
+            vcf_header.append(sample_header)
+
+            # keep header that is unique
+            all_header_lines.append("".join([line for line in header_lines if line.split("=")[0] not in {"##reference", "##commandline", "##fileDate"}]))
+            
+            # append to the previous df
+            all_df = all_df.append(df[vcf_header], sort=True)
+
+        # sort and remove duplicate entries
+        all_df = all_df.sort_values(by=["#CHROM", "POS"]).drop_duplicates(subset=["#CHROM", "POS", "REF", "ALT"])
+
+        # check that all headers are the same
+        if len(set(all_header_lines))!=1: 
+            print("These are the header lines: ", set(all_header_lines))
+            print("There are %i unique headers"%len(set(all_header_lines)))
+            raise ValueError("Not all headers are the same in the individual chromosomal vcfs. This may indicate a problem with parallelization of freebayes")
+
+        # write the file
+        open(freebayes_output_tmp, "w").write(all_header_lines[0] + all_df[vcf_header].to_csv(sep="\t", index=False, header=True))
+
+        # remove tmp vcfs
+        delete_folder(regions_vcfs_dir)
+
+        # rename
+        os.rename(freebayes_output_tmp, freebayes_output)
+
+    # filter the freebayes by quality
+    freebayes_filtered = "%s/output.filt.vcf"%outdir_freebayes; freebayes_filtered_tmp = "%s.tmp"%freebayes_filtered
+    if file_is_empty(freebayes_filtered) or replace is True:
+
+        if pooled_sequencing is True: soft_link_files(freebayes_output, freebayes_filtered)
+        else:
+
+            #print("filtering freebayes")
+            cmd_filter_fb = '%s -f "QUAL > 1 & QUAL / AO > 10 & SAF > 0 & SAR > 0 & RPR > 1 & RPL > 1" --tag-pass PASS %s > %s'%(vcffilter, freebayes_output, freebayes_filtered_tmp); run_cmd(cmd_filter_fb)
+            os.rename(freebayes_filtered_tmp, freebayes_filtered)
+
+    return freebayes_filtered
 
 def run_freebayes_parallel(outdir_freebayes, ref, sorted_bam, ploidy, coverage, threads=4, max_threads=8, replace=False, pooled_sequencing=False):
 
@@ -6320,6 +6411,22 @@ def connected_to_network(test_host='http://google.com'):
 
     except: return False
 
+def close_shortReads_table_is_correct(close_shortReads_table):
+
+    """Takes a file that is the close_shortReads_table and returns whether all the reads exist"""
+
+    # if it is empty return false
+    if file_is_empty(close_shortReads_table): return False
+
+    # load as df
+    close_shortReads_table_df = pd.read_csv(close_shortReads_table, sep="\t")
+
+    # check that all the reads exist
+    reads_files = set(close_shortReads_table_df["short_reads1"]).union(close_shortReads_table_df["short_reads2"])
+
+    if any([file_is_empty(f) for f in reads_files]): return False
+    else: return True
+
 def get_close_shortReads_table_close_to_taxID(target_taxID, reference_genome, outdir, ploidy, n_close_samples=3, nruns_per_sample=3, replace=False, threads=4, min_fraction_reads_mapped=0.1, coverage_subset_reads=0.1, min_coverage=30, job_array_mode="local", StopAfter_sampleIndexingFromSRA=False, queue_jobs="debug", max_ncores_queue=768, time_read_obtention="02:00:00", StopAfterPrefecth_of_reads=False):
 
     """
@@ -6355,15 +6462,17 @@ def get_close_shortReads_table_close_to_taxID(target_taxID, reference_genome, ou
     # define the path to the final table
     close_shortReads_table = "%s/close_shortReads_table.tbl"%outdir
 
+    # if it exists 
+
     # define the dir were you will store the reads
     reads_dir = "%s/reads"%outdir; make_folder(reads_dir)
 
-    if file_is_empty(close_shortReads_table) or replace is True:
+    if not close_shortReads_table_is_correct(close_shortReads_table) or replace is True:
+        print("getting short reads table")
 
         # change things
         SRA_runInfo_df["sampleID"] = "sample" + SRA_runInfo_df.sampleID.apply(str)
         SRA_runInfo_df["runID"] = SRA_runInfo_df.sampleID + "_" + SRA_runInfo_df.Run
-
 
         # initialize the final dict
         srr_to_readsDict = {}
@@ -6387,7 +6496,7 @@ def get_close_shortReads_table_close_to_taxID(target_taxID, reference_genome, ou
             else: final_file = trimmed_reads2 # the last one generated
 
             # get the cmd if necessary
-            if file_is_empty(final_file) or replace is True:
+            if file_is_empty(final_file) and file_is_empty(trimmed_reads2) or replace is True:
 
                 # define the cmd and add it
                 cmd = "%s --srr %s --outdir %s --threads %i"%(get_trimmed_reads_for_srr_py, srr, outdir_srr, threads)
@@ -6398,9 +6507,9 @@ def get_close_shortReads_table_close_to_taxID(target_taxID, reference_genome, ou
             # keep the files
             srr_to_readsDict[srr] = {"short_reads1":trimmed_reads1, "short_reads2":trimmed_reads2}
 
-
         # if there are all_cmds, run them in a job array
         if len(all_cmds)>0:
+            print("Getting reads into %s"%(reads_dir))
 
             # if you are in local, run them in parallel. Each job in one threads
             if job_array_mode=="local" and StopAfterPrefecth_of_reads is True: 
@@ -6435,7 +6544,7 @@ def get_close_shortReads_table_close_to_taxID(target_taxID, reference_genome, ou
 
 
         if StopAfterPrefecth_of_reads is True: 
-            print("You need to get the reads, not only stop after prefetch")
+            print("Stopping after prefetch of the reads. You still need to re-run this pipeline to get the actual reads.")
             exit(0)
 
         # add to the df
@@ -6449,11 +6558,16 @@ def get_close_shortReads_table_close_to_taxID(target_taxID, reference_genome, ou
 
     print("removing all files that are not the reads")
     close_shortReads_table_df = pd.read_csv(close_shortReads_table, sep="\t")
+
+    # deubg
+    if not close_shortReads_table_is_correct(close_shortReads_table): raise ValueError("%s has empty reads files"%close_shortReads_table)
+
+    dadkahdakda
     
     # define the important files
     important_files = set(close_shortReads_table_df["short_reads1"]).union(close_shortReads_table_df["short_reads2"])
     
-    # remove the others
+    # remove the files that are not the reads
     for srr in os.listdir(reads_dir):
         srr_dir = "%s/%s"%(reads_dir, srr)
         for file in os.listdir(srr_dir):
@@ -6469,6 +6583,10 @@ def get_close_shortReads_table_close_to_taxID(target_taxID, reference_genome, ou
             path = "%s/%s"%(outdir, f)
             delete_folder(path)
             remove_file(path)
+
+    # last check
+    if not close_shortReads_table_is_correct(close_shortReads_table): raise ValueError("%s has empty reads files"%close_shortReads_table)
+ 
 
     print("taking reads from %s"%close_shortReads_table)
 
@@ -7227,7 +7345,7 @@ def format_svDF(svDF, svtype="unknown", interesting_chromosomes="all", sampleNam
 
     return svDF
 
-def get_sampleID_to_svtype_to_svDF_filtered(sampleID_to_svtype_to_file, sampleID_to_dfGRIDSS, sampleID_to_parentIDs={}, breakend_info_to_keep=['#CHROM', 'POS', 'other_coordinates', 'allele_frequency', 'allele_frequency_SmallEvent', 'real_AF', 'FILTER', 'inserted_sequence', 'has_poly16GC', 'length_inexactHomology', 'length_microHomology', 'QUAL']):
+def get_sampleID_to_svtype_to_svDF_filtered(sampleID_to_svtype_to_file, sampleID_to_dfGRIDSS, sampleID_to_parentIDs={}, breakend_info_to_keep=['#CHROM', 'POS', 'other_coordinates', 'allele_frequency', 'allele_frequency_SmallEvent', 'real_AF', 'FILTER', 'inserted_sequence', 'has_poly16GC', 'length_inexactHomology', 'length_microHomology', 'QUAL', 'overlaps_repeats']):
 
     """This function takes a dictionary that maps sampleIDs to svtpes and the corresponding files (the ones returned in the SV-calling pipeline) and the corresponding gridss dataframes, returning a sampleID_to_svtype_to_svDF, after removal of the variants that are in sampleID_to_parentIDs. The idea is that if any breakend is shared between the sample and any of the parents it is removed and so does any sv that relies on this breakend. Other arguments:
 
@@ -7480,12 +7598,21 @@ def get_svtype_to_svfile_and_df_gridss_from_perSVade_outdir(perSVade_outdir, ref
     outdir = "%s/SVdetection_output/final_gridss_running"%perSVade_outdir
     gridss_vcf = "%s/gridss_output.raw.vcf"%outdir
 
+    # this means that it is a cleaned dir
+    if not file_is_empty(gridss_vcf):
+
+         # get the svtype_to_svfile
+        svtype_to_svfile = {svtype : "%s/%s.tab"%(outdir, svtype)  for svtype in {"insertions", "deletions", "tandemDuplications", "translocations", "inversions"}}
+        svtype_to_svfile["remaining"] = "%s/unclassified_SVs.tab"%outdir 
+
+    else: 
+
+        needtodevelopthesituationwiththedirty_perSVade_dir
+        gridss_vcf = jhdajhdajkdah
+
+
     # get the df gridss
     df_gridss = add_info_to_gridssDF(load_single_sample_VCF(gridss_vcf), reference_genome)
-
-    # get the svtype_to_svfile
-    svtype_to_svfile = {svtype : "%s/%s.tab"%(outdir, svtype)  for svtype in {"insertions", "deletions", "tandemDuplications", "translocations", "inversions"}}
-    svtype_to_svfile["remaining"] = "%s/unclassified_SVs.tab"%outdir 
 
     # keep only the ones that exist
     svtype_to_svfile = {svtype : file for svtype, file in svtype_to_svfile.items() if not file_is_empty(file)}
@@ -7630,13 +7757,17 @@ def get_ID_to_svtype_to_svDF_for_setOfGenomes_highConfidence(close_shortReads_ta
 
                 # define the previous important files
                 final_file = "%s/perSVade_finished_file.txt"%outdir_gridssClove
-                
+
+                # define the previous repeats file 
+                previous_repeats_table = "%s.repeats.tab"%reference_genome
+                if file_is_empty(previous_repeats_table): raise ValueError("%s should exist"%previous_repeats_table)
+
                 # only contine if the final file is not defined
                 if file_is_empty(final_file) or replace is True:
                     print("getting vars for %s"%ID)
 
                     # define the cmd. This is a normal perSvade.py run with the vars of the previous dir  
-                    cmd = "python %s -r %s --threads %i --outdir %s  --mitochondrial_chromosome %s -f1 %s -f2 %s --fast_SVcalling"%(perSVade_py, reference_genome, threads, outdir_gridssClove, mitochondrial_chromosome, row["short_reads1"], row["short_reads2"])
+                    cmd = "python %s -r %s --threads %i --outdir %s  --mitochondrial_chromosome %s -f1 %s -f2 %s --fast_SVcalling --previous_repeats_table %s"%(perSVade_py, reference_genome, threads, outdir_gridssClove, mitochondrial_chromosome, row["short_reads1"], row["short_reads2"], previous_repeats_table)
 
                     # add arguments depending on the pipeline
                     if replace is True: cmd += " --replace"
@@ -10629,7 +10760,9 @@ def plot_fraction_overlapping_realSVs(df_benchmarking, filename):
 def report_accuracy_realSVs(close_shortReads_table, reference_genome, outdir, real_svtype_to_file, SVs_compatible_to_insert_dir, threads=4, replace=False, n_simulated_genomes=2, mitochondrial_chromosome="mito_C_glabrata_CBS138", simulation_ploidies=["haploid", "diploid_homo", "diploid_hetero", "ref:2_var:1", "ref:3_var:1", "ref:4_var:1", "ref:5_var:1", "ref:9_var:1", "ref:19_var:1", "ref:99_var:1"], range_filtering_benchmark="theoretically_meaningful", nvars=100, job_array_mode="local", max_ncores_queue=48, time_perSVade_running="02:00:00", queue_jobs="debug", StopAfter_testAccuracy_perSVadeRunning=False):
 
 
-    """This function runs the SV pipeline for all the datasets in close_shortReads_table with the fastSV, optimisation based on uniform parameters and optimisation based on realSVs (specified in real_svtype_to_file). The latter is skipped if real_svtype_to_file is empty"""
+    """This function runs the SV pipeline for all the datasets in close_shortReads_table with the fastSV, optimisation based on uniform parameters and optimisation based on realSVs (specified in real_svtype_to_file). The latter is skipped if real_svtype_to_file is empty.
+
+    First, it runs perSVade on all parameters without cleaning. At the end it cleans."""
 
     # this pipeline requires real data and close_shortReads_table that is not none
     if len(real_svtype_to_file)==0: raise ValueError("You need real data if you want to test accuracy")
@@ -10680,11 +10813,15 @@ def report_accuracy_realSVs(close_shortReads_table, reference_genome, outdir, re
                 # define the final file 
                 final_file = "%s/perSVade_finished_file.txt"%outdir_runID
 
+                # define the previous repeats file 
+                previous_repeats_table = "%s.repeats.tab"%reference_genome
+                if file_is_empty(previous_repeats_table): raise ValueError("%s should exist"%previous_repeats_table)
+
                 # only contine if the final file is not defined
                 if file_is_empty(final_file) or replace is True:
 
                     # define the cmd. This is a normal perSvade.py run with the vars of the previous dir  
-                    cmd = "python %s -r %s --threads %i --outdir %s --nvars %i --nsimulations %i --simulation_ploidies %s --range_filtering_benchmark %s --mitochondrial_chromosome %s -f1 %s -f2 %s"%(perSVade_py, reference_genome, threads, outdir_runID, nvars, n_simulated_genomes, ",".join(simulation_ploidies), range_filtering_benchmark, mitochondrial_chromosome, r1, r2)
+                    cmd = "python %s -r %s --threads %i --outdir %s --nvars %i --nsimulations %i --simulation_ploidies %s --range_filtering_benchmark %s --mitochondrial_chromosome %s -f1 %s -f2 %s --previous_repeats_table %s --skip_cleaning_outdir"%(perSVade_py, reference_genome, threads, outdir_runID, nvars, n_simulated_genomes, ",".join(simulation_ploidies), range_filtering_benchmark, mitochondrial_chromosome, r1, r2, previous_repeats_table)
 
                     # add arguments depending on the pipeline
                     if replace is True: cmd += " --replace"
@@ -10710,9 +10847,6 @@ def report_accuracy_realSVs(close_shortReads_table, reference_genome, outdir, re
                 # get the df best accuracy
                 if typeSimulations!="fast": all_sampleID_to_dfBestAccuracy[ID] = pd.read_csv("%s/SVdetection_output/parameter_optimisation/benchmarking_all_filters_for_all_genomes_and_ploidies/df_cross_benchmark_best.tab"%outdir_runID, sep="\t")
 
-                # clean the output directory
-                clean_perSVade_outdir(outdir_runID)
-
         # if you are not running on slurm, just execute one cmd after the other
         if job_array_mode=="greasy":
 
@@ -10730,6 +10864,10 @@ def report_accuracy_realSVs(close_shortReads_table, reference_genome, outdir, re
         if StopAfter_testAccuracy_perSVadeRunning is True: 
             print("You already ran all the configurations of perSVade. Stopping after the running of perSVade on testAccuracy")
             sys.exit(0)
+
+
+
+        thishastobedeveloped
 
 
         print("getting ID_to_svtype_to_svDF")
@@ -10810,6 +10948,12 @@ def report_accuracy_realSVs(close_shortReads_table, reference_genome, outdir, re
     # plot the accuracy on simulations
     filename = "%s/accuracy_simulations.pdf"%plots_dir
     plot_accuracy_simulations_from_all_sampleID_to_dfBestAccuracy(all_sampleID_to_dfBestAccuracy, filename)
+
+
+
+    ##### VERY IMPORTANT: CLEAN THE OUTPUT #####
+    needsttobedeveloped
+    clean_perSVade_outdir(xxx)
 
 
 def get_simulated_bamFile(outdir, reference_genome, replace=False, threads=4, total_nread_pairs=10000000, read_length=150, median_insert_size=500, median_insert_size_sd=50):
@@ -10945,7 +11089,7 @@ def remove_smallVarsCNV_nonEssentialFiles(outdir, ploidy):
 
     """Removes all the files in outdir that are not essential. The outdir has to be the one of the VarCall outdir. The files to r"""
 
-    print("cleaning %s"%outdir)
+    #print("cleaning %s"%outdir)
 
     # initialize the files to remove
     files_to_remove = ["%s/CNV_results/gene_to_coverage_genes.tab"%outdir, # the genes coverage
@@ -11496,13 +11640,11 @@ def get_readsCoveringVariant(ad):
         return int(ad_split[1])
 
 
-def get_series_variant_in_repeats(vcf_df, repeats_table, outdir, replace=False):
+def get_series_variant_in_repeats(vcf_df, repeats_table, replace=False):
 
     """Takes a df that has a vcf and returns a series that contains a boolean array with wether the variant intersects the repeats"""
 
     print("getting the intersection with repeats")
-
-    make_folder(outdir)
 
     # if the repeats_table is None, override
     if repeats_table is None: return [False]*len(vcf_df)
@@ -11510,41 +11652,52 @@ def get_series_variant_in_repeats(vcf_df, repeats_table, outdir, replace=False):
     # copy the df
     vcf_df = cp.deepcopy(vcf_df)
 
-    # define the outdirs
-    repeats_bed = "%s/repeats_table.bed"%outdir
-    vcf_bed = "%s/variant_positions.bed"%outdir
+    # generate the repeats_positions
+    repeats_positions_file = "%s.repeats_positions.py"%repeats_table
+    repeats_positions_file_tmp = "%s.repeats_positions.tmp.py"%repeats_table
 
-    # make the bed file for the repeats
-    repeats_df = pd.read_csv(repeats_table, sep="\t").rename(columns={"chromosome":"#chrom", "begin_repeat":"start", "end_repeat":"end"})
-    repeats_df[["#chrom", "start", "end"]].to_csv(repeats_bed, sep="\t", header=True, index=False)
+    if file_is_empty(repeats_positions_file) or replace is True:
 
-    # make a bed for the variants
-    vcf_df["end"] = vcf_df.POS
-    vcf_df.rename(columns={"#CHROM":"#chrom", "POS":"start"})[["#chrom", "start", "end"]].to_csv(vcf_bed, sep="\t", header=True, index=False)
+        # define the bed_fields
+        bed_fields = ["#chrom", "start", "end", "length"]
 
-    # run bedtools get the intersecting positions in vcf_df
-    intersection_bed = "%s/intersection_vcf_and_repeats.bed"
-    run_cmd("%s intersect -a %s -b %s -header > %s"%(bedtools, repeats_bed, vcf_bed, intersection_bed))
+        # define a df with the repeats positions
+        repeats_df = pd.read_csv(repeats_table, sep="\t").rename(columns={"chromosome":"#chrom", "begin_repeat":"start", "end_repeat":"end"})
 
-    # load the df and define the repeats variants
-    intersecting_df = pd.read_csv(intersection_bed, sep="\t")
-    variants_in_repeats = set(intersecting_df["#chrom"] + "_" + intersecting_df["start"].apply(str))
+        repeats_df["length"] = repeats_df.end - repeats_df.start
+        repeats_df["pos_range"] = repeats_df[bed_fields].apply(lambda r: range(r["start"], r["end"]+1), axis=1)
+        repeats_df["chr_range"] = repeats_df[bed_fields].apply(lambda r: [r["#chrom"]]*(r["length"]+1), axis=1)
 
-    # check that the start and the end are the same
-    print(intersecting_df)
-    if any(intersecting_df.start!=intersecting_df.end): raise ValueError("Not all the positions are the same in the intersecting vcf are the same")
+        repeats_positions_series = pd.Series(make_flat_listOflists(repeats_df.pos_range))
+        chromosomes_series = pd.Series(make_flat_listOflists(repeats_df.chr_range))
+
+        # check that the length is the same
+        if len(repeats_positions_series)!=len(chromosomes_series): raise ValueError("repeats and chromosomes are expected to be the same. This is a bug.")
+
+        # check that the length is the same as expected_length_positions
+        expected_length_positions = sum(repeats_df.length + 1)
+        if len(repeats_positions_series)>expected_length_positions: raise ValueError("The length of repeats_positions_series can't exceed expected_length_positions")
+
+        if len(repeats_positions_series)!=expected_length_positions: print("WARNING: There are some overlapping repeats in the genome")
+
+        repeats_positions = set(chromosomes_series + "_" + repeats_positions_series.apply(str))
+        print("There are %i bp with repeats"%(len(repeats_positions)))
+
+        # save
+        save_object(repeats_positions, repeats_positions_file_tmp)
+        os.rename(repeats_positions_file_tmp, repeats_positions_file)
+
+    else: repeats_positions = load_object(repeats_positions_file)
 
     # define a series in vcf_df that has the variant as string
-    vcf_df["var_as_str"] = intersecting_df["#CHROM"] + "_" + intersecting_df["POS"].apply(str)
-    vcf_df["overlaps_repeats"] = vcf_df.var_as_str.isin(variants_in_repeats)
+    vcf_df["position_as_str"] = vcf_df["#CHROM"] + "_" + vcf_df["POS"].apply(str)
+
+    # get the overlaps
+    vcf_df["overlaps_repeats"] = vcf_df.position_as_str.isin(repeats_positions)
 
     print("There are %i/%i variants overlapping repeats"%(sum(vcf_df["overlaps_repeats"]), len(vcf_df)))
 
-    # clean
-    for f in [repeats_bed, vcf_bed, intersection_bed]: remove_file(f)
-
     return vcf_df["overlaps_repeats"]
-
 
 def merge_several_vcfsSameSample_into_oneMultiSample_vcf(vcf_iterable, reference_genome, outdir, ploidy,  replace=False, threads=4, repeats_table=None):
 
@@ -11665,10 +11818,20 @@ def merge_several_vcfsSameSample_into_oneMultiSample_vcf(vcf_iterable, reference
                 # keep
                 vcfs_to_merge.append(formatted_vcf_gz)
 
-            # run bcftools merge
-            print("running vcf merge")
-            run_cmd("%s merge --merge none -o %s -Ov --threads %i %s"%(bcftools, merged_vcf_tmp, threads, " ".join(vcfs_to_merge)))
-            
+            # run bcftools merge only if there are more than 1 vcf
+            if len(vcfs_to_merge)>1:
+                print("running vcf merge")
+
+                run_cmd("%s merge --merge none -o %s -Ov --threads %i %s"%(bcftools, merged_vcf_tmp, threads, " ".join(vcfs_to_merge)))
+
+            elif len(vcfs_to_merge)==1: 
+
+                run_cmd("%s view -o %s -Ov --threads %i %s"%(bcftools, merged_vcf_tmp, threads, vcfs_to_merge[0]))
+
+            else: raise ValueError("there are no vcfs to merge")   
+
+            print(merged_vcf_tmp)
+                
             ######## ADD EXTRA FILEDS TO INFO ######## 
             print("editing INFO")
 
@@ -11676,8 +11839,11 @@ def merge_several_vcfsSameSample_into_oneMultiSample_vcf(vcf_iterable, reference
             header_lines = [line.strip() for line in open(merged_vcf_tmp, "r", encoding='utf-8', errors='ignore') if line.startswith("##")]
             vcf_df = pd.read_csv(merged_vcf_tmp, skiprows=list(range(len(header_lines))), sep="\t", na_values=vcf_strings_as_NaNs, keep_default_na=False)
 
+            # remove the duplicates
+            vcf_df = vcf_df.drop_duplicates(subset=["#CHROM", "POS", "REF", "ALT"])
+
             # get whether the variant overlaps repeats
-            vcf_df["overlaps_repeats"] = get_series_variant_in_repeats(vcf_df, repeats_table, outdir, replace=replace)
+            vcf_df["overlaps_repeats"] = get_series_variant_in_repeats(vcf_df, repeats_table, replace=replace)
 
             # replace by a '.' if empty
             def get_point_if_empty(x):
@@ -11693,8 +11859,13 @@ def merge_several_vcfsSameSample_into_oneMultiSample_vcf(vcf_iterable, reference
             # define the 'ID' in  a way that resembles VEP
             vcf_df["ID"] = vcf_df["#CHROM"] + "_" + vcf_df.POS.apply(str) + "_" + vcf_df.REF + "/" + vcf_df.ALT
 
-            # check that the ID is unique
-            if len(set(vcf_df.ID))!=len(vcf_df): raise ValueError("The ID has to be unique")
+            # check that the ID is unique (check that the drop_duplicates worked)
+            if len(set(vcf_df.ID))!=len(vcf_df): 
+
+                #duplicated_ID = vcf_df[vcf_df.duplicate]
+                #print(.duplicate())
+
+                raise ValueError("The ID has to be unique")
 
             # check if there are empty programs
             for f in ["called_programs_list", "PASS_programs_list"]: 
@@ -11882,6 +12053,106 @@ def get_int_from_string(x):
     if x in {"", ".", " "}: return np.nan
     else: return int(x)
 
+
+def get_vep_df_for_vcf_df(vcf_df, outdir, reference_genome, gff_with_biotype, mitochondrial_chromosome, mitochondrial_code, gDNA_code, replace):
+
+    """This function takes a vcf_df and runs vep for this chunk, while keeping  """
+
+    # define the prefix
+    prefix = "%s/vep_%s_to_%s"%(outdir, vcf_df.iloc[0]["ID"].replace("/","_"), vcf_df.iloc[-1]["ID"].replace("/","_"))
+
+    # define the vcf file
+    vcf_file = "%s_variants.vcf"%prefix
+
+    # define the annotated_vcf 
+    annotated_vcf = "%s_annotated.tab"%vcf_file; annotated_vcf_tmp = "%s.tmp"%annotated_vcf
+
+    if file_is_empty(annotated_vcf) or replace is True:
+        print("running vep for %s"%vcf_file)
+
+        # clean previous files
+        for f in os.listdir(outdir):
+            path = "%s/%s"%(outdir, f)
+            if path.startswith(prefix) and path!=annotated_vcf: remove_file(path)
+
+        # generate the raw vcf
+        vcf_df.to_csv(vcf_file, sep="\t", index=False, header=True)
+
+        # run vep for this vcf
+        vep_std = "%s_annotating_vep.std"%prefix
+        run_cmd("%s --input_vcf %s --outfile %s --ref %s --gff %s --mitochondrial_chromosome %s --mito_code %i --gDNA_code %i > %s 2>&1"%(run_vep, vcf_file, annotated_vcf_tmp, reference_genome, gff_with_biotype, mitochondrial_chromosome, mitochondrial_code, gDNA_code, vep_std))
+
+        # keep
+        os.rename(annotated_vcf_tmp, annotated_vcf)
+
+    # remove all the files that are related to this prefix
+    for f in os.listdir(outdir):
+        path = "%s/%s"%(outdir, f)
+        if path.startswith(prefix) and path!=annotated_vcf: remove_file(path)
+
+    # load the vep df
+    df_vep = pd.read_csv(annotated_vcf, sep="\t")
+
+    return df_vep
+
+def run_vep_parallel(vcf, reference_genome, gff_with_biotype, mitochondrial_chromosome, mitochondrial_code, gDNA_code, threads=4, replace=False):
+
+    """This function runs vep in parallel and returns an annotated_vcf"""
+
+    # define an output file for VEP
+    output_vcf = "%s_annotated.tab"%vcf; output_vcf_tmp = "%s.tmp"%output_vcf
+
+    # run annotation by VEP
+    if file_is_empty(output_vcf) or replace is True:
+
+        print("Annotating with VEP %s"%vcf)
+
+        # get the input vcf as a df
+        print("loading vcf_df")
+        df_vcf, header = get_df_and_header_from_vcf(vcf)
+        df_vcf = df_vcf.set_index("ID", drop=False)
+
+        # check that the ID is unique
+        if len(set(df_vcf.index))!=len(df_vcf): raise ValueError("The IDs are not unique")
+
+        # get chunks of the df
+        chunk_size = 2000
+        chunks_vcf_df = [df_vcf.loc[chunk_idxs] for chunk_idxs in chunks(df_vcf.index, chunk_size)]
+        print("There are %i chunks of %i bp. Running on %i threads"%(len(chunks_vcf_df), chunk_size, threads))
+
+        # define an outdir where to write the 
+        outdir_intermediate_files = "%s.chunks_vep_annotation"%vcf
+        delete_folder(outdir_intermediate_files)
+        make_folder(outdir_intermediate_files)
+
+        # get the inputs of the function
+        inputs_fn = [(c, outdir_intermediate_files, reference_genome, gff_with_biotype, mitochondrial_chromosome, mitochondrial_code, gDNA_code, replace) for c in chunks_vcf_df]
+
+        # run in parallel
+        with multiproc.Pool(threads) as pool:
+            list_vep_dfs = pool.starmap(get_vep_df_for_vcf_df, inputs_fn) 
+                
+            pool.close()
+            pool.terminate()
+
+        # run one after the other, this is to test
+        #list_vep_dfs = list(map(lambda x: get_vep_df_for_vcf_df(x[0], x[1], x[2], x[3], x[4], x[5], x[6], x[7]), inputs_fn))
+
+        # concatenate
+        print("concatenating")
+        df_vep = pd.concat(list_vep_dfs).sort_values(by="#Uploaded_variation").drop_duplicates()
+
+        # write
+        print("saving")
+        df_vep.to_csv(output_vcf_tmp, sep="\t", header=True, index=False)
+
+        # remove the intermediate files
+        delete_folder(outdir_intermediate_files)
+        
+        # keep
+        os.rename(output_vcf_tmp, output_vcf)
+
+    return output_vcf
 
 def get_INFOdict(info, infoField_to_typeFN):
 
@@ -12193,7 +12464,7 @@ def run_repeat_masker(reference_genome, threads=4, replace=False, use_repeat_mod
         
         if file_is_empty(repeat_masker_outfile_personal) or replace is True:
             print("running repeatmasker to get the repeats of the genome with the lib obtained with RepeatModeler")
-            run_cmd("%s -pa %i -dir %s -poly -html -gff %s -lib %s"%(repeat_masker, threads, repeat_masker_outdir_personal, reference_genome, library_repeats_repeatModeller))
+            run_cmd("%s -pa %i -dir %s -poly -html -gff -lib %s %s"%(repeat_masker, threads, repeat_masker_outdir_personal, library_repeats_repeatModeller, reference_genome))
 
     else: 
 
