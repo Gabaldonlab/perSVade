@@ -102,7 +102,6 @@ if not opt.gff is None and fun.file_is_empty(opt.gff): raise ValueError("%s is n
 
 print("running small vars and CNV pipeline into %s"%opt.outdir)
 
-
 # check that the environment is correct
 fun.run_cmd("echo 'This is a check of the environment in which the pipeline is running'; which bedtools")
 
@@ -168,7 +167,6 @@ if opt.skip_cnv_analysis is False:
     if not os.path.isdir(cnv_outdir): os.mkdir(cnv_outdir)
 
     # get the bed file, and also the one of the regions surrounding each gene
-    print(opt.ref)
     bed_file = "%s.bed_index1"%correct_gff; bed_file_regions = fun.extract_BEDofGENES_of_gff3(correct_gff, bed_file, replace=opt.replace, reference=opt.ref)
 
     # define the interetsing beds
@@ -200,9 +198,6 @@ if opt.skip_cnv_analysis is False:
 
 print("CNV analysis finished")
 
-
-# clean the non-essential files before starting
-if opt.remove_smallVarsCNV_nonEssentialFiles is True: fun.remove_smallVarsCNV_nonEssentialFiles(opt.outdir, opt.ploidy)
 
 #####################################
 ######## VARIANTCALLING #############
@@ -303,11 +298,9 @@ if "freebayes" in opt.caller or opt.caller == "all":
     outdir_freebayes = "%s/freebayes_ploidy%i_out"%(opt.outdir, opt.ploidy)
 
     # run freebayes in normal configuratiom, in parallel
-    #if opt.pooled_sequencing is False:
-    freebayes_filtered =  fun.run_freebayes_parallel(outdir_freebayes, opt.ref, sorted_bam, opt.ploidy, opt.coverage, replace=opt.replace, pooled_sequencing=opt.pooled_sequencing, threads=opt.threads) 
+    #freebayes_filtered =  fun.run_freebayes_parallel(outdir_freebayes, opt.ref, sorted_bam, opt.ploidy, opt.coverage, replace=opt.replace, pooled_sequencing=opt.pooled_sequencing, threads=opt.threads) # old way. Parallelization on chromosomes
 
-    #else:
-    #freebayes_filtered = fun.run_freebayes_pooledSeq(outdir_freebayes, opt.ref, sorted_bam, opt.ploidy, opt.coverage, replace=opt.replace, threads=opt.threads) 
+    freebayes_filtered = fun.run_freebayes_parallel_regions(outdir_freebayes, opt.ref, sorted_bam, opt.ploidy, opt.coverage, replace=opt.replace, threads=opt.threads, pooled_sequencing=opt.pooled_sequencing) 
 
     # keep
     filtered_vcf_results.append(freebayes_filtered)
@@ -417,23 +410,8 @@ if opt.gff is None:
 variantAnnotation_table = "%s/variant_annotation_ploidy%i.tab"%(opt.outdir, opt.ploidy)
 if fun.file_is_empty(variantAnnotation_table) or opt.replace is True:
 
-    # define an output file for VEP
-    annotated_vcf = "%s_annotated.tab"%merged_vcf_all; annotated_vcf_tmp = "%s.tmp"%annotated_vcf
-
-    # run annotation by VEP
-    if fun.file_is_empty(annotated_vcf) or opt.replace is True:
-
-        print("Annotating with VEP %s"%merged_vcf_all)
-        fun.remove_file(annotated_vcf)
-        fun.remove_file(annotated_vcf_tmp)
-        for f in os.listdir(fun.get_dir(annotated_vcf)): 
-            if ".tmp.raw." in f: fun.remove_file("%s/%s"%(fun.get_dir(annotated_vcf), f))
-
-        vep_cmd = "%s --input_vcf %s --outfile %s --ref %s --gff %s --mitochondrial_chromosome %s --mito_code %i --gDNA_code %i "%(run_vep, merged_vcf_all, annotated_vcf_tmp, opt.ref, gff_with_biotype, opt.mitochondrial_chromosome, opt.mitochondrial_code, opt.gDNA_code)
-
-        fun.run_cmd(vep_cmd)
-
-        os.rename(annotated_vcf_tmp, annotated_vcf)
+    # run vep in parallel
+    annotated_vcf = fun.run_vep_parallel(merged_vcf_all, opt.ref, gff_with_biotype, opt.mitochondrial_chromosome, opt.mitochondrial_code, opt.gDNA_code, threads=opt.threads, replace=opt.replace)
 
     # get into df
     df_vep = pd.read_csv(annotated_vcf, sep="\t")
@@ -467,6 +445,16 @@ if fun.file_is_empty(variantAnnotation_table) or opt.replace is True:
 
     # generate a table that has all the variant annotation info
     varSpec_fields = ['#Uploaded_variation', 'Gene', 'Feature', 'Feature_type', 'Consequence', 'cDNA_position', 'CDS_position', 'Protein_position', 'Amino_acids', 'Codons', 'is_snp', 'is_protein_altering']
+
+    # add whether it matches a repeat
+    if opt.repeats_table is not None:
+
+        variants_in_repeats = set(df_variants[df_variants.INREPEATS]["#Uploaded_variation"])
+        df_vep["overlaps_repeats"] = df_vep["#Uploaded_variation"].isin(variants_in_repeats)
+
+        print("There are %i/%i lines in the vep output that are in repeats"%(sum(df_vep.overlaps_repeats), len(df_vep)))
+
+        varSpec_fields.append("overlaps_repeats")
 
     # write the final vars
     variantAnnotation_table_tmp = "%s.tmp"%variantAnnotation_table

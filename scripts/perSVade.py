@@ -115,7 +115,7 @@ parser.add_argument("-mchr", "--mitochondrial_chromosome", dest="mitochondrial_c
 parser.add_argument("--skip_cleaning_outdir", dest="skip_cleaning_outdir", action="store_true", default=False, help="Will NOT remove all the unnecessary files of the perSVade outdir")
 
 # arg to run the trimming of the reads
-parser.add_argument("--QC_and_trimming_reads", dest="QC_and_trimming_reads", action="store_true", default=False, help="Will run fastq and trimmomatic of reads")
+parser.add_argument("--QC_and_trimming_reads", dest="QC_and_trimming_reads", action="store_true", default=False, help="Will run fastq and trimmomatic of reads, and use the trimmed reads for downstream analysis. This option will generate files under the same dir as f1 and f2, so be aware of it.")
 
 # small VarCalk and CNV args
 parser.add_argument("--run_smallVarsCNV", dest="run_smallVarsCNV", action="store_true", default=False, help="Will call small variants and CNV.")
@@ -131,7 +131,9 @@ parser.add_argument("--replace_var_integration", dest="replace_var_integration",
 parser.add_argument("--pooled_sequencing", dest="pooled_sequencing", action="store_true", default=False, help="It is a pooled sequencing run, which means that the small variant calling is not done based on ploidy. If you are also running SV calling, check that the simulation_ploidies, resemble a population,")
 
 # repeat obtention
-parser.add_argument("--get_repeats_table", dest="get_repeats_table", action="store_true", default=False, help="It will run repeatmodeller and repeat masker to create a table with the coordinates of repeats in your genome (in reference_genome_dir/reference_genome.fasta.repeats.tab). If --run_smallVarsCNV, this option will impli that each small  variant will have an annotation of whether it overlaps a repeat region.")
+parser.add_argument("--consider_repeats_smallVarCall", dest="consider_repeats_smallVarCall", action="store_true", default=False, help="If --run_smallVarsCNV, this option will imply that each small  variant will have an annotation of whether it overlaps a repeat region.")
+
+parser.add_argument("--previous_repeats_table", dest="previous_repeats_table", default=None, help="This may be the path to a file that contains the processed output of RepeatMasker (such as the one output by the function get_repeat_maskerDF). This should be a table with the following header: 'SW_score, perc_div, perc_del, perc_ins, chromosome, begin_repeat, end_repeat, left_repeat, strand, repeat, type, position_inRepeat_begin, position_inRepeat_end, left_positionINrepeat, IDrepeat'. It is created by parsing the tabular output of RepeatMasker and putting into a real .tab format.")
 
 # small varCall stop options
 parser.add_argument("--StopAfter_smallVarCallSimpleRunning", dest="StopAfter_smallVarCallSimpleRunning", action="store_true", default=False, help="Stop after obtaining the filtered vcf outputs of each program.")
@@ -176,7 +178,6 @@ if any([x not in all_chroms for x in opt.mitochondrial_chromosome.split(",")]) a
 genome_length = sum(fun.get_chr_to_len(opt.ref).values())
 print("The genome has %.2f Mb"%(genome_length/1000000 ))
 
-
 ##################################
 
 #### REPLACE THE GFF ####
@@ -197,6 +198,19 @@ else:
     opt.gff = target_gff
 
 #########################
+
+#### REPLACE THE REPEATS TABLE IF PROVIDED ####
+if opt.previous_repeats_table is not None:
+    print("using privided repeats %s"%opt.previous_repeats_table)
+
+    # define the dest file
+    repeats_table_file = "%s.repeats.tab"%opt.ref
+
+    try: fun.run_cmd("rm %s"%repeats_table_file)
+    except: pass
+    fun.run_cmd("ln -s %s %s"%(opt.previous_repeats_table, repeats_table_file))
+
+###############################################
 
 if opt.StopAfter_genomeObtention is True: 
     print("Stopping pipeline after the genome obtention.")
@@ -375,6 +389,10 @@ elif opt.fast_SVcalling is False and opt.close_shortReads_table is not None:
 
         opt.close_shortReads_table = fun.get_close_shortReads_table_close_to_taxID(opt.target_taxID, opt.ref, outdir_getting_closeReads, opt.ploidy, n_close_samples=opt.n_close_samples, nruns_per_sample=opt.nruns_per_sample, replace=opt.replace, threads=opt.threads, job_array_mode=opt.job_array_mode, StopAfter_sampleIndexingFromSRA=opt.StopAfter_sampleIndexingFromSRA, queue_jobs=opt.queue_jobs, max_ncores_queue=opt.max_ncores_queue, time_read_obtention=opt.time_read_obtention, StopAfterPrefecth_of_reads=opt.StopAfterPrefecth_of_reads)
 
+
+        adkjhkjhjdha
+
+
     # skip the running of the pipeline 
     if opt.StopAfter_readObtentionFromSRA:
         print("Stopping pipeline after the reads obtention from SRA")
@@ -450,7 +468,7 @@ if opt.run_smallVarsCNV:
     if opt.StopAfter_smallVarCallSimpleRunning is True: varcall_cmd += " --StopAfter_smallVarCallSimpleRunning"
     if opt.replace_var_integration is True: varcall_cmd += " --replace_var_integration"
     if opt.pooled_sequencing is True: varcall_cmd += " --pooled_sequencing"
-    if opt.get_repeats_table is True: varcall_cmd += " --repeats_table %s"%repeats_table_file
+    if opt.consider_repeats_smallVarCall is True: varcall_cmd += " --repeats_table %s"%repeats_table_file
 
     # run
     if __name__ == '__main__': fun.run_cmd(varcall_cmd)

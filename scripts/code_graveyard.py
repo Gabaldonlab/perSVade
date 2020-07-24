@@ -1440,11 +1440,123 @@ parser.add_argument("--wallclock_read_obtention", dest="wallclock_read_obtention
 
 
 
+def run_freebayes_pooledSeq(outdir_freebayes, ref, sorted_bam, ploidy, coverage, replace=False, threads=4):
+
+    """Runs freebayes for pooled sequencing data, it writes the output as output.filt.vcf, although it is not filtered"""
+
+    # define the output
+    outvcf = "%s/output.filt.vcf"%outdir_freebayes; outvcf_tmp = "%s.tmp.vcf"%outvcf
+
+    make_folder(outdir_freebayes)
+
+    if file_is_empty(outvcf) or replace is True:
+        print("running freebayes for pooled data into %s"%get_dir(outvcf))
+
+        # not parallel
+        #run_cmd("%s -f %s --haplotype-length -1 --min-alternate-count %i --min-alternate-fraction 0 --pooled-continuous -b %s -v %s"%(freebayes, ref, coverage, sorted_bam, outvcf_tmp))
+
+        # generate a regions file
+        regions_file = "%s.regions.tab"%outvcf_tmp
+        run_cmd("%s %s.fai 100000 > %s"%(fasta_generate_regions_py, ref, regions_file))
+
+        run_cmd("%s -f %s --haplotype-length -1 --min-alternate-count %i --min-alternate-fraction 0 --pooled-continuous -b %s -v %s --region ChrA_C_glabrata_CBS138:0-100000"%(freebayes, ref, coverage, sorted_bam, outvcf_tmp))
+
+        akdjhjkhda
+
+        """
+        vcffirstheader \
+        |   vcfstreamsort -w 1000 | vcfuniq # remove duplicates at region edges
+        """
+
+
+        run_cmd("%s %s %i -f %s --haplotype-length -1 --min-alternate-count %i --min-alternate-fraction 0 --pooled-continuous -use-best-n-alleles 20 %s > %s"%(freebayes_parallel, regions_file, threads, ref, coverage, sorted_bam, outvcf_tmp))
+
+        remove_file(regions_file)
+
+
+        os.rename(outvcf_tmp, outvcf)
+
+    return outvcf
 
 
 
 
 
+
+    # define the outdirs
+    repeats_bed = "%s/repeats_table.bed"%outdir
+    vcf_bed = "%s/variant_positions.bed"%outdir
+
+
+    # make the bed file for the repeats
+    repeats_df = pd.read_csv(repeats_table, sep="\t").rename(columns={"chromosome":"#chrom", "begin_repeat":"start", "end_repeat":"end"})
+    repeats_df[["#chrom", "start", "end"]].to_csv(repeats_bed, sep="\t", header=True, index=False)
+
+    # make a bed for the variants
+    vcf_df["end"] = vcf_df.POS
+    vcf_df.rename(columns={"#CHROM":"#chrom", "POS":"start"})[["#chrom", "start", "end"]].to_csv(vcf_bed, sep="\t", header=True, index=False)
+
+    # run bedtools get the intersecting positions in vcf_df
+    intersection_bed = "%s/intersection_vcf_and_repeats.bed"%outdir
+    run_cmd("%s intersect -a %s -b %s -header > %s"%(bedtools, repeats_bed, vcf_bed, intersection_bed))
+
+    # load the df and define the repeats variants
+    intersecting_df = pd.read_csv(intersection_bed, sep="\t")
+    variants_in_repeats = set(intersecting_df["#chrom"] + "_" + intersecting_df["start"].apply(str)).union(set(intersecting_df["#chrom"] + "_" + intersecting_df["end"].apply(str)))
+
+    # debug the fact that there is no intersection
+    if len(intersecting_df)==0: return [False]*len(vcf_df)
+
+    print(intersecting_df)
+
+    # define a series in vcf_df that has the variant as string
+    vcf_df["var_as_str"] = vcf_df["#CHROM"] + "_" + vcf_df["POS"].apply(str)
+
+    # check that all the variants_in_repeats are in vcf_df["var_as_str"]
+
+    variants_in_repeats_not_in_vcf_df = variants_in_repeats.difference(set(vcf_df["var_as_str"]))
+    if len(variants_in_repeats_not_in_vcf_df)>0:
+
+        raise ValueError("There are %i/%i  variants in the intersection that can't be found in vcf_df"%(len(variants_in_repeats_not_in_vcf_df), len(variants_in_repeats)))
+
+
+
+    # get the overlaps
+    vcf_df["overlaps_repeats"] = vcf_df.var_as_str.isin(variants_in_repeats)
+
+    print("There are %i/%i variants overlapping repeats"%(sum(vcf_df["overlaps_repeats"]), len(vcf_df)))
+
+    ljadhjkadhkjadhk
+
+    # clean
+    for f in [repeats_bed, vcf_bed, intersection_bed]: remove_file(f)
+
+    return vcf_df["overlaps_repeats"]
+
+
+
+
+  # define an output file for VEP
+    annotated_vcf = "%s_annotated.tab"%merged_vcf_all; annotated_vcf_tmp = "%s.tmp"%annotated_vcf
+
+    # run annotation by VEP
+    if fun.file_is_empty(annotated_vcf) or opt.replace is True:
+
+        print("Annotating with VEP %s"%merged_vcf_all)
+
+        # clean previous files
+        fun.remove_file(annotated_vcf)
+        fun.remove_file(annotated_vcf_tmp)
+        for f in os.listdir(fun.get_dir(annotated_vcf)): 
+            if ".tmp.raw." in f: fun.remove_file("%s/%s"%(fun.get_dir(annotated_vcf), f))
+
+
+        vep_cmd = "%s --input_vcf %s --outfile %s --ref %s --gff %s --mitochondrial_chromosome %s --mito_code %i --gDNA_code %i "%(run_vep, merged_vcf_all, annotated_vcf_tmp, opt.ref, gff_with_biotype, opt.mitochondrial_chromosome, opt.mitochondrial_code, opt.gDNA_code)
+
+        fun.run_cmd(vep_cmd)
+
+        os.rename(annotated_vcf_tmp, annotated_vcf)
+        
 # test the accuracy on each of the simulations types
 if opt.testSimulationsAccuracy is True: fun.report_accuracy_simulations(sorted_bam, opt.ref, "%s/testing_SimulationsAccuracy"%opt.outdir, real_svtype_to_file, threads=opt.threads, replace=opt.replace, n_simulated_genomes=opt.nsimulations, mitochondrial_chromosome=opt.mitochondrial_chromosome, simulation_ploidies=simulation_ploidies, range_filtering_benchmark=opt.range_filtering_benchmark, nvars=opt.nvars, job_array_mode=opt.job_array_mode)
 

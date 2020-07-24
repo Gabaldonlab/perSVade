@@ -16,7 +16,7 @@ if os.path.exists(ParentDir):
 else:
     run_in_cluster = True    
     ParentDir = "/gpfs/projects/bsc40/mschikora"
-    threads = 48
+    threads = 24
 
 
 # define the dir where all perSVade code is
@@ -101,8 +101,7 @@ species_Info = [("5478", "Candida_glabrata", 1, "mito_C_glabrata_CBS138"),
                 ("746128", "Aspergillus_fumigatus", 1, "CM016889.1")]
 """
 #species_Info = [("7227", "Drosophila_melanogaster", 2, "KJ947872.2")]
-species_Info = [("5478", "Candida_glabrata", 1, "mito_C_glabrata_CBS138")]
-
+species_Info = [("5476", "Candida_albicans", 2, "Ca22chrM_C_albicans_SC5314")]
 
 taxIDs_with_noON_overalpping = {"5476", "746128"}
 
@@ -143,7 +142,7 @@ for taxID, spName, ploidy, mitochondrial_chromosome in species_Info:
         cmd = "%s --ref %s --threads %i -o %s --target_taxID %s --n_close_samples 3 --nruns_per_sample 3 -f1 skip -f2 skip --mitochondrial_chromosome %s --gff %s --goldenSet_dir %s --skip_SVcalling"%(perSVade_py, genome, threads, outdir_perSVade, taxID, mitochondrial_chromosome, gff, goldenSet_dir)
 
     # add options depending on the machine
-    if run_in_cluster is True: cmd += " --job_array_mode greasy --queue_jobs bsc_ls --max_ncores_queue 576 --time_read_obtention 48:00:00 --time_perSVade_running 48:00:00"
+    if run_in_cluster is True: cmd += " --job_array_mode greasy --queue_jobs bsc_ls --max_ncores_queue 144 --time_read_obtention 48:00:00 --time_perSVade_running 48:00:00"
 
     else: cmd += " --job_array_mode local"
 
@@ -170,7 +169,7 @@ cd ~/samba/CandidaMine_data_generation/v1/data/Candida_albicans_5476/varCall_out
 
 """
 
-python /gpfs/projects/bsc40/mschikora/scripts/perSVade/perSVade_repository/scripts/perSVade.py -r /gpfs/projects/bsc40/mschikora/scripts/perSVade/perSVade_repository/testing/outdirs_testing_severalSpecies/5478_Candida_glabrata/reference_genome_dir/reference_genome.fasta --threads 48 --outdir /gpfs/projects/bsc40/mschikora/scripts/perSVade/perSVade_repository/testing/outdirs_testing_severalSpecies/5478_Candida_glabrata/testing_Accuracy/uniform/BG2_ANI --nvars 50 --nsimulations 2 --simulation_ploidies haploid,diploid_hetero --range_filtering_benchmark theoretically_meaningful --mitochondrial_chromosome mito_C_glabrata_CBS138 -f1 /gpfs/projects/bsc40/mschikora/Cglabrata_antifungals/data/trimmed_reads/RUN1_BG2_11B_ANI_R1_trimmed.fq.gz -f2 /gpfs/projects/bsc40/mschikora/Cglabrata_antifungals/data/trimmed_reads/RUN1_BG2_11B_ANI_R2_trimmed.fq.gz
+python /gpfs/projects/bsc40/mschikora/scripts/perSVade/perSVade_repository/scripts/perSVade.py -r /gpfs/projects/bsc40/mschikora/scripts/perSVade/perSVade_repository/testing/outdirs_testing_severalSpecies/5478_Candida_glabrata/reference_genome_dir/reference_genome.fasta --threads 48 --outdir /gpfs/projects/bsc40/mschikora/scripts/perSVade/perSVade_repository/testing/outdirs_testing_severalSpecies/5478_Candida_glabrata/testing_Accuracy/fast/BG2_ANI --nvars 50 --nsimulations 2 --simulation_ploidies haploid,diploid_hetero --range_filtering_benchmark theoretically_meaningful --mitochondrial_chromosome mito_C_glabrata_CBS138 -f1 /gpfs/projects/bsc40/mschikora/Cglabrata_antifungals/data/trimmed_reads/RUN1_BG2_11B_ANI_R1_trimmed.fq.gz -f2 /gpfs/projects/bsc40/mschikora/Cglabrata_antifungals/data/trimmed_reads/RUN1_BG2_11B_ANI_R2_trimmed.fq.gz --fast_SVcalling --previous_repeats_table /gpfs/projects/bsc40/mschikora/scripts/perSVade/perSVade_repository/testing/outdirs_testing_severalSpecies/5478_Candida_glabrata/reference_genome.fasta.repeats.tab
 
 
 """
