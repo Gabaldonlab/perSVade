@@ -78,7 +78,6 @@ goldenSet_dir_Cglabrata = "%s/scripts/perSVade/perSVade_repository/testing/Cglab
 
 # define important info about each species: taxID, spName, ploidy
 
-"""
 species_Info = [("5478", "Candida_glabrata", 1, "mito_C_glabrata_CBS138"),
                 ("5476", "Candida_albicans", 2, "Ca22chrM_C_albicans_SC5314"),
                 ("5207", "Cryptococcus_neoformans", 1, "CP003834.1"),
@@ -87,7 +86,6 @@ species_Info = [("5478", "Candida_glabrata", 1, "mito_C_glabrata_CBS138"),
                 ("7227", "Drosophila_melanogaster", 2, "KJ947872.2")]
                 #("7955", "Danio_rerio", 2, "NC_002333.2")]
                 #("9606", "Homo_sapiens", 2, "NC_012920.1")]
-"""
 """
 species_Info = [("7227", "Drosophila_melanogaster", 2, "KJ947872.2")]
                 #("7955", "Danio_rerio", 2, "NC_002333.2")]
@@ -101,13 +99,13 @@ species_Info = [("5478", "Candida_glabrata", 1, "mito_C_glabrata_CBS138"),
                 ("746128", "Aspergillus_fumigatus", 1, "CM016889.1")]
 """
 #species_Info = [("7227", "Drosophila_melanogaster", 2, "KJ947872.2")]
-species_Info = [("5476", "Candida_albicans", 2, "Ca22chrM_C_albicans_SC5314")]
+#species_Info = [("5476", "Candida_albicans", 2, "Ca22chrM_C_albicans_SC5314")]
 
 taxIDs_with_noON_overalpping = {"5476", "746128"}
 
 # define the type of run
 type_run = "normalRun" # can be 'normalRun' or 'goldenSet'
-StopAfterPrefecth_of_reads = False
+StopAfterPrefecth_of_reads = True
 
 # go through each species
 for taxID, spName, ploidy, mitochondrial_chromosome in species_Info:
@@ -129,7 +127,7 @@ for taxID, spName, ploidy, mitochondrial_chromosome in species_Info:
         else: close_shortReads_table = "auto"
 
         # get the reads from SRA. 3 samples, 3 runs per sample. Process with the 
-        cmd = "%s --ref %s --threads %i -o %s --close_shortReads_table %s --target_taxID %s --n_close_samples 3 --nruns_per_sample 3 -f1 skip -f2 skip --mitochondrial_chromosome %s --gff %s --testAccuracy --StopAfter_testAccuracy_perSVadeRunning"%(perSVade_py, genome, threads, outdir_perSVade, close_shortReads_table, taxID, mitochondrial_chromosome, gff)
+        cmd = "%s --ref %s --threads %i -o %s --close_shortReads_table %s --target_taxID %s --n_close_samples 3 --nruns_per_sample 3 -f1 skip -f2 skip --mitochondrial_chromosome %s --gff %s --testAccuracy --StopAfter_testAccuracy_perSVadeRunning --StopAfterPrefecth_of_reads"%(perSVade_py, genome, threads, outdir_perSVade, close_shortReads_table, taxID, mitochondrial_chromosome, gff)
 
     elif type_run=="goldenSet":
 

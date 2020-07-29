@@ -433,8 +433,8 @@ if fun.file_is_empty(variantAnnotation_table) or opt.replace is True:
     print("generating variant annotation table")
 
     # add fields 
-    df_vep["ref"] = df_vep["#Uploaded_variation"].apply(lambda x: x.split("/")[-2])
-    df_vep["alt"] = df_vep["#Uploaded_variation"].apply(lambda x: x.split("/")[-1])
+    df_vep["ref"] = df_vep["#Uploaded_variation"].apply(lambda x: x.split("_")[-1].split("/")[-2])
+    df_vep["alt"] = df_vep["#Uploaded_variation"].apply(lambda x: x.split("_")[-1].split("/")[-1])
 
     df_vep['is_snp'] = (df_vep["ref"].apply(len)==1) & (df_vep["ref"]!="-") & (df_vep["alt"].apply(len)==1) & (df_vep["alt"]!="-")
 
