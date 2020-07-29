@@ -22,20 +22,35 @@ test_ref_genome = "%s/reduced_genome.fasta"%testing_inputs_dir
 test_mutated_genome = "%s/reduced_genome_mutated.fasta"%testing_inputs_dir
 test_gff = "%s/reduced_annotation.gff"%testing_inputs_dir
 
-# define the testing inuts dir
+# load the functions (test if you can import python packages)
+import sv_functions as fun
+print("loading python packages worked successfully")
+
+# define the testing inuts dir 
 testing_outputs_dir = "%s/testing_outputs"%test_dir
 test_output_perSVade = "%s/perSVade_output"%testing_outputs_dir
 
-########################################
-
-# test if you can import python packages
-import sv_functions as fun
-print("loading python packages worked successfully")
+# delete and cretae outdir
+#fun.delete_folder(testing_outputs_dir)
+fun.make_folder(testing_outputs_dir)
 
 # redefine the reference genome location
 ref_genome = "%s/reduced_genome.fasta"%testing_outputs_dir
 if fun.file_is_empty(ref_genome): fun.run_cmd("cp %s %s"%(test_ref_genome, ref_genome))
 
+########################################
+
+
+
+
 # test repeat masker obtention
 test_fun.test_get_repeat_maskerDF(ref_genome)
+
+
+
+
+# test that the environment can be recreated
+#test_fun.test_conda_env_generation(testing_outputs_dir)
+
+
 
