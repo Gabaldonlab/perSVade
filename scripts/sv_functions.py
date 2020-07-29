@@ -24,14 +24,12 @@ import itertools
 import copy as cp
 import re
 import shutil
-import psutil
 from datetime import date
 import multiprocessing as multiproc
 import scipy.stats
 import numpy.polynomial.polynomial as poly
 from scipy.optimize import curve_fit
 from sklearn import linear_model
-from statsmodels.stats import multitest
 import time
 from sklearn.metrics import r2_score
 import time
@@ -45,6 +43,21 @@ import urllib
 from subprocess import STDOUT, check_output
 import subprocess
 import subprocess, datetime, signal
+
+# define a function that is central
+def get_fullpath(x):
+
+    """Takes a path and substitutes it bu the full path"""
+
+    if x.startswith("/"): return x
+    elif x.startswith("."): path = "/".join(x.split("/")[1:])
+    else: path = x
+
+    return os.getcwd() + "/" + path
+
+# packages to remove (potentially)
+#import psutil
+#from statsmodels.stats import multitest
 
 
 warnings.simplefilter(action='ignore', category=pd.core.common.SettingWithCopyWarning) # avoid the slicing warning
@@ -61,7 +74,7 @@ except: import matplotlib.pyplot as plt
 import seaborn as sns
 
 # get the cwd were all the scripts are 
-CWD = "/".join(__file__.split("/")[0:-1]); sys.path.insert(0, CWD)
+CWD = get_fullpath("/".join(__file__.split("/")[0:-1])); sys.path.insert(0, CWD)
 
 # define the EnvDir where the environment is defined
 EnvDir = "/".join(sys.executable.split("/")[0:-2])
@@ -475,8 +488,6 @@ def extract_BEDofGENES_of_gff3(gff, bed, replace=False, reference=""):
     The regions bed is returned by this function.
 
     """
-
-    
 
     # load the gff
     df_gff3 = pd.read_csv(gff, skiprows=list(range(len([line for line in open(gff, "r") if line.startswith("#")]))), sep="\t", names=["chromosome", "source", "type_feature", "start", "end", "score", "strand", "phase", "attributes"])
@@ -6540,12 +6551,12 @@ def get_close_shortReads_table_close_to_taxID(target_taxID, reference_genome, ou
 
             # exit before it starts
             print("You need to wait until the read obtention is is finsihed")
-            exit(0)
+            sys.exit(0)
 
 
         if StopAfterPrefecth_of_reads is True: 
             print("Stopping after prefetch of the reads. You still need to re-run this pipeline to get the actual reads.")
-            exit(0)
+            sys.exit(0)
 
         # add to the df
         for f in ["short_reads1", "short_reads2"]: SRA_runInfo_df[f] = SRA_runInfo_df.Run.apply(lambda srr: srr_to_readsDict[srr][f])
@@ -6559,10 +6570,17 @@ def get_close_shortReads_table_close_to_taxID(target_taxID, reference_genome, ou
     print("removing all files that are not the reads")
     close_shortReads_table_df = pd.read_csv(close_shortReads_table, sep="\t")
 
+    if StopAfterPrefecth_of_reads is True: 
+        print("Stopping after prefetch of the reads. You still need to re-run this pipeline to get the actual reads.")
+        sys.exit(0)
+
+
+
+
     # deubg
     if not close_shortReads_table_is_correct(close_shortReads_table): raise ValueError("%s has empty reads files"%close_shortReads_table)
 
-    dadkahdakda
+    jhghjghjgjhgjhgg
     
     # define the important files
     important_files = set(close_shortReads_table_df["short_reads1"]).union(close_shortReads_table_df["short_reads2"])
@@ -7649,10 +7667,11 @@ def clean_perSVade_outdir(outdir):
        "aligned_reads.bam.sorted.tmp.MarkDups.bam.bai",
        "aligned_reads.bam.sorted.tmp.MarkDups.metrics",
        "aligned_reads.bam.sorted.tmp.sortingBam_std.txt",
+       "aligned_reads.bam.sorted.noMarkDups.MarkDups.metrics",
 
        # files under SVdetection
        "SVdetection_output/gridss_finished.txt",
-    
+
     ]
 
     # add all the temporary files
@@ -7697,6 +7716,24 @@ def clean_perSVade_outdir(outdir):
     file_to_dest_file = {**file_to_dest_file, **{"%s/%s"%(final_gridss_running, origin) : "%s/%s"%(final_gridss_running, dest) for origin, dest in file_to_dest_file_final_gridss_running.items()}}
 
     ##################################################
+
+    #### files in reference genome dir #### 
+    files_to_remove_reference_genome_dir = ["reference_genome.fasta.repeat_modeler_outdir",
+                                            "reference_genome_repeat_masker_outdir",
+                                            "reference_genome.fasta.amb",
+                                            "reference_genome.fasta.ann",
+                                            "reference_genome.fasta.bwt",
+                                            "reference_genome.fasta.chr_to_len.py",
+                                            "reference_genome.fasta.fai",
+                                            "reference_genome.fasta.pac",
+                                            "reference_genome.fasta.sa",
+                                            "reference_genome_features.gff",
+                                            "reference_genome.dict",
+                                            "reference_genome.fasta"
+                                            ]
+
+    files_to_remove += ["reference_genome_dir/%s"%f for f in files_to_remove_reference_genome_dir]
+    #######################################
 
     ####### REMOVE AND CHANGE FILENAMES #######
 
@@ -12290,7 +12327,7 @@ def report_variant_calling_statistics(df, variantCallingStats_tablePrefix, progr
         df_stats.to_csv("%s_%s.tab"%(variantCallingStats_tablePrefix, type_filter), sep="\t")
 
 
-def run_perSVade_severalSamples(paths_df, cwd, common_args, time_greasy="48:00:00", threads=4, sampleID_to_parentIDs={}, samples_to_run=set(), repeat=False, mn_queue="bsc_ls", job_array_mode="greasy", max_ncores_queue=48, ploidy=1):
+def run_perSVade_severalSamples(paths_df, cwd, common_args, time_greasy="48:00:00", threads=4, sampleID_to_parentIDs={}, samples_to_run=set(), repeat=False, mn_queue="bsc_ls", job_array_mode="greasy", max_ncores_queue=48, ploidy=1, variant_calling_fields=["#Uploaded_variation", "QUAL", "fb_DP", "fb_MQM", "fb_MQMR", "fb_PQA", "fb_PQR", "fb_QA", "fb_QR", "fb_fractionReadsCov", "fb_readsCovVar"]):
 
  
     """
@@ -12307,6 +12344,7 @@ def run_perSVade_severalSamples(paths_df, cwd, common_args, time_greasy="48:00:0
     - common_args is a string with all the perSVade args except the reads. The arguments added will be -o, -f1, -f2
     - max_ncores_queue is the total number of cores that will be assigned to the job.
     - ploidy is the ploidy with which to run the varcall
+    - variant_calling_fields are the fields in variant_calling_ploidy<N>.tab to keep in the concatenated data
     """
 
     print("Running VarCall pipeline...")
@@ -12368,7 +12406,114 @@ def run_perSVade_severalSamples(paths_df, cwd, common_args, time_greasy="48:00:0
         return False
 
     print("Integrating all variants and CNV into one......")
-    pass
+
+    ###### INTEGRATE VARIANT CALLING ######
+
+    # define the file
+    variant_calling_df_file = "%s/integrated_variant_calling_ploidy%i.tab"%(cwd, ploidy)
+
+    if file_is_empty(variant_calling_df_file) or repeat is True:
+        print("generating integrated vars")
+
+        # define the columns related to variant_calling_fields
+        df_example = pd.read_csv("%s/%s_VarCallresults/smallVars_CNV_output/variant_calling_ploidy%i.tab"%(VarCallOutdirs, next(iter(samples_to_run)), ploidy), sep="\t")
+        variant_calling_colNames = ",".join([str(I+1) for I, field in enumerate(df_example.keys()) if field in variant_calling_fields])
+
+        del df_example
+
+        # initialize df
+        df_variant_calling = pd.DataFrame()
+
+
+        for Is, sampleID in enumerate(samples_to_run):
+            print("%i/%i: %s"%(Is+1, len(samples_to_run), sampleID))
+
+            # get the partial file
+            target_varcall_file = "%s/%s_VarCallresults/smallVars_CNV_output/variant_calling_ploidy%i.tab"%(VarCallOutdirs, sampleID, ploidy)
+            partial_varcall_file = "%s/partial_variant_calling.tab"%cwd
+            run_cmd("cut -f%s %s > %s"%(variant_calling_colNames, target_varcall_file, partial_varcall_file))
+
+            # load df
+            df = pd.read_csv(partial_varcall_file, sep="\t")[variant_calling_fields]
+            remove_file(partial_varcall_file)
+
+            # append the sample ID 
+            df["sampleID"] = sampleID
+
+            # keep
+            df_variant_calling = df_variant_calling.append(df)
+
+            # print the size
+            print("Size of df_variant_calling: %.2f MB"%(sys.getsizeof(df_variant_calling)/1000000))
+
+        # save
+        variant_calling_df_file_tmp = "%s.tmp"%variant_calling_df_file
+        df_variant_calling.to_csv(variant_calling_df_file_tmp, sep="\t", header=True, index=False)
+        os.rename(variant_calling_df_file_tmp, variant_calling_df_file)
+
+    else: variant_calling_df = pd.read_csv(variant_calling_df_file, sep="\t")
+
+
+    ######################################
+
+    ###### INTEGRATE VARIANT ANNOTATION ######
+
+    # define the file
+    variant_annotation_df_file = "%s/integrated_variant_annotation_ploidy%i.tab"%(cwd, ploidy)
+
+    if file_is_empty(variant_annotation_df_file) or repeat is True:
+        print("generating integrated variant annotation")
+
+        # initialize df
+        df_variant_annotation = pd.DataFrame()
+
+        # initialize the previous vars
+        already_saved_vars = set()
+
+        for Is, sampleID in enumerate(samples_to_run):
+            print("%i/%i: %s"%(Is+1, len(samples_to_run), sampleID))
+
+            # load df
+            df = pd.read_csv("%s/%s_VarCallresults/smallVars_CNV_output/variant_annotation_ploidy%i.tab"%(VarCallOutdirs, sampleID, ploidy), sep="\t")
+
+            # get only the new vars
+            df_new = df[~df["#Uploaded_variation"].isin(already_saved_vars)]
+
+            # keep 
+            if len(df_new)>0: df_variant_annotation = df_variant_annotation.append(df_new)
+
+            # define the already existing vars
+            already_saved_vars = set(df_variant_annotation["#Uploaded_variation"])
+
+            # print the size
+            print("Size of df_variant_annotation: %.2f MB"%(sys.getsizeof(df_variant_annotation)/1000000))
+
+
+        # sort
+        df_variant_annotation = df_variant_annotation.sort_values(by="#Uploaded_variation").drop_duplicates()
+
+        # add some fields
+        """
+        df_variant_annotation["chromosome"] = df_variant_annotation["#Uploaded_variation"].apply(lambda x: "_".join(x.split("_")[0:-2]))
+        df_variant_annotation["position"] =  df_variant_annotation["#Uploaded_variation"].apply(lambda x: x.split("_")[-2]).apply(int)
+        df_variant_annotation["ref"] = df_variant_annotation["#Uploaded_variation"].apply(lambda x: x.split("_")[-1].split("/")[0])
+        df_variant_annotation["alt"] = df_variant_annotation["#Uploaded_variation"].apply(lambda x: x.split("_")[-1].split("/")[1])
+        """
+
+        # save
+        variant_annotation_df_file_tmp = "%s.tmp"%variant_annotation_df_file
+        df_variant_annotation.to_csv(variant_annotation_df_file_tmp, sep="\t", header=True, index=False)
+        os.rename(variant_annotation_df_file_tmp, variant_annotation_df_file)
+
+
+    ######################################
+
+
+
+
+    return variant_calling_df
+
+
 
 def run_repeat_modeller(reference_genome, threads=4, replace=False):
 
@@ -12386,13 +12531,14 @@ def run_repeat_modeller(reference_genome, threads=4, replace=False):
     """
 
     # get the genome into outdir
-    outdir = "%s.repeat_modeler_outdir"%reference_genome
+    outdir = get_fullpath("%s.repeat_modeler_outdir"%reference_genome)
 
     # define the final files
     genome_dir = "%s/reference_genome.fasta"%outdir
     repeat_modeler_outfile = "%s-families.fa"%genome_dir
 
     if file_is_empty(repeat_modeler_outfile) or replace is True:
+        print("running repeat modeler")
 
         # delete the outdir
         delete_folder(outdir)
@@ -12401,35 +12547,46 @@ def run_repeat_modeller(reference_genome, threads=4, replace=False):
         make_folder(outdir)
 
         # put the genome under this outdir
-        run_cmd("ln -s %s %s"%(reference_genome, genome_dir))
+        shutil.copy2(reference_genome, genome_dir)
 
         # change to the outdir to get the files there
-        os.chdir(outdir)
+        #os.chdir(outdir)
 
         # run the database
         name_database = get_file(genome_dir)
-        run_cmd("%s -name %s %s"%(repeat_modeller_BuildDatabase, name_database, genome_dir))
+        run_cmd("cd %s && %s -name %s %s"%(outdir, repeat_modeller_BuildDatabase, name_database, genome_dir))
 
         # run repeatmodeller
         njobs = int(threads/4) # Specify the number of parallel search jobs to run. RMBlast jobs wil use 4 cores each and ABBlast jobs will use a single core each. i.e. on a machine with 12 cores and running with RMBlast you would use -pa 3 to fully utilize the machine
+        print("Running in %s"%outdir)
 
         #raise ValueError("This has to be fixed!!!!")
-        cmd = "export PERL5LIB=%s; %s -database %s -pa %i -LTRStruct"%(repeatmoder_dir, repeat_modeller, name_database, njobs)
+        cmd = "export PERL5LIB=%s && cd %s && %s -database %s -pa %i -LTRStruct"%(repeatmoder_dir, outdir, repeat_modeller, name_database, njobs)
 
         # add the location were eveything is installed and run
         print("running repeatmodeler...")
-        cmd += " -abblast_dir %s -cdhit_dir %s -genometools_dir %s -ltr_retriever_dir %s -mafft_dir %s -ninja_dir %s -recon_dir %s -repeatmasker_dir %s -rmblast_dir %s -rscout_dir %s -trf_prgm %s"%(abblast_dir, cdhit_dir, genometools_dir, ltr_retriever_dir, mafft_dir, ninja_dir, recon_dir, repeatmasker_dir, rmblast_dir, rscout_dir, trf_prgm_dir)
+        repeatmodeler_std = "%s/repeatmodeler.std"%outdir
+        cmd += " -abblast_dir %s -cdhit_dir %s -genometools_dir %s -ltr_retriever_dir %s -mafft_dir %s -ninja_dir %s -recon_dir %s -repeatmasker_dir %s -rmblast_dir %s -rscout_dir %s -trf_prgm %s > %s 2>&1"%(abblast_dir, cdhit_dir, genometools_dir, ltr_retriever_dir, mafft_dir, ninja_dir, recon_dir, repeatmasker_dir, rmblast_dir, rscout_dir, trf_prgm_dir, repeatmodeler_std)
 
         run_cmd(cmd)
 
-        if file_is_empty(repeat_modeler_outfile): raise ValueError("RepeatModeler did not end properly")
+        if file_is_empty(repeat_modeler_outfile): 
+
+            # check if there are no families
+            if any([l.startswith("No families identified") for l in open(repeatmodeler_std, "r").readlines()[-3:]]): 
+                open(repeat_modeler_outfile, "w").write("no_families_identified")
+
+            else: raise ValueError("RepeatModeler did not end properly. Check %s for the std"%repeatmodeler_std)
+
+    # check if any new families were identified
+    new_families_identified = open(repeat_modeler_outfile, "r").readlines()[0].strip()!="no_families_identified"
 
     # remove the folder
     for f in os.listdir(outdir):
         path = "%s/%s"%(outdir, f)
         if os.path.isdir(path) and f.startswith("RM_"): delete_folder(path)
 
-    return repeat_modeler_outfile
+    return repeat_modeler_outfile, new_families_identified
 
 
 def run_repeat_masker(reference_genome, threads=4, replace=False, use_repeat_modeller=True):
@@ -12439,7 +12596,7 @@ def run_repeat_masker(reference_genome, threads=4, replace=False, use_repeat_mod
     """
 
     # get the library from repeat_modeller
-    if use_repeat_modeller is True: library_repeats_repeatModeller =  run_repeat_modeller(reference_genome, threads=threads, replace=replace)
+    if use_repeat_modeller is True: library_repeats_repeatModeller, new_families_identified =  run_repeat_modeller(reference_genome, threads=threads, replace=replace)
 
     # define the repear masker outdir
     genome_dir = "/".join(reference_genome.split("/")[0:-1])
@@ -12452,20 +12609,21 @@ def run_repeat_masker(reference_genome, threads=4, replace=False, use_repeat_mod
 
     # run in the default configuration
     repeat_masker_outfile_default = "%s/%s.out"%(repeat_masker_outdir_default, genome_name)
+    repeat_masker_std_default = "%s/%s.std.out"%(repeat_masker_outdir_default, genome_name)
+
     if file_is_empty(repeat_masker_outfile_default) or replace is True:
         print("running repeatmasker to get the repeats of the genome in the default configuration")
-        run_cmd("%s -pa %i -dir %s -poly -html -gff %s"%(repeat_masker, threads, repeat_masker_outdir_default, reference_genome))
-
+        run_cmd("%s -pa %i -dir %s -poly -html -gff %s > %s 2>&1"%(repeat_masker, threads, repeat_masker_outdir_default, reference_genome, repeat_masker_std_default))
 
     # run in the personal configuration
     repeat_masker_outfile_personal = "%s/%s.out"%(repeat_masker_outdir_personal, genome_name)
+    repeat_masker_std_personal = "%s/%s.std.out"%(repeat_masker_outdir_personal, genome_name)
 
-    if use_repeat_modeller is True:
+    if use_repeat_modeller is True and new_families_identified is True:
         
         if file_is_empty(repeat_masker_outfile_personal) or replace is True:
             print("running repeatmasker to get the repeats of the genome with the lib obtained with RepeatModeler")
-            run_cmd("%s -pa %i -dir %s -poly -html -gff -lib %s %s"%(repeat_masker, threads, repeat_masker_outdir_personal, library_repeats_repeatModeller, reference_genome))
-
+            run_cmd("%s -pa %i -dir %s -poly -html -gff -lib %s %s > %s 2>&1"%(repeat_masker, threads, repeat_masker_outdir_personal, library_repeats_repeatModeller, reference_genome, repeat_masker_std_personal))
     else: 
 
         # empty file
