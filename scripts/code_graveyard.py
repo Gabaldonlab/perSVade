@@ -1562,3 +1562,67 @@ if opt.testSimulationsAccuracy is True: fun.report_accuracy_simulations(sorted_b
 
 # test accuracy on real data
 if opt.testRealDataAccuracy is True:  fun.report_accuracy_realSVs(opt.close_shortReads_table, opt.ref, "%s/testing_RealSVsAccuracy"%opt.outdir, real_svtype_to_file, outdir_finding_realVars, threads=opt.threads, replace=opt.replace, n_simulated_genomes=opt.nsimulations, mitochondrial_chromosome=opt.mitochondrial_chromosome, simulation_ploidies=simulation_ploidies, range_filtering_benchmark=opt.range_filtering_benchmark, nvars=opt.nvars, job_array_mode=opt.job_array_mode)
+
+
+
+#### bamqc
+if opt.run_qualimap is True:
+    
+    bamqc_outdir = "%s/bamqc_out"%opt.outdir
+    if fun.file_is_empty("%s/qualimapReport.html"%bamqc_outdir) or opt.replace is True:
+        print("Running bamqc to analyze the bam alignment")
+        qualimap_std = "%s/std.txt"%bamqc_outdir
+        try: bamqc_cmd = "%s bamqc -bam %s -outdir %s -nt %i > %s 2>&1"%(qualimap, sorted_bam, bamqc_outdir, opt.threads, qualimap_std); fun.run_cmd(bamqc_cmd)
+        except: print("WARNING: qualimap failed likely due to memory errors, check %s"%qualimap_std)
+
+parser.add_argument("--run_qualimap", dest="run_qualimap", action="store_true", default=False, help="Run qualimap for quality assessment of bam files. This may be inefficient sometimes because of the ")
+
+
+def get_speciesTree_multipleGenomes_JolyTree(input_dir_withGenomes, outdir, threads=4, replace=False):
+
+    """This function generates a species tree under outdir with all the genomes (files ending with fasta) in input_dir_withGenomes. It returns the newick file with the tree"""
+
+    # make the outdir
+    make_folder(outdir)
+
+
+    # define the outprefix and the expected species tree file
+    outprefix = "%s/outputJolyTree"%outdir
+    species_treefile = "%s.nwk"%outprefix
+
+    if file_is_empty(species_treefile) or replace is True:
+
+        # move all the fasta files in input_dir_withGenomes into input_dir
+        input_dir = "%s/input_genomes"%outdir; make_folder(input_dir)
+        for file in os.listdir(input_dir_withGenomes):
+            origin_file = "%s/%s"%(input_dir_withGenomes, file)
+
+            # if it is a fasta file, softlink to input_dir
+            if file.split(".")[-1] in {"fasta", "fa"} and os.path.isfile(origin_file):
+                dest_file = "%s/%s"%(input_dir, file)
+                if file_is_empty(dest_file): run_cmd("ln -s %s %s"%(origin_file, dest_file))
+
+
+        # run JolyTree
+        print("running JolyTree to get species tree")
+        run_cmd("%s -i %s -b %s -t %i"%(JolyTree_sh, input_dir, outprefix, threads))
+
+    return species_treefile
+
+wget https://github.com/EBIvariation/vcf-validator/releases/download/v0.9.4/vcf_validator_linux
+
+
+vcf_validator = "%s/vcf_validator_linux"%external_software
+
+def validate_vcf(vcf_file, replace=False):
+
+    """This function takes a vcf and reports whether it is valid according to vcf_validator"""
+
+    # define the outdir
+    outdir = "%s_vcf_validator_outdir"%vcf_file; 
+    delete_folder(outdir); make_folder(outdir)
+
+    print("running vcf_validator into %s"%outdir)
+
+    run_cmd("%s -i %s -l warning -r summary,text -o %s --require-evidence"%(vcf_validator, vcf_file, outdir))
+

@@ -29,9 +29,9 @@ EnvDir = "/".join(sys.executable.split("/")[0:-2])
 import sv_functions as fun
 
 # packages installed into the conda environment 
-picard = "%s/share/picard-2.18.26-0/picard.jar"%EnvDir
 samtools = "%s/bin/samtools"%EnvDir
 java = "%s/bin/java"%EnvDir
+picard_exec = "%s/bin/picard"%EnvDir
 
 # scripts that are installed under this software
 varcall_cnv_pipeline = "%s/varcall_cnv_pipeline.py"%CWD
@@ -80,6 +80,7 @@ parser.add_argument("--StopAfter_bamFileObtention", dest="StopAfter_bamFileObten
 parser.add_argument("--StopAfterPrefecth_of_reads", dest="StopAfterPrefecth_of_reads", action="store_true", default=False, help="Stop after obtaining the prefetched .srr file in case close_shortReads_table is 'auto'")
 parser.add_argument("--StopAfterPrefecth_of_reads_goldenSet", dest="StopAfterPrefecth_of_reads_goldenSet", action="store_true", default=False, help="Stop after obtaining the prefetched .srr file in case --goldenSet_dir is specified.")
 parser.add_argument("--StopAfter_obtentionOFcloseSVs", dest="StopAfter_obtentionOFcloseSVs", action="store_true", default=False, help="Stop after obtaining the SVs_compatible_to_insert_dir ")
+parser.add_argument("--StopAfter_repeatsObtention", dest="StopAfter_repeatsObtention", action="store_true", default=False, help="Stop after obtaining  the repeats table")
 
 parser.add_argument("--StopAfter_testAccuracy_perSVadeRunning", dest="StopAfter_testAccuracy_perSVadeRunning", action="store_true", default=False, help="When --testAccuracy is specified, the pipeline will stop after the running of perSVade on all the inputs of --close_shortReads_table with the different configurations.")
 
@@ -97,7 +98,6 @@ parser.add_argument("--range_filtering_benchmark", dest="range_filtering_benchma
 parser.add_argument("-f1", "--fastq1", dest="fastq1", default=None, help="fastq_1 file. Option required to obtain bam files. It can be 'skip'")
 parser.add_argument("-f2", "--fastq2", dest="fastq2", default=None, help="fastq_2 file. Option required to obtain bam files. It can be 'skip'")
 parser.add_argument("-sbam", "--sortedbam", dest="sortedbam", default=None, help="The path to the sorted bam file, which should have a bam.bai file in the same dir. For example, if your bam file is called 'aligned_reads.bam', there should be an 'aligned_reads.bam.bai' as well. This is mutually exclusive with providing reads. By default, it is assumed that this bam has marked duplicates. If not, you can mark them with the option --markDuplicates_inBam.")
-parser.add_argument("--run_qualimap", dest="run_qualimap", action="store_true", default=False, help="Run qualimap for quality assessment of bam files. This may be inefficient sometimes because of the ")
 
 # machine options
 parser.add_argument("--job_array_mode", dest="job_array_mode", type=str, default="local", help="It specifies in how to run the job arrays for,  --testAccuracy, the downloading of reads if  --close_shortReads_table is auto, and the SV calling for the table in --close_shortReads_table. It can be 'local' (runs one job after the other or 'greasy' (each job is run on a diferent node of a slurm cluster with the greasy system. It requires the machine to be able to run greasy jobs, as in https://user.cscs.ch/tools/high_throughput/). If 'greasy' is specified, this pipeline will stop with a warning everytime that unfinished jobs have to be submited, and you'll be able to track the job status with the squeue command.")
@@ -234,6 +234,10 @@ print("using a window length of %i"%fun.window_l)
 print("getting repeats")
 repeats_df, repeats_table_file = fun.get_repeat_maskerDF(opt.ref, threads=opt.threads, replace=opt.replace)
 
+if opt.StopAfter_repeatsObtention is True:
+	print("Stopping after the obtention of repeats")
+	sys.exit(0)
+
 #############################
 
 ########################################
@@ -295,18 +299,6 @@ if not any([x=="skip" for x in {opt.fastq1, opt.fastq2}]):
 ############# NECESSARY FILES #############
 ###########################################
 
-
-
-#### bamqc
-if opt.run_qualimap is True:
-    
-    bamqc_outdir = "%s/bamqc_out"%opt.outdir
-    if fun.file_is_empty("%s/qualimapReport.html"%bamqc_outdir) or opt.replace is True:
-        print("Running bamqc to analyze the bam alignment")
-        qualimap_std = "%s/std.txt"%bamqc_outdir
-        try: bamqc_cmd = "%s bamqc -bam %s -outdir %s -nt %i > %s 2>&1"%(qualimap, sorted_bam, bamqc_outdir, opt.threads, qualimap_std); fun.run_cmd(bamqc_cmd)
-        except: print("WARNING: qualimap failed likely due to memory errors, check %s"%qualimap_std)
-
 # First create some files that are important for any program
 
 # Create a reference dictionary
@@ -318,7 +310,7 @@ if fun.file_is_empty(dictionary) or opt.replace is True:
     if not fun.file_is_empty(tmp_dictionary): os.unlink(tmp_dictionary)
 
     print("Creating picard dictionary")
-    cmd_dict = "%s -jar %s CreateSequenceDictionary R=%s O=%s TRUNCATE_NAMES_AT_WHITESPACE=true"%(java, picard, opt.ref, tmp_dictionary); fun.run_cmd(cmd_dict)   
+    cmd_dict = "%s CreateSequenceDictionary R=%s O=%s TRUNCATE_NAMES_AT_WHITESPACE=true"%(picard_exec, opt.ref, tmp_dictionary); fun.run_cmd(cmd_dict)   
     os.rename(tmp_dictionary , dictionary)
 
 # Index the reference

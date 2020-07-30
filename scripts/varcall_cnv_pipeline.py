@@ -30,19 +30,23 @@ import sv_functions as fun
 
 # packages installed into the conda environment 
 samtools = "%s/bin/samtools"%EnvDir
-freebayes = "%s/bin/freebayes"%EnvDir
-bcftools = "%s/bin/bcftools"%EnvDir
-vcffilter = "%s/bin/vcffilter"%EnvDir
-gatk = "%s/bin/gatk"%EnvDir # this is gatk4, and it has to be installed like that
-vcfallelicprimitives = "%s/bin/vcfallelicprimitives"%EnvDir
-qualimap = "%s/bin/qualimap"%EnvDir
-sift4g = "%s/bin/sift4g"%EnvDir
 java = "%s/bin/java"%EnvDir
 bcftools = "%s/bin/bcftools"%EnvDir
-bgzip = "%s/bin/bgzip"%EnvDir
-tabix = "%s/bin/tabix"%EnvDir
 bedtools = "%s/bin/bedtools"%EnvDir
-picard = "%s/share/picard-2.18.26-0/picard.jar"%EnvDir
+picard_exec = "%s/bin/picard"%EnvDir
+
+#vcfallelicprimitives = "%s/bin/vcfallelicprimitives"%EnvDir
+#sift4g = "%s/bin/sift4g"%EnvDir
+# gatk = "%s/bin/gatk"%EnvDir # this is gatk4, and it has to be installed like that
+# freebayes = "%s/bin/freebayes"%EnvDir
+# vcffilter = "%s/bin/vcffilter"%EnvDir
+# picard = "%s/share/picard-2.18.26-0/picard.jar"%EnvDir
+
+
+
+# bgzip = "%s/bin/bgzip"%EnvDir
+# tabix = "%s/bin/tabix"%EnvDir
+# qualimap = "%s/bin/qualimap"%EnvDir
 
 
 # scripts installed with perSVade
@@ -141,7 +145,8 @@ if fun.file_is_empty(dictionary) or opt.replace is True:
     if not fun.file_is_empty(tmp_dictionary): os.unlink(tmp_dictionary)
 
     print("Creating picard dictionary")
-    cmd_dict = "%s -jar %s CreateSequenceDictionary R=%s O=%s TRUNCATE_NAMES_AT_WHITESPACE=true"%(java, picard, opt.ref, tmp_dictionary); fun.run_cmd(cmd_dict)   
+    cmd_dict = "%s CreateSequenceDictionary R=%s O=%s TRUNCATE_NAMES_AT_WHITESPACE=true"%(picard_exec, opt.ref, tmp_dictionary); fun.run_cmd(cmd_dict)   
+    #  cmd_dict = "%s -jar %s CreateSequenceDictionary R=%s O=%s TRUNCATE_NAMES_AT_WHITESPACE=true"%(java, picard, opt.ref, tmp_dictionary); fun.run_cmd(cmd_dict)   
     os.rename(tmp_dictionary , dictionary)
 
 # Index the reference
@@ -159,6 +164,9 @@ print("running VarCall for %s"%sorted_bam)
 #####################################
 
 if opt.skip_cnv_analysis is False:
+
+    # debug
+    if opt.gff is None: raise ValueError("If you want to perform CNV analysis you need to provide a gff")
 
     print("Starting CNV analysis")
 
@@ -340,6 +348,7 @@ fun.report_variant_calling_statistics(df_variants, variantCallingStats_tablePref
 for minPASS_algs in [1, 2, 3]:
 
     simplified_vcf_PASSalgs = "%s/variants_atLeast%iPASS_ploidy%i.vcf"%(opt.outdir, minPASS_algs, opt.ploidy)
+    simplified_vcf_PASSalgs_multialleleles = "%s/variants_atLeast%iPASS_ploidy%i.withMultiAlt.vcf"%(opt.outdir, minPASS_algs, opt.ploidy)
     simplified_vcf_PASSalgs_tmp = "%s.tmp"%simplified_vcf_PASSalgs
 
     if fun.file_is_empty(simplified_vcf_PASSalgs) or opt.replace is True:
@@ -363,21 +372,22 @@ for minPASS_algs in [1, 2, 3]:
         # set the FILTER ad the number of pass programs
         df_PASS["FILTER"] = df_PASS.NPASS.apply(str) + "xPASS"
 
-        # set an empty INFO
-        df_PASS["INFO"] = "."
+        # set an empty INFO, unless the GT is unknown
+        boolean_to_GTtag = {True:"unknown_GT", False:"known_GT"}
+        df_PASS["INFO"] = (df_PASS.common_GT==".").apply(lambda x: boolean_to_GTtag[x])
 
         # set the format
-        df_PASS["FORMAT"] = "GT:AF:DP"
+        df_PASS["FORMAT"] = "GT:AF:DP:AD"
 
         # check that there are no NaNs in mean_fractionReadsCov_PASS_algs and mean_DP
-        for field in ["mean_fractionReadsCov_PASS_algs", "mean_DP", "common_GT"]: 
+        for field in ["mean_fractionReadsCov_PASS_algs", "mean_DP", "common_GT", "mean_AD"]: 
             if any(pd.isna(df_PASS[field])): 
                 df_nan = df_PASS[pd.isna(df_PASS[field])]
                 print(df_nan, df_nan.mean_fractionReadsCov_PASS_algs, df_nan.mean_DP, df_nan["ID"])
                 raise ValueError("There are NaNs in %s"%field)
 
         # add the sample according to FORMAT
-        df_PASS["SAMPLE"] = df_PASS.common_GT.apply(str) + ":" + df_PASS.mean_fractionReadsCov_PASS_algs.apply(lambda x: "%.4f"%x) + ":" + df_PASS.mean_DP.apply(lambda x: "%.4f"%x)
+        df_PASS["SAMPLE"] = df_PASS.common_GT.apply(str) + ":" + df_PASS.mean_fractionReadsCov_PASS_algs.apply(lambda x: "%.4f"%x) + ":" + df_PASS.mean_DP.apply(lambda x: "%.4f"%x) + ":" + df_PASS.mean_AD
 
         # initialize header lines
         valid_header_starts = ["fileformat", "contig", "reference", "phasing"]
@@ -390,12 +400,20 @@ for minPASS_algs in [1, 2, 3]:
 
                          '##FORMAT=<ID=GT,Number=1,Type=String,Description="Genotype. If there are discrepacncies in the GT between the algorithms where this var PASSed the filters GT is set to .">',
                          '##FORMAT=<ID=DP,Number=1,Type=Float,Description="Mean read depth of the locus from algorithms where this variant PASSed the filters">',
-                         '##FORMAT=<ID=AF,Number=1,Type=Float,Description="Mean fraction of reads covering the ALT allele from algorithms where this variant PASSed the filters">',
+                         '##FORMAT=<ID=AF,Number=A,Type=Float,Description="Mean fraction of reads covering the ALT allele from algorithms where this variant PASSed the filters">',
+                         '##FORMAT=<ID=AD,Number=R,Type=Integer,Description="The number of reads of each allele, as a mean of algorithms where this variant PASSed the filters">',
 
+                         "##phasing=none",
                          '##source=%s'%("_".join(all_programs))]
 
-        # write
+
+        # write the split with split multialleles
         open(simplified_vcf_PASSalgs_tmp, "w").write("\n".join(header_lines) + "\n" + df_PASS[vcf_fields].to_csv(sep="\t", index=False, header=True))
+        
+        # write the split with joined multialleles
+        if opt.ploidy==2: fun.get_vcf_with_joined_multialleles(simplified_vcf_PASSalgs_tmp, simplified_vcf_PASSalgs_multialleleles, opt.ref, replace=opt.replace, threads=opt.threads)
+
+        # rename the simplified
         os.rename(simplified_vcf_PASSalgs_tmp, simplified_vcf_PASSalgs)
 
 #################################################
