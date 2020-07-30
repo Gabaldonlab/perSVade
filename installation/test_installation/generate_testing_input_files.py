@@ -59,7 +59,7 @@ for chrom in all_chroms:
 	all_records.append(record)
 
 	# keep the mutated one
-	mutated_record = SeqRecord(Seq(str(record.seq).replace("AAGA", "AACA")), description="", name="", id="mutated_%s"%chrom)
+	mutated_record = SeqRecord(Seq(str(record.seq).replace("AACTGAG", "AACTGAC")), description="", name="", id="mutated_%s"%chrom)
 	all_records_mutated.append(mutated_record)
 
 SeqIO.write(all_records, "%s/reduced_genome.fasta"%testing_inputs_dir,"fasta")

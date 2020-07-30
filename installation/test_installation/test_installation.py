@@ -29,28 +29,58 @@ print("loading python packages worked successfully")
 # define the testing inuts dir 
 testing_outputs_dir = "%s/testing_outputs"%test_dir
 test_output_perSVade = "%s/perSVade_output"%testing_outputs_dir
+outdir_small_variantCalling = "%s/smallVars_CNV_output"%test_output_perSVade
 
 # delete and cretae outdir
 #fun.delete_folder(testing_outputs_dir)
 fun.make_folder(testing_outputs_dir)
+fun.make_folder(test_output_perSVade)
 
 # redefine the reference genome location
 ref_genome = "%s/reduced_genome.fasta"%testing_outputs_dir
 if fun.file_is_empty(ref_genome): fun.run_cmd("cp %s %s"%(test_ref_genome, ref_genome))
 
+# redefine the gff
+gff = "%s/reduced_annotations.gff"%testing_outputs_dir
+if fun.file_is_empty(gff): fun.run_cmd("cp %s %s"%(test_gff, gff))
+
+# redefine the mutated genome location
+mut_genome = "%s/mutated_genome.fasta"%testing_outputs_dir
+if fun.file_is_empty(mut_genome): fun.run_cmd("cp %s %s"%(test_mutated_genome, mut_genome))
+
+# define an example calbicans varCall_outout
+Calbicans_varCall_outdir = "%s/varcalling_output_Calbicans_SRR2088862"%testing_inputs_dir
+Calbicans_genome = "%s/Candida_albicans.fasta"%testing_inputs_dir
+
 ########################################
 
+# check that that the database has been created
+repeat_masker_db = "%s/Libraries/RepeatMasker.lib.nsq"%(fun.repeatmasker_dir) 
+if fun.file_is_empty(repeat_masker_db): raise ValueError("%s is missing. Check that you ran ./installation/setup_environment.sh"%repeat_masker_db)
 
-
+# test that the environment can be recreated
+test_fun.test_conda_env_generation(testing_outputs_dir, replace=False)
 
 # test repeat masker obtention
 test_fun.test_get_repeat_maskerDF(ref_genome)
 
+# test read simulation by simulating reads from the mutated genome
+r1_mutGenome, r2_mutGenome = test_fun.test_read_simulation_and_get_reads(mut_genome)
+
+# test bwa mem, samtools and picard
+sorted_bam_mutGenome = test_fun.test_bwa_mem_and_get_bam(r1_mutGenome, r2_mutGenome, ref_genome)
+
+# test the joining and unjoining of multiallleles. This is a test for bcftools 1.10
+outdir_testing_CalbicansVarCall = "%s/testing_CalbicansVarCall"%testing_outputs_dir
+test_fun.test_processing_varcalling(Calbicans_varCall_outdir, Calbicans_genome, outdir_testing_CalbicansVarCall, sorted_bam_mutGenome)
+jkdahkdagda
+
+# test bcftools, freebayes, gatk4, mosdepth, vep by running the small variant calling pipeline
+test_fun.test_smallVarCall_CNV_running(sorted_bam_mutGenome, outdir_small_variantCalling, ref_genome, gff)
 
 
-
-# test that the environment can be recreated
-#test_fun.test_conda_env_generation(testing_outputs_dir)
-
+#reftest_fun.test_bwa_mem_and_get_bam()
+# test bcftools
+# test sam tools
 
 

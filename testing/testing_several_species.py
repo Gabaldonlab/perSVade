@@ -127,7 +127,7 @@ for taxID, spName, ploidy, mitochondrial_chromosome in species_Info:
         else: close_shortReads_table = "auto"
 
         # get the reads from SRA. 3 samples, 3 runs per sample. Process with the 
-        cmd = "%s --ref %s --threads %i -o %s --close_shortReads_table %s --target_taxID %s --n_close_samples 3 --nruns_per_sample 3 -f1 skip -f2 skip --mitochondrial_chromosome %s --gff %s --testAccuracy --StopAfter_testAccuracy_perSVadeRunning --StopAfterPrefecth_of_reads"%(perSVade_py, genome, threads, outdir_perSVade, close_shortReads_table, taxID, mitochondrial_chromosome, gff)
+        cmd = "%s --ref %s --threads %i -o %s --close_shortReads_table %s --target_taxID %s --n_close_samples 3 --nruns_per_sample 3 -f1 skip -f2 skip --mitochondrial_chromosome %s --gff %s --testAccuracy --StopAfter_testAccuracy_perSVadeRunning --StopAfterPrefecth_of_reads --StopAfter_repeatsObtention"%(perSVade_py, genome, threads, outdir_perSVade, close_shortReads_table, taxID, mitochondrial_chromosome, gff)
 
     elif type_run=="goldenSet":
 

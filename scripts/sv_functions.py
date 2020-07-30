@@ -118,7 +118,6 @@ recon_dir = "%s/bin"%EnvDir
 rmblast_dir = "%s/bin"%EnvDir
 rscout_dir = "%s/bin"%EnvDir
 trf_prgm_dir = "%s/bin/trf"%EnvDir
-JolyTree_sh = "%s/bin/JolyTree.sh"%EnvDir
 esearch = "%s/bin/esearch"%EnvDir
 efetch = "%s/bin/efetch"%EnvDir
 prefetch = "%s/bin/prefetch"%EnvDir
@@ -140,8 +139,13 @@ gridss_jar = "%s/gridss-2.9.2-gridss-jar-with-dependencies.jar"%external_softwar
 clove = "%s/clove-0.17-jar-with-dependencies.jar"%external_software
 ninja_dir = "%s/NINJA-0.95-cluster_only/NINJA"%external_software
 gztool = "%s/gztool-linux.x86_64"%external_software
-vcf_validator = "%s/vcf_validator_linux"%external_software
-bcftools_latest = "%s/bcftools-1.10.2/bin/bcftools"%external_software
+
+
+
+# define the bcftools=1.10 by activating the conda env
+SOURCE_CONDA_CMD = "source %s/etc/profile.d/conda.sh"%CondaDir
+# CONDA_ACTIVATING_CMD = "conda activate %s;"%EnvName
+bcftools_latest = "%s && conda activate %s_bcftools_1.10.2_env && bcftools"%(SOURCE_CONDA_CMD, EnvName)
 
 # scripts that are of this pipeline
 create_random_simulatedSVgenome_R = "%s/create_random_simulatedSVgenome.R"%CWD
@@ -156,8 +160,7 @@ get_trimmed_reads_for_srr_py = "%s/get_trimmed_reads_for_srr.py"%CWD
 run_vep = "%s/run_vep.py"%CWD
 
 
-SOURCE_CONDA_CMD = "source %s/etc/profile.d/conda.sh;"%CondaDir
-CONDA_ACTIVATING_CMD = "conda activate %s;"%EnvName
+
 
 ######################################################
 ######################################################
@@ -7244,37 +7247,6 @@ def test_SVgeneration_from_DefaultParms(reference_genome, outdir, sample_sorted_
         print("--- the testing of SV generation from an assembly took %s seconds in %i cores ---"%(time.time() - pipeline_start_time, threads))
 
 
-def get_speciesTree_multipleGenomes_JolyTree(input_dir_withGenomes, outdir, threads=4, replace=False):
-
-    """This function generates a species tree under outdir with all the genomes (files ending with fasta) in input_dir_withGenomes. It returns the newick file with the tree"""
-
-    # make the outdir
-    make_folder(outdir)
-
-
-    # define the outprefix and the expected species tree file
-    outprefix = "%s/outputJolyTree"%outdir
-    species_treefile = "%s.nwk"%outprefix
-
-    if file_is_empty(species_treefile) or replace is True:
-
-        # move all the fasta files in input_dir_withGenomes into input_dir
-        input_dir = "%s/input_genomes"%outdir; make_folder(input_dir)
-        for file in os.listdir(input_dir_withGenomes):
-            origin_file = "%s/%s"%(input_dir_withGenomes, file)
-
-            # if it is a fasta file, softlink to input_dir
-            if file.split(".")[-1] in {"fasta", "fa"} and os.path.isfile(origin_file):
-                dest_file = "%s/%s"%(input_dir, file)
-                if file_is_empty(dest_file): run_cmd("ln -s %s %s"%(origin_file, dest_file))
-
-
-        # run JolyTree
-        print("running JolyTree to get species tree")
-        run_cmd("%s -i %s -b %s -t %i"%(JolyTree_sh, input_dir, outprefix, threads))
-
-    return species_treefile
-
 def ask_if_overlapping_breakends_in_parents_withEqualChromosomes(r, parents_gridss_df, tol_bp):
 
     """Returns a boolean that indicates whether ther is any breakend in parents that overlaps with the breakedn in r by less than tol_bp bp, where the orientation of the brekends is expected to be the same"""
@@ -11546,6 +11518,9 @@ def get_vcf_as_df_simple_oneSample(vcf_file):
     # set the index to be a tuple of (chromosome, location, ref, alt)
     df["CHROM_POS_REF_ALT"] = [tuple(x) for x in df[["#CHROM", "POS", "REF", "ALT"]].values]; df = df.set_index("CHROM_POS_REF_ALT")
 
+    # return an empty df
+    if len(df)==0: return pd.DataFrame()
+
     # add a colum that will result from the merging of FORMAT and the last column (which are the values of FORMAT)
     data_colname = list(df.keys())[-1]
     df["METADATA"] = [dict(zip(x[0].split(":"), x[1].split(":"))) for x in df[["FORMAT", data_colname]].values]
@@ -11595,6 +11570,66 @@ def get_GTto0(x):
     if x=="GT": return 0
     else: return 1
 
+def get_vcf_with_joined_multialleles(input_vcf, output_vcf, reference_genome, replace=False, threads=4):
+
+    """Takes a vcf and joins the multialleles"""
+
+    # define the tmp vcf
+    output_vcf_tmp = "%s.tmp"%output_vcf
+
+    if file_is_empty(output_vcf) or replace is True:
+        print("joining vcf records in %s"%input_vcf)
+
+        # get the processed input
+        input_vcf_only_knownGT = "%s.only_knownGT.vcf"%input_vcf
+        """
+        run_cmd("grep  $'\tknown_GT\t\|^#' %s > %s"%(input_vcf, input_vcf_only_knownGT))
+
+        # run the joining
+        joining_std = "%s.joining.std"%input_vcf_only_knownGT
+        run_cmd("%s norm --check-ref ws --fasta-ref %s --multiallelics +any -o %s --output-type v --threads %i %s > %s 2>&1"%(bcftools_latest, reference_genome, output_vcf_tmp, threads, input_vcf_only_knownGT, joining_std))
+
+        # check that none were changed
+        if any([set(l.split()[2].split("/")[1:])!={"0"} for l in open(joining_std, "r").readlines() if "total/split/realigned/skipped" in l]): raise ValueError("some variants changed the format in bcftools norm, which is likely a bug")
+        """
+
+        # load into vcf
+        noMultiAlt_vcf = get_vcf_as_df_simple_oneSample(input_vcf_only_knownGT)
+        vcf_df = get_vcf_as_df_simple_oneSample(output_vcf_tmp)
+
+        # check that the inputs are good
+        if any([x not in {'1/1', '0/1', '0/0'} for x in set(noMultiAlt_vcf.GT)]): raise ValueError("The monoallelic vcf was not properly generated")
+
+        # check that the ploidies are consistent with the allele freq
+        for GT in {'1/1', '0/1', '0/0'}:
+            if GT in set(noMultiAlt_vcf.GT):
+
+                # get the AF distribution
+                df_GT = noMultiAlt_vcf[noMultiAlt_vcf.GT==GT]
+                AF = df_GT["AF"].apply(float)
+
+                print("This is the distribution of AF for GT=%s: range=(%.4f, %.4f), median=%.4f, pct_1=%.4f, pct_99=%.4f"%(GT, min(AF), max(AF), np.median(AF), np.percentile(AF, 1), np.percentile(AF, 99)))
+
+                df_GT[df_GT.AF.apply(float)<=0.1].to_csv("%s.GT_%s.AFbelow0.1_vcf.tab"%(input_vcf_only_knownGT, GT.split("/", "-")), sep="\t", index=False, header=True)
+
+
+                
+        KHAAHG
+        # noMultiAlt_vcf
+
+        print(noMultiAlt_vcf.AF)
+
+
+        kjdahhkdakhdg
+
+
+
+        # remove packages
+        for f in [input_vcf_only_knownGT, joining_std]: remove_file(f)
+
+        # rename
+        os.rename(output_vcf_tmp, output_vcf)
+
 def get_normed_bgzip_and_tabix_vcf_file(file, reference_genome, replace=False, threads=4, multiallelics_cmd="-any"):
 
     """This function takes a file and gzips it, creating a tabix index file.
@@ -11637,18 +11672,6 @@ def get_normed_bgzip_and_tabix_vcf_file(file, reference_genome, replace=False, t
         os.rename(file_tmp_gz, file_gz)
 
     return file_gz
-
-def validate_vcf(vcf_file, replace=False):
-
-    """This function takes a vcf and reports whether it is valid according to vcf_validator"""
-
-    # define the outdir
-    outdir = "%s_vcf_validator_outdir"%vcf_file; 
-    delete_folder(outdir); make_folder(outdir)
-
-    print("running vcf_validator into %s"%outdir)
-
-    run_cmd("%s -i %s -l warning -r summary,text -o %s --require-evidence"%(vcf_validator, vcf_file, outdir))
 
 
 def get_altAllele_freq_noMultiAllele_fromAD(ad):
@@ -11745,6 +11768,7 @@ def merge_several_vcfsSameSample_into_oneMultiSample_vcf(vcf_iterable, reference
 
     # get the vcfs into a df
     program_to_vcf_df = {p : get_vcf_as_df_simple_oneSample(vcf) for p,vcf in program_to_vcf.items()}
+    program_to_vcf_df = {p : df for p, df in program_to_vcf_df.items() if len(df)>0}
 
     # define the common 'FORMAT' fields
     common_format_fields = sorted(set.intersection(*[set(df.FORMAT.iloc[0].split(":")) for df in program_to_vcf_df.values()]), key=get_GTto0)
@@ -11879,19 +11903,21 @@ def merge_several_vcfsSameSample_into_oneMultiSample_vcf(vcf_iterable, reference
             # remove the duplicates
             vcf_df = vcf_df.drop_duplicates(subset=["#CHROM", "POS", "REF", "ALT"])
 
-            # get whether the variant overlaps repeats
-            vcf_df["overlaps_repeats"] = get_series_variant_in_repeats(vcf_df, repeats_table, replace=replace)
 
             # replace by a '.' if empty
             def get_point_if_empty(x):
                 if len(x)>0: return x
                 else: return ["."]
 
+
             # add the called and PASS programs
             fields = list(vcf_df.columns)
             all_programs = list(p_to_df)
             vcf_df["called_programs_list"] = vcf_df[all_programs].apply(lambda r: [program_to_abbreviation[p] for p in all_programs if not r[p].endswith(".")], axis=1)
             vcf_df["PASS_programs_list"] = vcf_df.INFO.apply(lambda x: [program_to_abbreviation[p] for p in all_programs if "%s_FILTER=PASS"%program_to_abbreviation[p] in x]).apply(get_point_if_empty)
+
+            # get whether the variant overlaps repeats
+            vcf_df["overlaps_repeats"] = get_series_variant_in_repeats(vcf_df, repeats_table, replace=replace)
 
             # define the 'ID' in  a way that resembles VEP
             vcf_df["ID"] = vcf_df["#CHROM"] + "_" + vcf_df.POS.apply(str) + "_" + vcf_df.REF + "/" + vcf_df.ALT
@@ -11960,6 +11986,10 @@ def merge_several_vcfsSameSample_into_oneMultiSample_vcf(vcf_iterable, reference
 
                 # get the reads covering this variant
                 vcf_df["%s_readsCovVar"%abb] = vcf_df[p].apply(lambda x: x.split(":")[ADidx]).apply(get_readsCoveringVariant)
+
+                # get the AD
+                vcf_df["%s_AD"%abb] = vcf_df[p].apply(lambda x: x.split(":")[ADidx])
+
                 # get the total depth at the locus
                 vcf_df["%s_DP"%abb] = vcf_df[p].apply(lambda x: x.split(":")[DPidx]).apply(get_int_or0)
 
@@ -11999,15 +12029,53 @@ def merge_several_vcfsSameSample_into_oneMultiSample_vcf(vcf_iterable, reference
                 f_to_type["%s_called"%abb] = "String"
                 f_to_type["%s_PASS"%abb] = "String"
 
+
+            # get the mean AD
+            def get_mean_AD(list_ADs):
+
+                # get the mean for each of the ref and alt
+                mean_ref_reads = int(np.mean([int(AD.split(",")[0]) for AD in list_ADs]))
+                mean_alr_reads = int(np.mean([int(AD.split(",")[1]) for AD in list_ADs]))
+
+                return "%i,%i"%(mean_ref_reads, mean_alr_reads)
+
+            vcf_df["mean_AD"] = vcf_df.apply(lambda r: get_mean_AD([r["%s_AD"%p] for p in r["interesting_algs"]]), axis=1)
+            f_to_description["mean_AD"] = "The mean AD across  all programs that are PASS or all called programs if none are PASS"
+            f_to_type["mean_AD"] = "String"
+            info_series += ";mean_AD=" + vcf_df["mean_AD"]
+
             print("getting common genotype")
             # get the common GT
             def get_commonGT(r):
 
                 # get all the GTs
-                all_GTs = set([r["%s_GTreordered"%p] for p in r["interesting_algs"]])
+                all_GTs = [r["%s_GTreordered"%p] for p in r["interesting_algs"]]
+                all_GTs_set = set(all_GTs)
 
-                if len(all_GTs)!=1: commonGT = "."
-                else: commonGT = next(iter(all_GTs))
+                if len(r["called_algs_set"])>3: raise ValueError("This function does not work for >3 programs")
+
+                # if there is only one GT, return it
+                if len(all_GTs_set)==1: commonGT = next(iter(all_GTs_set))
+
+                # if there are 3 programs calling, you may have 2vs1 GT. If so, keep the most common ones
+                elif len(r["called_algs_set"])==3:
+
+                    # define the called GTs
+                    all_GTs_called = [r["%s_GTreordered"%p] for p in r["called_algs_set"]]
+                    all_GTs_called_set = set(all_GTs_called)
+                    
+                    # if each program calls a different GT, define as 'no-consensus'
+                    if len(all_GTs_called_set)==3: commonGT = "."
+
+                    # if not, you can the GT that is most commonly-called
+                    else:
+
+                        # map each GT to the number of programs that call it
+                        nPrograms_to_GT = {nPrograms : GT for GT, nPrograms in Counter(all_GTs_called).items()}
+                        if len(nPrograms_to_GT)<=1: raise ValueError("something went wrong with the parsing")
+                        commonGT = nPrograms_to_GT[max(nPrograms_to_GT)]
+
+                else: commonGT = "." 
 
                 return commonGT
 
@@ -12036,7 +12104,6 @@ def merge_several_vcfsSameSample_into_oneMultiSample_vcf(vcf_iterable, reference
             f_to_description["mean_DP"] = "The mean read depth by all programs that are PASS or all called programs if none are PASS"
             f_to_type["mean_DP"] = "Float"
             info_series += ";mean_DP=" + vcf_df["mean_DP"].apply(lambda x: "%.4f"%x)
-
 
             # add the mean AF for PASS and CALLED programs
             for targetField in ["called_algs_set", "PASS_algs_set"]: 
@@ -12284,6 +12351,8 @@ def report_variant_calling_statistics(df, variantCallingStats_tablePrefix, progr
                          ("freebayes","bcftools"),
                          ("HaplotypeCaller","freebayes","bcftools")]
 
+    # redefine the programs. Sometimes there are no vars called by a program
+    programs = [p for p in programs if "%s_called"%(p_to_abb[p]) in df.keys()]
 
     # go through different types of filters
     for type_filter in ["PASS", "called"]:
@@ -12298,6 +12367,8 @@ def report_variant_calling_statistics(df, variantCallingStats_tablePrefix, progr
             # get the df of the type var
             if type_var=="SNP": df_type_var = df[df.ISSNP]
             elif type_var=="INDEL": df_type_var = df[~df.ISSNP]
+
+
 
             # get the vars of each type
             p_to_vars = {p : set(df_type_var[df_type_var["%s_%s"%(p_to_abb[p], type_filter)]]["#Uploaded_variation"]) for p in programs}
@@ -12548,9 +12619,6 @@ def run_repeat_modeller(reference_genome, threads=4, replace=False):
 
         # put the genome under this outdir
         shutil.copy2(reference_genome, genome_dir)
-
-        # change to the outdir to get the files there
-        #os.chdir(outdir)
 
         # run the database
         name_database = get_file(genome_dir)
