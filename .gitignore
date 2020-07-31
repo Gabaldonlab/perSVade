@@ -11,3 +11,6 @@ installation/external_software
 sync_git.py
 installation/test_installation/__pycache__
 installation/test_installation/testing_outputs
+installation/test_installation/taxdump.tar.gz
+installation/test_installation/__pycache__
+scripts/__pycache__

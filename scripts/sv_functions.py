@@ -4238,6 +4238,15 @@ def run_gridssClove_given_filters(sorted_bam, reference_genome, working_dir, med
 
     """
 
+    # if the median_coverage is -1, calculate it from the provided sorted_bam
+    if median_coverage==-1: 
+
+        print("recalculating median coverage")
+        destination_dir = "%s.calculating_windowcoverage"%sorted_bam
+        coverage_df = pd.read_csv(generate_coverage_per_window_file_parallel(reference_genome, destination_dir, sorted_bam, windows_file="none", replace=replace, run_in_parallel=run_in_parallel, delete_bams=True), sep="\t")
+
+        median_coverage = np.median(coverage_df.mediancov_1)
+
     print("running gridss and clove with given parameter with %.2f min_rel_coverage_to_consider_dup"%min_rel_coverage_to_consider_dup)
     make_folder(working_dir)
 
@@ -5048,7 +5057,7 @@ def run_freebayes_parallel_regions(outdir_freebayes, ref, sorted_bam, ploidy, co
         print("running freebayes in parallel with %i threads"%(threads))
 
         # define the regions file
-        window_fb = 20000
+        window_fb = 10000
         regions_file = "%s/regions_genome_%ibp.tab"%(outdir_freebayes, window_fb)
         run_cmd("%s %s.fai %i > %s"%(fasta_generate_regions_py, ref, window_fb, regions_file))
         regions = [l.strip() for l in open(regions_file, "r").readlines()]
@@ -5986,7 +5995,7 @@ def run_parallelFastqDump_on_prefetched_SRRfile(SRRfile, replace=False, threads=
         testing_fastqdump_parallel_std = "%s.testing_fastqdumpParallel.std"%SRRfile
         test_cmd = "timeout 30 %s -s %s -t %i -O %s --tmpdir %s --split-3 --gzip > %s 2>&1"%(parallel_fastq_dump, SRRfile, threads, test_dir, test_dir, testing_fastqdump_parallel_std)
         try: run_cmd(test_cmd)
-        except: print("fastqdump did not work before timeout")
+        except: print("fastqdump did not work before timeout. This is fine.")
         any_fastqgz_generated = any([any([file.endswith("fastq.gz") for file in f[2]]) for f in os.walk(test_dir)])
 
         if any_fastqgz_generated is True:
@@ -12721,7 +12730,7 @@ def run_repeat_modeller(reference_genome, threads=4, replace=False):
 
         # run repeatmodeller
         njobs = int(threads/4) # Specify the number of parallel search jobs to run. RMBlast jobs wil use 4 cores each and ABBlast jobs will use a single core each. i.e. on a machine with 12 cores and running with RMBlast you would use -pa 3 to fully utilize the machine
-        print("Running in %s"%outdir)
+        print("Running repeat modeller in %s on %i jobs"%(outdir, njobs))
 
         #raise ValueError("This has to be fixed!!!!")
         cmd = "export PERL5LIB=%s && cd %s && %s -database %s -pa %i -LTRStruct"%(repeatmoder_dir, outdir, repeat_modeller, name_database, njobs)
@@ -12758,6 +12767,9 @@ def run_repeat_masker(reference_genome, threads=4, replace=False, use_repeat_mod
     It runs repeat masker for a reference genome, writing the results under a folder where the ref genome is
     """
 
+    # get the reference genome as a full path
+    reference_genome = get_fullpath(reference_genome)
+
     # get the library from repeat_modeller
     if use_repeat_modeller is True: library_repeats_repeatModeller, new_families_identified =  run_repeat_modeller(reference_genome, threads=threads, replace=replace)
 
@@ -12767,8 +12779,8 @@ def run_repeat_masker(reference_genome, threads=4, replace=False, use_repeat_mod
 
     # define the outdirs for each 
     repeat_masker_outdir = "%s/%s_repeat_masker_outdir"%(genome_dir, genome_name.split(".")[0]); make_folder(repeat_masker_outdir)
-    repeat_masker_outdir_default = "%s/default"%repeat_masker_outdir; make_folder(repeat_masker_outdir_default)
-    repeat_masker_outdir_personal = "%s/personal"%repeat_masker_outdir; make_folder(repeat_masker_outdir_personal)
+    repeat_masker_outdir_default = get_fullpath("%s/default"%repeat_masker_outdir); make_folder(repeat_masker_outdir_default)
+    repeat_masker_outdir_personal = get_fullpath("%s/personal"%repeat_masker_outdir); make_folder(repeat_masker_outdir_personal)
 
     # run in the default configuration
     repeat_masker_outfile_default = "%s/%s.out"%(repeat_masker_outdir_default, genome_name)
@@ -12776,7 +12788,7 @@ def run_repeat_masker(reference_genome, threads=4, replace=False, use_repeat_mod
 
     if file_is_empty(repeat_masker_outfile_default) or replace is True:
         print("running repeatmasker to get the repeats of the genome in the default configuration")
-        run_cmd("%s -pa %i -dir %s -poly -html -gff %s > %s 2>&1"%(repeat_masker, threads, repeat_masker_outdir_default, reference_genome, repeat_masker_std_default))
+        run_cmd("cd %s && %s -pa %i -dir %s -poly -html -gff %s > %s 2>&1"%(repeat_masker_outdir_default, repeat_masker, threads, repeat_masker_outdir_default, reference_genome, repeat_masker_std_default))
 
     # run in the personal configuration
     repeat_masker_outfile_personal = "%s/%s.out"%(repeat_masker_outdir_personal, genome_name)
@@ -12786,7 +12798,7 @@ def run_repeat_masker(reference_genome, threads=4, replace=False, use_repeat_mod
         
         if file_is_empty(repeat_masker_outfile_personal) or replace is True:
             print("running repeatmasker to get the repeats of the genome with the lib obtained with RepeatModeler")
-            run_cmd("%s -pa %i -dir %s -poly -html -gff -lib %s %s > %s 2>&1"%(repeat_masker, threads, repeat_masker_outdir_personal, library_repeats_repeatModeller, reference_genome, repeat_masker_std_personal))
+            run_cmd("cd %s && %s -pa %i -dir %s -poly -html -gff -lib %s %s > %s 2>&1"%(repeat_masker_outdir_personal, repeat_masker, threads, repeat_masker_outdir_personal, library_repeats_repeatModeller, reference_genome, repeat_masker_std_personal))
     else: 
 
         # empty file

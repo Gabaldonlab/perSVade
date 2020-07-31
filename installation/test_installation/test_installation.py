@@ -50,11 +50,18 @@ if fun.file_is_empty(mut_genome): fun.run_cmd("cp %s %s"%(test_mutated_genome, m
 
 # define an example calbicans varCall_outout
 Calbicans_varCall_outdir = "%s/varcalling_output_Calbicans_SRR2088862"%testing_inputs_dir
+
+# define the Calbicans genome
 inputs_Calbicans_genome = "%s/Candida_albicans.fasta"%testing_inputs_dir
 Calbicans_genome = "%s/Candida_albicans.fasta"%testing_outputs_dir
 fun.soft_link_files(inputs_Calbicans_genome, Calbicans_genome)
 
-# define the mers genome
+# define the Calbicans repeats
+inputs_Calbicans_repeats = "%s/Candida_albicans.fasta.repeats.tab"%testing_inputs_dir
+Calbicans_repeats = "%s/Candida_albicans.fasta.repeats.tab"%testing_outputs_dir
+fun.soft_link_files(inputs_Calbicans_repeats, Calbicans_repeats)
+
+# define the MERV genome
 inputs_MERS_genome = "%s/MERS_CoV_genome.fasta"%testing_inputs_dir
 MERS_genome = "%s/MERS_CoV_genome.fasta"%testing_outputs_dir
 fun.soft_link_files(inputs_MERS_genome, MERS_genome)
@@ -65,11 +72,12 @@ fun.soft_link_files(inputs_MERS_genome, MERS_genome)
 repeat_masker_db = "%s/Libraries/RepeatMasker.lib.nsq"%(fun.repeatmasker_dir) 
 if fun.file_is_empty(repeat_masker_db): raise ValueError("%s is missing. Check that you ran ./installation/setup_environment.sh"%repeat_masker_db)
 
+
 # test that the environment can be recreated
 test_fun.test_conda_env_generation(testing_outputs_dir, replace=False)
 
 # test repeat masker obtention
-test_fun.test_get_repeat_maskerDF(ref_genome)
+test_fun.test_get_repeat_maskerDF(ref_genome, replace=False)
 
 # test read simulation by simulating reads from the mutated genome
 r1_mutGenome, r2_mutGenome = test_fun.test_read_simulation_and_get_reads(mut_genome)
@@ -84,14 +92,22 @@ test_fun.test_processing_varcalling(Calbicans_varCall_outdir, Calbicans_genome, 
 # test bcftools, freebayes, gatk4, mosdepth, vep by running the small variant calling pipeline
 test_fun.test_smallVarCall_CNV_running(sorted_bam_mutGenome, outdir_small_variantCalling, ref_genome, gff)
 
-
 # test the querying of the SRA database and downloading, and trimming of reads and also gztool
 outdir_SRAdb_query_downloading_and_readTrimming = "%s/testing_SRAdb_query_downloading_and_readTrimming_MERS"%testing_outputs_dir
 test_fun.test_SRAdb_query_downloading_and_readTrimming(outdir_SRAdb_query_downloading_and_readTrimming, MERS_genome, 1335626)
 
 # generate a genome that is rearranged 
+rearranged_genome = test_fun.test_rearranging_genome_random(ref_genome, replace=False)
+
+# generate simulated reads from this rearranged genome, and also a bam file
+r1_svGenome, r2_svGenome = test_fun.test_read_simulation_and_get_reads(rearranged_genome)
+sorted_bam_svGenome = test_fun.test_bwa_mem_and_get_bam(r1_svGenome, r2_svGenome, ref_genome)
+
+# test whether you can run the gridss and clove pipeline
+outdir_testing_gridss_clove = "%s/testing_gridss_clove_pipeline_default_parms"%(testing_outputs_dir)
+test_fun.test_gridss_clove_pipeline(sorted_bam_svGenome, ref_genome, outdir_testing_gridss_clove, replace=False)
 
 
-# test that the gridss-clove pipeline works on the mutated genome
+
 
 
