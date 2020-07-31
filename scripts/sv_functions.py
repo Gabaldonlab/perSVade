@@ -94,15 +94,12 @@ bwa = "%s/bin/bwa"%EnvDir
 samtools = "%s/bin/samtools"%EnvDir
 gatk = "%s/bin/gatk"%EnvDir # this is gatk4
 freebayes = "%s/bin/freebayes"%EnvDir
-genmap = "%s/bin/genmap"%EnvDir
 repeat_masker = "%s/bin/RepeatMasker"%EnvDir
 vcffilter = "%s/bin/vcffilter"%EnvDir
 freebayes_parallel = "%s/bin/freebayes-parallel"%EnvDir
 fasta_generate_regions_py = "%s/bin/fasta_generate_regions.py"%EnvDir
-kmercountexact = "%s/bin/kmercountexact.sh"%EnvDir
 wgsim = "%s/bin/wgsim"%EnvDir
 picard_exec = "%s/bin/picard"%EnvDir
-minimap2 = "%s/bin/minimap2"%EnvDir
 svim = "%s/bin/svim"%EnvDir
 bbmap_reformat_sh = "%s/bin/reformat.sh"%EnvDir
 mosdepth = "%s/bin/mosdepth"%EnvDir
@@ -125,7 +122,6 @@ fastqdump = "%s/bin/fastq-dump"%EnvDir
 parallel_fastq_dump = "%s/bin/parallel-fastq-dump"%EnvDir
 FASTQC = "%s/bin/fastqc"%EnvDir
 porechop = "%s/bin/porechop"%EnvDir
-fasterq_dump = "%s/bin/fasterq-dump"%EnvDir
 seqtk = "%s/bin/seqtk"%EnvDir
 repeatmoder_dir = "%s/share/RepeatModeler"%EnvDir
 repeat_modeller = "%s/bin/RepeatModeler"%EnvDir
@@ -139,6 +135,13 @@ gridss_jar = "%s/gridss-2.9.2-gridss-jar-with-dependencies.jar"%external_softwar
 clove = "%s/clove-0.17-jar-with-dependencies.jar"%external_software
 ninja_dir = "%s/NINJA-0.95-cluster_only/NINJA"%external_software
 gztool = "%s/gztool-linux.x86_64"%external_software
+
+# sofware to skip
+#genmap = "%s/bin/genmap"%EnvDir
+#kmercountexact = "%s/bin/kmercountexact.sh"%EnvDir
+#minimap2 = "%s/bin/minimap2"%EnvDir
+#fasterq_dump = "%s/bin/fasterq-dump"%EnvDir
+
 
 
 
@@ -2614,9 +2617,13 @@ def simulate_pairedEndReads_per_chromosome_uniform(chr_obj, coverage, insert_siz
 
 def soft_link_files(origin, target):
 
-    """This function takes an origin file and makes it accessible through a link (targe)"""
+    """This function takes an origin file and makes it accessible through a link (target)"""
 
     if file_is_empty(target):
+
+        # rename as full paths
+        origin = get_fullpath(origin)
+        target = get_fullpath(target)
 
         # remove previous lisqnk
         try: run_cmd("rm %s > /dev/null 2>&1"%target)
@@ -5913,8 +5920,7 @@ def get_last_reads_fastqgz_file(file, nreads=100):
 
     # if the reads are incorrect, get them by another, slower way
     if not readIDs_are_correct(last_reads): 
-
-        print("These are the wrong reads:", last_reads)
+        #print("These are the wrong reads:", last_reads)
 
         # getting last reads in a more traditional way
         print("getting last reads for %s in a slower way (zcat + tail)"%file)
@@ -5977,7 +5983,8 @@ def run_parallelFastqDump_on_prefetched_SRRfile(SRRfile, replace=False, threads=
         delete_folder(test_dir); make_folder(test_dir)
 
         # run cmd and kill after 30 seconds
-        test_cmd = "timeout 15 %s -s %s -t %i -O %s --tmpdir %s --split-3 --gzip"%(parallel_fastq_dump, SRRfile, threads, test_dir, test_dir)
+        testing_fastqdump_parallel_std = "%s.testing_fastqdumpParallel.std"%SRRfile
+        test_cmd = "timeout 30 %s -s %s -t %i -O %s --tmpdir %s --split-3 --gzip > %s 2>&1"%(parallel_fastq_dump, SRRfile, threads, test_dir, test_dir, testing_fastqdump_parallel_std)
         try: run_cmd(test_cmd)
         except: print("fastqdump did not work before timeout")
         any_fastqgz_generated = any([any([file.endswith("fastq.gz") for file in f[2]]) for f in os.walk(test_dir)])
@@ -6202,11 +6209,13 @@ def get_SRA_runInfo_df_with_mapping_data(SRA_runInfo_df, reference_genome, outdi
 
     inputs_download_srr = [(srr, "%s/%s/reads_dir"%(seq_data_dir, srr), SRA_runInfo_df.loc[srr, "subset_n_reads"]) for srr in SRA_runInfo_df.Run]
 
-    print("Downloading %i sra datasets"%len(inputs_download_srr))
+    print("Downloading %i sra datasets or %i threads"%(len(inputs_download_srr), threads))
     with multiproc.Pool(threads) as pool:
         list_reads_tuples = pool.starmap(download_srr_subsetReads_onlyFastqDump, inputs_download_srr)
         pool.close()
+        pool.terminate()
 
+  
     ###################################################################
 
     ##### GET FRAC READS MAPPED ##### 
@@ -6246,7 +6255,7 @@ def get_taxID_or_BioSample(r, target_taxID):
     if r["TaxID"]==target_taxID: return r["BioSample"]
     else: return r["TaxID"]
 
-def get_SRA_runInfo_df(target_taxID, n_close_samples, nruns_per_sample, outdir, reference_genome, min_coverage, replace, threads, coverage_subset_reads, min_fraction_reads_mapped):
+def get_SRA_runInfo_df(target_taxID, n_close_samples, nruns_per_sample, outdir, reference_genome, min_coverage, replace, threads, coverage_subset_reads, min_fraction_reads_mapped, get_lowest_coverage_possible=False):
 
     """This function mines the SRA to find n_close_samples and nruns_per_sample, returning the necessary df """
 
@@ -6345,7 +6354,7 @@ def get_SRA_runInfo_df(target_taxID, n_close_samples, nruns_per_sample, outdir, 
         for Itax, taxID in enumerate(interesting_taxIDs_sorted):
 
             # get the df for this taxID
-            df_taxID = all_SRA_runInfo_df[all_SRA_runInfo_df.TaxID==taxID].sort_values(by="expected_coverage", ascending=False)
+            df_taxID = all_SRA_runInfo_df[all_SRA_runInfo_df.TaxID==taxID].sort_values(by="expected_coverage", ascending=get_lowest_coverage_possible)
             if len(df_taxID)==0: continue
 
             # define the length of the final_SRA_runInfo_df taxIDs
@@ -6441,7 +6450,7 @@ def close_shortReads_table_is_correct(close_shortReads_table):
     if any([file_is_empty(f) for f in reads_files]): return False
     else: return True
 
-def get_close_shortReads_table_close_to_taxID(target_taxID, reference_genome, outdir, ploidy, n_close_samples=3, nruns_per_sample=3, replace=False, threads=4, min_fraction_reads_mapped=0.1, coverage_subset_reads=0.1, min_coverage=30, job_array_mode="local", StopAfter_sampleIndexingFromSRA=False, queue_jobs="debug", max_ncores_queue=768, time_read_obtention="02:00:00", StopAfterPrefecth_of_reads=False):
+def get_close_shortReads_table_close_to_taxID(target_taxID, reference_genome, outdir, ploidy, n_close_samples=3, nruns_per_sample=3, replace=False, threads=4, min_fraction_reads_mapped=0.1, coverage_subset_reads=0.1, min_coverage=30, job_array_mode="local", StopAfter_sampleIndexingFromSRA=False, queue_jobs="debug", max_ncores_queue=768, time_read_obtention="02:00:00", StopAfterPrefecth_of_reads=False, get_lowest_coverage_possible=False):
 
     """
     This function takes a taxID and returns the close_shortReads_table that is required to do optimisation of parameters
@@ -6456,14 +6465,14 @@ def get_close_shortReads_table_close_to_taxID(target_taxID, reference_genome, ou
         print("getting SRRs")
 
         # get the df
-        SRA_runInfo_df = get_SRA_runInfo_df(target_taxID, n_close_samples, nruns_per_sample, outdir, reference_genome, min_coverage, replace, threads, coverage_subset_reads, min_fraction_reads_mapped)
+        SRA_runInfo_df = get_SRA_runInfo_df(target_taxID, n_close_samples, nruns_per_sample, outdir, reference_genome, min_coverage, replace, threads, coverage_subset_reads, min_fraction_reads_mapped, get_lowest_coverage_possible=get_lowest_coverage_possible)
 
         # load df
         save_object(SRA_runInfo_df, SRA_runInfo_df_file)
 
     else: SRA_runInfo_df = load_object(SRA_runInfo_df_file)
 
-    print("these are the samples chosen:\n:", SRA_runInfo_df[["Run", "sampleID", "SampleName", "sci_name", "fraction_reads_mapped"]].sort_values("sampleID"))
+    #print("these are the samples chosen:\n:", SRA_runInfo_df[["Run", "sampleID", "SampleName", "sci_name", "fraction_reads_mapped"]].sort_values("sampleID"))
 
     if StopAfter_sampleIndexingFromSRA is True: 
         print("stopping after generation of SRA_runInfo_df into %s"%SRA_runInfo_df_file)
@@ -6550,11 +6559,13 @@ def get_close_shortReads_table_close_to_taxID(target_taxID, reference_genome, ou
 
                 generate_jobarray_file_greasy(jobs_filename, walltime=time_read_obtention,  name="getting_SRAdatasets", queue=queue_jobs, sbatch=True, ncores_per_task=threads, number_tasks_to_run_at_once="all", max_ncores_queue=max_ncores_queue)
 
+                # exit before it starts
+                print("You need to wait until the read obtention is is finsihed")
+                sys.exit(0)
+
             else: raise ValueError("%s is not valid"%job_array_mode)
 
-            # exit before it starts
-            print("You need to wait until the read obtention is is finsihed")
-            sys.exit(0)
+
 
 
         if StopAfterPrefecth_of_reads is True: 
@@ -6570,7 +6581,7 @@ def get_close_shortReads_table_close_to_taxID(target_taxID, reference_genome, ou
         # write
         final_df.to_csv(close_shortReads_table, sep="\t", header=True, index=False)
 
-    print("removing all files that are not the reads")
+    #print("removing all files that are not the reads")
     close_shortReads_table_df = pd.read_csv(close_shortReads_table, sep="\t")
 
     if StopAfterPrefecth_of_reads is True: 
@@ -6578,16 +6589,12 @@ def get_close_shortReads_table_close_to_taxID(target_taxID, reference_genome, ou
         sys.exit(0)
 
 
-
-
-    # deubg
+    # debug
     if not close_shortReads_table_is_correct(close_shortReads_table): raise ValueError("%s has empty reads files"%close_shortReads_table)
-
-    jhghjghjgjhgjhgg
     
     # define the important files
     important_files = set(close_shortReads_table_df["short_reads1"]).union(close_shortReads_table_df["short_reads2"])
-    
+
     # remove the files that are not the reads
     for srr in os.listdir(reads_dir):
         srr_dir = "%s/%s"%(reads_dir, srr)
@@ -6609,7 +6616,7 @@ def get_close_shortReads_table_close_to_taxID(target_taxID, reference_genome, ou
     if not close_shortReads_table_is_correct(close_shortReads_table): raise ValueError("%s has empty reads files"%close_shortReads_table)
  
 
-    print("taking reads from %s"%close_shortReads_table)
+    #print("taking reads from %s"%close_shortReads_table)
 
     #########################################
 
@@ -11132,6 +11139,10 @@ def remove_smallVarsCNV_nonEssentialFiles(outdir, ploidy):
                              "variants_atLeast2PASS_ploidy%i.vcf"%ploidy,
                              "variants_atLeast3PASS_ploidy%i.vcf"%ploidy,
 
+                             "variants_atLeast1PASS_ploidy%i.withMultiAlt.vcf"%ploidy,
+                             "variants_atLeast2PASS_ploidy%i.withMultiAlt.vcf"%ploidy,
+                             "variants_atLeast3PASS_ploidy%i.withMultiAlt.vcf"%ploidy,
+
                              "variant_calling_stats_ploidy%i_called.tab"%ploidy,
                              "variant_calling_stats_ploidy%i_PASS.tab"%ploidy
                              }
@@ -11570,7 +11581,63 @@ def get_GTto0(x):
     if x=="GT": return 0
     else: return 1
 
-def get_vcf_with_joined_multialleles(input_vcf, output_vcf, reference_genome, replace=False, threads=4):
+
+def get_consensus_GT_row_multialleles_diploid(r, var_to_GTaf):
+
+    """This function takes a row of a multiallelic vcf gt and a dictionary where each variant (in the ID field) is mappend to a predicted AF from the GT of the monoallelic var"""
+
+    # map each GT to a var
+    GTaf_to_GT = {1.0:'1/1', 0.5:'0/1', 0.0:'0/0'}
+
+    # get the split vars
+    all_alts = r["ID"].split(";")
+    if len(all_alts)==0: raise ValueError("The all_alts can't be empty")
+
+    # if it is monoallelic, return the GT corresponding to the monoallelic GT
+    elif len(all_alts)==1: return GTaf_to_GT[var_to_GTaf[all_alts[0]]]
+
+    # if there 2 alleles, find a consensus
+    elif len(all_alts)==2: 
+
+        # define the vars
+        alt1 = all_alts[0]
+        alt2 = all_alts[1]
+
+        # define the GTs
+        gt_AF1 = var_to_GTaf[alt1]
+        gt_AF2 = var_to_GTaf[alt2]
+
+        # if both are theerozygous
+        if gt_AF1==0.5 and gt_AF2==0.5: return "1/2"
+
+        # if alt1 is homozygous
+        elif gt_AF1==1.0 and gt_AF2==0.0: return "1/1"
+
+        # if alt2 is homozygous:
+        elif gt_AF1==0.0 and gt_AF2==1.0: return "2/2"
+
+        # if alt1 is heterozygous
+        elif gt_AF1==0.5 and gt_AF2==0.0: return "0/1"
+
+        # if alt2 is homozygous:
+        elif gt_AF1==0.0 and gt_AF2==0.5: return "0/2"
+
+        # if none are called
+        elif gt_AF1==0.0 and gt_AF2==0.0: return "0/0"
+
+        # if both are called as homozygous
+        elif (gt_AF1==1.0 and gt_AF2==1.0) or (gt_AF1==1.0 and gt_AF2==0.5) or (gt_AF1==0.5 and gt_AF2==1.0): return "."
+
+        else: raise ValueError("the provided gt are not valid") 
+
+    # if there are more than 2 alts, the GT can't be resolved
+    else: return "."
+
+
+
+
+
+def get_vcf_with_joined_multialleles_diploid(input_vcf, output_vcf, reference_genome, replace=False, threads=4):
 
     """Takes a vcf and joins the multialleles"""
 
@@ -11582,26 +11649,49 @@ def get_vcf_with_joined_multialleles(input_vcf, output_vcf, reference_genome, re
 
         # get the processed input
         input_vcf_only_knownGT = "%s.only_knownGT.vcf"%input_vcf
-        """
         run_cmd("grep  $'\tknown_GT\t\|^#' %s > %s"%(input_vcf, input_vcf_only_knownGT))
 
         # run the joining
         joining_std = "%s.joining.std"%input_vcf_only_knownGT
         run_cmd("%s norm --check-ref ws --fasta-ref %s --multiallelics +any -o %s --output-type v --threads %i %s > %s 2>&1"%(bcftools_latest, reference_genome, output_vcf_tmp, threads, input_vcf_only_knownGT, joining_std))
+        
 
         # check that none were changed
         if any([set(l.split()[2].split("/")[1:])!={"0"} for l in open(joining_std, "r").readlines() if "total/split/realigned/skipped" in l]): raise ValueError("some variants changed the format in bcftools norm, which is likely a bug")
-        """
+
+        ####### EDITING GT #######
+        print("finding consensus genotype")
 
         # load into vcf
-        noMultiAlt_vcf = get_vcf_as_df_simple_oneSample(input_vcf_only_knownGT)
+        noMultiAlt_vcf = get_vcf_as_df_simple_oneSample(input_vcf_only_knownGT).set_index("ID", drop=False)
         vcf_df = get_vcf_as_df_simple_oneSample(output_vcf_tmp)
 
+        if len(noMultiAlt_vcf)!=len(set(noMultiAlt_vcf.index)): raise ValueError("There are duplicate records in the split alleles")
+
+        # map each var to the fraction of vars that correspond to GT
+        GT_to_fractionReads = {'1/1':1.0, '0/1':0.5, '0/0':0.0}
+        var_to_GTaf = dict(noMultiAlt_vcf.GT.apply(lambda x: GT_to_fractionReads[x]))
+
+        # get new GT
+        vcf_df["GT"] = vcf_df.apply(lambda r: get_consensus_GT_row_multialleles_diploid(r, var_to_GTaf), axis=1)
+
+        # debug
+        df_noGT = vcf_df[vcf_df["GT"]=="."]
+        if len(df_noGT)>0: print("WARNING: There are %i/%i loci that can't have an assigned GT. These will be skipped"%(len(df_noGT), len(vcf_df)))
+
+        # get only vcf with known GT
+        vcf_df = vcf_df[vcf_df["GT"]!="."]
+
+        #########################
+
+        #### DEBUGGING DATASETS ####
+
         # check that the inputs are good
-        if any([x not in {'1/1', '0/1', '0/0'} for x in set(noMultiAlt_vcf.GT)]): raise ValueError("The monoallelic vcf was not properly generated")
+        if any([x not in GT_to_fractionReads for x in set(noMultiAlt_vcf.GT)]): raise ValueError("The monoallelic vcf was not properly generated")
 
         # check that the ploidies are consistent with the allele freq
-        for GT in {'1/1', '0/1', '0/0'}:
+        print("getting distribution of AF across several ploidies")
+        for GT in GT_to_fractionReads:
             if GT in set(noMultiAlt_vcf.GT):
 
                 # get the AF distribution
@@ -11610,22 +11700,27 @@ def get_vcf_with_joined_multialleles(input_vcf, output_vcf, reference_genome, re
 
                 print("This is the distribution of AF for GT=%s: range=(%.4f, %.4f), median=%.4f, pct_1=%.4f, pct_99=%.4f"%(GT, min(AF), max(AF), np.median(AF), np.percentile(AF, 1), np.percentile(AF, 99)))
 
-                df_GT[df_GT.AF.apply(float)<=0.1].to_csv("%s.GT_%s.AFbelow0.1_vcf.tab"%(input_vcf_only_knownGT, GT.split("/", "-")), sep="\t", index=False, header=True)
+        ############################
 
+        # get the 
+        vcf_fields = ["#CHROM",  "POS", "ID", "REF", "ALT", "QUAL", "FILTER", "INFO", "FORMAT", "SAMPLE"]
 
-                
-        KHAAHG
-        # noMultiAlt_vcf
+        # redefne the sample
+        vcf_df["SAMPLE"] = vcf_df.GT + ":" + vcf_df.AF + ":" + vcf_df.DP + ":" + vcf_df.AD
 
-        print(noMultiAlt_vcf.AF)
+        # write vcf lines
+        vcf_lines_file = "%s.vcf_files.txt"%output_vcf_tmp
+        vcf_df[vcf_fields].to_csv(vcf_lines_file, sep="\t", header=False, index=False)
 
+        # define the header lines
+        header_lines_file = "%s.header_lines.txt"%output_vcf_tmp
+        run_cmd("grep '^#' %s > %s"%(output_vcf_tmp, header_lines_file))
 
-        kjdahhkdakhdg
-
-
+        # get the final vcf
+        run_cmd("cat %s %s > %s"%(header_lines_file, vcf_lines_file, output_vcf_tmp))
 
         # remove packages
-        for f in [input_vcf_only_knownGT, joining_std]: remove_file(f)
+        for f in [input_vcf_only_knownGT, joining_std, vcf_lines_file, header_lines_file]: remove_file(f)
 
         # rename
         os.rename(output_vcf_tmp, output_vcf)

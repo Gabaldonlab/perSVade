@@ -162,14 +162,19 @@ def test_processing_varcalling(smallVars_input_outdir, reference_genome, outdir,
         fun.run_cmd("cp %s.repeats.tab %s "%(reference_genome, target_repeats_tmp))
         os.rename(target_repeats_tmp, target_repeats)
 
-    cmd = "%s -r %s -o %s -p 2 -sbam %s -caller all -c 5 -mchr no_mitochondria -mcode 3 -gcode 1 --repeats_table %s --remove_smallVarsCNV_nonEssentialFiles -thr %i --skip_cnv_analysis"%(varcall_cnv_pipeline, target_reference_genome, target_smallVars_input_outdir, sorted_bam, target_repeats, threads) 
+    # final file 
+    final_file = "%s/variants_atLeast3PASS_ploidy2.vcf"%target_smallVars_input_outdir
 
-    fun.run_cmd(cmd)
+    if fun.file_is_empty(final_file) or replace is True:
+
+        cmd = "%s -r %s -o %s -p 2 -sbam %s -caller all -c 5 -mchr no_mitochondria -mcode 3 -gcode 1 --repeats_table %s --remove_smallVarsCNV_nonEssentialFiles -thr %i --skip_cnv_analysis"%(varcall_cnv_pipeline, target_reference_genome, target_smallVars_input_outdir, sorted_bam, target_repeats, threads) 
+
+        fun.run_cmd(cmd)
 
     print("you can run successfully the variant processing")
 
 
-def test_smallVarCall_CNV_running(sorted_bam, outdir, ref_genome, gff, threads=4, mitochondrial_chromosome="mito_C_glabrata_CBS138"):
+def test_smallVarCall_CNV_running(sorted_bam, outdir, ref_genome, gff, threads=4, mitochondrial_chromosome="mito_C_glabrata_CBS138", replace=False):
 
     """Takes a sorted bam (shuld have some mutations) and runs the variant calling pipeline on it"""
 
@@ -183,17 +188,48 @@ def test_smallVarCall_CNV_running(sorted_bam, outdir, ref_genome, gff, threads=4
 
         outdir_varCall = "%s/varcall_pooledSeq_%s"%(outdir, str(pooled_seq))
 
-        # define the cmd
-        cmd = "%s -r %s -o %s -p 2 -sbam %s -caller all -c 5 -mchr %s -mcode 3 -gcode 1 --repeats_table %s --remove_smallVarsCNV_nonEssentialFiles -gff %s -thr %i"%(varcall_cnv_pipeline, ref_genome, outdir_varCall, sorted_bam, mitochondrial_chromosome, repeats_table, gff, threads) 
+        # define the final file
+        final_file = "%s/variant_annotation_ploidy2.tab"%outdir_varCall
 
-        # add pooled seq
-        if pooled_seq is True: cmd += " --pooled_sequencing"
+        if fun.file_is_empty(final_file) or replace is True:
+            print("running on pooled_seq=%s. This may take a bit because a lot of variants will be considered"%pooled_seq)
 
-     
-        fun.run_cmd(cmd)
+            # define the cmd
+            cmd = "%s -r %s -o %s -p 2 -sbam %s -caller all -c 5 -mchr %s -mcode 3 -gcode 1 --repeats_table %s --remove_smallVarsCNV_nonEssentialFiles -gff %s -thr %i"%(varcall_cnv_pipeline, ref_genome, outdir_varCall, sorted_bam, mitochondrial_chromosome, repeats_table, gff, threads) 
 
-        sdkgsdkhgkd
+            # add pooled seq
+            if pooled_seq is True: cmd += " --pooled_sequencing"
+
+            fun.run_cmd(cmd)
+
+    print("small variant calling and CNV of genes works")
 
 
+def test_SRAdb_query_downloading_and_readTrimming(outdir, reference_genome, target_taxID, replace=False, threads=4):
+
+    """This function runs get_close_shortReads_table_close_to_taxID for the MERS coronavirus and taking the lowest coverage reads. This tests that sra tools, entrez tools, trimmomatic and fastqc work well.
+
+    5476 is C. albicans
+    1335626 is MERS
+    """
+
+    # make the outdir
+    fun.make_folder(outdir)
+
+
+    # set ploidy to 1
+    ploidy=1
+
+    # run with 'get_lowest_coverage_possible=True', which will take the lowest coverage datasets
+    close_shortReads_table = fun.get_close_shortReads_table_close_to_taxID(target_taxID, reference_genome, outdir, ploidy, n_close_samples=2, nruns_per_sample=1, replace=replace, threads=threads, min_fraction_reads_mapped=0.0, coverage_subset_reads=0.1, min_coverage=5, job_array_mode="local", StopAfter_sampleIndexingFromSRA=False, queue_jobs="debug", max_ncores_queue=768, time_read_obtention="02:00:00", StopAfterPrefecth_of_reads=False, get_lowest_coverage_possible=True)
+
+
+    # check
+    df_close_shortReads_table = fun.pd.read_csv(close_shortReads_table, sep="\t")
+
+    if set(df_close_shortReads_table.keys())!={'short_reads2', 'short_reads1', 'runID', 'sampleID'} or len(df_close_shortReads_table)!=2: raise ValueError("The close_shortReads_table %s was not created as expected"%close_shortReads_table)
+
+    print("The system to query the SRA database, dowload and trim reads works")
+    
 
 
