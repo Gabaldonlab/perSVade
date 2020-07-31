@@ -50,7 +50,14 @@ if fun.file_is_empty(mut_genome): fun.run_cmd("cp %s %s"%(test_mutated_genome, m
 
 # define an example calbicans varCall_outout
 Calbicans_varCall_outdir = "%s/varcalling_output_Calbicans_SRR2088862"%testing_inputs_dir
-Calbicans_genome = "%s/Candida_albicans.fasta"%testing_inputs_dir
+inputs_Calbicans_genome = "%s/Candida_albicans.fasta"%testing_inputs_dir
+Calbicans_genome = "%s/Candida_albicans.fasta"%testing_outputs_dir
+fun.soft_link_files(inputs_Calbicans_genome, Calbicans_genome)
+
+# define the mers genome
+inputs_MERS_genome = "%s/MERS_CoV_genome.fasta"%testing_inputs_dir
+MERS_genome = "%s/MERS_CoV_genome.fasta"%testing_outputs_dir
+fun.soft_link_files(inputs_MERS_genome, MERS_genome)
 
 ########################################
 
@@ -73,14 +80,18 @@ sorted_bam_mutGenome = test_fun.test_bwa_mem_and_get_bam(r1_mutGenome, r2_mutGen
 # test the joining and unjoining of multiallleles. This is a test for bcftools 1.10
 outdir_testing_CalbicansVarCall = "%s/testing_CalbicansVarCall"%testing_outputs_dir
 test_fun.test_processing_varcalling(Calbicans_varCall_outdir, Calbicans_genome, outdir_testing_CalbicansVarCall, sorted_bam_mutGenome)
-jkdahkdagda
 
 # test bcftools, freebayes, gatk4, mosdepth, vep by running the small variant calling pipeline
 test_fun.test_smallVarCall_CNV_running(sorted_bam_mutGenome, outdir_small_variantCalling, ref_genome, gff)
 
 
-#reftest_fun.test_bwa_mem_and_get_bam()
-# test bcftools
-# test sam tools
+# test the querying of the SRA database and downloading, and trimming of reads and also gztool
+outdir_SRAdb_query_downloading_and_readTrimming = "%s/testing_SRAdb_query_downloading_and_readTrimming_MERS"%testing_outputs_dir
+test_fun.test_SRAdb_query_downloading_and_readTrimming(outdir_SRAdb_query_downloading_and_readTrimming, MERS_genome, 1335626)
+
+# generate a genome that is rearranged 
+
+
+# test that the gridss-clove pipeline works on the mutated genome
 
 
