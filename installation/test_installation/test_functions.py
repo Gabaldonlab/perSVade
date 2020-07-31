@@ -23,12 +23,12 @@ import sv_functions as fun
 
 ######################################
 
-def test_get_repeat_maskerDF(test_genome):
+def test_get_repeat_maskerDF(test_genome, replace=False):
 
     """Tests the generation of repeats"""
 
     # define the ref genome
-    df_repeats, repeat_masker_outfile_default = fun.get_repeat_maskerDF(test_genome, threads=4, replace=False)
+    df_repeats, repeat_masker_outfile_default = fun.get_repeat_maskerDF(test_genome, threads=4, replace=replace)
 
     # test
     expected_fields = {'perc_ins', 'perc_del', 'type', 'end_repeat', 'perc_div', 'position_inRepeat_begin', 'repeat', 'left_repeat', 'IDrepeat', 'strand', 'left_positionINrepeat', 'SW_score', 'chromosome', 'begin_repeat', 'position_inRepeat_end'}
@@ -150,24 +150,12 @@ def test_processing_varcalling(smallVars_input_outdir, reference_genome, outdir,
         fun.run_cmd("cp -r %s %s "%(smallVars_input_outdir, target_smallVars_input_outdir_tmp))
         os.rename(target_smallVars_input_outdir_tmp, target_smallVars_input_outdir)
 
-    target_reference_genome = "%s/reference_genome.fasta"%outdir
-    target_reference_genome_tmp = "%s.tmp"%target_reference_genome
-    if fun.file_is_empty(target_reference_genome) or replace is True:
-        fun.run_cmd("cp %s %s "%(reference_genome, target_reference_genome_tmp))
-        os.rename(target_reference_genome_tmp, target_reference_genome)
-
-    target_repeats = "%s.repeats.tab"%target_reference_genome
-    target_repeats_tmp = "%s.tmp"%target_repeats
-    if fun.file_is_empty(target_repeats) or replace is True:
-        fun.run_cmd("cp %s.repeats.tab %s "%(reference_genome, target_repeats_tmp))
-        os.rename(target_repeats_tmp, target_repeats)
-
     # final file 
     final_file = "%s/variants_atLeast3PASS_ploidy2.vcf"%target_smallVars_input_outdir
 
     if fun.file_is_empty(final_file) or replace is True:
 
-        cmd = "%s -r %s -o %s -p 2 -sbam %s -caller all -c 5 -mchr no_mitochondria -mcode 3 -gcode 1 --repeats_table %s --remove_smallVarsCNV_nonEssentialFiles -thr %i --skip_cnv_analysis"%(varcall_cnv_pipeline, target_reference_genome, target_smallVars_input_outdir, sorted_bam, target_repeats, threads) 
+        cmd = "%s -r %s -o %s -p 2 -sbam %s -caller all -c 5 -mchr no_mitochondria -mcode 3 -gcode 1 --repeats_table %s.repeats.tab --remove_smallVarsCNV_nonEssentialFiles -thr %i --skip_cnv_analysis"%(varcall_cnv_pipeline, reference_genome, target_smallVars_input_outdir, sorted_bam, reference_genome, threads) 
 
         fun.run_cmd(cmd)
 
@@ -231,5 +219,37 @@ def test_SRAdb_query_downloading_and_readTrimming(outdir, reference_genome, targ
 
     print("The system to query the SRA database, dowload and trim reads works")
     
+
+def test_rearranging_genome_random(ref_genome, replace=False, threads=4, mitochondrial_chromosome="mito_C_glabrata_CBS138", nvars=5):
+
+
+    """This function takes a reference genome and simulates random variation on it, returning the rearranged genome in fasta format"""
+
+
+    # define the outdir
+    outdir = "%s.testing_rearranged_genome_generation"%(ref_genome); fun.make_folder(outdir)
+
+    sim_svtype_to_svfile, rearranged_genome = fun.rearrange_genomes_simulateSV(ref_genome, outdir, replace=replace, nvars=nvars, mitochondrial_chromosome=mitochondrial_chromosome)
+
+
+    print("The generation of a genome with randomly-inserted SVs works")
+
+    return rearranged_genome
+
+
+def test_gridss_clove_pipeline(sorted_bam, reference_genome, outdir, threads=4, replace=False):
+
+    """Tests that the default gridss and clove pipeline can be obtained"""
+
+    fun.make_folder(outdir)
+
+    # define the median coverage (to be recalculated)
+    median_coverage = -1
+
+    SV_dict, df_gridss = fun.run_gridssClove_given_filters(sorted_bam, reference_genome, outdir, median_coverage, replace=replace, threads=threads, gridss_blacklisted_regions="", gridss_VCFoutput="", gridss_maxcoverage=50000, median_insert_size=250, median_insert_size_sd=25, gridss_filters_dict=fun.default_filtersDict_gridss, run_in_parallel=True, max_rel_coverage_to_consider_del=0.2, min_rel_coverage_to_consider_dup=1.8, replace_FromGridssRun=replace)
+
+
+    print(df_gridss)
+
 
 
