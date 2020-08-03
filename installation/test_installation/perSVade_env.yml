@@ -1,0 +1,9 @@
+name: perSVade_env
+channels:
+  - r
+  - etetoolkit
+  - bioconda
+  - biocore
+  - conda-forge
+  - defaults
+prefix: /gpfs/projects/bsc40/mschikora/anaconda3/envs/perSVade_env

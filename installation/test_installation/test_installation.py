@@ -2,6 +2,8 @@
 
 ######### define environment ##########
 
+# this is to test that perSVade was properly installed. It takes ~45 minutes on a system of 4 cores, 32Gb of RAM
+
 # module imports
 import sys
 import os
@@ -72,7 +74,6 @@ fun.soft_link_files(inputs_MERS_genome, MERS_genome)
 repeat_masker_db = "%s/Libraries/RepeatMasker.lib.nsq"%(fun.repeatmasker_dir) 
 if fun.file_is_empty(repeat_masker_db): raise ValueError("%s is missing. Check that you ran ./installation/setup_environment.sh"%repeat_masker_db)
 
-
 # test that the environment can be recreated
 test_fun.test_conda_env_generation(testing_outputs_dir, replace=False)
 
@@ -90,7 +91,7 @@ outdir_testing_CalbicansVarCall = "%s/testing_CalbicansVarCall"%testing_outputs_
 test_fun.test_processing_varcalling(Calbicans_varCall_outdir, Calbicans_genome, outdir_testing_CalbicansVarCall, sorted_bam_mutGenome)
 
 # test bcftools, freebayes, gatk4, mosdepth, vep by running the small variant calling pipeline
-test_fun.test_smallVarCall_CNV_running(sorted_bam_mutGenome, outdir_small_variantCalling, ref_genome, gff)
+test_fun.test_smallVarCall_CNV_running(sorted_bam_mutGenome, outdir_small_variantCalling, ref_genome, gff, replace=False)
 
 # test the querying of the SRA database and downloading, and trimming of reads and also gztool
 outdir_SRAdb_query_downloading_and_readTrimming = "%s/testing_SRAdb_query_downloading_and_readTrimming_MERS"%testing_outputs_dir
@@ -100,14 +101,22 @@ test_fun.test_SRAdb_query_downloading_and_readTrimming(outdir_SRAdb_query_downlo
 rearranged_genome = test_fun.test_rearranging_genome_random(ref_genome, replace=False)
 
 # generate simulated reads from this rearranged genome, and also a bam file
-r1_svGenome, r2_svGenome = test_fun.test_read_simulation_and_get_reads(rearranged_genome)
-sorted_bam_svGenome = test_fun.test_bwa_mem_and_get_bam(r1_svGenome, r2_svGenome, ref_genome)
+r1_svGenome, r2_svGenome = test_fun.test_read_simulation_and_get_reads(rearranged_genome, replace=False)
+sorted_bam_svGenome = test_fun.test_bwa_mem_and_get_bam(r1_svGenome, r2_svGenome, ref_genome, replace=False)
 
 # test whether you can run the gridss and clove pipeline
 outdir_testing_gridss_clove = "%s/testing_gridss_clove_pipeline_default_parms"%(testing_outputs_dir)
 test_fun.test_gridss_clove_pipeline(sorted_bam_svGenome, ref_genome, outdir_testing_gridss_clove, replace=False)
 
+# test whether the parameter optimisation pipeline works well to find the rearrangements
+outdir_testing_parameterOptimisation = "%s/testing_parameter_optimisation_pipeline"%(testing_outputs_dir)
+test_fun.test_parameter_optimisation_perSVade(sorted_bam_svGenome, ref_genome, outdir_testing_parameterOptimisation, replace=False)
 
+# test whether you can run greasy
+test_fun.test_greasy()
+
+
+print("\n\n---\nSUCCESS: perSVade was properly installed\n---\n\n")
 
 
 

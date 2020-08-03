@@ -80,15 +80,24 @@ def test_conda_env_generation(outdir, replace=False):
 
     print("%s can be correctly regenerated"%EnvName)
 
-def test_read_simulation_and_get_reads(genome, window_l=2000, npairs=50000, read_length=150, median_insert_size=250, median_insert_size_sd=50, threads=4):
+def test_read_simulation_and_get_reads(genome, window_l=2000, npairs=50000, read_length=150, median_insert_size=250, median_insert_size_sd=50, threads=4, replace=False):
 
     """ 
     Takes a genome and simulates reads for it, saving them under <genome>_simulating_reads 
     """
 
     # define the outdir
-    outdir = "%s_simulating_reads"%genome; fun.make_folder(outdir)
-    outdir_reads = "%s/getting_reads"%outdir; fun.make_folder(outdir_reads)
+    outdir = "%s_simulating_reads"%genome; 
+    outdir_reads = "%s/getting_reads"%outdir; 
+    
+    # remove the outdirs if replace is True
+    if replace is True: 
+        fun.delete_folder(outdir)
+        fun.delete_folder(outdir_reads)
+
+    # make folders 
+    fun.make_folder(outdir)
+    fun.make_folder(outdir_reads)
 
     # define the expected reads
     reads1 = "%s/all_reads1.correct.fq.gz"%outdir_reads
@@ -111,12 +120,17 @@ def test_read_simulation_and_get_reads(genome, window_l=2000, npairs=50000, read
     print("read simulation works well")
     return reads1, reads2
 
-def test_bwa_mem_and_get_bam(r1, r2, ref_genome):
+def test_bwa_mem_and_get_bam(r1, r2, ref_genome, replace=False):
 
     """Runs bwa mem on the reads and returns the sorted bam with marked duplicates"""
 
     # define the outdir
     outdir = "%s/aligning_reads_against_%s"%(fun.get_dir(r1), fun.get_file(ref_genome))
+
+    # if replace is True, delete the outdir
+    if replace is True: fun.delete_folder(outdir)
+
+    # make de outdir
     fun.make_folder(outdir)
 
     # define the inputs of bam
@@ -166,13 +180,16 @@ def test_smallVarCall_CNV_running(sorted_bam, outdir, ref_genome, gff, threads=4
 
     """Takes a sorted bam (shuld have some mutations) and runs the variant calling pipeline on it"""
 
+    # if replace is True, remove the outdir
+    if replace is True: fun.delete_folder(outdir)
+
     # make the outdir
     fun.make_folder(outdir)
 
     # get the repeats
     repeats_table = fun.get_repeat_maskerDF(ref_genome, threads=4, replace=False)[1]
 
-    for pooled_seq in [False, True]:
+    for pooled_seq in [False]: # this may be also [False, True] to test pooled seq
 
         outdir_varCall = "%s/varcall_pooledSeq_%s"%(outdir, str(pooled_seq))
 
@@ -208,18 +225,23 @@ def test_SRAdb_query_downloading_and_readTrimming(outdir, reference_genome, targ
     # set ploidy to 1
     ploidy=1
 
-    # run with 'get_lowest_coverage_possible=True', which will take the lowest coverage datasets
-    close_shortReads_table = fun.get_close_shortReads_table_close_to_taxID(target_taxID, reference_genome, outdir, ploidy, n_close_samples=2, nruns_per_sample=1, replace=replace, threads=threads, min_fraction_reads_mapped=0.0, coverage_subset_reads=0.1, min_coverage=5, job_array_mode="local", StopAfter_sampleIndexingFromSRA=False, queue_jobs="debug", max_ncores_queue=768, time_read_obtention="02:00:00", StopAfterPrefecth_of_reads=False, get_lowest_coverage_possible=True)
+    try:
+
+        # run with 'get_lowest_coverage_possible=True', which will take the lowest coverage datasets
+        close_shortReads_table = fun.get_close_shortReads_table_close_to_taxID(target_taxID, reference_genome, outdir, ploidy, n_close_samples=2, nruns_per_sample=1, replace=replace, threads=threads, min_fraction_reads_mapped=0.0, coverage_subset_reads=0.1, min_coverage=5, job_array_mode="local", StopAfter_sampleIndexingFromSRA=False, queue_jobs="debug", max_ncores_queue=768, time_read_obtention="02:00:00", StopAfterPrefecth_of_reads=False, get_lowest_coverage_possible=True)
 
 
-    # check
-    df_close_shortReads_table = fun.pd.read_csv(close_shortReads_table, sep="\t")
+        # check
+        df_close_shortReads_table = fun.pd.read_csv(close_shortReads_table, sep="\t")
 
-    if set(df_close_shortReads_table.keys())!={'short_reads2', 'short_reads1', 'runID', 'sampleID'} or len(df_close_shortReads_table)!=2: raise ValueError("The close_shortReads_table %s was not created as expected"%close_shortReads_table)
+        if set(df_close_shortReads_table.keys())!={'short_reads2', 'short_reads1', 'runID', 'sampleID'} or len(df_close_shortReads_table)!=2: raise ValueError("The close_shortReads_table %s was not created as expected"%close_shortReads_table)
 
-    print("The system to query the SRA database, dowload and trim reads works")
-    
+        print("The system to query the SRA database, dowload and trim reads works")
 
+    except:
+
+        print("\n\n---\nWARNING: The connection to SRA did not work. This means that the automated obtention of reads of close species for benchmarking (involving the arguments --target_taxID, --n_close_samples, --nruns_per_sample or --goldenSet_dir) may fail. You can download the reads on your own and provide them with --close_shortReads_table. This can be also due to network problems at this moment. \n---\n\n")
+        
 def test_rearranging_genome_random(ref_genome, replace=False, threads=4, mitochondrial_chromosome="mito_C_glabrata_CBS138", nvars=5):
 
 
@@ -248,8 +270,41 @@ def test_gridss_clove_pipeline(sorted_bam, reference_genome, outdir, threads=4, 
 
     SV_dict, df_gridss = fun.run_gridssClove_given_filters(sorted_bam, reference_genome, outdir, median_coverage, replace=replace, threads=threads, gridss_blacklisted_regions="", gridss_VCFoutput="", gridss_maxcoverage=50000, median_insert_size=250, median_insert_size_sd=25, gridss_filters_dict=fun.default_filtersDict_gridss, run_in_parallel=True, max_rel_coverage_to_consider_del=0.2, min_rel_coverage_to_consider_dup=1.8, replace_FromGridssRun=replace)
 
+    print("you could run the gridss + clove pipeline succesfully")
 
-    print(df_gridss)
+
+def test_parameter_optimisation_perSVade(sorted_bam, reference_genome, outdir, threads=4, replace=False):
+
+    """This pipeline will test the parameter optimisation features of perSVade into outdir. It is expected to work for C.glabrata"""
+
+    cmd = "%s -r %s -thr %i -o %s -sbam %s --nvars 5 --simulation_ploidies haploid,diploid_hetero --range_filtering_benchmark theoretically_meaningful -mchr mito_C_glabrata_CBS138"%(fun.perSVade_py, reference_genome, threads, outdir, sorted_bam)
+
+    fun.run_cmd(cmd)
+
+    print("parameter optimisation worked successfully")
+
+def test_greasy():
+
+    """This function tests whether greasy can be found in the path"""
+
+    try:
+
+        fun.run_cmd("module load greasy")
+        print("greasy module can be loaded")
+
+        fun.run_cmd("module load greasy && which greasy")
+        print("greasy is in the path")
+
+        fun.run_cmd("which sbatch")
+        print("sbatch is in the path")
+
+        print("greasy can be used for running parallel perSVade jobs")
+
+    except:
+
+        print("\n\n---\nWARNING: greasy is not installed properly in your system. This means that setting '--job_array_mode greasy' will fail. You can set '--job_array_mode local' and run jobs sequentially and not in parallel. '--job_array_mode greasy' will only work on machines that use SLURM for managing jobs and greasy installed (and callable with a command like 'module load greasy && greasy <jobs_file>', and '<jobs_file>' is a file where each line corresponds to a command to be executed in a sepparate SLURM job) \n---\n\n")
+
+
 
 
 

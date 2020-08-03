@@ -2,109 +2,39 @@
 
 perSVade is a method that runs structural variation (SV) calling and interpretation for a set of paired end WGS short reads. It is a pipeline to call breakpoints with  GRIDSS (https://github.com/PapenfussLab/gridss) and summarize them into complex structural variants with CLOVE (https://github.com/PapenfussLab/clove), with some added features. perSVade provides an automated benchmarking and parameter selection for these methods in any genome or sequencing run. This is useful for species without reccommended running and filtering parameters. In addition, it provides an automated report of the SV calling accuracy on simulations and real data, useful to assess the confidence of the results. The pipeline has not been extensively tested in several architectures and species, so that it is not intended for widespread usage. The next release will include these.
 
-
 ## Installation:
-perSVade is written in python and R for Linux. Most of the dependecies can be installed through conda. It is advisable that you install these dependencies by creating a conda environment (i.e.: perSVade_env) with all of them, which we provide, with the following command:
 
-`conda env create --file installation/perSVade_env.yml --name perSVade_env`
+perSVade is written in python, R and bash for Linux. Most of the dependecies can be installed through conda. It is advisable that you install these dependencies by creating a conda environment (for example called perSVade_env) with all of them, which we provide, with the following command:
 
-When running the pipeline make sure that the python interpreter is the one of this environment. To test this execute:
+`conda env create --file installation/perSVade_env.yml --name <env_name>`
 
-`conda activate perSVade_env`
+In addition, you can install the extra dependencies with the following commands:
 
-`which python`
+`conda activate <env_name>`
 
-It is expected to print: 
+`./installation/setup_environment.sh`
 
-`<path_to_conda>/envs/perSVade_env/bin/python`
+NOTE: This will create an additional environment called `<env_name>_bcftools_1.10.2_env`. Make sure that  `<env_name>_bcftools_1.10.2_env` does not exist before running this script. You can change `<env_name>` to fullfil this requirement.
 
-This is essential so that all the dependencies of the pipeline are met.
+We note that this was tested with `conda 4.8.0` on a Linux-x86 64-bit architecture, installed at 03/2019.
 
-You also need to create the databases for running RepeatMasker. To do so type the following commands:
+## Test installation
 
-`cd <path_to_conda>/envs/perSVade_env/share/RepeatMasker` # go to the path where the RepeatMasker is
+We highly recommend to test that all dependencies were properly installed with the following commands:
 
-`./configure` (or `perl configure`) # This is just to create the RepeatMasker.lib. Press Ctrl+C when the program asks for any input
+`conda activate <env_name>`
 
-`cd Libraries` # go to the folder where all the pipelines are
+`./installation/test_installation/test_installation.py`
 
-`makeblastdb -in RepeatPeps.lib -input_type fasta -dbtype prot` # generate the database for RepeatPeps
+This process should take arround 45 minutes on 4 cores. Verify that it finishes with the following message:
 
-`makeblastdb -in RepeatMasker.lib -input_type fasta -dbtype nucl` # make the database for RepeatMasker
+`SUCCESS: perSVade was properly installed`
 
-Note that `<path_to_conda>` is the path where you have your anaconda installed. For example it may be `/home/username/anaconda3`.
+There are two WARNING messages that you should look for after running this script:
 
-In addition, there are some dependencies that are included in the respository "installation/external_software" (only in the "release" packages). These are gridss (tested on version 2.8.1), clove (tested on version 0.17), gztools (installed from https://github.com/circulosmeos/gztool/releases/download/v0.11.5/gztool-linux.x86_64), vcfvalidator (installed from https://github.com/EBIvariation/vcf-validator/releases/download/v0.9.4/vcf_validator_linux), bcftools (installed from https://github.com/samtools/bcftools/releases/download/1.10.2/bcftools-1.10.2.tar.bz2) and Ninja (installed from https://github.com/TravisWheelerLab/NINJA/archive/0.95-cluster_only.tar.gz). perSVade uses these exact versions.
+1. `WARNING: greasy is not installed properly in your system.` perSVade includes the option to distribute some of the processes on parallel jobs in a SLURM-based cluster (with the option `--job_array_mode greasy`). If this warning appears, it means that your machine is not configured to do this. You can instead run `--job_array_mode local` to run each process in a sequential manner.
 
-## Comments for the installation of extra dependencies
-The non-conda dependencies can be installed like this (if you wanted to reinstall them):
-
-1. change to the directory where you installed the perSVade repository:
-
-`conda activate perSVade_env`
-
-`cd <perSVade_installation_dir>/installation/external_software`
-
-2. download dependencies
-
-`wget https://github.com/PapenfussLab/gridss/releases/download/v2.8.1/gridss-2.8.1-gridss-jar-with-dependencies.jar`
-
-`wget https://github.com/PapenfussLab/gridss/releases/download/v2.8.1/gridss.sh`
-
-`wget https://github.com/PapenfussLab/clove/releases/download/v0.17/clove-0.17-jar-with-dependencies.jar`
-
-`wget https://github.com/circulosmeos/gztool/releases/download/v0.11.5/gztool-linux.x86_64`
-
-`wget https://github.com/EBIvariation/vcf-validator/releases/download/v0.9.4/vcf_validator_linux`
-
-`wget https://github.com/samtools/bcftools/releases/download/1.10.2/bcftools-1.10.2.tar.bz2`
-
-`wget https://github.com/TravisWheelerLab/NINJA/archive/0.95-cluster_only.tar.gz`
-
-`wget http://www.repeatmasker.org/RepeatModeler/RepeatModeler-2.0.1.tar.gz`
-
-`wget http://www.repeatmasker.org/RepeatMasker-4.1.0.tar.gz`
-
-3. setup bcftools
-
-`tar -xvf bcftools-1.10.2.tar.bz2`
-
-`rm bcftools-1.10.2.tar.bz2`
-
-`cd bcftools-1.10.2`
-
-`./configure --prefix=$PWD`
-
-`make`
-
-`make install`
-
-4. give execution permssion to all the files:
-
-`chmod u+x *`
-
-You may want to repeat this in case you have problems running any of the programs with the pipeline
-
-5. Setup NINJA
-
-`tar -xvf 0.95-cluster_only.tar.gz`
-
-`rm 0.95-cluster_only.tar.gz`
-
-`cd NINJA-0.95-cluster_only/NINJA`
-
-`make`
-
-
-
-
-### Extra remarks
-
-The conda environment can be exported to a .yml file with:
-
-`conda env export --no-builds -n perSVade_env --file perSVade_env.yml`
-
-NOTE that if you download any release it will already include all these non-conda software installed
+2. `WARNING: The connection to SRA did not work`. perSVade includes the option to query and download from the SRA database for the benchmarking of SV calling. This requires a proper network access and SRA connection, which may not always be available. This warning indicates that this process is not possible on your machine. You can skip this connection by providing the reads on your own through `--close_shortReads_table`.
 
 ## Running in MareNostrum
 
@@ -184,10 +114,8 @@ This will output the following files and folders under `./output_directory`:
     5. `variants_atLeast<n_PASS_programs>PASS_ploidy2.vcf` are the variants that PASS de filters in at least n_PASS_programs algorithms. The INFO and FORMAT fields are simplified to take less space. It may be useful to take, for example, variants that PASS de filters by at least 2 algorithms.
 
 
+## SV-calling method
 
-
-
-## Method
 Breakpoints are called using gridss and integrated into complex structural variation with clove. The straightforward implementation of these algorithms is challenging for 1) genomes without established parameters and 2) sequencing runs were there is a "smiley-pattern" in read-depth (such as https://www.cell.com/cell/pdf/S0092-8674(16)31071-6.pdf). The latter occurs when read-depth is correlated with the distance to the telomere, which may be an artifact of library preparation and/or sequencing. This impedes the usage of a single read-depth threshold for filtering deletions and tandem duplications (used by clove). perSVade selects the running and filtering parameters from a simulation-based optimization, including the following pipeline for the input sequencing:
 
 1. Simulation of randomly-placed insertions (27 copy-and-paste and 28 cut-and-paste), translocations (one for each gDNA chromosome, where half of them are unbalanced), 55 inversions, 55 deletions and 55 tandem duplications into the reference genome using the RSVSim package (https://www.bioconductor.org/packages/release/bioc/html/RSVSim.html). This corresponds to 50 gDNA and 5 mtDNA variants except for translocations. The variant length is set to follow a decaying beta-distribution function between 20% of the shortest chromosome and 50 bp, so that smaller variants would be more likely to occur. This 20% is progressively reduced up to 1% if the random set of variants does not fit into the genome for being to long. We perform three such replicate genomes for each sample, hereafter referred as SV genomes.
