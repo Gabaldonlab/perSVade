@@ -167,10 +167,8 @@ new_reference_genome_file = "%s/reference_genome.fasta"%reference_genome_dir
 if fun.file_is_empty(new_reference_genome_file) or opt.replace is True:
 
     # move the reference genome into the outdir, so that every file is written under outdir
-    try: fun.run_cmd("rm %s"%new_reference_genome_file)
-    except: pass
-    fun.run_cmd("ln -s %s %s"%(opt.ref, new_reference_genome_file))
-
+    fun.soft_link_files(opt.ref, new_reference_genome_file)
+   
 opt.ref = new_reference_genome_file
 
 # check that the mitoChromosomes are in the ref
@@ -191,12 +189,7 @@ target_gff = "%s/reference_genome_features.gff"%reference_genome_dir
 if opt.gff is None: print("WARNING: gff was not provided. This will be a problem if you want to annotate small variant calls")
 else:
 
-    if fun.file_is_empty(target_gff): 
-
-        try: fun.run_cmd("rm %s"%target_gff)
-        except: pass
-
-        fun.run_cmd("ln -s %s %s"%(opt.gff, target_gff))
+    if fun.file_is_empty(target_gff): fun.soft_link_files(opt.gff, target_gff)
 
     # change the path
     opt.gff = target_gff
@@ -210,9 +203,8 @@ if opt.previous_repeats_table is not None:
     # define the dest file
     repeats_table_file = "%s.repeats.tab"%opt.ref
 
-    try: fun.run_cmd("rm %s"%repeats_table_file)
-    except: pass
-    fun.run_cmd("ln -s %s %s"%(opt.previous_repeats_table, repeats_table_file))
+    # softlink
+    fun.soft_link_files(opt.previous_repeats_table, repeats_table_file)
 
 ###############################################
 

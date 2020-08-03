@@ -136,15 +136,6 @@ clove = "%s/clove-0.17-jar-with-dependencies.jar"%external_software
 ninja_dir = "%s/NINJA-0.95-cluster_only/NINJA"%external_software
 gztool = "%s/gztool-linux.x86_64"%external_software
 
-# sofware to skip
-#genmap = "%s/bin/genmap"%EnvDir
-#kmercountexact = "%s/bin/kmercountexact.sh"%EnvDir
-#minimap2 = "%s/bin/minimap2"%EnvDir
-#fasterq_dump = "%s/bin/fasterq-dump"%EnvDir
-
-
-
-
 # define the bcftools=1.10 by activating the conda env
 SOURCE_CONDA_CMD = "source %s/etc/profile.d/conda.sh"%CondaDir
 # CONDA_ACTIVATING_CMD = "conda activate %s;"%EnvName
@@ -161,9 +152,6 @@ perSVade_py = "%s/perSVade.py"%CWD
 run_trimmomatic_and_fastqc_py = "%s/run_trimmomatic_and_fastqc.py"%CWD
 get_trimmed_reads_for_srr_py = "%s/get_trimmed_reads_for_srr.py"%CWD
 run_vep = "%s/run_vep.py"%CWD
-
-
-
 
 ######################################################
 ######################################################
@@ -2953,7 +2941,6 @@ def get_gridssDF_filtered(df, reference_genome, min_Nfragments=8, min_af=0.005, 
 
     ######## ADD COLUMNS TO THE DF FOR FURTHER CALCULATION ##########
     if add_columns is True: df = add_info_to_gridssDF(df, reference_genome)
-    print(df.overlaps_repeats, sum(df.overlaps_repeats))
 
     # define whether the variant is a small duplication or insertion. These have special filters
     df["is_small_DupDel"] = (df.INFO_SIMPLE_TYPE.isin({"DEL", "DUP"})) & (df.length_event<=max_to_be_considered_small_event)
@@ -4209,6 +4196,10 @@ def merge_coverage_per_window_files_in_one(bamfile, bam_sufix=".coverage_per_win
 
     # unite files
     files_prefix = ["%s/%s"%(bam_dir, f) for f in os.listdir(bam_dir) if not file_is_empty("%s/%s"%(bam_dir, f)) and "temporary_file" not in f and f.startswith(fileprefix)]
+
+    # if there are no files, just skip the writing of the 'coverage_per_window.tab' file
+    if len(files_prefix)==0: return
+
     df_all = pd.concat([pd.read_csv(f, sep="\t") for f in files_prefix])
 
     # write into one
@@ -5207,11 +5198,7 @@ def run_freebayes_parallel(outdir_freebayes, ref, sorted_bam, ploidy, coverage, 
     freebayes_filtered = "%s/output.filt.vcf"%outdir_freebayes; freebayes_filtered_tmp = "%s.tmp"%freebayes_filtered
     if file_is_empty(freebayes_filtered) or replace is True:
 
-        if pooled_sequencing is True:
-
-            run_cmd("rm %s"%freebayes_filtered)
-            run_cmd("ln -s %s %s"%(freebayes_output, freebayes_filtered))
-
+        if pooled_sequencing is True: soft_link_files(freebayes_output, freebayes_filtered)
         else:
 
             #print("filtering freebayes")
@@ -8796,7 +8783,7 @@ def write_breakpoints_for_parameter_combinations_and_get_filterIDtoBpoints_grids
         # get only breakends that are in bendID_to_bpointID, meaning that there are 2 breakends
         df_gridss_twoBreakEnds = df_gridss[df_gridss.ID.isin(bendID_to_bpointID)]
         df_gridss_twoBreakEnds["breakpointID"] = df_gridss_twoBreakEnds.ID.apply(lambda x: bendID_to_bpointID[x])
-        df_gridss_twoBreakEnds = df_gridss_twoBreakEnds.set_index("ID")[["INFO_SIMPLE_TYPE", "length_event", "allele_frequency", "allele_frequency_SmallEvent", "DATA_VF", "INFO_misc", "FILTER", "INFO_SB", "length_microHomology", "length_inexactHomology", "len_inserted_sequence", "has_poly16GC", "DATA_SR", "DATA_RP", "breakpointID", "real_AF", "QUAL"]]
+        df_gridss_twoBreakEnds = df_gridss_twoBreakEnds.set_index("ID")[["INFO_SIMPLE_TYPE", "length_event", "allele_frequency", "allele_frequency_SmallEvent", "DATA_VF", "INFO_misc", "FILTER", "INFO_SB", "length_microHomology", "length_inexactHomology", "len_inserted_sequence", "has_poly16GC", "DATA_SR", "DATA_RP", "breakpointID", "real_AF", "QUAL", "overlaps_repeats"]]
 
         # check that all breakpoints have two breakends in the df
         if set(Counter(df_gridss_twoBreakEnds["breakpointID"]).values())!={2}: raise ValueError("Not all breakpoints have 2 brekends")
@@ -9549,7 +9536,7 @@ def get_df_accuracy_for_train_filer(r, outdir, test_gridss_info_dict, sorted_bam
         # make a link under working_dir
         gridss_VCFoutput_underWorkDir = "%s/gridss_output.vcf"%(working_dir)
         print("testing...", gridss_VCFoutput_underWorkDir)
-        if file_is_empty(gridss_VCFoutput_underWorkDir) or replace is True: run_cmd("ln -s %s %s"%(gridss_VCFoutput , gridss_VCFoutput_underWorkDir))
+        if file_is_empty(gridss_VCFoutput_underWorkDir) or replace is True: soft_link_files(gridss_VCFoutput, gridss_VCFoutput_underWorkDir)
 
         # get the svs
         predicted_svtype_to_SVtable, df_gridss = run_gridssClove_given_filters(sorted_bam, reference_genome, working_dir, median_coverage, replace=replace, threads=multiproc.cpu_count(), gridss_blacklisted_regions=r["gridss_regionsToIgnoreBed"], gridss_VCFoutput=gridss_VCFoutput_underWorkDir, gridss_maxcoverage=r["gridss_maxcoverage"], median_insert_size=median_insert_size, median_insert_size_sd=median_insert_size_sd, gridss_filters_dict=r["filters_dict"], tol_bp=50, run_in_parallel=True, max_rel_coverage_to_consider_del=r["clove_max_rel_coverage_to_consider_del"], min_rel_coverage_to_consider_dup=r["clove_min_rel_coverage_to_consider_dup"], replace_FromGridssRun=False)
@@ -9610,7 +9597,7 @@ def get_benchmarking_df_for_testSVs_from_trainSV_filterSets(test_SVdict, outdir,
 ################# GRAPHICS FUNCTIONS #################
 ######################################################
 
-def plot_clustermap_with_annotation(df, row_colors_df, col_colors_df, filename, title="clustermap", col_cluster=False, row_cluster=False, colorbar_label="default label", adjust_position=True, legend=True, idxs_separator_pattern="_", texts_to_strip={"L001"}, default_label_legend="control", df_annotations=None, cmap=sns.color_palette("RdBu_r", 50), ylabels_graphics_df=None, grid_lines=True, add_to_legend_x=0.5):
+def plot_clustermap_with_annotation(df, row_colors_df, col_colors_df, filename, title="clustermap", col_cluster=False, row_cluster=False, colorbar_label="default label", adjust_position=True, legend=True, idxs_separator_pattern="_", texts_to_strip={"L001"}, default_label_legend="control", df_annotations=None, cmap=sns.color_palette("RdBu_r", 50), ylabels_graphics_df=None, grid_lines=True, add_to_legend_x=1):
 
     """Takes a df were the index is the annotation and the cols are samples. It will be saved under filename. ylabels_graphics_df can be a df containing fontweight and color for each index value in df"""
 
@@ -9759,8 +9746,8 @@ def plot_clustermap_with_annotation(df, row_colors_df, col_colors_df, filename, 
             for extraBarI in range(max_nboxes-I): cm.ax_heatmap.bar(1, 0, color="white", label="-", linewidth=0)
 
         # add the legend, depending on the location
-        cm.ax_heatmap.legend(loc="best", bbox_to_anchor=(hm_pos.x0+hm_pos.width+add_to_legend_x, hm_pos.y0, hm_pos.width, hm_pos.height), ncol=2) # loc is the lower left corner bbox_to_anchor
-        #cm.ax_heatmap.legend(loc="best", bbox_to_anchor=(2, 1), ncol=2) # loc is the lower left corner bbox_to_anchor
+        #cm.ax_heatmap.legend(bbox_to_anchor=(hm_pos.x0+hm_pos.width+add_to_legend_x, hm_pos.y0, hm_pos.width, hm_pos.height), ncol=2) # loc is the lower left corner bbox_to_anchor
+        cm.ax_heatmap.legend(bbox_to_anchor=(2, 2), ncol=2) # loc is the lower left corner bbox_to_anchor
 
         ###################################
 
@@ -10371,7 +10358,7 @@ def run_GridssClove_optimising_parameters(sorted_bam, reference_genome, outdir, 
     final_gridss_vcf = "%s/output_gridss.vcf"%outdir_gridss_final
 
     # if there is a provided gridss_VCFoutput, softlink it to the outdir_gridss_final
-    if not file_is_empty(gridss_VCFoutput) and file_is_empty(final_gridss_vcf): run_cmd("ln -s %s %s"%(gridss_VCFoutput, final_gridss_vcf)) 
+    if not file_is_empty(gridss_VCFoutput) and file_is_empty(final_gridss_vcf): soft_link_files(gridss_VCFoutput, final_gridss_vcf)
 
     # define the median coverage across window_l windows of the genome
     coverage_df =  pd.read_csv(generate_coverage_per_window_file_parallel(reference_genome, outdir_gridss_final, sorted_bam, windows_file="none", replace=replace), sep="\t")
@@ -11995,7 +11982,6 @@ def merge_several_vcfsSameSample_into_oneMultiSample_vcf(vcf_iterable, reference
 
             else: raise ValueError("there are no vcfs to merge")   
 
-            print(merged_vcf_tmp)
                 
             ######## ADD EXTRA FILEDS TO INFO ######## 
             print("editing INFO")

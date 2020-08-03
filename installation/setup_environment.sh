@@ -20,7 +20,7 @@ t="0"
 while [ ! -f $expected_file ]
 do
 	t=$[$t+10]
-	timeout $t ./configure; 
+	timeout $t ./configure || echo 'exiting the generation on RepeatMasker.lib';
 
 done
 
@@ -58,10 +58,15 @@ wget https://github.com/TravisWheelerLab/NINJA/archive/0.95-cluster_only.tar.gz
 chmod u+x *;
 
 # setup NINJA
+echo 'installing NINJA'
 tar -xvf 0.95-cluster_only.tar.gz
 rm 0.95-cluster_only.tar.gz
 cd NINJA-0.95-cluster_only/NINJA
-make
+ninja_make_outdir="./installation_std.txt"
+make > $ninja_make_outdir 2>&1
+
+# print that everything went well
+echo 'SUCCESS: all perSVade dependencies were properly installed'
 
 
 
