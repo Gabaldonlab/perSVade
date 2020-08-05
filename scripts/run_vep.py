@@ -49,10 +49,11 @@ parser.add_argument("--gff", dest="gff", required=True, type=str, help="The gff 
 parser.add_argument("--mitochondrial_chromosome", dest="mitochondrial_chromosome", required=True, type=str, help="The name of mitochondrial chromosomes,  which can be comma sepparated if there are more than 1.")
 parser.add_argument("--mito_code", dest="mito_code", required=False, default=3, type=int, help="The code of translation of ncbi of mitochondrial proteins. Fungal mitochondrial by default.")
 parser.add_argument("--gDNA_code", dest="gDNA_code", required=False, default=1, type=int, help="The code of translation of ncbi of nuclear genes. Standard by default. C. albicans has 12")
+parser.add_argument("--gff_as_gtf", dest="gff_as_gtf", action="store_true", default=False, help="Will pass the gff as a gtf")
+
 opt = parser.parse_args()
 
 # print the command line to run this
-
 
 #############################################
 ################ RUNNING VEP ################
@@ -79,6 +80,22 @@ if fun.file_is_empty(gff_clean_compressed_tbi):
     # index with tabix
     fun.run_cmd("%s %s"%(tabix, gff_clean_compressed))
 
+
+###### test that the gff is correct ######
+
+# load df
+gff_fields = ["chromosome", "source", "type_feature", "start", "end", "score", "strand", "phase", "attributes"]
+df_gff = pd.read_csv(gff_clean, header=None, sep="\t", names=gff_fields)
+
+# check that all type_feature are correct
+print("checking that the specifications are correct according to https://www.ensembl.org/info/docs/tools/vep/script/vep_cache.html#gfftypes")
+allowed_fields = {"aberrant_processed_transcript", "CDS", "C_gene_segment", "D_gene_segment", "exon", "gene", "J_gene_segment", "lincRNA", "lincRNA_gene", "miRNA", "miRNA_gene", "mRNA", "mt_gene", "ncRNA", "NMD_transcript_variant", "primary_transcript", "processed_pseudogene", "processed_transcript", "pseudogene", "pseudogenic_transcript", "RNA", "rRNA", "rRNA_gene", "snoRNA", "snoRNA_gene", "snRNA", "snRNA_gene", "supercontig", "transcript", "tRNA", "VD_gene_segment", "V_gene_segment"}
+
+not_allowed_features = set(df_gff[~df_gff.type_feature.isin(allowed_fields)].type_feature)
+if len(not_allowed_features)>0: raise ValueError("%s are features not allowed in the 3d col of the gff"%not_allowed_features)
+
+##########################################
+
 # define the outfile of vep raw
 outfile_vep_raw = "%s.raw.tbl"%opt.outfile
 outfile_vep_raw_tmp = "%s.tmp"%outfile_vep_raw
@@ -86,13 +103,19 @@ outfile_vep_raw_tmp = "%s.tmp"%outfile_vep_raw
 if fun.file_is_empty(outfile_vep_raw):
     fun.remove_file(outfile_vep_raw_tmp)
 
-    print("running vep")
+    print("running vep. If this fails, you may double check that the provided gff is consistent with https://www.ensembl.org/info/docs/tools/vep/script/vep_cache.html#gfftypes")
 
     # test that there are variants in the input
     nlines_vep_input = len([l for l in open(opt.input_vcf, "r").readlines() if not l.startswith("#")])
     if nlines_vep_input==0: raise ValueError("The input of vep is empty")
 
-    fun.run_cmd('%s --input_file %s --format "vcf" --output_file %s --fasta %s --gff %s -v --force_overwrite --tab --fields "Uploaded_variation,Location,Allele,Gene,Feature,Feature_type,Consequence,cDNA_position,CDS_position,Protein_position,Amino_acids,Codons,Existing_variation,Extra"'%(vep, opt.input_vcf, outfile_vep_raw_tmp, opt.ref, gff_clean_compressed))
+    # define the backbone_cmd
+    cmd = '%s --input_file %s --format "vcf" --output_file %s --fasta %s -v --force_overwrite --tab --fields "Uploaded_variation,Location,Allele,Gene,Feature,Feature_type,Consequence,cDNA_position,CDS_position,Protein_position,Amino_acids,Codons,Existing_variation,Extra"'%(vep, opt.input_vcf, outfile_vep_raw_tmp, opt.ref)
+
+    # add annotations
+    if opt.gff_as_gtf is False: cmd += " --gff %s"%gff_clean_compressed
+    else: cmd += " --gtf %s"%gff_clean_compressed
+    fun.run_cmd(cmd)
 
     # check that <10% of the variants were not annotated
     nlines_vep_output = len([l for l in open(outfile_vep_raw_tmp, "r").readlines() if not l.startswith("#")])

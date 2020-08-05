@@ -290,7 +290,7 @@ def get_aa(codons, genetic_code):
         if len(codons)<3: return "X"
         else: return (str(Seq("".join(list(chunks(codons, 3))[0:-1])).translate(table = genetic_code)) + "X")
 
-def modify_DF_cols(row, genetic_code, stop_codons, genCode_affected_vars):
+def modify_DF_cols(rdow, genetic_code, stop_codons, genCode_affected_vars):
 
     """Takes a row of a VEP df according to the genetic_code and modifies the necessary rows"""
 
@@ -12367,6 +12367,8 @@ def run_vep_parallel(vcf, reference_genome, gff_with_biotype, mitochondrial_chro
         print("concatenating")
         df_vep = pd.concat(list_vep_dfs).sort_values(by="#Uploaded_variation").drop_duplicates()
 
+        # check that not all of the variants are intergenic (this would be suspicious)
+        if (sum(df_vep.Consequence=="intergenic_variant")/len(df_vep)) > 0.9: print("WARNING: There are >90 percent of the variants that are intergenic. Maybe your gff is wrong. ")
         # write
         print("saving")
         df_vep.to_csv(output_vcf_tmp, sep="\t", header=True, index=False)
