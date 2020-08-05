@@ -457,6 +457,9 @@ if fun.file_is_empty(variantAnnotation_table) or opt.replace is True:
     if len(unnanotated_vars)>0: 
         print("WARNING: There are some variants that have not been annotated with VEP:\n%s\n (%i/%i in total)"%("\n".join(unnanotated_vars), len(unnanotated_vars), len(all_variants)))
 
+    # raise ValueError if there are more than 10% of unannotated vars
+    if len(unnanotated_vars)/len(all_variants)>0.1: raise ValueError("There are more than 10 perecent of unannotated variants by VEP")
+
     # get variant annotation table
     print("generating variant annotation table")
 

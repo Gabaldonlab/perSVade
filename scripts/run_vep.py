@@ -70,7 +70,7 @@ if fun.file_is_empty(gff_clean_compressed_tbi):
     fun.remove_file(gff_clean_compressed)
     fun.remove_file(gff_clean_compressed_tbi)
 
-    print("compressing gff")
+    print("compressing gff before running vep")
 
     # eliminate strange lines,chromosomes and compress
     fun.run_cmd("%s sort -i %s | egrep -v '^#' | egrep -v $'\tchromosome\t' > %s"%(bedtools, opt.gff, gff_clean))
@@ -88,7 +88,16 @@ if fun.file_is_empty(outfile_vep_raw):
 
     print("running vep")
 
+    # test that there are variants in the input
+    nlines_vep_input = len([l for l in open(opt.input_vcf, "r").readlines() if not l.startswith("#")])
+    if nlines_vep_input==0: raise ValueError("The input of vep is empty")
+
     fun.run_cmd('%s --input_file %s --format "vcf" --output_file %s --fasta %s --gff %s -v --force_overwrite --tab --fields "Uploaded_variation,Location,Allele,Gene,Feature,Feature_type,Consequence,cDNA_position,CDS_position,Protein_position,Amino_acids,Codons,Existing_variation,Extra"'%(vep, opt.input_vcf, outfile_vep_raw_tmp, opt.ref, gff_clean_compressed))
+
+    # check that <10% of the variants were not annotated
+    nlines_vep_output = len([l for l in open(outfile_vep_raw_tmp, "r").readlines() if not l.startswith("#")])
+
+    if (nlines_vep_output/nlines_vep_input) < 0.9: raise ValueError("There is less than 90 perecent of annotated vars")
 
     # rename
     os.rename(outfile_vep_raw_tmp, outfile_vep_raw)
@@ -106,8 +115,6 @@ print("Correcting proteins for the genetic_code")
 
 # get into df
 vep_df = pd.read_csv(outfile_vep_raw, sep="\t", header=len([x for x in open(outfile_vep_raw, "r") if x.startswith("##")]), na_values=fun.vcf_strings_as_NaNs, keep_default_na=False)
-
-
 
 # define the expected vars
 all_expected_consequences = {'stop_gained', 'intron_variant', 'upstream_gene_variant', '5_prime_UTR_variant', 'inframe_insertion', 'synonymous_variant', 'non_coding_transcript_exon_variant', 'intergenic_variant', 'protein_altering_variant', 'coding_sequence_variant', 'downstream_gene_variant', '3_prime_UTR_variant', 'missense_variant', 'splice_region_variant', 'splice_acceptor_variant', 'inframe_deletion', 'stop_lost', 'non_coding_transcript_variant', 'start_retained_variant', 'frameshift_variant', 'stop_retained_variant', 'start_lost', 'incomplete_terminal_codon_variant', 'splice_donor_variant'}
