@@ -4,25 +4,61 @@ perSVade is a method that runs structural variation (SV) calling and interpretat
 
 ## Installation:
 
-perSVade is written in python, R and bash for Linux. Most of the dependecies can be installed through conda. It is advisable that you install these dependencies by creating a conda environment (for example called perSVade_env) with all of them, which we provide, with the following command:
+### 1. Manual installation of Ninja
+
+There is one dependency, Ninja (https://github.com/TravisWheelerLab/NINJA, release 0.95-cluster_only), that you need ro install manually. You have to make sure that the folder containing the binary of Ninja  can be found in your $PATH. This is an example of how you can do this:
+
+`cd <path_to_install_Ninja>`
+
+`wget https://github.com/TravisWheelerLab/NINJA/archive/0.95-cluster_only.tar.gz`
+
+`tar -xvf 0.95-cluster_only.tar.gz; rm 0.95-cluster_only.tar.gz`
+
+`cd NINJA-0.95-cluster_only/NINJA`
+
+`make`
+
+`export PATH=$PATH:<path_to_install_Ninja>/NINJA-0.95-cluster_only/NINJA`
+
+You may need to install some extra dependencies to compile Ninja with `make`. At the end, make sure that you can execute Ninja by typing:
+
+`Ninja --help`
+
+### 2. Downloading the perSVade source code
+
+Download the perSVade source code from one of the releases and decompress. For example:
+
+`wget https://github.com/Gabaldonlab/perSVade/releases/download/v0.3/perSVade-v0.3.tar.gz`
+
+`tar -xvf perSVade-v0.3.tar.gz; rm perSVade-v0.3.tar.gz`
+
+`cd perSVade-v0.3`
+
+This already contains all the scripts to run the pipeline. 
+
+### 3. Create a conda environment with most dependencies
+
+perSVade is written in python, R and bash for Linux. Most of the dependecies can be installed through conda. It is advisable that you install these dependencies by creating a conda environment (for example called perSVade_env) with all of them, which we provide, with the following commands:
 
 `conda env create --file installation/perSVade_env.yml --name <env_name>`
 
-In addition, you can install the extra dependencies with the following commands:
-
 `conda activate <env_name>`
 
+### 4. Automatic installation of additional dependencies 
+
+In addition, you should install some additional dependencies with the following commands:
+
 `./installation/setup_environment.sh`
+
+Make sure that this script ends with the message: `SUCCESS: all perSVade dependencies were properly installed.`
 
 NOTE: This will create an additional environment called `<env_name>_bcftools_1.10.2_env`. Make sure that  `<env_name>_bcftools_1.10.2_env` does not exist before running this script. You can change `<env_name>` to fullfil this requirement.
 
 We note that this was tested with `conda 4.8.0` on a Linux-x86 64-bit architecture, installed at 03/2019.
 
-## Test installation
+### 5. Test installation
 
 We highly recommend to test that all dependencies were properly installed with the following commands:
-
-`conda activate <env_name>`
 
 `./installation/test_installation/test_installation.py`
 

@@ -133,8 +133,8 @@ external_software = "%s/../installation/external_software"%CWD
 gridss_run = "%s/gridss.sh"%external_software
 gridss_jar = "%s/gridss-2.9.2-gridss-jar-with-dependencies.jar"%external_software
 clove = "%s/clove-0.17-jar-with-dependencies.jar"%external_software
-ninja_dir = "%s/NINJA-0.95-cluster_only/NINJA"%external_software
-gztool = "%s/gztool-linux.x86_64"%external_software
+gztool = "%s/gztool"%external_software
+ninja_dir = "%s/NINJA"%external_software
 
 # define the bcftools=1.10 by activating the conda env
 SOURCE_CONDA_CMD = "source %s/etc/profile.d/conda.sh"%CondaDir
@@ -5898,25 +5898,28 @@ def get_last_reads_fastqgz_file(file, nreads=100):
     # try twice
     for Itry in range(2):
 
-        if file_is_empty(file_last_reads):
-            print("getting last reads for %s"%file)
+        try:
 
-            # remove the gz index file
-            remove_file("%si"%file)
+            if file_is_empty(file_last_reads):
+                print("getting last reads for %s"%file)
 
-            cmd_ztail = "%s -t %s -v 0 | tail -%i | sed -n '1~4p' | cut -f1 -d ' ' > %s"%(gztool, file, int(nreads*4), file_last_reads_tmp)
-            run_cmd(cmd_ztail)
+                # remove the gz index file
+                remove_file("%si"%file)
 
-            os.rename(file_last_reads_tmp, file_last_reads)
+                cmd_ztail = "%s -t %s -v 0 | tail -%i | sed -n '1~4p' | cut -f1 -d ' ' > %s"%(gztool, file, int(nreads*4), file_last_reads_tmp)
+                run_cmd(cmd_ztail)
 
-        # get as list
-        last_reads = [l.strip() for l in open(file_last_reads, "r").readlines()]
+                os.rename(file_last_reads_tmp, file_last_reads)
 
-        if not readIDs_are_correct(last_reads): remove_file(file_last_reads) # remove the file and try again
+            # get as list
+            last_reads = [l.strip() for l in open(file_last_reads, "r").readlines()]
+
+            if not readIDs_are_correct(last_reads): remove_file(file_last_reads) # remove the file and try again
+
+        except: print("gztool did not work. This may be due to stochastic errors or impossible installation")
 
     # if the reads are incorrect, get them by another, slower way
-    if not readIDs_are_correct(last_reads): 
-        #print("These are the wrong reads:", last_reads)
+    if file_is_empty(file_last_reads) or not readIDs_are_correct(last_reads): 
 
         # getting last reads in a more traditional way
         print("getting last reads for %s in a slower way (zcat + tail)"%file)
@@ -12250,10 +12253,10 @@ def get_int_from_string(x):
 
 def get_vep_df_for_vcf_df(vcf_df, outdir, reference_genome, gff_with_biotype, mitochondrial_chromosome, mitochondrial_code, gDNA_code, replace):
 
-    """This function takes a vcf_df and runs vep for this chunk, while keeping  """
+    """This function takes a vcf_df and runs vep for this chunk, while keeping. vcf_df index should be unique from 0 ti nvars  """
 
     # define the prefix
-    prefix = "%s/vep_%s_to_%s"%(outdir, vcf_df.iloc[0]["ID"].replace("/","_"), vcf_df.iloc[-1]["ID"].replace("/","_"))
+    prefix = "%s/vep_%i_to_%i"%(outdir, vcf_df.index[0], vcf_df.index[-1])
 
     # define the vcf file
     vcf_file = "%s_variants.vcf"%prefix
@@ -12275,6 +12278,9 @@ def get_vep_df_for_vcf_df(vcf_df, outdir, reference_genome, gff_with_biotype, mi
         # run vep for this vcf
         vep_std = "%s_annotating_vep.std"%prefix
         run_cmd("%s --input_vcf %s --outfile %s --ref %s --gff %s --mitochondrial_chromosome %s --mito_code %i --gDNA_code %i > %s 2>&1"%(run_vep, vcf_file, annotated_vcf_tmp, reference_genome, gff_with_biotype, mitochondrial_chromosome, mitochondrial_code, gDNA_code, vep_std))
+
+        # check that the std contains no signs of compressing the gff
+        if any(["compressing gff before running vep" in l for l in open(vep_std, "r").readlines()]): raise ValueError("There was a compression of the gff before running vep. This is not acceptable when running in parallel")        
 
         # keep
         os.rename(annotated_vcf_tmp, annotated_vcf)
@@ -12304,20 +12310,45 @@ def run_vep_parallel(vcf, reference_genome, gff_with_biotype, mitochondrial_chro
         # get the input vcf as a df
         print("loading vcf_df")
         df_vcf, header = get_df_and_header_from_vcf(vcf)
-        df_vcf = df_vcf.set_index("ID", drop=False)
+        df_vcf.index = list(range(len(df_vcf)))
 
-        # check that the ID is unique
-        if len(set(df_vcf.index))!=len(df_vcf): raise ValueError("The IDs are not unique")
+        # check that the uploaded variation is unique
+        if len(set(df_vcf.ID))!=len(df_vcf): raise ValueError("The IDs are not unique")
 
         # get chunks of the df
         chunk_size = 2000
         chunks_vcf_df = [df_vcf.loc[chunk_idxs] for chunk_idxs in chunks(df_vcf.index, chunk_size)]
-        print("There are %i chunks of %i bp. Running on %i threads"%(len(chunks_vcf_df), chunk_size, threads))
+        print("There are %i chunks of %i variants. Running on %i threads"%(len(chunks_vcf_df), chunk_size, threads))
 
         # define an outdir where to write the 
         outdir_intermediate_files = "%s.chunks_vep_annotation"%vcf
         delete_folder(outdir_intermediate_files)
         make_folder(outdir_intermediate_files)
+
+        ####### get the gff tabixed and sorted #######
+
+        # this is a necessary step to run vep, and you don't want each individual run to repeat it
+
+        gff_clean = "%s_clean.gff"%gff_with_biotype
+        gff_clean_compressed = "%s_clean.gz"%gff_with_biotype
+        gff_clean_compressed_tbi = "%s.tbi"%gff_clean_compressed
+
+        # remove previous files
+        remove_file(gff_clean)
+        remove_file(gff_clean_compressed)
+        remove_file(gff_clean_compressed_tbi)
+
+        if file_is_empty(gff_clean_compressed_tbi):
+            print("compressing gff before running vep in parallel")
+
+            # eliminate strange lines,chromosomes and compress
+            run_cmd("%s sort -i %s | egrep -v '^#' | egrep -v $'\tchromosome\t' > %s"%(bedtools, gff_with_biotype, gff_clean))
+            run_cmd("%s -c %s > %s"%(bgzip, gff_clean, gff_clean_compressed))
+
+            # index with tabix
+            run_cmd("%s %s"%(tabix, gff_clean_compressed))
+
+        ################################################
 
         # get the inputs of the function
         inputs_fn = [(c, outdir_intermediate_files, reference_genome, gff_with_biotype, mitochondrial_chromosome, mitochondrial_code, gDNA_code, replace) for c in chunks_vcf_df]
