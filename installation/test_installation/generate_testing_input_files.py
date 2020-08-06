@@ -64,3 +64,11 @@ for chrom in all_chroms:
 
 SeqIO.write(all_records, "%s/reduced_genome.fasta"%testing_inputs_dir,"fasta")
 SeqIO.write(all_records_mutated, "%s/reduced_genome_mutated.fasta"%testing_inputs_dir,"fasta")
+
+
+# define the Ca22chr1A_C_albicans_SC5314 of candida albicans, which should be used to test repeat modeller
+Calbicans_genome = "%s/Candida_albicans.fasta"%testing_inputs_dir
+SeqIO.write([s for s in SeqIO.parse(Calbicans_genome, "fasta") if s.id in {"Ca22chr1A_C_albicans_SC5314", "Ca22chr6A_C_albicans_SC5314", "Ca22chr2A_C_albicans_SC5314"}], "%s/Candida_albicans_chr1_2_6.fasta"%testing_inputs_dir, "fasta")
+
+
+

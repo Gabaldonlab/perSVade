@@ -1,4 +1,4 @@
-name: perSVade_env_test
+name: perSVade_env
 channels:
   - r
   - etetoolkit
@@ -7,38 +7,40 @@ channels:
   - conda-forge
   - defaults
 dependencies:
-  - python=3.6
-  - pandas=0.24.2
-  - biopython=1.73
-  - scipy=1.4.1
-  - scikit-learn=0.21.3
-  - igraph=0.7.1
-  - python-igraph=0.7.1.post7
-  - ete3=3.1.1
-  - seaborn=0.9.0
   - repeatmasker=4.0.9_p2
-  - repeatmodeler=2.0.1
-  - bwa=0.7.17
-  - picard=2.18.26
-  - bcftools=1.9
-  - samtools=1.9
-  - bedtools=2.29.0
-  - wgsim=1.0
-  - seqtk=1.3
-  - gatk4=4.1.2.0
-  - freebayes=1.3.1
-  - mosdepth=0.2.6
-  - ensembl-vep=100.2
-  - vcflib=1.0.0_rc2
-  - sra-tools=2.10.0
-  - trimmomatic=0.38
-  - parallel-fastq-dump=0.6.3
-  - fastqc=0.11.9
-  - r-base=4.0.2
-  - bioconductor-rsvsim=1.28
+  - pandas=0.24.2
   - r-argparser=0.6
-  - r-emdbook=1.3.12
-  - bioconductor-rtracklayer=1.48.0
-  - r-r.utils=2.9.2
+  - r-base=4.0.2
   - bioconductor-structuralvariantannotation=1.4.0
-prefix: /gpfs/projects/bsc40/mschikora/anaconda3/envs/perSVade_env_test
+  - ensembl-vep=100.2
+  - scikit-learn=0.21.3
+  - parallel-fastq-dump=0.6.3
+  - gatk4=4.1.2.0
+  - r-r.utils=2.9.2
+  - wgsim=1.0
+  - samtools=1.9
+  - python-igraph=0.7.1.post7
+  - fastqc=0.11.9
+  - python=3.6
+  - freebayes=1.3.1
+  - ete3=3.1.1
+  - mosdepth=0.2.6
+  - repeatmodeler=2.0.1
+  - scipy=1.4.1
+  - vcflib=1.0.0_rc2
+  - bioconductor-rsvsim=1.28
+  - r-emdbook=1.3.12
+  - seaborn=0.9.0
+  - trimmomatic=0.38
+  - bwa=0.7.17
+  - bcftools=1.9
+  - picard=2.18.26
+  - seqtk=1.3
+  - bioconductor-rtracklayer=1.48.0
+  - sra-tools=2.10.0
+  - igraph=0.7.1
+  - bedtools=2.29.0
+  - biopython=1.73
+  - gffread=0.12.1
+  - pigz=2.4
+prefix: /gpfs/projects/bsc40/mschikora/anaconda3/envs/perSVade_env

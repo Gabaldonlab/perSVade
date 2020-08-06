@@ -115,6 +115,7 @@ recon_dir = "%s/bin"%EnvDir
 rmblast_dir = "%s/bin"%EnvDir
 rscout_dir = "%s/bin"%EnvDir
 trf_prgm_dir = "%s/bin/trf"%EnvDir
+ninja_dir = "%s/bin"%EnvDir
 esearch = "%s/bin/esearch"%EnvDir
 efetch = "%s/bin/efetch"%EnvDir
 prefetch = "%s/bin/prefetch"%EnvDir
@@ -127,6 +128,8 @@ repeatmoder_dir = "%s/share/RepeatModeler"%EnvDir
 repeat_modeller = "%s/bin/RepeatModeler"%EnvDir
 repeatmasker_dir = "%s/share/RepeatMasker"%EnvDir
 fasta_generate_regions_py = "%s/bin/fasta_generate_regions.py"%EnvDir
+pigz = "%s/bin/pigz"%EnvDir
+unpigz = "%s/bin/unpigz"%EnvDir
 
 # executables that are provided in the repository
 external_software = "%s/../installation/external_software"%CWD
@@ -134,7 +137,6 @@ gridss_run = "%s/gridss.sh"%external_software
 gridss_jar = "%s/gridss-2.9.2-gridss-jar-with-dependencies.jar"%external_software
 clove = "%s/clove-0.17-jar-with-dependencies.jar"%external_software
 gztool = "%s/gztool"%external_software
-ninja_dir = "%s/NINJA"%external_software
 
 # define the bcftools=1.10 by activating the conda env
 SOURCE_CONDA_CMD = "source %s/etc/profile.d/conda.sh"%CondaDir
@@ -290,7 +292,7 @@ def get_aa(codons, genetic_code):
         if len(codons)<3: return "X"
         else: return (str(Seq("".join(list(chunks(codons, 3))[0:-1])).translate(table = genetic_code)) + "X")
 
-def modify_DF_cols(rdow, genetic_code, stop_codons, genCode_affected_vars):
+def modify_DF_cols(row, genetic_code, stop_codons, genCode_affected_vars):
 
     """Takes a row of a VEP df according to the genetic_code and modifies the necessary rows"""
 
@@ -5869,7 +5871,7 @@ def get_n_pairs_in_fastqgz(file):
     if file_is_empty(file_wc):
         print("calculating # reads for %s"%file)
 
-        run_cmd("unpigz -c %s | wc -l > %s"%(file, file_wc_tmp))
+        run_cmd("%s -c %s | wc -l > %s"%(unpigz, file, file_wc_tmp))
         os.rename(file_wc_tmp, file_wc)
 
     # get the number
@@ -7731,7 +7733,7 @@ def clean_perSVade_outdir(outdir):
 
     ###########################################
 
-def get_ID_to_svtype_to_svDF_for_setOfGenomes_highConfidence(close_shortReads_table, reference_genome, outdir, replace=False, threads=4, mitochondrial_chromosome="mito_C_glabrata_CBS138", job_array_mode="local", max_ncores_queue=768, time_perSVade_running="48:00:00", queue_jobs="bsc_ls", max_nvars=100):
+def get_ID_to_svtype_to_svDF_for_setOfGenomes_highConfidence(close_shortReads_table, reference_genome, outdir, replace=False, threads=4, mitochondrial_chromosome="mito_C_glabrata_CBS138", job_array_mode="local", max_ncores_queue=768, time_perSVade_running="48:00:00", queue_jobs="bsc_ls", max_nvars=100, name_job_array="getRealSVs"):
 
     """Generates a dict that maps each sample in genomes_withSV_and_shortReads_table to an svtype and a DF with all the info about several vars. It only gets the high-confidence vars.
 
@@ -7782,10 +7784,21 @@ def get_ID_to_svtype_to_svDF_for_setOfGenomes_highConfidence(close_shortReads_ta
                     print("getting vars for %s"%ID)
 
                     # define the cmd. This is a normal perSvade.py run with the vars of the previous dir  
-                    cmd = "python %s -r %s --threads %i --outdir %s  --mitochondrial_chromosome %s -f1 %s -f2 %s --fast_SVcalling --previous_repeats_table %s"%(perSVade_py, reference_genome, threads, outdir_gridssClove, mitochondrial_chromosome, row["short_reads1"], row["short_reads2"], previous_repeats_table)
+                    cmd = "python %s -r %s --threads %i --outdir %s  --mitochondrial_chromosome %s --fast_SVcalling --previous_repeats_table %s"%(perSVade_py, reference_genome, threads, outdir_gridssClove, mitochondrial_chromosome, previous_repeats_table)
 
                     # add arguments depending on the pipeline
                     if replace is True: cmd += " --replace"
+
+                    # add the input
+                    all_keys_df = set(df_genomes.keys())
+
+                    # reads
+                    if "short_reads1" in all_keys_df and "short_reads2" in all_keys_df: cmd += " -f1 %s -f2 %s"%(row["short_reads1"], row["short_reads2"])
+
+                    # bams
+                    elif "sorted_bam" in all_keys_df: cmd += " -sbam %s"%(row["sorted_bam"])
+
+                    else: raise ValueError("The provided close_shortReads_table is not valid") 
 
                     # if the running in slurm is false, just run the cmd
                     if job_array_mode=="local": run_cmd(cmd)
@@ -7819,7 +7832,7 @@ def get_ID_to_svtype_to_svDF_for_setOfGenomes_highConfidence(close_shortReads_ta
                 jobs_filename = "%s/jobs.getting_realSVs"%all_realVars_dir
                 open(jobs_filename, "w").write("\n".join(all_cmds))
 
-                generate_jobarray_file_greasy(jobs_filename, walltime=time_perSVade_running,  name="getRealSVs", queue=queue_jobs, sbatch=True, ncores_per_task=threads, constraint="", number_tasks_to_run_at_once="all", max_ncores_queue=max_ncores_queue )
+                generate_jobarray_file_greasy(jobs_filename, walltime=time_perSVade_running,  name=name_job_array, queue=queue_jobs, sbatch=True, ncores_per_task=threads, constraint="", number_tasks_to_run_at_once="all", max_ncores_queue=max_ncores_queue )
 
                 print("Exiting... You have to wait until all the jobs in testRealSVs are done. Wait until the jobs are done and rerun this pipeline to continue")
                 sys.exit(0)
@@ -7875,7 +7888,7 @@ def set_position_to_max(pos, maxPos):
     if pos>maxPos: return maxPos
     else: return pos
 
-def get_compatible_real_svtype_to_file(close_shortReads_table, reference_genome, outdir, replace=False, threads=4, max_nvars=100, mitochondrial_chromosome="mito_C_glabrata_CBS138", job_array_mode="local", max_ncores_queue=768, time_perSVade_running="48:00:00", queue_jobs="bsc_ls"):
+def get_compatible_real_svtype_to_file(close_shortReads_table, reference_genome, outdir, replace=False, threads=4, max_nvars=100, mitochondrial_chromosome="mito_C_glabrata_CBS138", job_array_mode="local", max_ncores_queue=768, time_perSVade_running="48:00:00", queue_jobs="bsc_ls", name_job_array="getRealSVs"):
 
     """This function generates a dict of svtype to the file for SVs that are compatible and ready to insert into the reference_genome. All the files are written into outdir. Only a set of 'high-confidence' SVs are reported, which are those that, for each sampleID inclose_shortReads_table, have a reasonable minimum allele frequency and all breakpoints with 'PASS' and are found in all the genomes of the same sampleID.
 
@@ -7890,7 +7903,7 @@ def get_compatible_real_svtype_to_file(close_shortReads_table, reference_genome,
     pipeline_start_time = time.time()
 
     # get all the high-confidence real variants
-    ID_to_svtype_to_svDF = get_ID_to_svtype_to_svDF_for_setOfGenomes_highConfidence(close_shortReads_table, reference_genome, outdir, replace=replace, threads=threads, mitochondrial_chromosome=mitochondrial_chromosome, job_array_mode=job_array_mode, max_ncores_queue=max_ncores_queue, time_perSVade_running=time_perSVade_running, queue_jobs=queue_jobs, max_nvars=max_nvars)
+    ID_to_svtype_to_svDF = get_ID_to_svtype_to_svDF_for_setOfGenomes_highConfidence(close_shortReads_table, reference_genome, outdir, replace=replace, threads=threads, mitochondrial_chromosome=mitochondrial_chromosome, job_array_mode=job_array_mode, max_ncores_queue=max_ncores_queue, time_perSVade_running=time_perSVade_running, queue_jobs=queue_jobs, max_nvars=max_nvars, name_job_array=name_job_array)
 
     # define the df with the realVars info
     all_realVars_dir = "%s/all_realVars"%(outdir)
@@ -8286,7 +8299,7 @@ def run_wgsim_pairedEnd_per_windows_in_parallel(df_windows, genome, outdir, read
 
                 # run gzip in parallel
                 print("running pgzip in parallel")
-                run_cmd("pigz --fast %s/*"%parallel_files_outdir)
+                run_cmd("%s --fast %s/*"%(pigz, parallel_files_outdir))
 
                 # concatenate them all
                 print("Integrating all in one for chunk %i..."%(I+1))
@@ -8332,7 +8345,7 @@ def run_seqtk_rename(origin_fastqgz, dest_fastqgz):
 
     if file_is_empty(seqtk): raise ValueError("seqtk is expected to be in %s"%seqtk)
 
-    run_cmd("%s rename %s read_ | pigz -c > %s"%(seqtk, origin_fastqgz, dest_fastqgz))
+    run_cmd("%s rename %s read_ | %s -c > %s"%(seqtk, origin_fastqgz, pigz, dest_fastqgz))
 
 
 def simulate_readPairs_per_window(df_windows, genome, npairs, outdir, read_length,  median_insert_size, median_insert_size_sd, replace=False, threads=4):
@@ -11508,7 +11521,7 @@ def get_gzipped_file(file, replace=False):
     if file_is_empty(gz_file) or replace is True:
 
         # run pigz with the 'gz_vcf' suffix
-        run_cmd("pigz --keep --suffix .gz_tmp %s"%file)
+        run_cmd("%s --keep --suffix .gz_tmp %s"%(pigz, file))
 
         # rename 
         os.rename(gz_file_tmp, gz_file)
@@ -12752,10 +12765,11 @@ def run_repeat_modeller(reference_genome, threads=4, replace=False):
         print("Running repeat modeller in %s on %i jobs"%(outdir, njobs))
 
         #raise ValueError("This has to be fixed!!!!")
-        cmd = "export PERL5LIB=%s && cd %s && %s -database %s -pa %i -LTRStruct"%(repeatmoder_dir, outdir, repeat_modeller, name_database, njobs)
+        cmd = "export PERL5LIB=%s && cd %s && %s -database %s -pa %i -LTRStruct -debug"%(repeatmoder_dir, outdir, repeat_modeller, name_database, njobs)
 
         # add the location were eveything is installed and run
         print("running repeatmodeler...")
+        #print(ninja_dir)
         repeatmodeler_std = "%s/repeatmodeler.std"%outdir
         cmd += " -abblast_dir %s -cdhit_dir %s -genometools_dir %s -ltr_retriever_dir %s -mafft_dir %s -ninja_dir %s -recon_dir %s -repeatmasker_dir %s -rmblast_dir %s -rscout_dir %s -trf_prgm %s > %s 2>&1"%(abblast_dir, cdhit_dir, genometools_dir, ltr_retriever_dir, mafft_dir, ninja_dir, recon_dir, repeatmasker_dir, rmblast_dir, rscout_dir, trf_prgm_dir, repeatmodeler_std)
 
@@ -12763,9 +12777,14 @@ def run_repeat_modeller(reference_genome, threads=4, replace=False):
 
         if file_is_empty(repeat_modeler_outfile): 
 
+            # test that there are no families identified
+            no_families_identified = any([l.startswith("No families identified") for l in open(repeatmodeler_std, "r").readlines()[-3:]])
+
+            # test that there are errors
+            errors_in_repeatModeler = any(["ERROR" in l.upper() for l in open(repeatmodeler_std, "r").readlines()])
+
             # check if there are no families
-            if any([l.startswith("No families identified") for l in open(repeatmodeler_std, "r").readlines()[-3:]]): 
-                open(repeat_modeler_outfile, "w").write("no_families_identified")
+            if no_families_identified and not errors_in_repeatModeler: open(repeat_modeler_outfile, "w").write("no_families_identified")
 
             else: raise ValueError("RepeatModeler did not end properly. Check %s for the std"%repeatmodeler_std)
 
