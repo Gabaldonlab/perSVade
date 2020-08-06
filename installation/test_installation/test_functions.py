@@ -20,6 +20,12 @@ varcall_cnv_pipeline = "%s/varcall_cnv_pipeline.py"%scripts_dir
 
 # import functions
 import sv_functions as fun
+import multiprocessing as multiproc
+
+
+# define the threads
+threads = multiproc.cpu_count()
+
 
 ######################################
 
@@ -28,7 +34,7 @@ def test_get_repeat_maskerDF(test_genome, replace=False):
     """Tests the generation of repeats"""
 
     # define the ref genome
-    df_repeats, repeat_masker_outfile_default = fun.get_repeat_maskerDF(test_genome, threads=4, replace=replace)
+    df_repeats, repeat_masker_outfile_default = fun.get_repeat_maskerDF(test_genome, threads=threads, replace=replace)
 
     # test
     expected_fields = {'perc_ins', 'perc_del', 'type', 'end_repeat', 'perc_div', 'position_inRepeat_begin', 'repeat', 'left_repeat', 'IDrepeat', 'strand', 'left_positionINrepeat', 'SW_score', 'chromosome', 'begin_repeat', 'position_inRepeat_end'}
@@ -80,7 +86,7 @@ def test_conda_env_generation(outdir, replace=False):
 
     print("%s can be correctly regenerated"%EnvName)
 
-def test_read_simulation_and_get_reads(genome, window_l=2000, npairs=50000, read_length=150, median_insert_size=250, median_insert_size_sd=50, threads=4, replace=False):
+def test_read_simulation_and_get_reads(genome, window_l=2000, npairs=50000, read_length=150, median_insert_size=250, median_insert_size_sd=50, threads=threads, replace=False):
 
     """ 
     Takes a genome and simulates reads for it, saving them under <genome>_simulating_reads 
@@ -115,7 +121,7 @@ def test_read_simulation_and_get_reads(genome, window_l=2000, npairs=50000, read
         df_windows["predicted_relative_coverage"] = fun.random.sample(list(fun.np.linspace(0.5, 2, 10000)), len(df_windows))
 
         # simulate reads
-        fun.simulate_readPairs_per_window(df_windows, genome, npairs, outdir_reads, read_length, median_insert_size, median_insert_size_sd, replace=False, threads=4) 
+        fun.simulate_readPairs_per_window(df_windows, genome, npairs, outdir_reads, read_length, median_insert_size, median_insert_size_sd, replace=False, threads=threads) 
 
     print("read simulation works well")
     return reads1, reads2
@@ -141,12 +147,12 @@ def test_bwa_mem_and_get_bam(r1, r2, ref_genome, replace=False):
 
     # run
     print("aligning reads")
-    fun.run_bwa_mem(r1, r2, ref_genome, outdir, bamfile, sorted_bam, index_bam, name_sample, threads=4, replace=False, MarkDuplicates=True)
+    fun.run_bwa_mem(r1, r2, ref_genome, outdir, bamfile, sorted_bam, index_bam, name_sample, threads=threads, replace=False, MarkDuplicates=True)
 
     return sorted_bam
 
 
-def test_processing_varcalling(smallVars_input_outdir, reference_genome, outdir, sorted_bam, replace=False, threads=4):
+def test_processing_varcalling(smallVars_input_outdir, reference_genome, outdir, sorted_bam, replace=False, threads=threads):
 
     """This function takes a varcall file were all the variant calling has been performed and checks that the processing of vcfs works in varcall_cnv_pipeline. sorted_bam is just a fake sorted bam not to repeat the pipeline running"""
 
@@ -176,7 +182,7 @@ def test_processing_varcalling(smallVars_input_outdir, reference_genome, outdir,
     print("you can run successfully the variant processing")
 
 
-def test_smallVarCall_CNV_running(sorted_bam, outdir, ref_genome, gff, threads=4, mitochondrial_chromosome="mito_C_glabrata_CBS138", replace=False):
+def test_smallVarCall_CNV_running(sorted_bam, outdir, ref_genome, gff, threads=threads, mitochondrial_chromosome="mito_C_glabrata_CBS138", replace=False):
 
     """Takes a sorted bam (shuld have some mutations) and runs the variant calling pipeline on it"""
 
@@ -187,7 +193,7 @@ def test_smallVarCall_CNV_running(sorted_bam, outdir, ref_genome, gff, threads=4
     fun.make_folder(outdir)
 
     # get the repeats
-    repeats_table = fun.get_repeat_maskerDF(ref_genome, threads=4, replace=False)[1]
+    repeats_table = fun.get_repeat_maskerDF(ref_genome, threads=threads, replace=False)[1]
 
     for pooled_seq in [False]: # this may be also [False, True] to test pooled seq
 
@@ -210,7 +216,7 @@ def test_smallVarCall_CNV_running(sorted_bam, outdir, ref_genome, gff, threads=4
     print("small variant calling and CNV of genes works")
 
 
-def test_SRAdb_query_downloading_and_readTrimming(outdir, reference_genome, target_taxID, replace=False, threads=4):
+def test_SRAdb_query_downloading_and_readTrimming(outdir, reference_genome, target_taxID, replace=False, threads=threads):
 
     """This function runs get_close_shortReads_table_close_to_taxID for the MERS coronavirus and taking the lowest coverage reads. This tests that sra tools, entrez tools, trimmomatic and fastqc work well.
 
@@ -242,7 +248,7 @@ def test_SRAdb_query_downloading_and_readTrimming(outdir, reference_genome, targ
 
         print("\n\n---\nWARNING: The connection to SRA did not work. This means that the automated obtention of reads of close species for benchmarking (involving the arguments --target_taxID, --n_close_samples, --nruns_per_sample or --goldenSet_dir) may fail. You can download the reads on your own and provide them with --close_shortReads_table. This can be also due to network problems at this moment. \n---\n\n")
         
-def test_rearranging_genome_random(ref_genome, replace=False, threads=4, mitochondrial_chromosome="mito_C_glabrata_CBS138", nvars=5):
+def test_rearranging_genome_random(ref_genome, replace=False, threads=threads, mitochondrial_chromosome="mito_C_glabrata_CBS138", nvars=5):
 
 
     """This function takes a reference genome and simulates random variation on it, returning the rearranged genome in fasta format"""
@@ -259,7 +265,7 @@ def test_rearranging_genome_random(ref_genome, replace=False, threads=4, mitocho
     return rearranged_genome
 
 
-def test_gridss_clove_pipeline(sorted_bam, reference_genome, outdir, threads=4, replace=False):
+def test_gridss_clove_pipeline(sorted_bam, reference_genome, outdir, threads=threads, replace=False):
 
     """Tests that the default gridss and clove pipeline can be obtained"""
 
@@ -273,7 +279,7 @@ def test_gridss_clove_pipeline(sorted_bam, reference_genome, outdir, threads=4, 
     print("you could run the gridss + clove pipeline succesfully")
 
 
-def test_parameter_optimisation_perSVade(sorted_bam, reference_genome, outdir, threads=4, replace=False):
+def test_parameter_optimisation_perSVade(sorted_bam, reference_genome, outdir, threads=threads, replace=False):
 
     """This pipeline will test the parameter optimisation features of perSVade into outdir. It is expected to work for C.glabrata"""
 

@@ -6,7 +6,7 @@ perSVade is a method that runs structural variation (SV) calling and interpretat
 
 ### 1. Manual installation of Ninja
 
-There is one dependency, Ninja (https://github.com/TravisWheelerLab/NINJA, release 0.95-cluster_only), that you need ro install manually. You have to make sure that the folder containing the binary of Ninja  can be found in your $PATH. This is an example of how you can do this:
+perSVade has one dependency, Ninja (https://github.com/TravisWheelerLab/NINJA, release 0.95-cluster_only), that you have to install manually. Make sure that the folder containing the compiled binary of Ninja can be found in your $PATH. This is an example of how you can do this:
 
 `cd <path_to_install_Ninja>`
 

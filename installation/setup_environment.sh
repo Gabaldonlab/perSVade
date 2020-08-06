@@ -10,11 +10,30 @@ env_name=$(echo $env_path | rev | cut -d '/' -f1 | rev)
 # define the path to the installation dir
 installation_dir=$(readlink -f $0 | sed 's/\/setup_environment.sh//g')
 
+# move ninja to the conda env
+echo 'NOTE: Befeore setting up the installation of further dependencies, you have to make sure that the folder containing the binary of Ninja (https://github.com/TravisWheelerLab/NINJA, preferably release 0.95-cluster_only) can be found in your $PATH. This is an example of how you can do this:'
+echo '---'
+echo 'cd <path_to_install_Ninja>'
+echo 'wget https://github.com/TravisWheelerLab/NINJA/archive/0.95-cluster_only.tar.gz'
+echo 'tar -xvf 0.95-cluster_only.tar.gz'
+echo 'rm 0.95-cluster_only.tar.gz'
+echo 'cd NINJA-0.95-cluster_only/NINJA'
+echo 'make'
+echo 'export PATH=$PATH:<path_to_install_Ninja>/NINJA-0.95-cluster_only/NINJA'
+echo '---'
+echo 'You should check that a <path_to_install_Ninja>/NINJA-0.95-cluster_only/NINJA/Ninja binary was created. This is enough for running perSVade'
+
+# copy the Ninja binary under the conda environment 
+ninja_binary=$(which Ninja)
+new_ninja_binary=$env_path/bin/Ninja
+cp $ninja_binary $new_ninja_binary
+echo 'NINJA is installed successfully in your system'
+
 # go to the path where the RepeatMasker is
 cd $env_path/share/RepeatMasker;
 
 # This is just to create the RepeatMasker.lib. Press Ctrl+C when the program asks for any input
-echo "generating RepeatMasker.lib"
+echo "configuring RepeatModeler"
 expected_file=./Libraries/RepeatMasker.lib
 t="0"
 while [ ! -f $expected_file ]
@@ -42,23 +61,6 @@ fi
 mkdir external_software
 cd external_software
 
-echo 'NOTE: Befeore setting up the installation of further dependencies, you have to make sure that the folder containing the binary of Ninja (https://github.com/TravisWheelerLab/NINJA, preferably release 0.95-cluster_only) can be found in your $PATH. This is an example of how you can do this:'
-echo '---'
-echo 'cd <path_to_install_Ninja>'
-echo 'wget https://github.com/TravisWheelerLab/NINJA/archive/0.95-cluster_only.tar.gz'
-echo 'tar -xvf 0.95-cluster_only.tar.gz'
-echo 'rm 0.95-cluster_only.tar.gz'
-echo 'cd NINJA-0.95-cluster_only/NINJA'
-echo 'make'
-echo 'export PATH=$PATH:<path_to_install_Ninja>/NINJA-0.95-cluster_only/NINJA'
-echo '---'
-echo 'You should check that a <path_to_install_Ninja>/NINJA-0.95-cluster_only/NINJA/Ninja binary was created. This is enough for running perSVade'
-
-# copy the Ninja directory under external_software
-ninja_binary=$(which Ninja)
-ninja_dir=${ninja_binary%/*}
-cp -r $ninja_dir ./NINJA
-echo 'NINJA is installed successfully in your system'
 
 # download the gztool depending on the architecture
 architechture=$(uname -i)

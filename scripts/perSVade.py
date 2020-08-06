@@ -200,6 +200,8 @@ else:
 if opt.previous_repeats_table is not None:
     print("using privided repeats %s"%opt.previous_repeats_table)
 
+    if fun.file_is_empty(opt.previous_repeats_table): raise ValueError("The provided repeats table does not exist")
+
     # define the dest file
     repeats_table_file = "%s.repeats.tab"%opt.ref
 

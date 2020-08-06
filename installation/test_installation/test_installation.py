@@ -29,9 +29,12 @@ import sv_functions as fun
 print("loading python packages worked successfully")
 
 # define the testing inuts dir 
-testing_outputs_dir = "%s/testing_outputs"%test_dir
+#testing_outputs_dir = "%s/testing_outputs"%test_dir # this is the normal place
+testing_outputs_dir = "%s/Desktop/testing_perSVade_outputs"%(os.getenv("HOME")) # this is to be faster
 test_output_perSVade = "%s/perSVade_output"%testing_outputs_dir
 outdir_small_variantCalling = "%s/smallVars_CNV_output"%test_output_perSVade
+
+print("all output files will be written to %s"%testing_outputs_dir)
 
 # delete and cretae outdir
 #fun.delete_folder(testing_outputs_dir)
@@ -68,17 +71,32 @@ inputs_MERS_genome = "%s/MERS_CoV_genome.fasta"%testing_inputs_dir
 MERS_genome = "%s/MERS_CoV_genome.fasta"%testing_outputs_dir
 fun.soft_link_files(inputs_MERS_genome, MERS_genome)
 
+# define the C. albicans chromosome
+inputs_Calbicans_chr1 = "%s/Candida_albicans_Ca22chr1A_C_albicans_SC5314.fasta"%testing_inputs_dir
+Calbicans_chr1 = "%s/Candida_albicans_Ca22chr1A_C_albicans_SC5314.fasta"%testing_outputs_dir
+fun.soft_link_files(inputs_Calbicans_chr1, Calbicans_chr1)
+
+inputs_Calbicans_chr1_2_6 = "%s/Candida_albicans_chr1_2_6.fasta"%testing_inputs_dir
+Calbicans_chr1_2_6 = "%s/Candida_albicans_chr1_2_6.fasta"%testing_outputs_dir
+fun.soft_link_files(inputs_Calbicans_chr1_2_6, Calbicans_chr1_2_6)
+
+
 ########################################
 
 # check that that the database has been created
 repeat_masker_db = "%s/Libraries/RepeatMasker.lib.nsq"%(fun.repeatmasker_dir) 
 if fun.file_is_empty(repeat_masker_db): raise ValueError("%s is missing. Check that you ran ./installation/setup_environment.sh"%repeat_masker_db)
 
-# test that the environment can be recreated
-test_fun.test_conda_env_generation(testing_outputs_dir, replace=False)
+# test that the environment can be recreated. This is only important from the developer's package
+#test_fun.test_conda_env_generation(testing_outputs_dir, replace=False)
 
 # test repeat masker obtention
-test_fun.test_get_repeat_maskerDF(ref_genome, replace=False)
+test_fun.test_get_repeat_maskerDF(ref_genome, replace=False) # this will not work for repeat masker
+
+# test the repeat masker obtention for a long chromosome 1, 2 and 6
+test_fun.test_get_repeat_maskerDF(Calbicans_chr1_2_6, replace=False)
+print("repeat masker works on chromosome 1, 2 and 6 of C. albicans")
+
 
 # test read simulation by simulating reads from the mutated genome
 r1_mutGenome, r2_mutGenome = test_fun.test_read_simulation_and_get_reads(mut_genome)
