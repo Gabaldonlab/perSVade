@@ -26,6 +26,10 @@ echo 'You should check that a <path_to_install_Ninja>/NINJA-0.95-cluster_only/NI
 # copy the Ninja binary under the conda environment 
 ninja_binary=$(which Ninja)
 new_ninja_binary=$env_path/bin/Ninja
+if [ -f $new_ninja_binary ] 
+then 
+	rm $new_ninja_binary
+fi
 cp $ninja_binary $new_ninja_binary
 echo 'NINJA is installed successfully in your system'
 

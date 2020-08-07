@@ -32,7 +32,6 @@ from scipy.optimize import curve_fit
 from sklearn import linear_model
 import time
 from sklearn.metrics import r2_score
-import time
 from collections import Counter, defaultdict
 import inspect
 import collections
@@ -44,7 +43,8 @@ from subprocess import STDOUT, check_output
 import subprocess
 import subprocess, datetime, signal
 
-# define a function that is central
+#### UNIVERSAL FUNCTIONS ####
+
 def get_fullpath(x):
 
     """Takes a path and substitutes it bu the full path"""
@@ -54,6 +54,18 @@ def get_fullpath(x):
     else: path = x
 
     return os.getcwd() + "/" + path
+
+
+def get_date_and_time():
+
+    """Gets the date of today"""
+
+    current_day = date.today().strftime("%d%m%Y")
+    current_time = time.strftime("%H%M%S", time.localtime())
+
+    return "%s_%s"%(current_day, current_time)
+
+########################
 
 # packages to remove (potentially)
 #import psutil
@@ -208,6 +220,9 @@ g_filterName_to_filterValue_to_Number = {filterName : dict(zip(filtersList, rang
 # define the default window_l
 window_l = 10000
 
+# define the verbosity. If False, none of the print statements will have an effect.
+printing_verbose_mode = False
+
 # define the wrong SRRs (could not be downloaded)
 wrong_SRRs = {"ERR2163728", "SRR8373447"}
 
@@ -278,6 +293,13 @@ taxID_to_srrs_goldenSet = {3702: {"short_reads":"ERR2173372", "long_reads":"ERR2
 ####################################
 ####################################
 ####################################
+
+
+def print_if_verbose(*x):
+
+    """This function overrides the print statement"""
+
+    if printing_verbose_mode is True: print(*x)
 
 def get_aa(codons, genetic_code):
 
@@ -493,6 +515,15 @@ def get_uniqueVals_df(df): return set.union(*[set(df[col]) for col in df.columns
 
 
 
+
+def get_date():
+
+    """Gets the date of today"""
+
+    today = date.today()
+
+    return today.strftime("%d/%m/%Y")
+
 def extract_BEDofGENES_of_gff3(gff, bed, replace=False, reference=""):
 
     """Takes the full path to a gff annotation and writes a bed file to bed, which only has genes' info. 
@@ -622,7 +653,10 @@ def write_coverage_per_gene_mosdepth_and_parallel(sorted_bam, reference_genome, 
 
         # get the first three cols, important for the coverage calc
         cnv_bed = "%s/%s"%(cnv_outdir, get_file(bed))
-        run_cmd("cut -f1-3 %s > %s"%(bed, cnv_bed))
+        cnv_bed_stderr = "%s.generating.stderr"%cnv_bed
+        print("getting the first 3 cols of a bed. The stderr can be found in %s"%cnv_bed_stderr)
+        run_cmd("cut -f1-3 %s > %s 2>%s"%(bed, cnv_bed, cnv_bed_stderr))
+        remove_file(cnv_bed_stderr)
 
         # get the coverage file for the first three
         coverage_file = generate_coverage_per_window_file_parallel(reference_genome, cnv_outdir, sorted_bam, windows_file=cnv_bed, replace=replace, run_in_parallel=True, delete_bams=True)
@@ -654,10 +688,13 @@ def run_gatk_HaplotypeCaller(outdir_gatk, ref, sorted_bam, ploidy, threads, cove
     gatk_out = "%s/output.raw.vcf"%outdir_gatk; gatk_out_tmp = "%s.tmp"%gatk_out
     if file_is_empty(gatk_out) or replace is True:
         print("Running GATK HaplotypeCaller in ploidy mode...")
-
-        gatk_cmd = "%s HaplotypeCaller -R %s -I %s -O %s -ploidy %i --genotyping-mode DISCOVERY --emit-ref-confidence NONE --stand-call-conf 30 --native-pair-hmm-threads %i > %s.log"%(gatk, ref, sorted_bam, gatk_out_tmp, ploidy, threads, gatk_out)
+        
+        gatk_std = "%s.running.std"%gatk_out
+        print("the log of gatk can be found in %s"%gatk_std)
+        gatk_cmd = "%s HaplotypeCaller -R %s -I %s -O %s -ploidy %i --genotyping-mode DISCOVERY --emit-ref-confidence NONE --stand-call-conf 30 --native-pair-hmm-threads %i > %s 2>&1"%(gatk, ref, sorted_bam, gatk_out_tmp, ploidy, threads, gatk_std)
         run_cmd(gatk_cmd)
         os.rename(gatk_out_tmp, gatk_out)
+        remove_file(gatk_std)
 
         # rename the index as well
         os.rename("%s.tmp.idx"%gatk_out, "%s.idx"%gatk_out)
@@ -671,8 +708,13 @@ def run_gatk_HaplotypeCaller(outdir_gatk, ref, sorted_bam, ploidy, threads, cove
         if ploidy==1: filterHeterozygous = '-G-filter-name "heterozygous" -G-filter "isHet == 1"'
         else: filterHeterozygous = ''
 
-        gatk_filt_cmd = '%s VariantFiltration -V %s -O %s -cluster 5 -window 20 %s --filter-name "BadDepthofQualityFilter" -filter "DP <= %i || QD < 2.0 || MQ < 40.0 || FS > 60.0 || MQRankSum < -12.5 || ReadPosRankSum < -8.0" > %s.log'%(gatk, gatk_out, gatk_out_filtered_tmp, filterHeterozygous , coverage, gatk_out_filtered); run_cmd(gatk_filt_cmd)
+        gatk_filtered_std = "%s.filtering.std"%gatk_out
+        print("the log of GATK filtering is in %s"%gatk_filtered_std)
+        gatk_filt_cmd = '%s VariantFiltration -V %s -O %s -cluster 5 -window 20 %s --filter-name "BadDepthofQualityFilter" -filter "DP <= %i || QD < 2.0 || MQ < 40.0 || FS > 60.0 || MQRankSum < -12.5 || ReadPosRankSum < -8.0" > %s 2>&1'%(gatk, gatk_out, gatk_out_filtered_tmp, filterHeterozygous , coverage, gatk_filtered_std)
+
+        run_cmd(gatk_filt_cmd)
         os.rename(gatk_out_filtered_tmp, gatk_out_filtered)
+        remove_file(gatk_filtered_std)
 
         # rename the index as well
         os.rename("%s.tmp.idx"%gatk_out_filtered, "%s.idx"%gatk_out_filtered)
@@ -699,6 +741,7 @@ def run_bwa_mem(fastq1, fastq2, ref, outdir, bamfile, sorted_bam, index_bam, nam
 
             # run indexing in the copy
             indexFasta_std = "%s.std.txt"%branch_ref
+            print("indexing fasta. The std can be found in %s"%indexFasta_std)
             cmd_indexFasta = "%s index %s > %s 2>&1"%(bwa, branch_ref, indexFasta_std); run_cmd(cmd_indexFasta) # creates a set of indexes of fasta
             index_files_branch = ["%s.%s"%(branch_ref, x) for x in ["amb", "ann", "bwt", "pac", "sa"]]
 
@@ -718,19 +761,21 @@ def run_bwa_mem(fastq1, fastq2, ref, outdir, bamfile, sorted_bam, index_bam, nam
 
             #print("Running bwa mem")
             bwa_mem_stderr = "%s.tmp.stderr"%samfile
+            print("running bwa mem. The std is in %s"%bwa_mem_stderr)
             cmd_bwa = '%s mem -R "@RG\\tID:%s\\tSM:%s" -t %i %s %s %s > %s.tmp 2>%s'%(bwa, name_sample, name_sample, threads, ref, fastq1, fastq2, samfile, bwa_mem_stderr); run_cmd(cmd_bwa)
             os.rename("%s.tmp"%samfile , samfile)
+            remove_file(bwa_mem_stderr)
 
         # convert to bam 
         if file_is_empty(bamfile) or replace is True:
-            #print("Converting to bam")
             bamconversion_stderr = "%s.tmp.stderr"%bamfile
+            print("Converting to bam. The std is in %s"%bamconversion_stderr)
             cmd_toBAM = "%s view -Sbu %s > %s.tmp 2>%s"%(samtools, samfile, bamfile, bamconversion_stderr); run_cmd(cmd_toBAM)
 
             # remove the sam
             #print("Removing sam"); 
             os.unlink(samfile)
-
+            remove_file(bamconversion_stderr)
             os.rename("%s.tmp"%bamfile , bamfile)
 
 
@@ -749,9 +794,11 @@ def run_bwa_mem(fastq1, fastq2, ref, outdir, bamfile, sorted_bam, index_bam, nam
 
             # sort
             bam_sort_std = "%s.tmp.sortingBam_std.txt"%sorted_bam
+            print("the sorting bam std is in %s"%bam_sort_std)
             cmd_sort = "%s sort --threads %i -o %s %s > %s 2>&1"%(samtools, threads, sorted_bam_noMarkDups_tmp, bamfile, bam_sort_std); run_cmd(cmd_sort)
 
             # rename
+            remove_file(bam_sort_std)
             os.rename(sorted_bam_noMarkDups_tmp, sorted_bam_noMarkDups)
 
         # mark duplicates or not, depending on MarkDuplicates
@@ -780,6 +827,7 @@ def run_bwa_mem(fastq1, fastq2, ref, outdir, bamfile, sorted_bam, index_bam, nam
     if file_is_empty(index_bam) or replace is True:
         #print("Indexing bam")
         bam_index_std = "%s.indexingBam_std.txt"%sorted_bam
+        print("indexing bam. The std is in %s"%bam_index_std)
         cmd_indexBam = "%s index -@ %i %s > %s 2>&1"%(samtools, threads, sorted_bam, bam_index_std); run_cmd(cmd_indexBam)   # creates a .bai of sorted_bam
         remove_file(bam_index_std)
 
@@ -962,7 +1010,10 @@ def get_bed_df_not_overlapping_with_SVs(all_regions_bed_df, svtypes, svtype_to_s
 
     # get the regions in all_regions_bed that are not in regions_with_SV_bed
     regions_without_SV_bed = "%s_noSV_regions.bed"%bed_regions_prefix
-    run_cmd("%s subtract -a %s -b %s > %s"%(bedtools, all_regions_bed, regions_with_SV_bed, regions_without_SV_bed))
+    regions_without_SV_bed_stderr = "%s.generating.stderr"%regions_without_SV_bed
+    print("generating regions_without_SV_bed. The stderr can be found in %s"%regions_without_SV_bed_stderr)
+    run_cmd("%s subtract -a %s -b %s > %s 2>%s"%(bedtools, all_regions_bed, regions_with_SV_bed, regions_without_SV_bed, regions_without_SV_bed_stderr))
+    remove_file(regions_without_SV_bed_stderr)
 
     return regions_without_SV_bed, svtype_to_nSVs
 
@@ -1047,7 +1098,10 @@ def rewrite_translocations_uniformizedFormat_simulateSV(translocations_file, ref
     print("rewriting %s"%translocations_file)
 
     # keep the unmodified version
-    run_cmd("cp %s %s.unmodified"%(translocations_file, translocations_file))
+    copying_translocations_std = "%s.copying.std"%translocations_file
+    print("Copying translocations. The std is in %s"%copying_translocations_std)
+    run_cmd("cp %s %s.unmodified > %s 2>&1"%(translocations_file, translocations_file, copying_translocations_std))
+    remove_file(copying_translocations_std)
 
     # define chromosome_to_length
     chr_to_len = {seq.id: len(seq.seq) for seq in SeqIO.parse(reference_genome, "fasta")}
@@ -1085,7 +1139,10 @@ def rewrite_insertions_uniformizedFormat_simulateSV(insertions_file):
     df["Copied"] = df.Copied.apply(lambda x: str(x).upper())
 
     # keep an uncorrected version
-    run_cmd("cp %s %s.unmodified"%(insertions_file, insertions_file))
+    copying_insertions_std = "%s.copying.std"%insertions_file
+    print("copying insertions. The std is in %s"%copying_insertions_std)
+    run_cmd("cp %s %s.unmodified > %s 2>&1"%(insertions_file, insertions_file, copying_insertions_std))
+    remove_file(copying_insertions_std)
 
     # write as corrected
     df.to_csv(insertions_file, sep="\t", header=True, index=False)
@@ -1115,13 +1172,26 @@ def get_breakpoint_positions_df_in_svDF(svDF):
 
 def transform_cut_and_paste_to_copy_and_paste_insertions(reference_genome, rearranged_genome, insertions_file, svtype_to_svDF):
 
-    """ This function takes a rearranged genome and reinserts the copy-and-paste insertions where they should be """
+    """ This function takes a rearranged genome and reinserts the copy-and-paste insertions where they should be. The copy-and-paste insertions will be set to cut-and-paste if they can't be processed by this pipeline. This means that the insertions_file will be overwritten """
 
     print("reinserting-copy-and-paste insertions into %s"%insertions_file)
 
     # load df and keep the copy-and-paste insertions
-    df = pd.read_csv(insertions_file, sep="\t")
-    df = df[df.Copied]
+    df_all = pd.read_csv(insertions_file, sep="\t")
+
+    # define all the initial ids
+    initial_IDs = cp.deepcopy(set(df_all.ID))
+
+    # check that the keys are the ones of the simulation by RSVsim
+    insertions_fields = ["ChrA", "StartA", "EndA", "ChrB", "StartB", "EndB", "Copied", "ID"]
+    expected_keys = set(insertions_fields)
+    if set(df_all.keys())!=expected_keys: raise ValueError("insertons_file %s does not have the expected headers"%insertions_file)
+
+    # check that the IDs are unique
+    if len(set(df_all.ID))!=len(df_all): raise ValueError("the IDs should be unique")
+
+    # define the df of copied insertions (which have to be changed)
+    df = df_all[df_all.Copied]
 
     if len(df)>0:
 
@@ -1130,6 +1200,9 @@ def transform_cut_and_paste_to_copy_and_paste_insertions(reference_genome, rearr
         rearranged_genome_unmodified_tmp = "%s.tmp"%rearranged_genome_unmodified
 
         if file_is_empty(rearranged_genome_unmodified):
+
+            # initialize a df that will contain the final insertions (with the cut-and-paste, that are correct)
+            df_final_insertions = df_all[~df_all.Copied] ### NEWLY ADDED LINE
 
             # if the unmodified tmps is writen, replace the rearranged_genome with it
             if not file_is_empty(rearranged_genome_unmodified_tmp): os.rename(rearranged_genome_unmodified_tmp, rearranged_genome)
@@ -1171,8 +1244,14 @@ def transform_cut_and_paste_to_copy_and_paste_insertions(reference_genome, rearr
             df["deleted_sequence"] = df.apply(lambda r: chr_to_refSeq[r["ChrA"]][r["StartA"]-1:r["EndA"]], axis=1)
 
             # change the chromosome seq in the sequence 
-            for I, (chrA, seq5, seq3, del_seq) in enumerate(df[["ChrA", "5'sequence", "3'sequence", "deleted_sequence"]].values):
-                print("copy-paste-insertion %i.."%I)
+            for I, row in df.iterrows():
+                print("copy-paste-insertion %i/%i.."%(I+1, len(df_all)))
+
+                # define critical vars
+                chrA = row["ChrA"]
+                seq5 = row["5'sequence"]
+                seq3 = row["3'sequence"]
+                del_seq = row["deleted_sequence"]
 
                 # all seq
                 ref_seq = seq5+del_seq+seq3
@@ -1180,45 +1259,52 @@ def transform_cut_and_paste_to_copy_and_paste_insertions(reference_genome, rearr
                 # conformation in the rearranged chromosome
                 rearranged_seq = seq5+seq3
 
-                # check that the rearranged seq appears once in the genome and the ref seq in the ref genome. And they do not cross.
+                # check that the rearranged seq appears once in the genome and the ref seq in the ref genome. And they do not cross. If it does, just keep the genome as it was, and set this insertion to false
                 chrA_refSeq = chr_to_refSeq[chrA]
                 if not(chrA_refSeq.count(ref_seq)==1 and all_rearranged_chromosomes_together.count(rearranged_seq)==1 and all_rearranged_chromosomes_together.count(ref_seq)==0): # chrA_refSeq.count(rearranged_seq)==0
 
-                    print(chrA)
+                    print("WARNING: insertion %i is not unique. setting as cut-and-paste instead of copy-and-paste")
+                    row["Copied"] = False
 
-                    print(ref_seq)
-                    print(rearranged_seq)
+                else:
+                    # change the location
+                    # go through each chrom of the rearranged seqs
+                    for chrom in chr_to_rearrangedSeq.keys():
 
-                    print(chrA_refSeq.count(ref_seq))
-                    print(chrA_refSeq.count(rearranged_seq))
-                    print(all_rearranged_chromosomes_together.count(rearranged_seq))
-                    print(all_rearranged_chromosomes_together.count(ref_seq))
+                        # get the rearranged sequence
+                        seq = cp.deepcopy(chr_to_rearrangedSeq[chrom])
 
-                    raise ValueError("The sequence is not unique")
+                        # if the rearrangement sequence is in this chromosome, change it
+                        if rearranged_seq in seq: 
 
-                # go through each chrom of the rearranged seqs
-                for chrom in chr_to_rearrangedSeq.keys():
+                            # update the chr_to_rearrangedSeq so that it contains the reference sequence (copied)
+                            chr_to_rearrangedSeq[chrom] = seq.replace(rearranged_seq, ref_seq)
+                            break
 
-                    # get the rearranged sequence
-                    seq = cp.deepcopy(chr_to_rearrangedSeq[chrom])
-
-                    # if the rearrangement sequence is in this chromosome, change it
-                    if rearranged_seq in seq: 
-
-                        # update the chr_to_rearrangedSeq so that it contains the reference sequence (copied)
-                        chr_to_rearrangedSeq[chrom] = seq.replace(rearranged_seq, ref_seq)
-                        break
+                # keep this row
+                row_df = pd.DataFrame({I : row}).transpose()[insertions_fields]
+                df_final_insertions = df_final_insertions.append(row_df)
 
             # get the rearranged genome into the file
             seq_records_list = [SeqRecord(Seq(seq), id=chrom, name=chrom, description=chrom) for chrom, seq in chr_to_rearrangedSeq.items()]
 
             # write the unmodified one
-            print("writing")
-            run_cmd("cp %s %s.tmp"%(rearranged_genome, rearranged_genome_unmodified_tmp))
+            copying_rearranged_genome_std = "%s.copying.std"%rearranged_genome
+            print("writing rearranged_genome. The std is in %s"%(copying_rearranged_genome_std))
+            run_cmd("cp %s %s.tmp > %s 2>&1"%(rearranged_genome, rearranged_genome_unmodified_tmp, copying_rearranged_genome_std))
             os.rename("%s.tmp"%rearranged_genome_unmodified_tmp, rearranged_genome_unmodified_tmp)
+            remove_file(copying_rearranged_genome_std)
 
             # write the modified genome
             SeqIO.write(seq_records_list, rearranged_genome, "fasta")
+
+            # test that the IDs are the same as at the beggining
+            if set(df_final_insertions.ID)!=initial_IDs: raise ValueError("The IDs have changed along the rearrangement of the genome")
+
+            # write the insertions file
+            insertions_file_tmp = "%s.tmp"%insertions_file
+            df_final_insertions.to_csv(insertions_file_tmp, sep="\t", header=True, index=False)
+            os.rename(insertions_file_tmp, insertions_file)
 
             # write the modified genome
             os.rename(rearranged_genome_unmodified_tmp, rearranged_genome_unmodified)
@@ -1244,7 +1330,10 @@ def get_bed_df_not_overlapping_with_translocations_allChromARM(target_regions_be
     # get the regions in all_regions_bed that are not in regions_with_SV_bed
     regions_without_tra_bed = "%s/noTRA_regions.bed"%outdir
 
-    run_cmd("%s subtract -a %s -b %s > %s"%(bedtools, target_regions_bed, regions_with_tra_bed, regions_without_tra_bed))
+    bed_non_overlapping_stderr = "%s.generating.stderr"%regions_without_tra_bed
+    print("Getting regions without translocations. The stderr is in %s"%bed_non_overlapping_stderr)
+    run_cmd("%s subtract -a %s -b %s > %s 2>%s"%(bedtools, target_regions_bed, regions_with_tra_bed, regions_without_tra_bed, bed_non_overlapping_stderr))
+    remove_file(bed_non_overlapping_stderr)
 
     return regions_without_tra_bed
 
@@ -1919,7 +2008,8 @@ def generate_rearranged_genome_from_svtype_to_svDF(reference_genome, svtype_to_s
 
             # run the cmd
             std_rearranging_genome = "%s/simulation_std.txt"%outdir
-            #std_rearranging_genome = "stdout"
+            #std_rearranging_genome = "stdout" # debug
+            print("rearranging genome. The std is in %s"%std_rearranging_genome)
 
             if std_rearranging_genome!="stdout": run_cmd("%s > %s 2>&1"%(targetSV_cmd, std_rearranging_genome))
             else: run_cmd(targetSV_cmd)
@@ -1933,6 +2023,9 @@ def generate_rearranged_genome_from_svtype_to_svDF(reference_genome, svtype_to_s
 
                 # edit the insertions so that they are in the correct format
                 rewrite_insertions_uniformizedFormat_simulateSV(insertions_file)
+
+
+            remove_file(std_rearranging_genome)
 
             # rename the genome 
             os.rename(rearranged_genome_InsInvDelTan_tmp, rearranged_genome_InsInvDelTan)
@@ -2089,8 +2182,10 @@ def get_random_svtype_to_svDF(reference_genome, mitochondrial_chromosome, outdir
             # run the random simulation
             std_rearranging_genome = "%s/simulation_std.txt"%random_sim_dir
             #std_rearranging_genome = "stdout"
+            print("getting random SVs. The std is in %s"%std_rearranging_genome)
             if std_rearranging_genome!="stdout": run_cmd("%s > %s 2>&1"%(randomSV_cmd, std_rearranging_genome))
             else: run_cmd(randomSV_cmd)
+            remove_file(std_rearranging_genome)
 
             # edit the insertions 
             insertions_file = "%s/insertions.tab"%random_sim_dir
@@ -2115,7 +2210,10 @@ def get_random_svtype_to_svDF(reference_genome, mitochondrial_chromosome, outdir
 
                 # get a bed file where to place the randomly chosen 
                 noInsInvDelTan_bed = "%s/noInsInvDelTan_regions.bed"%genome_outdir
-                run_cmd("%s subtract -a %s -b %s > %s"%(bedtools, all_regions_bed, InsInvDelTan_bed, noInsInvDelTan_bed))
+                noInsInvDelTan_bed_stderr = "%s.generating.stderr"%noInsInvDelTan_bed
+                print("the stderr is in %s "%noInsInvDelTan_bed_stderr)
+                run_cmd("%s subtract -a %s -b %s > %s 2>%s"%(bedtools, all_regions_bed, InsInvDelTan_bed, noInsInvDelTan_bed, noInsInvDelTan_bed_stderr))
+                remove_file(noInsInvDelTan_bed_stderr)
 
                 # get the translocations randomly placed
                 get_translocations_randomly_placed_in_target_regions(noInsInvDelTan_bed, translocations_file, chrom_to_len, nvars=nvars*2, only_5_to_3=only_5_to_3_translocations)
@@ -2303,12 +2401,14 @@ def convert_fasta_to_fqgz(fasta_file, replace=False, remove_fasta=True):
         print("generating %s"%fastqgz)
 
         # convert
-        print("running reformat")
-        run_cmd("%s in=%s out=%s qfake=50 overwrite=true"%(bbmap_reformat_sh, fasta_file, fastqgz_tmp))
+        reformatting_std = "%s.generating.std"%fastqgz_tmp
+        print("running reformat. The std is in %s"%reformatting_std)
+        run_cmd("%s in=%s out=%s qfake=50 overwrite=true > %s 2>&1"%(bbmap_reformat_sh, fasta_file, fastqgz_tmp, reformatting_std))
 
         # remove the fasta
         if remove_fasta is True: os.unlink(fasta_file)
 
+        remove_file(reformatting_std)
         os.rename(fastqgz_tmp, fastqgz)
 
     return fastqgz
@@ -2330,16 +2430,22 @@ def get_mosdepth_coverage_per_windows_output_likeBamStats(fileprefix, sorted_bam
         
         # change the end, setting it to -1, and also sorting
         windows_1_based = "%s.1_based.bed"%windows_bed
-        run_cmd(""" awk '{print $1 "\t" ($2+1) "\t" ($3)}' %s | sort -k1,1 -k2,2n > %s"""%(windows_bed, windows_1_based))
+        windows_1_based_stderr = "%s.generating.stderr"%windows_1_based
+        print("getting 1-based bed file. The stderr is in %s"%windows_1_based_stderr)
+        run_cmd(""" awk '{print $1 "\t" ($2+1) "\t" ($3)}' %s | sort -k1,1 -k2,2n > %s 2>%s"""%(windows_bed, windows_1_based, windows_1_based_stderr))
+        remove_file(windows_1_based_stderr)
 
         # get the cmd
-        cmd = "%s --threads %i --by %s --no-per-base --fast-mode --thresholds 1 --use-median %s %s"%(mosdepth, extra_threads, windows_1_based, fileprefix_tmp, sorted_bam) # mosdepth does not look at internal cigar operations or correct mate overlaps (recommended for most use-cases). It is also faster
+        mosdepth_std = "%s.generating.std"%fileprefix_tmp
+        print("running mosdepth. The std is in %s "%mosdepth_std)
+        cmd = "%s --threads %i --by %s --no-per-base --fast-mode --thresholds 1 --use-median %s %s > %s 2>&1"%(mosdepth, extra_threads, windows_1_based, fileprefix_tmp, sorted_bam, mosdepth_std) # mosdepth does not look at internal cigar operations or correct mate overlaps (recommended for most use-cases). It is also faster
 
         # add the chromosome_id if provided
         if chromosome_id!="": cmd = cmd.replace("--use-median", "--use-median --chrom %s"%chromosome_id)
 
         # run 
         run_cmd(cmd)
+        remove_file(mosdepth_std)
 
         # remove the 1-based file
         remove_file(windows_1_based)
@@ -2396,7 +2502,10 @@ def get_coverage_per_window_for_chromosomeDF(chromosome_id, destination_dir, win
 
     # define a file for the coverage
     windows_bed_chromsome = "%s.%s.%s.bed"%(windows_bed, chromosome_id, randID)
-    run_cmd("egrep '%s\t' %s > %s"%(chromosome_id, windows_bed, windows_bed_chromsome))
+    egrepping_windows_stderr = "%s.generaing.stderr"%windows_bed_chromsome
+    print("Running egrep on chromosome. The stderr is in %s"%egrepping_windows_stderr)
+    run_cmd("egrep '%s\t' %s > %s 2>%s"%(chromosome_id, windows_bed, windows_bed_chromsome, egrepping_windows_stderr))
+    remove_file(egrepping_windows_stderr)
 
     # if there is nothing, return an empty df
     bamstats_fields = ["#chrom", "start", "end", "length", "mediancov_1", "nocoveragebp_1", "percentcovered_1"]
@@ -2427,7 +2536,10 @@ def generate_coverage_per_window_file_parallel(reference_genome, destination_dir
 
         # first generate the windows file
         windows_file = "%s.windows%ibp.bed"%(reference_genome, window_l)
-        run_cmd("%s makewindows -g %s.fai -w %i > %s"%(bedtools, reference_genome, window_l, windows_file))
+        windows_file_stderr = "%s.generating.stderr"%windows_file
+        print("genearting windows_file. The stderr is in %s"%windows_file_stderr)
+        run_cmd("%s makewindows -g %s.fai -w %i > %s 2>%s"%(bedtools, reference_genome, window_l, windows_file, windows_file_stderr))
+        remove_file(windows_file_stderr)
 
         # define the file
         coverage_file = "%s/coverage_windows_%ibp.tab"%(destination_dir, window_l)
@@ -2637,7 +2749,10 @@ def soft_link_files(origin, target):
         try: run_cmd("rm %s > /dev/null 2>&1"%target)
         except: pass
 
-        run_cmd("ln -s %s %s"%(origin, target))
+        soft_linking_std = "%s.softlinking.std"%(origin)
+        print("softlinking. The std is in %s"%soft_linking_std)
+        run_cmd("ln -s %s %s > %s 2>&1"%(origin, target, soft_linking_std))
+        remove_file(soft_linking_std)
 
 def run_gridss_and_annotateSimpleType(sorted_bam, reference_genome, outdir, replace=False, threads=4, blacklisted_regions="", maxcoverage=50000):
 
@@ -2671,14 +2786,12 @@ def run_gridss_and_annotateSimpleType(sorted_bam, reference_genome, outdir, repl
 
         print("blacklisting %s\n"%blacklisted_regions)
         
-
         # define the out and error of gridss
-        #gridss_std = "%s/gridss_run_std.txt"%outdir
-        gridss_std = "stdout"
+        gridss_std = "%s/gridss_run_std.txt"%outdir
         
         max_tries = 2
         for Itry in range(max_tries):
-            print("running gridss try %i"%(Itry+1))
+            print("running gridss try %i. The std can be found in %s"%(Itry+1, gridss_std))
             try: 
                 # delete previous files
                 delete_folder(gridss_tmpdir); make_folder(gridss_tmpdir)
@@ -2700,8 +2813,7 @@ def run_gridss_and_annotateSimpleType(sorted_bam, reference_genome, outdir, repl
                 # run
                 print("running gridss on %s jvmheap and %i threads"%(jvmheap, threads))
 
-                gridss_cmd = "%s --jar %s --reference %s -o %s --assembly %s --threads %i --workingdir %s --maxcoverage %i --blacklist %s --jvmheap %s %s"%(gridss_run, gridss_jar, reference_genome, gridss_VCFoutput, gridss_assemblyBAM, threads, gridss_tmpdir, maxcoverage, blacklisted_regions, jvmheap, sorted_bam_renamed)
-                if gridss_std!="stdout": gridss_cmd += " > %s 2>&1"%gridss_std
+                gridss_cmd = "%s --jar %s --reference %s -o %s --assembly %s --threads %i --workingdir %s --maxcoverage %i --blacklist %s --jvmheap %s %s > %s 2>&1"%(gridss_run, gridss_jar, reference_genome, gridss_VCFoutput, gridss_assemblyBAM, threads, gridss_tmpdir, maxcoverage, blacklisted_regions, jvmheap, sorted_bam_renamed, gridss_std)
                 run_cmd(gridss_cmd)
 
                 break
@@ -2711,13 +2823,24 @@ def run_gridss_and_annotateSimpleType(sorted_bam, reference_genome, outdir, repl
         # if it did not finish correctly finish it
         if file_is_empty(gridss_VCFoutput): raise ValueError("gridss did not finish correctly after %i tries. Check the log in %s and the std in %s"%(max_tries, gridss_tmpdir, gridss_std))
 
+        # keep the full log
+        lines_with_full_log = [l for l in open(gridss_std, "r").readlines() if "Full log file is" in l]
+        if len(lines_with_full_log)!=1: raise ValueError("there should only be one log file")
+        full_gridss_log = lines_with_full_log[0].split("Full log file is:")[1].split()[0]
+        dest_full_gridss_log = "%s/gridss_full_log.txt"%outdir
+        os.rename(full_gridss_log, dest_full_gridss_log)
+
+        # delete unnecessary files
         delete_folder(gridss_tmpdir); remove_file(gridss_assemblyBAM)
 
     # annotated simple events, the ones that can be predicted from each breakpoint, but only if there are some predicted events
     gridss_VCFoutput_with_simple_event = "%s.withSimpleEventType.vcf"%gridss_VCFoutput
     simple_event_std = "%s/simple_event_annotation.std"%outdir
+    print("annotating simple events in the grids output. The std is in %s"%simple_event_std)
     n_breakends = len([l for l in open(gridss_VCFoutput, "r").readlines() if not l.startswith("#")])
     if (file_is_empty(gridss_VCFoutput_with_simple_event) or replace is True) and n_breakends>0 : run_cmd("%s %s > %s 2>&1"%(annotate_simpleEvents_gridssVCF_R, gridss_VCFoutput, simple_event_std))
+
+    remove_file(simple_event_std)
 
     return gridss_VCFoutput_with_simple_event
 
@@ -3022,16 +3145,20 @@ def get_bedpe_from_svVCF(svVCF, outdir, replace=False, only_simple_conversion=Fa
 
         if len_vcf_records>0:
 
+            # define the std
+            r_stdout = "%s/svVCF_analysis_log.out"%outdir
+
             if only_simple_conversion is True:
 
-                print("Getting files for svVCF file. Mainly generating a bedpe file for breakpoints with some extra info, but simple.")
-                r_stdout = "%s/svVCF_analysis_log.out"%outdir
+                print("Getting files for svVCF file. Mainly generating a bedpe file for breakpoints with some extra info, but simple. The std can be found in %s"%r_stdout)
                 run_cmd("%s %s > %s 2>&1"%(analyze_svVCF_simple, svVCF, r_stdout))                
 
             else:
-                print("Getting files for svVCF file. Mainly generating a bedpe file for breakpoints with some extra info.")
-                r_stdout = "%s/svVCF_analysis_log.out"%outdir
+                
+                print("Getting files for svVCF file. Mainly generating a bedpe file for breakpoints with some extra info. The std can be found in %s"%r_stdout)
                 run_cmd("%s %s > %s 2>&1"%(analyze_svVCF, svVCF, r_stdout))
+
+            remove_file(r_stdout)
 
         else: open(bedpe_file, "w").write("no_vcf_records\n")
 
@@ -3223,17 +3350,17 @@ def run_clove_filtered_bedpe(bedpe_file, outfile, sorted_bam, replace=False, med
             print("avoid checking coverage")
             cmd += " -r "
 
-        print("running clove with cmd:", cmd)
-
+        print("running clove. The std can ve found in %s"%clove_std)
 
         # add the std
         cmd = "%s > %s 2>&1"%(cmd, clove_std)
 
         run_cmd(cmd)
+        remove_file(clove_std)
         os.rename(outfile_tmp, outfile)
 
         # remove at the end
-        remove_file(clove_std)
+        
 
     #print("clove finsihed correctly")
 
@@ -4336,130 +4463,6 @@ def run_gridssClove_given_filters(sorted_bam, reference_genome, working_dir, med
 ###################################################################################################
 ###################################################################################################
 
-def get_GenBank_assembly_statistics_df(file, assembly_summary_genbank_url="ftp://ftp.ncbi.nih.gov/genomes/genbank/assembly_summary_genbank.txt", replace=False):
-
-    """
-    Downloads the assembly summary statistics into file and returns a df.
-
-    Index(['# assembly_accession', 'bioproject', 'biosample', 'wgs_master',
-       'refseq_category', 'taxid', 'species_taxid', 'organism_name',
-       'infraspecific_name', 'isolate', 'version_status', 'assembly_level',
-       'release_type', 'genome_rep', 'seq_rel_date', 'asm_name', 'submitter',
-       'gbrs_paired_asm', 'paired_asm_comp', 'ftp_path',
-       'excluded_from_refseq', 'relation_to_type_material'],
-      dtype='object')
-    """
-
-    df_file = "%s.df.py"%file
-
-    if file_is_empty(df_file) or replace is True:
-        print("getting GeneBank genomes")
-
-        # download the file 
-        urllib.request.urlretrieve(assembly_summary_genbank_url, file)
-
-        # get into df and save
-        df = pd.read_csv(file, header=1, sep="\t").rename(columns={"# assembly_accession":"assembly_accession"}) 
-
-        save_object(df, df_file)
-
-    else: df = load_object(df_file)
-
-    return df
-
-def assembly_row_has_annotation(r, prefix):
-
-    """Takes a row of the get_GenBank_assembly_statistics_df and returns whether it has a gff annotation"""
-
-    print("looking for annotation")
-
-    # define the ftp direction
-    ftp_site = r["ftp_path"]
-    ftp_last = ftp_site.split("/")[-1]# something that has to be added for the ftp direction
-    full_ftp_direction = ftp_site+"/"+ftp_last
-
-    # define the gff name
-    origin_file = "%s_genomic.gff.gz"%(full_ftp_direction)
-    dest_file = "%s_testing.gff"%prefix
-
-
-    # print getting file
-    try: 
-        urllib.request.urlretrieve(origin_file, dest_file)
-        remove_file(dest_file)
-        return True
-
-    except: return False
-
-def get_reference_genome_from_GenBank(ID, dest_genome_file, replace=False):
-
-    """Downloads the reference genome for a given ID into dest_genome_file from genBank """
-
-    # get the genBank df
-    gb_file = "%s.GenBankAssemblySummary.txt"%dest_genome_file
-    df_assemblies = get_GenBank_assembly_statistics_df(gb_file, replace=replace)
-
-    # it is a genbank assembly just get the accession
-    if ID.startswith("GCA_"): rep_genomes = df_assemblies[df_assemblies.assembly_accession==ID]
-
-    # it is a taxID
-    else:
-
-        # get the taxID genomes
-        df_taxID = df_assemblies[(df_assemblies.taxid==ID) | (df_assemblies.species_taxid==ID)]
-
-        # get the reference genomes
-        rep_genomes = df_taxID[(df_taxID.refseq_category.isin({"reference genome", "representative genome"}))]
-
-    if len(rep_genomes)==0: 
-
-        df_taxID.to_csv("%s/../testing/failed_assemblies_taxID%i"%(CWD, ID), sep="\t", header=True, index=False)
-        raise ValueError("There are no representative genomes in GenBank for this ID")
-
-    if len(rep_genomes)>1: print("WARNING: There are more than 1 reference genomes for this ID")
-
-    # download genome and annotations
-    ftp_site = rep_genomes.iloc[0]["ftp_path"]
-
-    # get the full_ftp_direction
-    ftp_last = ftp_site.split("/")[-1]# something that has to be added for the ftp direction
-    full_ftp_direction = ftp_site+"/"+ftp_last
-
-    # map each file type to the final file
-    file_type_to_finalFile = {"report":"%s.assembly_report.txt"%dest_genome_file, "genome":dest_genome_file, "gff":"%s.features.gff"%dest_genome_file}
-
-    # download the genome and annotations 
-    for file_type, file_name in [("report", "assembly_report.txt"), ("genome", "genomic.fna.gz"), ("gff", "genomic.gff.gz")]:
-
-        # define the files
-        origin_file = "%s_%s"%(full_ftp_direction, file_name)
-        dest_file = "%s.%s"%(dest_genome_file, file_name)
-        dest_file_unzipped = dest_file.rstrip(".gz")
-        final_file = file_type_to_finalFile[file_type]
-
-        if file_is_empty(final_file) or replace is True:
-            print("getting", file_type, "from genBank")
-
-        
-            try:
-
-                # print getting file
-                urllib.request.urlretrieve(origin_file, dest_file)
-
-                # unzip if necessary
-                if file_type in {"genome", "gff"}: run_cmd("gunzip --force %s"%dest_file)
-
-                # move to the final file
-                os.rename(dest_file_unzipped, final_file)
-
-            except: print("WARNING: %s could not be found"%file_type)
-
-    # define the files to return
-    genome_file = file_type_to_finalFile["genome"]
-    gff_file = file_type_to_finalFile["gff"]
-    if file_is_empty(gff_file): gff_file = None
-
-    return genome_file, gff_file
 
 def get_taxid2name(taxIDs):
 
@@ -4502,7 +4505,9 @@ def get_allOxfordNanopore_runInfo_fromSRA_forDivision(fileprefix, taxID_division
         columns_efetch = "Run,ReleaseDate,LoadDate,spots,bases,spots_with_mates,avgLength,size_MB,AssemblyName,download_path,Experiment,LibraryName,LibraryStrategy,LibrarySelection,LibrarySource,LibraryLayout,InsertSize,InsertDev,Platform,Model,SRAStudy,BioProject,Study_Pubmed_id,ProjectID,Sample,BioSample,SampleType,TaxID,ScientificName,SampleName,g1k_pop_code,source,g1k_analysis_group,Subject_ID,Sex,Disease,Tumor,Affection_Status,Analyte_Type,Histological_Type,Body_Site,CenterName,Submission,dbgap_study_accession,Consent,RunHash,ReadHash".split(",")
 
         # get the esearch
+        print("running esearch. The stderr is in %s"%esearch_stderr)
         run_cmd("%s -db sra -query '%s' > %s 2>%s"%(esearch, esearch_query, esearch_outfile, esearch_stderr))
+        remove_file(esearch_stderr)
 
         # get the number of rows
         nresults = [int(l.split("<Count>")[1].split("<")[0]) for l in open(esearch_outfile, "r").readlines() if "<Count>" in l and "</Count>" in l][0]
@@ -4512,7 +4517,10 @@ def get_allOxfordNanopore_runInfo_fromSRA_forDivision(fileprefix, taxID_division
         else:
 
             # run efetch
+            print("running efetch. The stderr is in %s"%efetch_stderr)
             run_cmd("cat %s | %s -db sra --format runinfo | egrep -v '^Run' | egrep 'https' > %s 2>%s"%(esearch_outfile, efetch, efetch_outfile, efetch_stderr))
+            remove_file(efetch_stderr)
+
 
             # get into df
             SRA_runInfo_df = pd.read_csv(efetch_outfile, sep=",", header=None, names=columns_efetch)
@@ -4583,7 +4591,9 @@ def get_allWGS_runInfo_fromSRA_forDivision(fileprefix, taxID_division, reference
         columns_efetch = "Run,ReleaseDate,LoadDate,spots,bases,spots_with_mates,avgLength,size_MB,AssemblyName,download_path,Experiment,LibraryName,LibraryStrategy,LibrarySelection,LibrarySource,LibraryLayout,InsertSize,InsertDev,Platform,Model,SRAStudy,BioProject,Study_Pubmed_id,ProjectID,Sample,BioSample,SampleType,TaxID,ScientificName,SampleName,g1k_pop_code,source,g1k_analysis_group,Subject_ID,Sex,Disease,Tumor,Affection_Status,Analyte_Type,Histological_Type,Body_Site,CenterName,Submission,dbgap_study_accession,Consent,RunHash,ReadHash".split(",")
 
         # get the esearch
+        print("running esearch. The stderr is in %s"%esearch_stderr)
         run_cmd("%s -db sra -query '%s' > %s 2>%s"%(esearch, esearch_query, esearch_outfile, esearch_stderr))
+        remove_file(esearch_stderr)
 
         # get the number of rows
         nresults = [int(l.split("<Count>")[1].split("<")[0]) for l in open(esearch_outfile, "r").readlines() if "<Count>" in l and "</Count>" in l][0]
@@ -4593,7 +4603,9 @@ def get_allWGS_runInfo_fromSRA_forDivision(fileprefix, taxID_division, reference
         else:
 
             # run efetch
+            print("running efetch. The stderr is in %s"%efetch_stderr)
             run_cmd("cat %s | %s -db sra --format runinfo | egrep -v '^Run' | egrep 'https' > %s 2>%s"%(esearch_outfile, efetch, efetch_outfile, efetch_stderr))
+            remove_file(efetch_stderr)
 
             # get into df
             SRA_runInfo_df = pd.read_csv(efetch_outfile, sep=",", header=None, names=columns_efetch)
@@ -4662,7 +4674,10 @@ def get_allWGS_runInfo_fromSRA_forTaxIDs(fileprefix, taxIDs, reference_genome, r
         columns_efetch = "Run,ReleaseDate,LoadDate,spots,bases,spots_with_mates,avgLength,size_MB,AssemblyName,download_path,Experiment,LibraryName,LibraryStrategy,LibrarySelection,LibrarySource,LibraryLayout,InsertSize,InsertDev,Platform,Model,SRAStudy,BioProject,Study_Pubmed_id,ProjectID,Sample,BioSample,SampleType,TaxID,ScientificName,SampleName,g1k_pop_code,source,g1k_analysis_group,Subject_ID,Sex,Disease,Tumor,Affection_Status,Analyte_Type,Histological_Type,Body_Site,CenterName,Submission,dbgap_study_accession,Consent,RunHash,ReadHash".split(",")
 
         # if there are no runs, it will run an error
-        run_cmd("%s -db sra -query '%s' | %s -db sra --format runinfo | egrep -v '^Run' | egrep 'https' > %s"%(esearch, esearch_query, efetch, efetch_outfile))
+        esearch_efetch_stderr = "%s.generating.stderr"%efetch_outfile
+        print("Querying the SRA database. This will throw an error if there are no results. The stderr is in %s"%esearch_efetch_stderr)
+        run_cmd("%s -db sra -query '%s' | %s -db sra --format runinfo | egrep -v '^Run' | egrep 'https' > %s 2>%s"%(esearch, esearch_query, efetch, efetch_outfile, esearch_efetch_stderr))
+        remove_file(esearch_efetch_stderr)
 
         SRA_runInfo_df = pd.read_csv(efetch_outfile, sep=",", header=None, names=columns_efetch)
 
@@ -4716,6 +4731,9 @@ def download_srr_subsetReads_onlyFastqDump(srr, download_dir, subset_n_reads=100
     reads1 = "%s/%s_1.fastq.gz"%(download_dir, srr)
     reads2 = "%s/%s_2.fastq.gz"%(download_dir, srr)
 
+    # define the std
+    fastqdump_std = "%s/std.txt"%download_dir_tmp
+
     for Itry in range(3):
 
         if file_is_empty(reads1) or file_is_empty(reads2):
@@ -4725,7 +4743,7 @@ def download_srr_subsetReads_onlyFastqDump(srr, download_dir, subset_n_reads=100
             make_folder(download_dir_tmp)
 
             # run dump
-            fastqdump_std = "%s/std.txt"%download_dir_tmp
+            print("running fastqdump. The std is in %s"%fastqdump_std)
             fastqdump_cmd = "%s --split-3 --gzip --maxSpotId %i --outdir %s %s > %s 2>&1"%(fastqdump, subset_n_reads, download_dir_tmp, srr, fastqdump_std)
             
             try:
@@ -4736,66 +4754,11 @@ def download_srr_subsetReads_onlyFastqDump(srr, download_dir, subset_n_reads=100
 
             except: print("fastqdump did not work this time. Retrying up to 3 times")
 
-
     if any([file_is_empty(x) for x in [reads1, reads2]]): raise ValueError("You could not download properly %s. Try running again"%srr)
 
+    remove_file(fastqdump_std)
+
     return reads1, reads2
-
-def run_freebayes_for_chromosome(chromosome_id, outvcf_folder, ref, sorted_bam, ploidy, coverage, replace, pooled_sequencing):
-
-    """Takes a chromosome ID and the fasta file and an outvcf and runs freebayes on it"""
-
-    # define the output vcf file
-    outvcf = "%s/%s_freebayes.vcf"%(outvcf_folder, chromosome_id); outvcf_tmp = "%s.tmp.vcf"%outvcf
-    #print("running freebayes for %s"%chromosome_id)
-
-    # remove previously existing files
-    if file_is_empty(outvcf) or replace is True:
-        remove_file(outvcf_tmp)
-
-        """
-        optional removal of bam file
-        # generate the bam file for this chromosome (and index)
-        sorted_bam_chr = "%s.%s.bam"%(sorted_bam, chromosome_id)
-        run_cmd("%s view -b %s %s > %s"%(samtools, sorted_bam, chromosome_id, sorted_bam_chr))
-        run_cmd("%s index -@ 1 %s"%(samtools, sorted_bam_chr))
-
-        """
-
-        # map each chromosome to a length
-        chr_to_len = get_chr_to_len(ref)
-
-        # get the fasta for the chromosome
-        fasta_chromosome = "%s.%s.fasta"%(ref, chromosome_id)
-        SeqIO.write([seq for seq in SeqIO.parse(ref, "fasta") if seq.id==chromosome_id], fasta_chromosome, "fasta")
-
-        # run freebayes
-        freebayes_std = "%s.std"%outvcf_tmp
-        print("running freebayes with STD %s"%freebayes_std)
-
-        # define the region
-        region = "%s:0-%i"%(chromosome_id, chr_to_len[chromosome_id])
-
-        if pooled_sequencing is True:
-            print("running for pooled data")
-            run_cmd("%s -f %s --haplotype-length -1 --use-best-n-alleles 20 --min-alternate-count %i --min-alternate-fraction 0 --pooled-continuous -b %s -v %s --region %s > %s 2>&1"%(freebayes, fasta_chromosome, coverage, sorted_bam, outvcf_tmp, region, freebayes_std))
-        else: 
-            print("running unpooled sequencing")
-            run_cmd("%s -f %s -p %i --min-coverage %i -b %s --haplotype-length -1 -v %s --region %s > %s 2>&1"%(freebayes, fasta_chromosome, ploidy, coverage, sorted_bam, outvcf_tmp, region, freebayes_std))
-
-        # remove the intermediate files
-        #print("%s exists %s"%(fasta_chromosome, str(file_is_empty(fasta_chromosome))))
-        remove_file(fasta_chromosome); remove_file("%s.fai"%fasta_chromosome); remove_file(freebayes_std)
-
-        #remove_file(sorted_bam_chr); remove_file("%s.bai"%sorted_bam_chr); remove_file(fasta_chromosome); remove_file("%s.fai"%fasta_chromosome); remove_file(freebayes_std)
-
-        # rename
-        os.rename(outvcf_tmp, outvcf)
-
-    # return the vcfs
-    return outvcf
-
-
 
 def run_freebayes_for_region(region, outvcf_folder, ref, sorted_bam, ploidy, coverage, replace, pooled_sequencing):
 
@@ -5070,7 +5033,10 @@ def run_freebayes_parallel_regions(outdir_freebayes, ref, sorted_bam, ploidy, co
         # define the regions file
         window_fb = 10000
         regions_file = "%s/regions_genome_%ibp.tab"%(outdir_freebayes, window_fb)
-        run_cmd("%s %s.fai %i > %s"%(fasta_generate_regions_py, ref, window_fb, regions_file))
+        regions_file_stderr = "%s.generating.stderr"%regions_file
+        print("getting regions for freebayes run in parallel. The stderr is in %s"%regions_file_stderr)
+        run_cmd("%s %s.fai %i > %s 2>%s"%(fasta_generate_regions_py, ref, window_fb, regions_file, regions_file_stderr))
+        remove_file(regions_file_stderr)
         regions = [l.strip() for l in open(regions_file, "r").readlines()]
 
         # remove the previous tmp file
@@ -5139,107 +5105,16 @@ def run_freebayes_parallel_regions(outdir_freebayes, ref, sorted_bam, ploidy, co
         if pooled_sequencing is True: soft_link_files(freebayes_output, freebayes_filtered)
         else:
 
-            #print("filtering freebayes")
-            cmd_filter_fb = '%s -f "QUAL > 1 & QUAL / AO > 10 & SAF > 0 & SAR > 0 & RPR > 1 & RPL > 1" --tag-pass PASS %s > %s'%(vcffilter, freebayes_output, freebayes_filtered_tmp); run_cmd(cmd_filter_fb)
+            filtering_stderr = "%s.generating.stderr"%freebayes_filtered_tmp
+            print("filtering freebayes. The stderr is in %s"%filtering_stderr)
+            cmd_filter_fb = '%s -f "QUAL > 1 & QUAL / AO > 10 & SAF > 0 & SAR > 0 & RPR > 1 & RPL > 1" --tag-pass PASS %s > %s 2>%s'%(vcffilter, freebayes_output, freebayes_filtered_tmp, filtering_stderr); run_cmd(cmd_filter_fb)
+            remove_file(filtering_stderr)
             os.rename(freebayes_filtered_tmp, freebayes_filtered)
 
     return freebayes_filtered
 
-def run_freebayes_parallel(outdir_freebayes, ref, sorted_bam, ploidy, coverage, threads=4, max_threads=8, replace=False, pooled_sequencing=False):
-
-    """It parallelizes over the current CPUs of the system"""
-
-    # make the dir if not already done
-    if not os.path.isdir(outdir_freebayes): os.mkdir(outdir_freebayes)
-
-    #run freebayes
-    freebayes_output ="%s/output.raw.vcf"%outdir_freebayes; freebayes_output_tmp = "%s.tmp"%freebayes_output
-    if file_is_empty(freebayes_output) or replace is True:
-
-        #print("running freebayes in parallel with %i threads"%(multiproc.cpu_count()))
-
-        # define the chromosomes
-        all_chromosome_IDs = [seq.id for seq in SeqIO.parse(ref, "fasta")]
-
-        # remove the previous tmp file
-        if not file_is_empty(freebayes_output_tmp): os.unlink(freebayes_output_tmp)
-
-        # initialize the pool class with the available CPUs --> this is asyncronous parallelization
-        threads = min([max_threads, threads])
-        with multiproc.Pool(threads) as pool:
-
-            # make a dir to store the vcfs
-            chromosome_vcfs_dir = "%s/chromosome_vcfs"%outdir_freebayes; make_folder(chromosome_vcfs_dir)
-
-            # run in parallel the freebayes generation for all the 
-            chromosomal_vcfs = pool.starmap(run_freebayes_for_chromosome, [(ID, chromosome_vcfs_dir, ref, sorted_bam, ploidy, coverage, replace, pooled_sequencing) for ID in all_chromosome_IDs])
-
-            # close the pool
-            pool.close()
-            pool.terminate()
 
 
-        # go through each of the chromosomal vcfs and append to a whole df
-        all_df = pd.DataFrame()
-        all_header_lines = []
-        for vcf in chromosomal_vcfs:
-
-            # load the df keeping the header lines
-            header_lines = [l for l in open(vcf, "r") if l.startswith("##")]
-            df = pd.read_csv(vcf, sep="\t", header = len(header_lines))
-
-            # define the vcf header
-            vcf_header = ["#CHROM", "POS", "ID", "REF", "ALT", "QUAL", "FILTER", "INFO", "FORMAT"]
-            sample_header = [c for c in df.columns if c not in vcf_header][0]
-            vcf_header.append(sample_header)
-
-            # keep header that is unique
-            all_header_lines.append("".join([line for line in header_lines if line.split("=")[0] not in {"##reference", "##commandline", "##fileDate"}]))
-            
-            # append to the previous df
-            all_df = all_df.append(df[vcf_header], sort=True)
-
-        # check that all headers are the same
-        if len(set(all_header_lines))!=1: 
-            print("These are the header lines: ", set(all_header_lines))
-            print("There are %i unique headers"%len(set(all_header_lines)))
-            raise ValueError("Not all headers are the same in the individual chromosomal vcfs. This may indicate a problem with parallelization of freebayes")
-
-        # write the file
-        open(freebayes_output_tmp, "w").write(all_header_lines[0] + all_df[vcf_header].to_csv(sep="\t", index=False, header=True))
-
-        # remove tmp vcfs
-        delete_folder(chromosome_vcfs_dir)
-
-        # rename
-        os.rename(freebayes_output_tmp, freebayes_output)
-
-    # filter the freebayes by quality
-    freebayes_filtered = "%s/output.filt.vcf"%outdir_freebayes; freebayes_filtered_tmp = "%s.tmp"%freebayes_filtered
-    if file_is_empty(freebayes_filtered) or replace is True:
-
-        if pooled_sequencing is True: soft_link_files(freebayes_output, freebayes_filtered)
-        else:
-
-            #print("filtering freebayes")
-            cmd_filter_fb = '%s -f "QUAL > 1 & QUAL / AO > 10 & SAF > 0 & SAR > 0 & RPR > 1 & RPL > 1" --tag-pass PASS %s > %s'%(vcffilter, freebayes_output, freebayes_filtered_tmp); run_cmd(cmd_filter_fb)
-            os.rename(freebayes_filtered_tmp, freebayes_filtered)
-
-    return freebayes_filtered
-
-def run_freebayes_withoutFiltering(outdir_freebayes, ref, sorted_bam, ploidy, threads, coverage, replace=False):
-
-    # make the dir if not already done
-    make_folder(outdir_freebayes)
-
-    #run freebayes
-    freebayes_output ="%s/output.raw.vcf"%outdir_freebayes; freebayes_output_tmp = "%s.tmp"%freebayes_output
-    if file_is_empty(freebayes_output) or replace is True:
-        #print("running freebayes")
-        cmd_freebayes = "%s -f %s -p %i --min-coverage %i -b %s --haplotype-length -1 -v %s"%(freebayes, ref, ploidy, coverage, sorted_bam, freebayes_output_tmp); run_cmd(cmd_freebayes)
-        os.rename(freebayes_output_tmp, freebayes_output)
-
-    return freebayes_output
 
 def get_set_adapter_fastqc_report(fastqc_report):
 
@@ -5344,122 +5219,6 @@ def run_porechop(raw_reads, replace=False, threads=4):
 
     return trimmed_reads
 
-def get_SNPs_from_bam(sorted_bam, outdir, reference_genome, replace=False, threads=4):
-
-    """Runs freebayes on the sorted bam and returns a set with the SNPs found with a fast freebayes for ploidy 1"""
-
-    make_folder(outdir)
-
-    # read calling with freebayes
-    vcf = run_freebayes_withoutFiltering(outdir, reference_genome, sorted_bam, 1, threads, 2, replace=replace)
-
-    # get the vcf as a df
-    df = pd.read_csv(vcf, skiprows=list(range(len([line for line in open(vcf, "r", encoding='utf-8', errors='ignore') if line.startswith("##")]))), sep="\t", na_values=vcf_strings_as_NaNs, keep_default_na=False)
-
-
-    # kepp only snps
-    df["is_snp"] = (df.REF.isin({"A", "C", "T", "G"})) & (df.ALT.isin({"A", "C", "T", "G"}))
-    df  = df[df["is_snp"]]
-
-    # add the var
-    df["variant"] = df["#CHROM"] + "_" + df.POS.apply(str) + "_" + df.REF + "_" + df.ALT
-
-    return set(df.variant)
-
-def getSNPs_for_SRR(srr, reference_genome, outdir, subset_n_reads=100000, threads=1, replace=False):
-
-    """This function runs fast SNP calling for an SRR, saving data into outdir an srr. It returns the path to the VCF file. By default it runs on one core"""
-
-
-    start_time = time.time()
-
-    print("running getSNPs_for_SRR for %i reads "%subset_n_reads)
-
-    # make the outdir 
-    make_folder(outdir)
-
-    # first get the reads into a downloading dir
-    reads_dir = "%s/reads_dir"%outdir
-    #print("downloading fastq files")
-    reads1, reads2 = download_srr_subsetReads_onlyFastqDump(srr, reads_dir, subset_n_reads=subset_n_reads)
-
-    # get the trimmed reads
-    #print("running trimmomatic")
-    trimmed_reads1, trimmed_reads2 = run_trimmomatic(reads1, reads2, replace=replace, threads=threads)
-
-    # get the aligned reads
-    #print("running bwa mem")
-    bamfile = "%s/aligned_reads.bam"%outdir
-    sorted_bam = "%s.sorted"%bamfile
-    index_bam = "%s.bai"%sorted_bam
-
-    run_bwa_mem(trimmed_reads1, trimmed_reads2, reference_genome, outdir, bamfile, sorted_bam, index_bam, srr, threads=threads, replace=replace)
-
-    # get the SNPs
-    #print("getting SNPs ")
-    snps_set = get_SNPs_from_bam(sorted_bam, outdir, reference_genome, replace=replace, threads=threads)
-
-    # define the parallel running of mosdepth 
-    if threads==1: run_in_parallel=False
-    else: run_in_parallel = True
-
-    # get the coverage df
-    coverage_df =  pd.read_csv(generate_coverage_per_window_file_parallel(reference_genome, outdir, sorted_bam, windows_file="none", replace=replace, run_in_parallel=run_in_parallel), sep="\t")
-
-    # define stats
-    mean_coverage = np.mean(coverage_df.mediancov_1)
-    fraction_genome_covered = np.mean(coverage_df.percentcovered_1)/100
-
-    #print("The mean coverage for %s is %.3f for windows of %ibp"%(srr, mean_coverage, window_l))
-    #print("The mean fraction coverage for %s is %.3f for windows of %ibp"%(srr, fraction_genome_covered, window_l))
-    #print(coverage_df)
-
-
-    #print("--- the running of getSNPs_for_SRR took %s seconds in %i cores for a mean_coverage=%.3f ---"%(time.time() - start_time, threads, mean_coverage))
-
-
-    return snps_set, mean_coverage, fraction_genome_covered
-
-
-def get_vcf_and_coverage_for_reads(reads1, reads2, reference_genome, outdir, ploidy, threads=4, replace=False):
-
-    """This function runs GATK without coverage filtering for some reads and mosdepth to return a vcf with SNPs   """
-
-    # get the trimmed reads
-    #print("running trimmomatic")
-    trimmed_reads1, trimmed_reads2 = run_trimmomatic(reads1, reads2, replace=replace, threads=threads)
-
-    # get the aligned reads
-    #print("running bwa mem")
-    bamfile = "%s/aligned_reads.bam"%outdir
-    sorted_bam = "%s.sorted"%bamfile
-    index_bam = "%s.bai"%sorted_bam
-
-    run_bwa_mem(trimmed_reads1, trimmed_reads2, reference_genome, outdir, bamfile, sorted_bam, index_bam, "nameSample", threads=threads, replace=replace)
-
-    # get the variants vcf
-    
-    # run freebayes
-    outdir_freebayes = "%s/freebayes_ploidy%i_out"%(outdir, ploidy)
-    vcf =  run_freebayes_parallel(outdir_freebayes, reference_genome, sorted_bam, ploidy, 1, replace=replace) 
-
-    # define the parallel running of mosdepth 
-    if threads==1: run_in_parallel=False
-    else: run_in_parallel = True
-
-    # get the coverage df
-    coverage_df =  pd.read_csv(generate_coverage_per_window_file_parallel(reference_genome, outdir, sorted_bam, windows_file="none", replace=replace, run_in_parallel=True), sep="\t")
-
-    # define stats
-    mean_coverage = np.mean(coverage_df.mediancov_1)
-    fraction_genome_covered = np.mean(coverage_df.percentcovered_1)/100
-
-    #print("The mean coverage is %.3f for windows of %ibp"%(mean_coverage, window_l))
-    #print("The mean fraction coverage for is %.3f for windows of %ibp"%(fraction_genome_covered, window_l))
-
-    return vcf, mean_coverage, fraction_genome_covered
-
-
 def get_coverage_for_reads(reads1, reads2, reference_genome, outdir, threads=4, replace=False):
 
     """This function runs the coverage calculation for sets of reads """
@@ -5513,14 +5272,6 @@ def get_sorted_bam_for_untrimmed_reads(reads1, reads2, reference_genome, outdir,
 
 
 
-def get_fraction_differing_positions_AvsB(snpsA, snpsB, length_genome):
-
-    """Takes two sets of SNPs and returns the fraction of variable positions in the genome"""
-
-    fraction_different_positions = max([len(snpsA.difference(snpsB)), len(snpsB.difference(snpsA))]) / length_genome
-
-    return fraction_different_positions
-
 def get_fraction_readPairsMapped(bamfile, replace=False, threads=4):
 
     """Returns the fraction of reads mappend for a bam file"""
@@ -5535,172 +5286,6 @@ def get_fraction_readPairsMapped(bamfile, replace=False, threads=4):
     else: fraction_mapped = [float(l.split("mapped (")[1].split("%")[0])/100 for l in open(flagstat_file, "r").readlines() if "mapped (" in l][0]
 
     return fraction_mapped
-
-def get_SRA_runInfo_df_with_sampleID(SRA_runInfo_df, reference_genome, outdir, replace=False, threads=4, SNPthreshold=0.0001, coverage_subset_reads=10):
-
-    """This function takes an SRA_runInfo_df and adds the sampleID. samples with the sample sampleID are those that have less tha SNPthreshold fraction of positions of the reference genome with SNPs. By default it is 0.01%. """
-
-    make_folder(outdir)
-
-    # change index
-    SRA_runInfo_df = SRA_runInfo_df.set_index("Run", drop=False)
-
-    # calculate the length of the genome
-    length_genome = sum(get_chr_to_len(reference_genome).values())
-
-    # add the subset_n_reads depending on the coverage and the read length
-    SRA_runInfo_df["subset_n_reads"] = (length_genome*coverage_subset_reads / SRA_runInfo_df.avgLength).apply(int)
-
-    ##### GET THE SNPS AND COVERAGE #####
-
-    # get the SNPs for each run
-    inputs_getSNPs_for_SRR = [(srr, reference_genome, "%s/%s"%(outdir, srr), SRA_runInfo_df.loc[srr, "subset_n_reads"], 1, replace) for srr in SRA_runInfo_df.Run]
-
-    with multiproc.Pool(threads) as pool:
-        list_vars_and_coverage = pool.starmap(getSNPs_for_SRR, inputs_getSNPs_for_SRR)
-        pool.close()
-
-
-    # change the vars
-    list_vars = [x[0] for x in list_vars_and_coverage]
-    list_mean_coverage = [x[1] for x in list_vars_and_coverage]
-    list_fraction_genome_covered = [x[2] for x in list_vars_and_coverage]
-
-    # add to the df
-    SRA_runInfo_df["vars_set"] = list_vars
-    SRA_runInfo_df["mean_coverage"] = list_mean_coverage
-    SRA_runInfo_df["fraction_genome_covered"] = list_fraction_genome_covered
-
-    ###################################
-
-    # add the fraction of mapping reads
-    print("calculating fraction of mapped reads")
-    SRA_runInfo_df["fraction_reads_mapped"] = SRA_runInfo_df.Run.apply(lambda run: get_fraction_readPairsMapped("%s/%s/aligned_reads.bam.sorted"%(outdir, run), replace=replace, threads=threads))
-
-    # add the divergence from the reference genome
-    SRA_runInfo_df["fraction_genome_different_than_reference"] = SRA_runInfo_df.vars_set.apply(lambda x: len(x)/length_genome)
-
-    # add the fraction of reads that were maintained 
-
-    # initialize vars
-    runA_to_runB_to_fraction_different_positions = {}
-
-    # assign the  ID based on the comparison of SNPs 
-    for runA in SRA_runInfo_df.Run:
-
-        # get the snps
-        snpsA = SRA_runInfo_df.loc[runA, "vars_set"]
-
-        for runB in SRA_runInfo_df.Run:
-
-            # get the snps
-            snpsB = SRA_runInfo_df.loc[runB, "vars_set"]
-
-            # calculate the fraction of positions of the genome that are different
-            fraction_different_positions = get_fraction_differing_positions_AvsB(snpsA, snpsB, length_genome)
-            runA_to_runB_to_fraction_different_positions.setdefault(runA, {}).setdefault(runB, fraction_different_positions)
-
-
-    # get a df
-    df_divergence = pd.DataFrame(runA_to_runB_to_fraction_different_positions)
-
-    # get the clusters of IDs through a graph
-    g =  igraph.Graph(directed=False)
-    list_IDs = list(range(len(SRA_runInfo_df.Run)))
-    srr_to_ID = dict(zip(SRA_runInfo_df.Run, list_IDs))
-    ID_to_srr = dict(zip(list_IDs, SRA_runInfo_df.Run))
-    g.add_vertices(list_IDs)
-    pairs_equal_IDs = set.union(*[{tuple(sorted((srr_to_ID[runA], srr_to_ID[runB]))) for runB in SRA_runInfo_df.Run if df_divergence.loc[runA, runB]<SNPthreshold} for runA in SRA_runInfo_df.Run])
-    g.add_edges(pairs_equal_IDs)
-    clustersIDs = list(get_graph_subcomponents(g))
-
-    # map each cluster to the SRRs
-    cluster_names = list(range(len(clustersIDs)))
-    clusterName_to_srrs = {name : {ID_to_srr[ID] for ID in IDs}  for name, IDs in dict(zip(cluster_names, clustersIDs)).items()}
-    run_to_sampleID = {}
-    for clusterName, srrs in clusterName_to_srrs.items():
-        for srr in srrs: run_to_sampleID[srr] = clusterName+1
-
-    # add to the df
-    SRA_runInfo_df["sampleID"] = SRA_runInfo_df.Run.apply(lambda x: run_to_sampleID[x])
-
-    # go through each sampleID and print the sample names
-   # for s in set(SRA_runInfo_df.sampleID): print("Sample %i has these names: "%s, set(SRA_runInfo_df[SRA_runInfo_df.sampleID==s].SampleName))
-
-    # drop the vars
-    SRA_runInfo_df = SRA_runInfo_df.drop("vars_set", axis=1)
-
-    return SRA_runInfo_df, df_divergence
-
-
-
-def get_SRA_runInfo_df_with_sampleID_popStructure(SRA_runInfo_df, reference_genome, outdir, ploidy, replace=False, threads=4, coverage_subset_reads=10):
-
-    """This function takes an SRA_runInfo_df and adds the sampleID. The sampleID is defined as samples that are from the same population."""
-
-    make_folder(outdir)
-
-    # define the outdir that will store the seq data
-    seq_data_dir = "%s/seq_data"%outdir; make_folder(seq_data_dir)
-
-    # change index
-    SRA_runInfo_df = SRA_runInfo_df.set_index("Run", drop=False)
-
-    # calculate the length of the genome
-    length_genome = sum(get_chr_to_len(reference_genome).values())
-
-    # add the subset_n_reads depending on the coverage and the read length
-    SRA_runInfo_df["subset_n_reads"] = (length_genome*coverage_subset_reads / SRA_runInfo_df.avgLength).apply(int)
-
-    ###### DOWNLOAD THE SUBSET OF READS WITH FASTQDUMP ####
-
-    inputs_download_srr = [(srr, "%s/%s/reads_dir"%(seq_data_dir, srr), SRA_runInfo_df.loc[srr, "subset_n_reads"]) for srr in SRA_runInfo_df.Run]
-
-    with multiproc.Pool(threads) as pool:
-        list_reads_tuples = pool.starmap(download_srr_subsetReads_onlyFastqDump, inputs_download_srr)
-        pool.close()
-
-    #######################################################
-
-    ##### GET THE SNPs CALLED AND COVERAGE ##### 
-
-    # initialize lists
-    mean_coverage_list = []
-    fraction_genome_covered_list = []
-    vcf_list = []
-
-    # get the files
-    for I, (reads1, reads2) in enumerate(list_reads_tuples):
-        #print("working on sample %i"%I)
-
-        # define the outdir
-        srr = SRA_runInfo_df.iloc[I]["Run"]
-        outdir_srr = "%s/%s"%(seq_data_dir, srr)
-
-        vcf, mean_coverage, fraction_genome_covered = get_vcf_and_coverage_for_reads(reads1, reads2, reference_genome, outdir_srr, ploidy, threads=threads, replace=replace)
-
-        # keep
-        mean_coverage_list.append(mean_coverage)
-        fraction_genome_covered_list.append(fraction_genome_covered)
-        vcf_list.append(vcf)
-
-
-    SRA_runInfo_df["mean_coverage"] = mean_coverage_list
-    SRA_runInfo_df["fraction_genome_covered"] = fraction_genome_covered_list
-    SRA_runInfo_df["vcf"] = vcf_list
-
-    ############################################
-
-    # add the sampleID by popStructure
-    pop_structure_dir = "%s/pop_structure"%outdir; make_folder(pop_structure_dir)
-    SRA_runInfo_df = get_SRA_runInfo_df_with_populationID(SRA_runInfo_df, pop_structure_dir, replace=replace)
-
-
-    # add the fraction of mapping reads
-    print("calculating fraction of mapped reads")
-    SRA_runInfo_df["fraction_reads_mapped"] = SRA_runInfo_df.Run.apply(lambda run: get_fraction_readPairsMapped("%s/%s/aligned_reads.bam.sorted"%(seq_data_dir, run), replace=replace, threads=threads))
-
-    print(SRA_runInfo_df["fraction_reads_mapped"])
 
 
 def downsample_bamfile_keeping_pairs(bamfile, fraction_reads=0.1, replace=True, threads=4, name="sampleX", sampled_bamfile=None):
@@ -5729,107 +5314,6 @@ def downsample_bamfile_keeping_pairs(bamfile, fraction_reads=0.1, replace=True, 
     remove_file(sampled_bamfile_unedited)
 
     return sampled_bamfile
-
-
-def get_SNPs_for_a_sample_of_a_bam(sorted_bam, outdir, reference_genome, fraction_reads=0.1, replace=False, threads=4):
-
-    """This function samples a bam and gets a subsample and the SNPs on this Subsample """
-
-    print("getting SNPs")
-
-    make_folder(outdir)
-
-    # define the sampled bamfile
-    sampled_bamfile = "%s/sampled_bamfile.bam"%outdir
-    sampled_bamfile_tmp = "%s.tmp"%sampled_bamfile
-
-    if file_is_empty(sampled_bamfile) or replace is True:
-
-        remove_file(sampled_bamfile_tmp)
-
-        # get the subsampled bam
-        downsample_bamfile_keeping_pairs(sorted_bam, fraction_reads=fraction_reads, replace=replace, threads=threads, sampled_bamfile=sampled_bamfile_tmp)
-
-        os.rename(sampled_bamfile_tmp, sampled_bamfile)
-
-    # index the bam
-    index_bam = "%s.bai"%sampled_bamfile
-    if file_is_empty(index_bam) or replace is True:
-        #print("Indexing bam")
-        run_cmd("%s index -@ %i %s"%(samtools, threads, sampled_bamfile))
-
-    # get the snps
-    snps = get_SNPs_from_bam(sampled_bamfile, outdir, reference_genome, replace=replace, threads=threads)
-
-
-    #### FIND COVERAGE ####
-
-    """
-    THISISNECESSARYFORCHECKINGCOVERAGE
-
-    # define the parallel running of mosdepth 
-    if threads==1: run_in_parallel=False
-    else: run_in_parallel = True
-
-    # get the coverage df
-    coverage_df =  pd.read_csv(generate_coverage_per_window_file_parallel(reference_genome, outdir, sampled_bamfile, windows_file="none", replace=replace, run_in_parallel=run_in_parallel), sep="\t")
-
-    # define stats
-    mean_coverage = np.mean(coverage_df.mediancov_1)
-    fraction_genome_covered = np.mean(coverage_df.percentcovered_1)/100
-
-    print("The mean coverage for this bam sample is %.3f for windows of 10Kb"%(mean_coverage))
-    print("The mean fraction coverage for this bam sample is %.3f for windows of 10Kb"%(fraction_genome_covered))
-
-    """
-
-    #######################
-
-    return snps
-
-def get_fractionGenome_different_samplings_from_sorted_bam(sorted_bam, reference_genome, outdir, replace=False, threads=4, coverage_subset_reads=5, nsamples=3):
-
-    """ This function makes nsamples (of subset_n_reads each) of a sorted bam and calculates the fraction of positions of the genome that are different between the different samples. It returns the mean of all the measurements. """
-
-    make_folder(outdir)
-
-    # count number of reads
-    npairs = count_number_read_pairs(sorted_bam, replace=replace, threads=threads)
-
-    # count the read length
-    read_length = get_read_length(sorted_bam, threads=threads, replace=replace)
-
-    # get the length of the reference genome
-    length_genome = sum(get_chr_to_len(reference_genome).values())
-
-    # expected coverage
-    expected_coverage = (npairs*read_length)/length_genome
-
-    # calculate the fraction of reads that each sample should have
-    fraction_reads_per_sample = coverage_subset_reads/expected_coverage
-    print("Subsampling %.4f of reads to get %ix coverage"%(fraction_reads_per_sample, coverage_subset_reads))
-
-    # run for each sample in parallel
-    inputs_get_SNPs_for_a_sample_of_a_bam = [(sorted_bam, "%s/sample%i"%(outdir, sample), reference_genome, fraction_reads_per_sample, replace, 1) for sample in range(nsamples)]
-
-    # run in parallel
-    with multiproc.Pool(threads) as pool:
-        list_vars = pool.starmap(get_SNPs_for_a_sample_of_a_bam, inputs_get_SNPs_for_a_sample_of_a_bam)
-        pool.close()
-
-    # get the fraction of different positions
-    all_fraction_different_positions = []
-
-    # go through each combination of vars
-    for snpsA in list_vars:
-        for snpsB in list_vars:
-            if snpsA==snpsB: continue
-
-            # get the fraction of SNPs that are different
-            fraction_different_positions = get_fraction_differing_positions_AvsB(snpsA, snpsB, length_genome)
-            all_fraction_different_positions.append(fraction_different_positions) 
-
-    return max(all_fraction_different_positions)
 
 
 def download_srr_with_prefetch(srr, SRRfile, replace=False):
@@ -9198,14 +8682,6 @@ def merge_tables_into_file(list_table_files, outfile):
         for f in list_table_files: remove_file(f)
 
 
-def get_date():
-
-    """Gets the date of today"""
-
-    today = date.today()
-
-    return today.strftime("%d/%m/%Y")
-
 def makePlots_gridsss_benchmarking_oneGenome(df_benchmark, PlotsDir, plots={"histogram", "scatter_PRvsRC", "scatter_PRvsRCa_eachSVtype", "Fscore_correlation_scatter", "Fscore_correlation_mat"}):
 
     """Takes a dataframe such as the output of benchmark_GridssClove_for_knownSV and writes plots under PlotsDir, as specified in plots. These are several """
@@ -11198,8 +10674,12 @@ def get_sortedBam_with_duplicatesMarked(sorted_bam, threads=4, replace=False):
         javaRamGb = int(get_availableGbRAM()*fractionRAM_to_dedicate)
         print("running MarkDuplicates with %iGb of RAM"%javaRamGb)
 
-        run_cmd("%s -Xmx%ig MarkDuplicates I=%s O=%s M=%s"%(picard_exec, javaRamGb, sorted_bam, sorted_bam_dupMarked_tmp, sorted_bam_dupMarked_metrics))
+        markduplicates_std = "%s.markingDuplicates.std"%sorted_bam
+
+        run_cmd("%s -Xmx%ig MarkDuplicates I=%s O=%s M=%s > %s 2>&1"%(picard_exec, javaRamGb, sorted_bam, sorted_bam_dupMarked_tmp, sorted_bam_dupMarked_metrics, markduplicates_std))
         #REMOVE_DUPLICATES=Boolean
+
+        remove_file(markduplicates_std)
 
         # keep
         os.rename(sorted_bam_dupMarked_tmp, sorted_bam_dupMarked)
@@ -11778,9 +11258,11 @@ def get_normed_bgzip_and_tabix_vcf_file(file, reference_genome, replace=False, t
         run_cmd("%s sort -header -i %s > %s"%(bedtools, file, sorted_vcf))
 
         # normalise with bcftools
-        print("normalising vcf")
-        run_bcftools_latest("norm --check-ref ws --fasta-ref %s --multiallelics %s -o %s --output-type v --threads %i %s"%( reference_genome, multiallelics_cmd, normed_vcf_tmp, threads, file))
+        normalising_vcf_std = "%s.std"%normed_vcf_tmp
+        print("normalising vcf. STD can be found in %s"%normalising_vcf_std)
+        run_bcftools_latest("norm --check-ref ws --fasta-ref %s --multiallelics %s -o %s --output-type v --threads %i %s > %s 2>&1"%( reference_genome, multiallelics_cmd, normed_vcf_tmp, threads, file, normalising_vcf_std))
         os.rename(normed_vcf_tmp, normed_vcf)
+        remove_file(normalising_vcf_std)
 
         # bgzip
         print("bgzipping")
