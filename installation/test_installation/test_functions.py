@@ -274,6 +274,8 @@ def test_gridss_clove_pipeline(sorted_bam, reference_genome, outdir, threads=thr
     # define the median coverage (to be recalculated)
     median_coverage = -1
 
+    print("running gridss+clove pipeline on %i threads"%threads)
+    
     SV_dict, df_gridss = fun.run_gridssClove_given_filters(sorted_bam, reference_genome, outdir, median_coverage, replace=replace, threads=threads, gridss_blacklisted_regions="", gridss_VCFoutput="", gridss_maxcoverage=50000, median_insert_size=250, median_insert_size_sd=25, gridss_filters_dict=fun.default_filtersDict_gridss, run_in_parallel=True, max_rel_coverage_to_consider_del=0.2, min_rel_coverage_to_consider_dup=1.8, replace_FromGridssRun=replace)
 
     print("you could run the gridss + clove pipeline succesfully")

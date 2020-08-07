@@ -28,11 +28,11 @@ You may need to install some extra dependencies to compile Ninja with `make`. At
 
 Download the perSVade source code from one of the releases and decompress. For example:
 
-`wget https://github.com/Gabaldonlab/perSVade/releases/download/v0.3/perSVade-v0.3.tar.gz`
+`wget https://github.com/Gabaldonlab/perSVade/releases/download/v0.4/perSVade_v0.4.tar.gz`
 
-`tar -xvf perSVade-v0.3.tar.gz; rm perSVade-v0.3.tar.gz`
+`tar -xvf perSVade_v0.4.tar.gz; rm perSVade_v0.4.tar.gz`
 
-`cd perSVade-v0.3`
+`cd perSVade_v0.4`
 
 This already contains all the scripts to run the pipeline. 
 

@@ -124,7 +124,7 @@ if not opt.gff is None:
 
     if fun.file_is_empty(correct_gff) or opt.replace is True:
         print("correcting gff")
-        correct_gff_cmd = "grep -v '^#' %s > %s"%(opt.gff, correct_gff_tmp); fun.run_cmd(correct_gff_cmd)
+        correct_gff_cmd = "egrep -v '^#' %s > %s"%(opt.gff, correct_gff_tmp); fun.run_cmd(correct_gff_cmd)
         os.rename(correct_gff_tmp, correct_gff)
 
     # modify gff to add biotype

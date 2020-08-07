@@ -139,9 +139,11 @@ clove = "%s/clove-0.17-jar-with-dependencies.jar"%external_software
 gztool = "%s/gztool"%external_software
 
 # define the bcftools=1.10 by activating the conda env
-SOURCE_CONDA_CMD = "source %s/etc/profile.d/conda.sh"%CondaDir
+#SOURCE_CONDA_CMD = "source %s/etc/profile.d/conda.sh"%CondaDir
 # CONDA_ACTIVATING_CMD = "conda activate %s;"%EnvName
-bcftools_latest = "%s && conda activate %s_bcftools_1.10.2_env && bcftools"%(SOURCE_CONDA_CMD, EnvName)
+#bcftools_latest = "%s && conda activate %s_bcftools_1.10.2_env && bcftools"%(SOURCE_CONDA_CMD, EnvName)
+#bcftools_latest_cmd = "%s && conda activate %s_bcftools_1.10.2_env && bcftools"%(SOURCE_CONDA_CMD, EnvName)
+
 
 # scripts that are of this pipeline
 create_random_simulatedSVgenome_R = "%s/create_random_simulatedSVgenome.R"%CWD
@@ -398,8 +400,24 @@ def run_cmd(cmd):
 
     """Runs a cmd under the VarCall_CNV_env environment, as defined in CONDA_ACTIVATING_CMD"""
 
-    out_stat = os.system(cmd); 
+    # define the way to export the path to be first the EnvDir
+    #path_definition_cmd = "export PATH=%s/bin:$PATH"%EnvDir
+    #cmd_to_run = "%s && %s"%(path_definition_cmd, cmd) # the cmd with the path definition
+    cmd_to_run = cmd # the raw cmd
+    out_stat = os.system(cmd_to_run) 
     if out_stat!=0: raise ValueError("\n%s\n did not finish correctly. Out status: %i"%(cmd, out_stat))
+
+
+def run_bcftools_latest(kwargs):
+
+    """This funcion runs bcftools 1.10.2 with the provided kwargs"""
+
+    # define the cmds
+    SOURCE_CONDA_CMD = "source %s/etc/profile.d/conda.sh"%CondaDir
+    bcftools_cmd = "%s && conda activate %s_bcftools_1.10.2_env && bcftools"%(SOURCE_CONDA_CMD, EnvName)
+
+    # define the running
+    run_cmd("bash -c '%s %s'"%(bcftools_cmd, kwargs))
 
 def get_dir(filename): return "/".join(filename.split("/")[0:-1])
 
@@ -2378,7 +2396,7 @@ def get_coverage_per_window_for_chromosomeDF(chromosome_id, destination_dir, win
 
     # define a file for the coverage
     windows_bed_chromsome = "%s.%s.%s.bed"%(windows_bed, chromosome_id, randID)
-    run_cmd("grep $'%s\t' %s > %s"%(chromosome_id, windows_bed, windows_bed_chromsome))
+    run_cmd("egrep '%s\t' %s > %s"%(chromosome_id, windows_bed, windows_bed_chromsome))
 
     # if there is nothing, return an empty df
     bamstats_fields = ["#chrom", "start", "end", "length", "mediancov_1", "nocoveragebp_1", "percentcovered_1"]
@@ -2676,11 +2694,11 @@ def run_gridss_and_annotateSimpleType(sorted_bam, reference_genome, outdir, repl
                 jvmheap = "%ig"%min([31, int(allocated_ram)]) # this is automatically adjusted for the given machine. Note that due to Java's use of Compressed Oops, specifying a max heap size of between 32-48GB effectively reduces the memory available to GRIDSS so is strongly discouraged.
 
                 # define the maxiumum number of threads so that each thread has 8Gb of ram (jvmheap)
-                max_threads = int(allocated_ram/8 - 1) 
+                max_threads = max([1, int(allocated_ram/8 - 1)]) 
                 if threads>max_threads: threads =  max_threads # this is to optimise for the reccommended level of parallelism
 
                 # run
-                print("running gridss on %s jvmheap"%jvmheap)
+                print("running gridss on %s jvmheap and %i threads"%(jvmheap, threads))
 
                 gridss_cmd = "%s --jar %s --reference %s -o %s --assembly %s --threads %i --workingdir %s --maxcoverage %i --blacklist %s --jvmheap %s %s"%(gridss_run, gridss_jar, reference_genome, gridss_VCFoutput, gridss_assemblyBAM, threads, gridss_tmpdir, maxcoverage, blacklisted_regions, jvmheap, sorted_bam_renamed)
                 if gridss_std!="stdout": gridss_cmd += " > %s 2>&1"%gridss_std
@@ -4494,7 +4512,7 @@ def get_allOxfordNanopore_runInfo_fromSRA_forDivision(fileprefix, taxID_division
         else:
 
             # run efetch
-            run_cmd("cat %s | %s -db sra --format runinfo | grep -v '^Run' | grep 'https' > %s 2>%s"%(esearch_outfile, efetch, efetch_outfile, efetch_stderr))
+            run_cmd("cat %s | %s -db sra --format runinfo | egrep -v '^Run' | egrep 'https' > %s 2>%s"%(esearch_outfile, efetch, efetch_outfile, efetch_stderr))
 
             # get into df
             SRA_runInfo_df = pd.read_csv(efetch_outfile, sep=",", header=None, names=columns_efetch)
@@ -4575,7 +4593,7 @@ def get_allWGS_runInfo_fromSRA_forDivision(fileprefix, taxID_division, reference
         else:
 
             # run efetch
-            run_cmd("cat %s | %s -db sra --format runinfo | grep -v '^Run' | grep 'https' > %s 2>%s"%(esearch_outfile, efetch, efetch_outfile, efetch_stderr))
+            run_cmd("cat %s | %s -db sra --format runinfo | egrep -v '^Run' | egrep 'https' > %s 2>%s"%(esearch_outfile, efetch, efetch_outfile, efetch_stderr))
 
             # get into df
             SRA_runInfo_df = pd.read_csv(efetch_outfile, sep=",", header=None, names=columns_efetch)
@@ -4644,7 +4662,7 @@ def get_allWGS_runInfo_fromSRA_forTaxIDs(fileprefix, taxIDs, reference_genome, r
         columns_efetch = "Run,ReleaseDate,LoadDate,spots,bases,spots_with_mates,avgLength,size_MB,AssemblyName,download_path,Experiment,LibraryName,LibraryStrategy,LibrarySelection,LibrarySource,LibraryLayout,InsertSize,InsertDev,Platform,Model,SRAStudy,BioProject,Study_Pubmed_id,ProjectID,Sample,BioSample,SampleType,TaxID,ScientificName,SampleName,g1k_pop_code,source,g1k_analysis_group,Subject_ID,Sex,Disease,Tumor,Affection_Status,Analyte_Type,Histological_Type,Body_Site,CenterName,Submission,dbgap_study_accession,Consent,RunHash,ReadHash".split(",")
 
         # if there are no runs, it will run an error
-        run_cmd("%s -db sra -query '%s' | %s -db sra --format runinfo | grep -v '^Run' | grep 'https' > %s"%(esearch, esearch_query, efetch, efetch_outfile))
+        run_cmd("%s -db sra -query '%s' | %s -db sra --format runinfo | egrep -v '^Run' | egrep 'https' > %s"%(esearch, esearch_query, efetch, efetch_outfile))
 
         SRA_runInfo_df = pd.read_csv(efetch_outfile, sep=",", header=None, names=columns_efetch)
 
@@ -11493,11 +11511,11 @@ def get_PASS_vcf(vcf, replace=False):
 
         # get the vcf lines with PASS
         linesPASS = "%s.PASSvcflines"%vcf
-        run_cmd("grep $'\tPASS\t' %s | grep -v '^#' > %s"%(vcf, linesPASS))
+        run_cmd("egrep '\tPASS\t' %s | egrep -v '^#' > %s"%(vcf, linesPASS))
 
         # get the header
         header = "%s.header"%vcf
-        run_cmd("grep '^#' %s > %s"%(vcf, header))
+        run_cmd("egrep '^#' %s > %s"%(vcf, header))
         
         # merge into the tmp
         run_cmd("cat %s %s > %s"%(header, linesPASS, pass_vcf_tmp))
@@ -11661,13 +11679,13 @@ def get_vcf_with_joined_multialleles_diploid(input_vcf, output_vcf, reference_ge
 
         # get the processed input
         input_vcf_only_knownGT = "%s.only_knownGT.vcf"%input_vcf
-        run_cmd("grep  $'\tknown_GT\t\|^#' %s > %s"%(input_vcf, input_vcf_only_knownGT))
+        run_cmd("egrep  '(\tknown_GT\t)|(^#)' %s > %s"%(input_vcf, input_vcf_only_knownGT))
 
         # run the joining
         joining_std = "%s.joining.std"%input_vcf_only_knownGT
-        run_cmd("%s norm --check-ref ws --fasta-ref %s --multiallelics +any -o %s --output-type v --threads %i %s > %s 2>&1"%(bcftools_latest, reference_genome, output_vcf_tmp, threads, input_vcf_only_knownGT, joining_std))
-        
 
+        run_bcftools_latest("norm --check-ref ws --fasta-ref %s --multiallelics +any -o %s --output-type v --threads %i %s > %s 2>&1"%(reference_genome, output_vcf_tmp, threads, input_vcf_only_knownGT, joining_std))
+        
         # check that none were changed
         if any([set(l.split()[2].split("/")[1:])!={"0"} for l in open(joining_std, "r").readlines() if "total/split/realigned/skipped" in l]): raise ValueError("some variants changed the format in bcftools norm, which is likely a bug")
 
@@ -11726,7 +11744,7 @@ def get_vcf_with_joined_multialleles_diploid(input_vcf, output_vcf, reference_ge
 
         # define the header lines
         header_lines_file = "%s.header_lines.txt"%output_vcf_tmp
-        run_cmd("grep '^#' %s > %s"%(output_vcf_tmp, header_lines_file))
+        run_cmd("egrep '^#' %s > %s"%(output_vcf_tmp, header_lines_file))
 
         # get the final vcf
         run_cmd("cat %s %s > %s"%(header_lines_file, vcf_lines_file, output_vcf_tmp))
@@ -11761,7 +11779,7 @@ def get_normed_bgzip_and_tabix_vcf_file(file, reference_genome, replace=False, t
 
         # normalise with bcftools
         print("normalising vcf")
-        run_cmd("%s norm --check-ref ws --fasta-ref %s --multiallelics %s -o %s --output-type v --threads %i %s"%(bcftools_latest, reference_genome, multiallelics_cmd, normed_vcf_tmp, threads, file))
+        run_bcftools_latest("norm --check-ref ws --fasta-ref %s --multiallelics %s -o %s --output-type v --threads %i %s"%( reference_genome, multiallelics_cmd, normed_vcf_tmp, threads, file))
         os.rename(normed_vcf_tmp, normed_vcf)
 
         # bgzip
@@ -12355,7 +12373,7 @@ def run_vep_parallel(vcf, reference_genome, gff_with_biotype, mitochondrial_chro
             print("compressing gff before running vep in parallel")
 
             # eliminate strange lines,chromosomes and compress
-            run_cmd("%s sort -i %s | egrep -v '^#' | egrep -v $'\tchromosome\t' > %s"%(bedtools, gff_with_biotype, gff_clean))
+            run_cmd("%s sort -i %s | egrep -v '^#' | egrep -v '\tchromosome\t' > %s"%(bedtools, gff_with_biotype, gff_clean))
             run_cmd("%s -c %s > %s"%(bgzip, gff_clean, gff_clean_compressed))
 
             # index with tabix
