@@ -4,7 +4,19 @@ perSVade is a method that runs structural variation (SV) calling and interpretat
 
 ## Installation:
 
-### 1. Manual installation of Ninja
+### 1. Downloading the perSVade source code
+
+Download the perSVade source code from one of the releases and decompress. For example:
+
+`wget https://github.com/Gabaldonlab/perSVade/releases/download/v0.4/perSVade_v0.4.tar.gz`
+
+`tar -xvf perSVade_v0.4.tar.gz; rm perSVade_v0.4.tar.gz`
+
+`cd perSVade_v0.4`
+
+This already contains all the scripts to run the pipeline. 
+
+### 2. Manual installation of Ninja
 
 perSVade has one dependency, Ninja (https://github.com/TravisWheelerLab/NINJA, release 0.95-cluster_only), that you have to install manually. Make sure that the folder containing the compiled binary of Ninja can be found in your $PATH. This is an example of how you can do this:
 
@@ -20,7 +32,7 @@ perSVade has one dependency, Ninja (https://github.com/TravisWheelerLab/NINJA, r
 
 `export PATH=$PATH:<path_to_install_Ninja>/NINJA-0.95-cluster_only/NINJA`
 
-You may need to install some extra dependencies to compile Ninja with `make`. If this fails, perSVade also includes compiled binaries (they may not always work on your machine) for Ninja in `./installation/Ninja_binaries`. As an examople, in a linux machine with a `x86_64` architecture you can use the provided binary by adding the containing folder to the $PATH:
+You may need to install some extra dependencies to compile Ninja with `make`. If you can't get the compiled binary, you may try among the ones provided by perSVade (they may not work on your machine) in `./installation/Ninja_binaries`. As an example, in a linux machine with a `x86_64` architecture you can use the provided binary by adding the containing folder to the $PATH:
 
 `export PATH=$PATH:<perSVade_dir>/installation/Ninja_binaries/Ninja_x86_64`
 
@@ -29,17 +41,6 @@ At the end, make sure that you can execute Ninja by typing:
 
 `Ninja --help`
 
-### 2. Downloading the perSVade source code
-
-Download the perSVade source code from one of the releases and decompress. For example:
-
-`wget https://github.com/Gabaldonlab/perSVade/releases/download/v0.4/perSVade_v0.4.tar.gz`
-
-`tar -xvf perSVade_v0.4.tar.gz; rm perSVade_v0.4.tar.gz`
-
-`cd perSVade_v0.4`
-
-This already contains all the scripts to run the pipeline. 
 
 ### 3. Create a conda environment with most dependencies
 
