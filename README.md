@@ -12,9 +12,7 @@ Download the perSVade source code from one of the releases and decompress. For e
 
 `tar -xvf perSVade_v0.4.tar.gz; rm perSVade_v0.4.tar.gz`
 
-`cd perSVade_v0.4`
-
-This already contains all the scripts to run the pipeline. 
+This already contains all the scripts to run the pipeline. Note that the created file (for example `perSVade_v0.4`) will be referred as `<perSVade_dir>`
 
 ### 2. Manual installation of Ninja
 
@@ -24,18 +22,15 @@ perSVade has one dependency, Ninja (https://github.com/TravisWheelerLab/NINJA, r
 
 `wget https://github.com/TravisWheelerLab/NINJA/archive/0.95-cluster_only.tar.gz`
 
-`tar -xvf 0.95-cluster_only.tar.gz; rm 0.95-cluster_only.tar.gz`
+`tar -xvf 0.95-cluster_only.tar.gz; rm 0.95-cluster_only.tar.gz; cd NINJA-0.95-cluster_only/NINJA`
 
-`cd NINJA-0.95-cluster_only/NINJA`
-
-`make`
+`make all`
 
 `export PATH=$PATH:<path_to_install_Ninja>/NINJA-0.95-cluster_only/NINJA`
 
-You may need to install some extra dependencies to compile Ninja with `make`. If you can't get the compiled binary, you may try among the ones provided by perSVade (they may not work on your machine) in `./installation/Ninja_binaries`. As an example, in a linux machine with a `x86_64` architecture you can use the provided binary by adding the containing folder to the $PATH:
+You may need to install some extra dependencies to compile Ninja with `make`. If you can't get the compiled binary (called `Ninja`), you may try among the ones provided by perSVade in `<perSVade_dir>/installation/Ninja_binaries`. Note that these will not necessarily work on your computer. As an example, in a linux machine with a `x86_64` architecture you can use the provided binary by adding the containing folder to the $PATH:
 
 `export PATH=$PATH:<perSVade_dir>/installation/Ninja_binaries/Ninja_x86_64`
-
 
 At the end, make sure that you can execute Ninja by typing:
 
@@ -45,6 +40,8 @@ At the end, make sure that you can execute Ninja by typing:
 ### 3. Create a conda environment with most dependencies
 
 perSVade is written in python, R and bash for Linux. Most of the dependecies can be installed through conda. It is advisable that you install these dependencies by creating a conda environment (for example called perSVade_env) with all of them, which we provide, with the following commands:
+
+`cd <perSVade_dir>`
 
 `conda env create --file installation/perSVade_env.yml --name <env_name>`
 
