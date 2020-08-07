@@ -32,7 +32,9 @@ df_gff3 = pd.read_csv(full_gff, skiprows=list(range(len([line for line in open(f
 
 # write only the first 3 genes of 2 chromosomes
 all_chroms = {"ChrA_C_glabrata_CBS138", "ChrB_C_glabrata_CBS138", "mito_C_glabrata_CBS138"}
-df_gff_reduced = pd.concat([df_gff3[(df_gff3.type_feature=="gene") & (df_gff3["#chromosome"]==chrom)].sort_values(by=["#chromosome", "start"]).iloc[0:10] for chrom in all_chroms])
+
+
+df_gff_reduced = pd.concat([df_gff3[(df_gff3["#chromosome"]==chrom) & (df_gff3["type_feature"].isin({"gene", "mRNA", "exon", "CDS"}))].sort_values(by=["#chromosome", "start"]).iloc[0:40] for chrom in all_chroms])
 
 # write the reduced gff
 df_gff_reduced.to_csv("%s/reduced_annotation.gff"%testing_inputs_dir, sep="\t", index=False, header=True)

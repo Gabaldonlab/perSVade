@@ -29,8 +29,8 @@ import sv_functions as fun
 print("loading python packages worked successfully")
 
 # define the testing inuts dir 
-#testing_outputs_dir = "%s/testing_outputs"%test_dir # this is the normal place
-testing_outputs_dir = "%s/Desktop/testing_perSVade_outputs"%(os.getenv("HOME")) # this is to be faster
+testing_outputs_dir = "%s/testing_outputs"%test_dir # this is the normal place
+#testing_outputs_dir = "%s/Desktop/testing_perSVade_outputs"%(os.getenv("HOME")) # this is to be faster
 test_output_perSVade = "%s/perSVade_output"%testing_outputs_dir
 outdir_small_variantCalling = "%s/smallVars_CNV_output"%test_output_perSVade
 
@@ -97,7 +97,6 @@ test_fun.test_get_repeat_maskerDF(ref_genome, replace=False) # this will not wor
 test_fun.test_get_repeat_maskerDF(Calbicans_chr1_2_6, replace=False)
 print("repeat masker works on chromosome 1, 2 and 6 of C. albicans")
 
-
 # test read simulation by simulating reads from the mutated genome
 r1_mutGenome, r2_mutGenome = test_fun.test_read_simulation_and_get_reads(mut_genome)
 
@@ -110,10 +109,6 @@ test_fun.test_processing_varcalling(Calbicans_varCall_outdir, Calbicans_genome, 
 
 # test bcftools, freebayes, gatk4, mosdepth, vep by running the small variant calling pipeline
 test_fun.test_smallVarCall_CNV_running(sorted_bam_mutGenome, outdir_small_variantCalling, ref_genome, gff, replace=False)
-
-# test the querying of the SRA database and downloading, and trimming of reads and also gztool
-outdir_SRAdb_query_downloading_and_readTrimming = "%s/testing_SRAdb_query_downloading_and_readTrimming_MERS"%testing_outputs_dir
-test_fun.test_SRAdb_query_downloading_and_readTrimming(outdir_SRAdb_query_downloading_and_readTrimming, MERS_genome, 1335626)
 
 # generate a genome that is rearranged 
 rearranged_genome = test_fun.test_rearranging_genome_random(ref_genome, replace=False)
@@ -130,9 +125,16 @@ test_fun.test_gridss_clove_pipeline(sorted_bam_svGenome, ref_genome, outdir_test
 outdir_testing_parameterOptimisation = "%s/testing_parameter_optimisation_pipeline"%(testing_outputs_dir)
 test_fun.test_parameter_optimisation_perSVade(sorted_bam_svGenome, ref_genome, outdir_testing_parameterOptimisation, replace=False)
 
+### TESTING THINGS THAT ARE DISPENSABLE ###
+
+# test the querying of the SRA database and downloading, and trimming of reads and also gztool
+outdir_SRAdb_query_downloading_and_readTrimming = "%s/testing_SRAdb_query_downloading_and_readTrimming_MERS"%testing_outputs_dir
+test_fun.test_SRAdb_query_downloading_and_readTrimming(outdir_SRAdb_query_downloading_and_readTrimming, MERS_genome, 1335626, replace=False)
+
 # test whether you can run greasy
 test_fun.test_greasy()
 
+############################################
 
 print("\n\n---\nSUCCESS: perSVade was properly installed\n---\n\n")
 
