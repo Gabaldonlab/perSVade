@@ -20,7 +20,12 @@ perSVade has one dependency, Ninja (https://github.com/TravisWheelerLab/NINJA, r
 
 `export PATH=$PATH:<path_to_install_Ninja>/NINJA-0.95-cluster_only/NINJA`
 
-You may need to install some extra dependencies to compile Ninja with `make`. At the end, make sure that you can execute Ninja by typing:
+You may need to install some extra dependencies to compile Ninja with `make`. If this fails, perSVade also includes compiled binaries (they may not always work on your machine) for Ninja in `./installation/Ninja_binaries`. As an examople, in a linux machine with a `x86_64` architecture you can use the provided binary by adding the containing folder to the $PATH:
+
+`export PATH=$PATH:<perSVade_dir>/installation/Ninja_binaries/Ninja_x86_64`
+
+
+At the end, make sure that you can execute Ninja by typing:
 
 `Ninja --help`
 
