@@ -315,8 +315,6 @@ if "freebayes" in opt.caller or opt.caller == "all":
     outdir_freebayes = "%s/freebayes_ploidy%i_out"%(opt.outdir, opt.ploidy)
 
     # run freebayes in normal configuratiom, in parallel for each chromosome
-    #freebayes_filtered =  fun.run_freebayes_parallel(outdir_freebayes, opt.ref, sorted_bam, opt.ploidy, opt.coverage, replace=opt.replace, pooled_sequencing=opt.pooled_sequencing, threads=opt.threads) # old way. Parallelization on chromosomes
-
     freebayes_filtered = fun.run_freebayes_parallel_regions(outdir_freebayes, opt.ref, sorted_bam, opt.ploidy, opt.coverage, replace=opt.replace, threads=opt.threads, pooled_sequencing=opt.pooled_sequencing) 
 
     # keep

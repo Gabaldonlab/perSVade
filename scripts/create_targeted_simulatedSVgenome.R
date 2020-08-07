@@ -98,8 +98,13 @@ if (!is.na(argv$tandemDuplications_file)) {
 # get the rearranged genome
 rearranged_genome = simulateSV(output=NA, genome=genome_obj, random=FALSE, verbose=TRUE, regionsDels=regionsDels, regionsInvs=regionsInvs, regionsIns=regionsIns, regionsDups=regionsDups, regionsTrans=regionsTrans, bpSeqSize=50, maxDups=4)
 
-#print(metadata(rearranged_genome))
+# test that all the insetions are cut-and-paste (this is so because after this they should be changed to copy-paste )
+if (!is.na(argv$insertions_file)){
+	print("checking that insertions are ok")
 
+	copy_column_insertions = unique(metadata(rearranged_genome)$insertions$Copied)
+	if (copy_column_insertions!=c(FALSE)){ stop("ERROR: All the insertions should be cut-and-paste in the simulation. The copy-and-paste will be generated afterwards with a custom script") }
+}
 
 # write the rearranged genome
 writeXStringSet(rearranged_genome, filepath = argv$output_genome, format = "fasta")

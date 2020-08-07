@@ -59,9 +59,6 @@ conda install -c anaconda -y pigz=2.4 &&
 #   certifi            conda-forge::certifi-2020.6.20-py36h9~ --> anaconda::certifi-2020.6.20-py36_0
 #   openssl            conda-forge::openssl-1.1.1g-h516909a_1 --> anaconda::openssl-1.1.1g-h7b6447c_0
 
-
-
-
 # install R packages
 conda install -c conda-forge -y r-base=4.0.2 &&
 # The following packages will be UPDATED:

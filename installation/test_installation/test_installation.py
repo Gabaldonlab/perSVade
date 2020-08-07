@@ -27,6 +27,7 @@ test_gff = "%s/reduced_annotation.gff"%testing_inputs_dir
 # load the functions (test if you can import python packages)
 import sv_functions as fun
 print("loading python packages worked successfully")
+#fun.printing_verbose_mode = True
 
 # define the testing inuts dir 
 testing_outputs_dir = "%s/testing_outputs"%test_dir # this is the normal place
@@ -120,6 +121,7 @@ sorted_bam_svGenome = test_fun.test_bwa_mem_and_get_bam(r1_svGenome, r2_svGenome
 # test whether you can run the gridss and clove pipeline
 outdir_testing_gridss_clove = "%s/testing_gridss_clove_pipeline_default_parms"%(testing_outputs_dir)
 test_fun.test_gridss_clove_pipeline(sorted_bam_svGenome, ref_genome, outdir_testing_gridss_clove, replace=False)
+kljhadjkahd
 
 # test whether the parameter optimisation pipeline works well to find the rearrangements
 outdir_testing_parameterOptimisation = "%s/testing_parameter_optimisation_pipeline"%(testing_outputs_dir)
