@@ -473,7 +473,10 @@ def file_is_empty(path):
 
 def remove_file(f):
 
-    if os.path.isfile(f): os.unlink(f)
+    if os.path.isfile(f): 
+
+        try: run_cmd("rm %s > /dev/null 2>&1"%f)
+        except: pass
 
 def delete_folder(f):
 
@@ -2749,7 +2752,7 @@ def soft_link_files(origin, target):
         try: run_cmd("rm %s > /dev/null 2>&1"%target)
         except: pass
 
-        soft_linking_std = "%s.softlinking.std"%(origin)
+        soft_linking_std = "%s.softlinking.std"%(target)
         print("softlinking. The std is in %s"%soft_linking_std)
         run_cmd("ln -s %s %s > %s 2>&1"%(origin, target, soft_linking_std))
         remove_file(soft_linking_std)
@@ -5159,7 +5162,9 @@ def run_trimmomatic(reads1, reads2, replace=False, threads=1):
 
                 #print("running fastqc")
                 std_fastqc = "%s/std.txt"%fastqc_dir
+                print("running fastqc. The std is in %s"%std_fastqc)
                 run_cmd("%s -o %s --threads %i --extract --java %s %s > %s 2>&1"%(FASTQC, fastqc_dir, threads, JAVA, reads, std_fastqc))
+                remove_file(std_fastqc)
 
             # get again the html files
             html_files = ["%s/%s"%(fastqc_dir, x) for x in os.listdir(fastqc_dir) if x.endswith(".html")]
@@ -5183,12 +5188,12 @@ def run_trimmomatic(reads1, reads2, replace=False, threads=1):
         # run trimmomatic
         if file_is_empty(trimmed_reads1) or file_is_empty(trimmed_reads2) or replace is True:
 
-            #print("running trimmomatic")
-
             std_trimmomatic = "%s.trimmomatic_std.txt"%trimmed_reads1
+            print("running trimmomatic. The std is in %s"%std_trimmomatic)
             trim_cmd = "%s --number_threads %i -rr1 %s -rr2 %s -tr1 %s -tr2 %s -ad %s > %s 2>&1"%(TRIMMOMATIC, threads, reads1, reads2, trimmed_reads1, trimmed_reads2, adapters_filename, std_trimmomatic)
 
             run_cmd(trim_cmd)
+            remove_file(std_trimmomatic)
 
         # check that the reads are correct
         check_that_paired_reads_are_correct(trimmed_reads1, trimmed_reads2)
@@ -5209,9 +5214,10 @@ def run_porechop(raw_reads, replace=False, threads=4):
         remove_file(trimmed_reads_tmp)
 
         # run cmd
-        print("running porechop")
         porechop_std = "%s.std.txt"%trimmed_reads
+        print("running porechop. The std is in %s"%porechop_std)
         run_cmd("%s -i %s -o %s --threads %i > %s 2>&1"%(porechop, raw_reads, trimmed_reads_tmp, threads, porechop_std))
+        remove_file(porechop_std)
 
         # rename
         os.rename(trimmed_reads_tmp, trimmed_reads)
@@ -5305,10 +5311,16 @@ def downsample_bamfile_keeping_pairs(bamfile, fraction_reads=0.1, replace=True, 
 
     # run the sampling
     sampled_bamfile_unedited = "%s.unedited"%sampled_bamfile
-    run_cmd("%s view -o %s -s %i.%s --threads %i -b %s"%(samtools, sampled_bamfile_unedited, seed, fraction_str, threads, bamfile))
+    sampled_bamfile_unedited_std = "%s.generating.std"%sampled_bamfile_unedited
+    print("running samtools view. The std is in %s"%sampled_bamfile_unedited_std)
+    run_cmd("%s view -o %s -s %i.%s --threads %i -b %s > %s 2>&1"%(samtools, sampled_bamfile_unedited, seed, fraction_str, threads, bamfile, sampled_bamfile_unedited_std))
+    remove_file(sampled_bamfile_unedited_std)
 
     # now rename the reads, so that the read name gets a prefix called name
-    run_cmd("%s view -h --threads %i %s | sed -e 's/^/%s_/' | sed 's/^%s_@/@/' | %s view --threads %i -bSh > %s"%(samtools, threads, sampled_bamfile_unedited, name, name, samtools, threads, sampled_bamfile))
+    sampled_bamfile_generating_stderr = "%s.generating.stderr"%sampled_bamfile
+    print("getting the sampled bam. The stderr is in %s"%sampled_bamfile_generating_stderr)
+    run_cmd("%s view -h --threads %i %s | sed -e 's/^/%s_/' | sed 's/^%s_@/@/' | %s view --threads %i -bSh > %s 2>%s"%(samtools, threads, sampled_bamfile_unedited, name, name, samtools, threads, sampled_bamfile, sampled_bamfile_generating_stderr))
+    remove_file(sampled_bamfile_generating_stderr)
 
     # at the end remove the unedited
     remove_file(sampled_bamfile_unedited)
@@ -5326,6 +5338,10 @@ def download_srr_with_prefetch(srr, SRRfile, replace=False):
     # make the downloading dir
     make_folder(downloading_dir)
 
+    # define the std files
+    prefetch_std = "%s.std.txt"%SRRfile
+    prefetch_std_copy = "%s.copy"%prefetch_std
+
     # try a couple of times
     for Itry in range(2):
 
@@ -5339,7 +5355,7 @@ def download_srr_with_prefetch(srr, SRRfile, replace=False):
             remove_file(SRRfile)
 
             # run prefetch
-            prefetch_std = "%s.std.txt"%SRRfile
+            print("running prefetch. The std can be found in %s"%prefetch_std)
             try: run_cmd("%s -o %s --max-size 500G --progress 1 %s > %s 2>&1"%(prefetch, SRRfile, srr, prefetch_std))
             except: print("prefetch did not work for %s"%srr)
 
@@ -5350,8 +5366,6 @@ def download_srr_with_prefetch(srr, SRRfile, replace=False):
             has_dependencies_line = any(["unresolved dependencies" in l for l in std_lines])
 
             if not successful_download or (has_dependencies_line and not no_dependencies_left): 
-                print(successful_download, has_dependencies_line, no_dependencies_left)
-                prefetch_std_copy = "%s.copy"%prefetch_std
                 run_cmd("cp %s %s"%(prefetch_std, prefetch_std_copy))
                 print("prefetch did not work for %s. Test the log in %s"%(srr, prefetch_std_copy))
                 remove_file(SRRfile)
@@ -5359,6 +5373,9 @@ def download_srr_with_prefetch(srr, SRRfile, replace=False):
     # check that the prefetch works 
     if file_is_empty(SRRfile): 
         raise ValueError("prefetch did not work for %s"%srr)
+
+    remove_file(prefetch_std)
+    remove_file(prefetch_std_copy)
 
     return SRRfile
 
@@ -5371,9 +5388,13 @@ def get_n_pairs_in_fastqgz(file):
     file_wc = "%s.wc"%file
     file_wc_tmp = "%s.tmp"%file_wc
     if file_is_empty(file_wc):
-        print("calculating # reads for %s"%file)
 
-        run_cmd("%s -c %s | wc -l > %s"%(unpigz, file, file_wc_tmp))
+        unpigz_stderr = "%s.generating.stderr"%file_wc_tmp
+        print("calculating # reads for %s. The stderr is in %s"%(file, unpigz_stderr))
+
+        run_cmd("%s -c %s | wc -l > %s 2>%s"%(unpigz, file, file_wc_tmp, unpigz_stderr))
+        remove_file(unpigz_stderr)
+
         os.rename(file_wc_tmp, file_wc)
 
     # get the number
@@ -5409,9 +5430,11 @@ def get_last_reads_fastqgz_file(file, nreads=100):
 
                 # remove the gz index file
                 remove_file("%si"%file)
-
-                cmd_ztail = "%s -t %s -v 0 | tail -%i | sed -n '1~4p' | cut -f1 -d ' ' > %s"%(gztool, file, int(nreads*4), file_last_reads_tmp)
+                gztool_stderr = "%s.generating.stderr"%file_last_reads_tmp
+                print("running gztool. The stderr is in %s"%gztool_stderr)
+                cmd_ztail = "%s -t %s -v 0 | tail -%i | sed -n '1~4p' | cut -f1 -d ' ' > %s 2>%s"%(gztool, file, int(nreads*4), file_last_reads_tmp, gztool_stderr)
                 run_cmd(cmd_ztail)
+                remove_file(gztool_stderr)
 
                 os.rename(file_last_reads_tmp, file_last_reads)
 
@@ -5426,8 +5449,9 @@ def get_last_reads_fastqgz_file(file, nreads=100):
     if file_is_empty(file_last_reads) or not readIDs_are_correct(last_reads): 
 
         # getting last reads in a more traditional way
-        print("getting last reads for %s in a slower way (zcat + tail)"%file)
-        run_cmd("zcat %s | tail -%i | sed -n '1~4p' | cut -f1 -d ' ' > %s"%(file, int(nreads*4), file_last_reads_tmp))
+        tail_zcat_stderr = "%s.generating.stderr"%file_last_reads_tmp
+        print("getting last reads for %s in a slower way (zcat + tail). The stderr is in %s"%(file, tail_zcat_stderr))
+        run_cmd("zcat %s | tail -%i | sed -n '1~4p' | cut -f1 -d ' ' > %s 2>%s"%(file, int(nreads*4), file_last_reads_tmp, tail_zcat_stderr))
 
         os.rename(file_last_reads_tmp, file_last_reads)
 
@@ -5487,16 +5511,20 @@ def run_parallelFastqDump_on_prefetched_SRRfile(SRRfile, replace=False, threads=
 
         # run cmd and kill after 30 seconds
         testing_fastqdump_parallel_std = "%s.testing_fastqdumpParallel.std"%SRRfile
+        print("running the testing of the parallel fastqdump. The std is in %s"%testing_fastqdump_parallel_std)
         test_cmd = "timeout 30 %s -s %s -t %i -O %s --tmpdir %s --split-3 --gzip > %s 2>&1"%(parallel_fastq_dump, SRRfile, threads, test_dir, test_dir, testing_fastqdump_parallel_std)
         try: run_cmd(test_cmd)
         except: print("fastqdump did not work before timeout. This is fine.")
+
         any_fastqgz_generated = any([any([file.endswith("fastq.gz") for file in f[2]]) for f in os.walk(test_dir)])
 
+        # define the std of fastdump
+        stdfile = "%s/std_fastqdump.txt"%tmpdir
+
         if any_fastqgz_generated is True:
-            print("running parallel-fastqdump from prefetch")
 
             # run fastqdump parallel into the tmpdir 
-            stdfile = "%s/std_fastqdump.txt"%tmpdir
+            print("running fastq dump in parallel. The std is in %s"%stdfile)
             run_cmd("%s -s %s -t %i -O %s --tmpdir %s --split-3 --gzip > %s 2>&1 "%(parallel_fastq_dump, SRRfile, threads, tmpdir, tmpdir, stdfile))
 
             # check that the fastqdump is correct
@@ -5511,13 +5539,10 @@ def run_parallelFastqDump_on_prefetched_SRRfile(SRRfile, replace=False, threads=
             tmp_reads2 = "%s/%s"%(tmpdir, get_file(reads2))
 
         else: 
-            print("running normal fastqdump")
+            print("running normal fastqdump. This is slower. The std is in %s"%stdfile)
 
             # run fastqdump
-            stdfile = "%s/std_fastqdump.txt"%tmpdir
             srr = get_file(SRRfile).split(".")[0]
-            #srr = "ERR1597900" # debug with a dataset that works
-            print(stdfile, srr)
             run_cmd("%s --split-3 --gzip --outdir %s %s > %s 2>&1"%(fastqdump, tmpdir, srr, stdfile))
 
             # define the tmp reads
@@ -5526,6 +5551,11 @@ def run_parallelFastqDump_on_prefetched_SRRfile(SRRfile, replace=False, threads=
 
         # check that the read pairs are correct
         check_that_paired_reads_are_correct(tmp_reads1, tmp_reads2)
+
+        # remove unneccessary logs
+        remove_file(testing_fastqdump_parallel_std)
+        remove_file(stdfile)
+
 
         # rename
         os.rename(tmp_reads1, reads1)
@@ -5558,6 +5588,7 @@ def run_parallelFastqDump_on_prefetched_SRRfile_nanopore(SRRfile, replace=False,
 
         # run fastqdump parallel into the tmpdir 
         stdfile = "%s/std_fastqdump.txt"%tmpdir
+        print("running fastqdump in parallel for ONT prefetched .srr file. The std is in %s"%stdfile)
         run_cmd("%s -s %s -t %i -O %s --tmpdir %s --gzip > %s 2>&1"%(parallel_fastq_dump, SRRfile, threads, tmpdir, tmpdir, stdfile))
 
         # check that the fastqdump is correct
@@ -5567,9 +5598,10 @@ def run_parallelFastqDump_on_prefetched_SRRfile_nanopore(SRRfile, replace=False,
         if not written_lines_as_threads or any_error:
             raise ValueError("Something went wrong with the fastqdump. Check the log in %s"%stdfile)
 
+        remove_file(stdfile)
+
         # rename the reads
         tmp_reads = "%s/%s"%(tmpdir, get_file(reads))
-
         os.rename(tmp_reads, reads)
 
     # delete the tmpdir
@@ -5597,10 +5629,15 @@ def run_svim(reads, reference_genome, outdir,  threads=4, replace=False, min_sv_
         # make the folder
         delete_folder(outdir); make_folder(outdir)
 
+        # define the std
+        svim_std = "%s/running_svim.std"%outdir
+        print("running svim. The std is in %s"%svim_std)
+
         # run svim with few filters
-        svim_cmd = "%s reads %s %s %s --min_sv_size %i --max_sv_size %i --cores %i --aligner %s --minimum_depth %s --min_mapq 0 --skip_genotyping"%(svim, outdir, reads, reference_genome, min_sv_size, max_sv_size, threads, aligner, minimum_depth)
+        svim_cmd = "%s reads %s %s %s --min_sv_size %i --max_sv_size %i --cores %i --aligner %s --minimum_depth %s --min_mapq 0 --skip_genotyping > %s 2>&1"%(svim, outdir, reads, reference_genome, min_sv_size, max_sv_size, threads, aligner, minimum_depth, svim_std)
         if is_nanopore is True: svim_cmd += " --nanopore"
         run_cmd(svim_cmd)
+        remove_file(svim_std)
         
         os.rename(sorted_bam_long, sorted_bam_short)
         os.rename(sorted_bam_long_idx, sorted_bam_short_idx)
@@ -5682,7 +5719,10 @@ def download_srr_parallelFastqDump(srr, destination_dir, is_paired=True, threads
         download_srr_with_prefetch(srr, SRRfile)
 
         # download into fastq split files
-        run_cmd("%s -s %s -t %i -O %s --tmpdir %s --split-3 --gzip"%(parallel_fastq_dump, SRRfile, threads, downloading_dir, tmp_dir))
+        std_fqdump_parallel = "%s.running_fqDumpParallel.std"%SRRfile
+        print("running fastqdump in parallel. The std is in %s"%std_fqdump_parallel)
+        run_cmd("%s -s %s -t %i -O %s --tmpdir %s --split-3 --gzip > %s 2>&1"%(parallel_fastq_dump, SRRfile, threads, downloading_dir, tmp_dir, std_fqdump_parallel))
+        remove_file(std_fqdump_parallel)
 
         # move the fastq files into destination
         for N in isPaired_to_fastqIDXs[is_paired]: os.rename("%s/%s.srr_%i.fastq.gz"%(downloading_dir, srr, N), "%s/%s_%i.fastq.gz"%(destination_dir, srr, N))
@@ -7261,7 +7301,15 @@ def get_ID_to_svtype_to_svDF_for_setOfGenomes_highConfidence(close_shortReads_ta
         # initialize dicts that keep them all together
         all_sampleID_to_svtype_to_file = {}
         all_sampleID_to_dfGRIDSS = {}
-       
+
+        # define the name of the final file name
+        final_file_name = "perSVade_finished_file.txt"
+
+        # check if there are some jobs to run SV calling on
+        njobs_to_run_SVcalling_on = sum([file_is_empty("%s/shortReads_realVarsDiscovery_%s/%s"%(all_realVars_dir,ID, final_file_name)) for ID, row in df_genomes.iterrows()])
+
+        print("There are %i jobs still to run"%njobs_to_run_SVcalling_on)
+
         # generate all real vars
         for ID, row in df_genomes.iterrows():
             print(ID)
@@ -7275,7 +7323,7 @@ def get_ID_to_svtype_to_svDF_for_setOfGenomes_highConfidence(close_shortReads_ta
                 outdir_gridssClove = "%s/shortReads_realVarsDiscovery_%s"%(all_realVars_dir,ID); make_folder(outdir_gridssClove)
 
                 # define the previous important files
-                final_file = "%s/perSVade_finished_file.txt"%outdir_gridssClove
+                final_file = "%s/%s"%(outdir_gridssClove, final_file_name)
 
                 # define the previous repeats file 
                 previous_repeats_table = "%s.repeats.tab"%reference_genome
@@ -7309,6 +7357,10 @@ def get_ID_to_svtype_to_svDF_for_setOfGenomes_highConfidence(close_shortReads_ta
                         continue
 
                     else: raise ValueError("%s is not valid"%job_array_mode)
+
+
+                # if the mode is greasy and there are jobs to run, continue
+                if njobs_to_run_SVcalling_on>0 and job_array_mode=="greasy": continue
 
                 # define the svdict
                 print("running get_svtype_to_svfile_and_df_gridss_from_perSVade_outdir")
@@ -7532,7 +7584,11 @@ def get_insert_size_distribution(sorted_bam, replace=False, threads=4):
     # run
     if file_is_empty(outfile) or replace is True: 
         remove_file(outfile_tmp)
-        run_cmd("%s CollectInsertSizeMetrics HISTOGRAM_FILE=%s INPUT=%s OUTPUT=%s"%(picard_exec, hist_file, sorted_bam, outfile_tmp))
+        picard_insertSize_std = "%s.generating.std"%outfile_tmp
+        print("calculating insert size distribution. The std is in %s"%picard_insertSize_std)
+        run_cmd("%s CollectInsertSizeMetrics HISTOGRAM_FILE=%s INPUT=%s OUTPUT=%s > %s 2>&1"%(picard_exec, hist_file, sorted_bam, outfile_tmp, picard_insertSize_std))
+        remove_file(picard_insertSize_std)
+
         os.rename(outfile_tmp, outfile)
 
     # get stats
@@ -7552,13 +7608,21 @@ def get_windows_infoDF_with_predictedFromFeatures_coverage(genome, distToTel_chr
         print("getting relCov predicted from feats")
 
         # index the genome of interest if not already done
-        if file_is_empty("%s.fai"%genome) or replace is True: run_cmd("%s faidx %s"%(samtools, genome))
+        if file_is_empty("%s.fai"%genome) or replace is True: 
+
+            faidx_std = "%s.indexing.std"%genome
+            print("running faidx. The std is in %s"%faidx_std)
+            run_cmd("%s faidx %s > %s 2>&1"%(samtools, genome, faidx_std))
+            remove_file(faidx_std)
 
         ##### get the windows df ####
 
         # get the file
         windows_file = "%s.windows%ibp.bed"%(genome, window_l)
-        run_cmd("%s makewindows -g %s.fai -w %i > %s"%(bedtools, genome, window_l, windows_file))
+        windows_file_stderr = "%s.generating.stderr"%windows_file
+        print("running makewindows. The stderr is in %s"%windows_file_stderr)
+        run_cmd("%s makewindows -g %s.fai -w %i > %s 2>%s"%(bedtools, genome, window_l, windows_file, windows_file_stderr))
+        remove_file(windows_file_stderr)
 
         # get into df 
         df = pd.read_csv(windows_file, sep="\t", header=None, names=["chromosome", "start", "end"])
@@ -7626,9 +7690,12 @@ def get_read_length(bamfile, threads=4, nreads=5000, replace=False):
     readlen_dist_file = "%s.read_length_dist_first%ireads.txt"%(bamfile, nreads); readlen_dist_file_tmp = "%s.tmp"%readlen_dist_file
     if file_is_empty(readlen_dist_file) or replace is True:
 
-        print("The following command will throw a warning stating that 'samtools view: writing to standard output failed: Broken pipe'. This is because the output of samtools view is piped, which is expected.")
-        cmd = "%s view --threads %i %s | head -n %i | cut -f10 | perl -ne 'chomp;print length($_) . \"\n\"' | sort > %s"%(samtools, threads, bamfile, nreads, readlen_dist_file_tmp)
+        samtools_read_len_stderr = "%s.generating.stderr"%readlen_dist_file_tmp
+
+        print("Running samtools view. The following command will throw a warning stating that 'samtools view: writing to standard output failed: Broken pipe'. This is because the output of samtools view is piped, which is expected. The stderr is in %s"%samtools_read_len_stderr)
+        cmd = "%s view --threads %i %s | head -n %i | cut -f10 | perl -ne 'chomp;print length($_) . \"\n\"' | sort > %s 2>%s"%(samtools, threads, bamfile, nreads, readlen_dist_file_tmp, samtools_read_len_stderr)
         run_cmd(cmd)
+        remove_file(samtools_read_len_stderr)
 
         os.rename(readlen_dist_file_tmp, readlen_dist_file)
 
@@ -7644,8 +7711,11 @@ def count_number_read_pairs(bamfile, replace=False, threads=4):
     # get the total n reads
     if file_is_empty(read_count_file) or replace is True:
 
-        #print("calculating n reads")
-        run_cmd("%s flagstat --threads %i %s > %s"%(samtools, threads, bamfile, read_count_file_tmp))
+        read_count_stderr = "%s.generating.stderr"%read_count_file
+        print("calculating n reads. The stderr is in %s"%read_count_stderr)
+        run_cmd("%s flagstat --threads %i %s > %s 2>%s"%(samtools, threads, bamfile, read_count_file_tmp, read_count_stderr))
+        remove_file(read_count_stderr)
+
         os.rename(read_count_file_tmp, read_count_file)
 
     return [int(l.split()[0]) for l in open(read_count_file, "r").readlines() if " read1" in l][0]
@@ -7704,30 +7774,19 @@ def run_wgsim_pairedEnd_for_window(genome, chromosome, start, end, readPairs, re
     # now run wgsim
     fastq_1 = "%s/%s_read1.fq"%(outdir, ID); fastq_2 = "%s/%s_read2.fq"%(outdir, ID); 
     fastq_1_tmp = "%s.tmp"%fastq_1; fastq_2_tmp = "%s.tmp"%fastq_2; 
-
-    #fastqgz_1 = "%s.gz"%fastq_1; fastqgz_2 = "%s.gz"%fastq_2;
-    #fastqgz_1_tmp = "%s.gz"%fastq_1_tmp; fastqgz_2_tmp = "%s.gz"%fastq_2_tmp;
-
  
     if any([file_is_empty(x) for x in {fastq_1, fastq_2}]) or replace is True:
 
-        #print("simulating %s"%ID)
 
         # define the stderr of the reads
         std = "%s/%s_std.txt"%(outdir, ID)
+        print("simulating %s. The std is in %s"%(ID, std))
 
         run_cmd("%s -e %.2f -N %i -1 %i -2 %i -r 0.0 -R 0.0 -X 0.0 -h -d %i -s %i %s %s %s > %s 2>&1"%(wgsim, error_rate, readPairs, read_length, read_length, median_insert_size, median_insert_size_sd, region_fasta, fastq_1_tmp, fastq_2_tmp, std))
 
         # check that the generated files are not empty, this may make the parallelization to fail
         for f in [fastq_1_tmp, fastq_2_tmp]:
             if os.stat(f).st_size==0: print("!!WARNING: No reads could be generated for region %s into %s. It is likely too short. This may cause problems with multiprocessing."%(ID, f))
-
-        # delete previously generated gzips
-        #for f in [fastqgz_1_tmp, fastqgz_2_tmp]: remove_file(f)
-        
-        # compress        
-        #print("%s performing gzip"%ID)
-        #for f in [fastq_1_tmp, fastq_2_tmp]: run_cmd("gzip %s"%f)
 
         # check that everything is fine in the std and remove it
         if all([l.startswith("[wgsim") for l in open(std, "r").readlines()]): remove_file(std)
@@ -7800,15 +7859,24 @@ def run_wgsim_pairedEnd_per_windows_in_parallel(df_windows, genome, outdir, read
                     pool.join()
 
                 # run gzip in parallel
-                print("running pgzip in parallel")
-                run_cmd("%s --fast %s/*"%(pigz, parallel_files_outdir))
+                pigz_std = "%s.pigz_compression.std"%chunk_all_fastqgz_1
+                print("running pgzip in parallel. The std is in %s"%pigz_std)
+                run_cmd("%s --fast %s/* > %s 2>&1"%(pigz, parallel_files_outdir, pigz_std))
 
                 # concatenate them all
-                print("Integrating all in one for chunk %i..."%(I+1))
-                chunk_all_fastqgz_1_tmp = "%s.tmp"%chunk_all_fastqgz_1; chunk_all_fastqgz_2_tmp = "%s.tmp"%chunk_all_fastqgz_2; 
+                chunk_all_fastqgz_1_tmp = "%s.tmp"%chunk_all_fastqgz_1
+                chunk_all_fastqgz_2_tmp = "%s.tmp"%chunk_all_fastqgz_2
+                chunk_all_fastqgz_1_stderr = "%s.generating.stderr"%chunk_all_fastqgz_1_tmp
+                chunk_all_fastqgz_2_stderr = "%s.generating.stderr"%chunk_all_fastqgz_2_tmp
 
-                run_cmd("cat %s/*_read1.fq.gz > %s"%(parallel_files_outdir, chunk_all_fastqgz_1_tmp)) 
-                run_cmd("cat %s/*_read2.fq.gz > %s"%(parallel_files_outdir, chunk_all_fastqgz_2_tmp))
+                print("Integrating all in one for chunk %i. The stderrs are in %s and %s"%(I+1, chunk_all_fastqgz_1_stderr, chunk_all_fastqgz_2_stderr))
+
+
+                run_cmd("cat %s/*_read1.fq.gz > %s 2>%s"%(parallel_files_outdir, chunk_all_fastqgz_1_tmp, chunk_all_fastqgz_1_stderr)) 
+                run_cmd("cat %s/*_read2.fq.gz > %s 2>%s"%(parallel_files_outdir, chunk_all_fastqgz_2_tmp, chunk_all_fastqgz_2_stderr))
+
+                remove_file(chunk_all_fastqgz_1_stderr)
+                remove_file(chunk_all_fastqgz_2_stderr)
 
                 # rename to keep
                 os.rename(chunk_all_fastqgz_1_tmp, chunk_all_fastqgz_1); os.rename(chunk_all_fastqgz_2_tmp, chunk_all_fastqgz_2)
@@ -7824,11 +7892,20 @@ def run_wgsim_pairedEnd_per_windows_in_parallel(df_windows, genome, outdir, read
             chunks_fastq_files += [chunk_all_fastqgz_1, chunk_all_fastqgz_2]
 
         # integrate all the chunks in one
-        allChunks_fastqgz_1_tmp = "%s.tmp"%allChunks_fastqgz_1; allChunks_fastqgz_2_tmp = "%s.tmp"%allChunks_fastqgz_2
-        chunks_read1_files = "%s/chunk*_ofmax%i_all_reads1.fq.gz"%(outdir, max_n_windows_at_once); chunks_read2_files = "%s/chunk*_ofmax%i_all_reads2.fq.gz"%(outdir, max_n_windows_at_once)
+        allChunks_fastqgz_1_tmp = "%s.tmp"%allChunks_fastqgz_1
+        allChunks_fastqgz_2_tmp = "%s.tmp"%allChunks_fastqgz_2
+        chunks_read1_files = "%s/chunk*_ofmax%i_all_reads1.fq.gz"%(outdir, max_n_windows_at_once)
+        chunks_read2_files = "%s/chunk*_ofmax%i_all_reads2.fq.gz"%(outdir, max_n_windows_at_once)
 
-        run_cmd("cat %s > %s"%(chunks_read1_files, allChunks_fastqgz_1_tmp)) 
-        run_cmd("cat %s > %s"%(chunks_read2_files, allChunks_fastqgz_2_tmp))
+        allChunks_fastqgz_1_tmp_stderr = "%s.generating.stderr"%allChunks_fastqgz_1_tmp
+        allChunks_fastqgz_2_tmp_stderr = "%s.generating.stderr"%allChunks_fastqgz_2_tmp
+        print("integrating all the gzipped reads into one.The stderrs are in %s and %s"%(allChunks_fastqgz_1_tmp_stderr, allChunks_fastqgz_2_tmp_stderr))
+
+        run_cmd("cat %s > %s 2>%s"%(chunks_read1_files, allChunks_fastqgz_1_tmp, allChunks_fastqgz_1_tmp_stderr)) 
+        run_cmd("cat %s > %s 2>%s"%(chunks_read2_files, allChunks_fastqgz_2_tmp, allChunks_fastqgz_2_tmp_stderr))
+
+        remove_file(allChunks_fastqgz_1_tmp_stderr)
+        remove_file(allChunks_fastqgz_2_tmp_stderr)
 
         # remove chunks' fastq's
         for f in chunks_fastq_files: remove_file(f)
@@ -7847,7 +7924,10 @@ def run_seqtk_rename(origin_fastqgz, dest_fastqgz):
 
     if file_is_empty(seqtk): raise ValueError("seqtk is expected to be in %s"%seqtk)
 
-    run_cmd("%s rename %s read_ | %s -c > %s"%(seqtk, origin_fastqgz, pigz, dest_fastqgz))
+    seqtk_stderr = "%s.generating.stderr"%dest_fastqgz
+    print("Running seqtk. The stderr is in %s"%seqtk_stderr)
+    run_cmd("%s rename %s read_ | %s -c > %s 2>%s"%(seqtk, origin_fastqgz, pigz, dest_fastqgz, seqtk_stderr))
+    remove_file(seqtk_stderr)
 
 
 def simulate_readPairs_per_window(df_windows, genome, npairs, outdir, read_length,  median_insert_size, median_insert_size_sd, replace=False, threads=4):
@@ -7973,11 +8053,19 @@ def simulate_readPairs_per_window(df_windows, genome, npairs, outdir, read_lengt
             perWindow_fastqgz1, perWindow_fastqgz2 = run_wgsim_pairedEnd_per_windows_in_parallel(df_windows_sliding, genome, outdir_per_windows, read_length, median_insert_size, median_insert_size_sd, replace=replace)
 
             # now concatenate all the simulated reads
-            print("Integrating all in one...")
-            all_fastqgz_1_tmp = "%s.tmp"%all_fastqgz_1; all_fastqgz_2_tmp = "%s.tmp"%all_fastqgz_2; 
+            all_fastqgz_1_tmp = "%s.tmp"%all_fastqgz_1
+            all_fastqgz_2_tmp = "%s.tmp"%all_fastqgz_2
 
-            run_cmd("cat %s %s > %s"%(wholeChr_fastqgz1, perWindow_fastqgz1, all_fastqgz_1_tmp))
-            run_cmd("cat %s %s > %s"%(wholeChr_fastqgz2, perWindow_fastqgz2, all_fastqgz_2_tmp))
+            all_fastqgz_1_tmp_stderr = "%s.generating.stderr"%all_fastqgz_1_tmp
+            all_fastqgz_2_tmp_stderr = "%s.generating.stderr"%all_fastqgz_2_tmp
+
+            print("Integrating all in one. The stderrs are in %s and %s"%(all_fastqgz_1_tmp_stderr, all_fastqgz_2_tmp_stderr))
+
+            run_cmd("cat %s %s > %s 2>%s"%(wholeChr_fastqgz1, perWindow_fastqgz1, all_fastqgz_1_tmp, all_fastqgz_1_tmp_stderr))
+            run_cmd("cat %s %s > %s 2>%s"%(wholeChr_fastqgz2, perWindow_fastqgz2, all_fastqgz_2_tmp, all_fastqgz_2_tmp_stderr))
+
+            remove_file(all_fastqgz_1_tmp_stderr)
+            remove_file(all_fastqgz_2_tmp_stderr)
 
             # rename to keep
             os.rename(all_fastqgz_1_tmp, all_fastqgz_1); os.rename(all_fastqgz_2_tmp, all_fastqgz_2)
@@ -8080,22 +8168,28 @@ def merge_2bams(bamA, bamB, merged, threads=4):
     """Merges two bams"""
     remove_file(merged)
 
-    print("merging %s and %s into %s"%(bamA, bamB, merged))
-    run_cmd("%s merge --threads %i %s %s %s"%(samtools, threads, merged, bamA, bamB))
+    merged_std = "%s.generating.std"%merged
+    print("merging %s and %s into %s. The std is in %s"%(bamA, bamB, merged, merged_std))
+    run_cmd("%s merge --threads %i %s %s %s > %s 2>&1"%(samtools, threads, merged, bamA, bamB, merged_std))
+    remove_file(merged_std)
 
 def sort_bam(bam, sorted_bam, threads=4):
 
     """Sorts a bam file into sorted_bam"""
 
-    #print("sorting bam")
-    run_cmd("%s sort --threads %i -o %s %s"%(samtools, threads, sorted_bam, bam))
+    sorting_std = "%s.generating.std"%sorted_bam
+    print("sorting bam. The std is in %s"%sorting_std)
+    run_cmd("%s sort --threads %i -o %s %s > %s 2>&1"%(samtools, threads, sorted_bam, bam, sorting_std))
+    remove_file(sorting_std)
 
 def index_bam(bam, threads=4):
 
     """indexes bam and creates a .bai file"""
 
-    print("indexing bam")
-    run_cmd("%s index -@ %i %s"%(samtools, threads, bam))
+    indexing_std = "%s.generating.std"%bam
+    print("indexing bam. The std is in %s"%indexing_std)
+    run_cmd("%s index -@ %i %s > %s 2>&1"%(samtools, threads, bam, indexing_std))
+    remove_file(indexing_std)
 
 
 def merge_2bams_sort_and_index(bamfileA, bamfileB, merged_bam, merged_sorted_bam, merged_sorted_bam_index, threads=4):
@@ -10672,9 +10766,10 @@ def get_sortedBam_with_duplicatesMarked(sorted_bam, threads=4, replace=False):
 
         # define the java memory
         javaRamGb = int(get_availableGbRAM()*fractionRAM_to_dedicate)
-        print("running MarkDuplicates with %iGb of RAM"%javaRamGb)
 
         markduplicates_std = "%s.markingDuplicates.std"%sorted_bam
+        print("running MarkDuplicates with %iGb of RAM. The std is in %s"%(javaRamGb, markduplicates_std))
+
 
         run_cmd("%s -Xmx%ig MarkDuplicates I=%s O=%s M=%s > %s 2>&1"%(picard_exec, javaRamGb, sorted_bam, sorted_bam_dupMarked_tmp, sorted_bam_dupMarked_metrics, markduplicates_std))
         #REMOVE_DUPLICATES=Boolean
@@ -10991,17 +11086,23 @@ def get_PASS_vcf(vcf, replace=False):
 
         # get the vcf lines with PASS
         linesPASS = "%s.PASSvcflines"%vcf
-        run_cmd("egrep '\tPASS\t' %s | egrep -v '^#' > %s"%(vcf, linesPASS))
+        linesPASS_stderr = "%s.generating.stderr"%linesPASS
+        print("getting the PASS lines. The stderr is in %s"%linesPASS_stderr)
+        run_cmd("egrep '\tPASS\t' %s | egrep -v '^#' > %s 2>%s"%(vcf, linesPASS, linesPASS_stderr))
 
         # get the header
         header = "%s.header"%vcf
-        run_cmd("egrep '^#' %s > %s"%(vcf, header))
+        header_stderr = "%s.generating.stderr"%header
+        print("getting header. The stderr is in %s"%header_stderr)
+        run_cmd("egrep '^#' %s > %s 2>%s"%(vcf, header, header_stderr))
         
         # merge into the tmp
-        run_cmd("cat %s %s > %s"%(header, linesPASS, pass_vcf_tmp))
+        merging_stderr = "%s.generating.stderr"%pass_vcf_tmp
+        print("merging. The stderr is in %s"%merging_stderr)
+        run_cmd("cat %s %s > %s 2>%s"%(header, linesPASS, pass_vcf_tmp, merging_stderr))
 
         # remove intermediate files
-        for f in [linesPASS, header]: remove_file(f)
+        for f in [linesPASS, header, linesPASS_stderr, header_stderr, merging_stderr]: remove_file(f)
 
         # keep
         os.rename(pass_vcf_tmp, pass_vcf)
@@ -11019,7 +11120,10 @@ def get_gzipped_file(file, replace=False):
     if file_is_empty(gz_file) or replace is True:
 
         # run pigz with the 'gz_vcf' suffix
-        run_cmd("%s --keep --suffix .gz_tmp %s"%(pigz, file))
+        pigz_std = "%s.generating.std"%gz_file_tmp
+        print("running pigz. The std is in %s"%pigz_std)
+        run_cmd("%s --keep --suffix .gz_tmp %s > %s 2>&1"%(pigz, file, pigz_std))
+        remove_file(pigz_std)
 
         # rename 
         os.rename(gz_file_tmp, gz_file)
@@ -11159,11 +11263,14 @@ def get_vcf_with_joined_multialleles_diploid(input_vcf, output_vcf, reference_ge
 
         # get the processed input
         input_vcf_only_knownGT = "%s.only_knownGT.vcf"%input_vcf
-        run_cmd("egrep  '(\tknown_GT\t)|(^#)' %s > %s"%(input_vcf, input_vcf_only_knownGT))
+        generating_knownGT_stderr = "%s.generating.stderr"%input_vcf_only_knownGT
+        print("getting only known GT. The stderr is in %s"%generating_knownGT_stderr)
+        run_cmd("egrep  '(\tknown_GT\t)|(^#)' %s > %s 2>%s"%(input_vcf, input_vcf_only_knownGT, generating_knownGT_stderr))
 
         # run the joining
         joining_std = "%s.joining.std"%input_vcf_only_knownGT
 
+        print("running bcftools latest. The std is in %s"%joining_std)
         run_bcftools_latest("norm --check-ref ws --fasta-ref %s --multiallelics +any -o %s --output-type v --threads %i %s > %s 2>&1"%(reference_genome, output_vcf_tmp, threads, input_vcf_only_knownGT, joining_std))
         
         # check that none were changed
@@ -11224,13 +11331,18 @@ def get_vcf_with_joined_multialleles_diploid(input_vcf, output_vcf, reference_ge
 
         # define the header lines
         header_lines_file = "%s.header_lines.txt"%output_vcf_tmp
-        run_cmd("egrep '^#' %s > %s"%(output_vcf_tmp, header_lines_file))
+        header_lines_file_stderr = "%s.generating.stderr"%header_lines_file
+        print("generating header. The stderr is in %s"%header_lines_file_stderr)
+        run_cmd("egrep '^#' %s > %s 2>%s"%(output_vcf_tmp, header_lines_file, header_lines_file_stderr))
 
         # get the final vcf
-        run_cmd("cat %s %s > %s"%(header_lines_file, vcf_lines_file, output_vcf_tmp))
+        merging_files_stderr = "%s.generating.stderr"%output_vcf_tmp
+        print("merging files. The stderr is in %s"%merging_files_stderr)
+
+        run_cmd("cat %s %s > %s 2>%s"%(header_lines_file, vcf_lines_file, output_vcf_tmp, merging_files_stderr))
 
         # remove packages
-        for f in [input_vcf_only_knownGT, joining_std, vcf_lines_file, header_lines_file]: remove_file(f)
+        for f in [input_vcf_only_knownGT, joining_std, vcf_lines_file, header_lines_file, generating_knownGT_stderr, header_lines_file_stderr, merging_files_stderr]: remove_file(f)
 
         # rename
         os.rename(output_vcf_tmp, output_vcf)
@@ -11254,25 +11366,27 @@ def get_normed_bgzip_and_tabix_vcf_file(file, reference_genome, replace=False, t
         for f in [file_tmp_gz, file_gz_tbi, file_tmp_gz_tbi, sorted_vcf]: remove_file(f)
 
         # sort with bedtools
-        print("sorting vcf")
-        run_cmd("%s sort -header -i %s > %s"%(bedtools, file, sorted_vcf))
+        sorting_vcf_stderr = "%s.generating.stderr"%sorted_vcf
+        print("sorting vcf. The stderr is in %s"%sorting_vcf_stderr)
+        run_cmd("%s sort -header -i %s > %s 2>%s"%(bedtools, file, sorted_vcf, sorting_vcf_stderr))
 
         # normalise with bcftools
         normalising_vcf_std = "%s.std"%normed_vcf_tmp
         print("normalising vcf. STD can be found in %s"%normalising_vcf_std)
         run_bcftools_latest("norm --check-ref ws --fasta-ref %s --multiallelics %s -o %s --output-type v --threads %i %s > %s 2>&1"%( reference_genome, multiallelics_cmd, normed_vcf_tmp, threads, file, normalising_vcf_std))
         os.rename(normed_vcf_tmp, normed_vcf)
-        remove_file(normalising_vcf_std)
 
         # bgzip
-        print("bgzipping")
-        run_cmd("%s -c %s > %s"%(bgzip, normed_vcf, file_tmp_gz))
+        bgzip_stderr = "%s.generating.stderr"%file_tmp_gz
+        print("bgzipping. The stderr is in %s"%bgzip_stderr)
+        run_cmd("%s -c %s > %s 2>%s"%(bgzip, normed_vcf, file_tmp_gz, bgzip_stderr))
 
-        print("tabix-ing")
-        run_cmd("%s -p vcf %s"%(tabix, file_tmp_gz))
+        tabix_std = "%s.tabixing.std"%file_tmp_gz
+        print("tabix-ing. The std is in %s"%tabix_std)
+        run_cmd("%s -p vcf %s > %s 2>&1"%(tabix, file_tmp_gz, tabix_std))
 
         # delete intermediate unnecessary files
-        for f in [sorted_vcf, normed_vcf]: remove_file(f)
+        for f in [sorted_vcf, normed_vcf, sorting_vcf_stderr, normalising_vcf_std, bgzip_stderr, tabix_std]: remove_file(f)
 
         # rename files
         os.rename(file_tmp_gz_tbi, file_gz_tbi)
@@ -11486,15 +11600,18 @@ def merge_several_vcfsSameSample_into_oneMultiSample_vcf(vcf_iterable, reference
                 # keep
                 vcfs_to_merge.append(formatted_vcf_gz)
 
+            # define the bcftools_merge_std
+            bcftools_merge_std = "%s.generating.std"%merged_vcf_tmp
+            print("generating merged vcf. The std is in %s"%bcftools_merge_std)
+
             # run bcftools merge only if there are more than 1 vcf
             if len(vcfs_to_merge)>1:
-                print("running vcf merge")
 
-                run_cmd("%s merge --merge none -o %s -Ov --threads %i %s"%(bcftools, merged_vcf_tmp, threads, " ".join(vcfs_to_merge)))
+                run_cmd("%s merge --merge none -o %s -Ov --threads %i %s > %s 2>&1"%(bcftools, merged_vcf_tmp, threads, " ".join(vcfs_to_merge), bcftools_merge_std))
 
             elif len(vcfs_to_merge)==1: 
 
-                run_cmd("%s view -o %s -Ov --threads %i %s"%(bcftools, merged_vcf_tmp, threads, vcfs_to_merge[0]))
+                run_cmd("%s view -o %s -Ov --threads %i %s > %s 2>&1"%(bcftools, merged_vcf_tmp, threads, vcfs_to_merge[0], bcftools_merge_std))
 
             else: raise ValueError("there are no vcfs to merge")   
 
@@ -11735,6 +11852,10 @@ def merge_several_vcfsSameSample_into_oneMultiSample_vcf(vcf_iterable, reference
             for field in ["mean_fractionReadsCov_PASS_algs", "mean_DP", "common_GT"]: 
                 if any(pd.isna(vcf_df[field])): raise ValueError("There are NaNs in %s"%field)
 
+
+            # remove the std
+            remove_file(bcftools_merge_std)
+
             # write vcf
             vcf_lines = vcf_df[fields].to_csv(sep="\t", header=True, index=False)
             open(merged_vcf_tmp, "w").write("\n".join(header_lines) +  "\n" + vcf_lines)
@@ -11793,7 +11914,9 @@ def get_vep_df_for_vcf_df(vcf_df, outdir, reference_genome, gff_with_biotype, mi
         run_cmd("%s --input_vcf %s --outfile %s --ref %s --gff %s --mitochondrial_chromosome %s --mito_code %i --gDNA_code %i > %s 2>&1"%(run_vep, vcf_file, annotated_vcf_tmp, reference_genome, gff_with_biotype, mitochondrial_chromosome, mitochondrial_code, gDNA_code, vep_std))
 
         # check that the std contains no signs of compressing the gff
-        if any(["compressing gff before running vep" in l for l in open(vep_std, "r").readlines()]): raise ValueError("There was a compression of the gff before running vep. This is not acceptable when running in parallel")        
+        if any(["compressing gff before running vep" in l for l in open(vep_std, "r").readlines()]): raise ValueError("There was a compression of the gff before running vep. This is not acceptable when running in parallel")   
+
+        remove_file(vep_std)
 
         # keep
         os.rename(annotated_vcf_tmp, annotated_vcf)
@@ -11855,11 +11978,20 @@ def run_vep_parallel(vcf, reference_genome, gff_with_biotype, mitochondrial_chro
             print("compressing gff before running vep in parallel")
 
             # eliminate strange lines,chromosomes and compress
-            run_cmd("%s sort -i %s | egrep -v '^#' | egrep -v '\tchromosome\t' > %s"%(bedtools, gff_with_biotype, gff_clean))
-            run_cmd("%s -c %s > %s"%(bgzip, gff_clean, gff_clean_compressed))
+            cleaning_gff_stderr = "%s.generating.stderr"%gff_clean
+            print("cleaning gff. The stderr is in %s"%cleaning_gff_stderr)
+            run_cmd("%s sort -i %s | egrep -v '^#' | egrep -v '\tchromosome\t' > %s 2>%s"%(bedtools, gff_with_biotype, gff_clean, cleaning_gff_stderr))
+            
+            compresing_gff_stderr = "%s.generating.stderr"%gff_clean_compressed
+            print("compressing gff. The stderr is in %s"%compresing_gff_stderr)
+            run_cmd("%s -c %s > %s 2>%s"%(bgzip, gff_clean, gff_clean_compressed, compresing_gff_stderr))
 
             # index with tabix
-            run_cmd("%s %s"%(tabix, gff_clean_compressed))
+            tabixing_std = "%s.tabixing.std"%gff_clean_compressed
+            print("tabixing. The std is in %s"%tabixing_std)
+            run_cmd("%s %s > %s 2>&1"%(tabix, gff_clean_compressed, tabixing_std))
+
+            for f in [cleaning_gff_stderr, compresing_gff_stderr, tabixing_std]: remove_file(f)
 
         ################################################
 
@@ -12138,7 +12270,11 @@ def run_perSVade_severalSamples(paths_df, cwd, common_args, time_greasy="48:00:0
             # get the partial file
             target_varcall_file = "%s/%s_VarCallresults/smallVars_CNV_output/variant_calling_ploidy%i.tab"%(VarCallOutdirs, sampleID, ploidy)
             partial_varcall_file = "%s/partial_variant_calling.tab"%cwd
-            run_cmd("cut -f%s %s > %s"%(variant_calling_colNames, target_varcall_file, partial_varcall_file))
+
+            cutting_cols_stderr = "%s.generating.stderr"%partial_varcall_file
+            print("getting the important cols. The stderr is in %s"%cutting_cols_stderr)
+            run_cmd("cut -f%s %s > %s 2>%s"%(variant_calling_colNames, target_varcall_file, partial_varcall_file, cutting_cols_stderr))
+            remove_file(cutting_cols_stderr)
 
             # load df
             df = pd.read_csv(partial_varcall_file, sep="\t")[variant_calling_fields]
@@ -12258,7 +12394,13 @@ def run_repeat_modeller(reference_genome, threads=4, replace=False):
 
         # run the database
         name_database = get_file(genome_dir)
-        run_cmd("cd %s && %s -name %s %s"%(outdir, repeat_modeller_BuildDatabase, name_database, genome_dir))
+
+        bulding_repModeler_db_std = "%s.genearting_db.std"%genome_dir
+        print("getting repeat modeler db. The std is in %s"%bulding_repModeler_db_std)
+
+        run_cmd("cd %s && %s -name %s %s > %s 2>&1"%(outdir, repeat_modeller_BuildDatabase, name_database, genome_dir, bulding_repModeler_db_std))
+
+        remove_file(bulding_repModeler_db_std)
 
         # run repeatmodeller
         njobs = int(threads/4) # Specify the number of parallel search jobs to run. RMBlast jobs wil use 4 cores each and ABBlast jobs will use a single core each. i.e. on a machine with 12 cores and running with RMBlast you would use -pa 3 to fully utilize the machine
@@ -12268,9 +12410,8 @@ def run_repeat_modeller(reference_genome, threads=4, replace=False):
         cmd = "export PERL5LIB=%s && cd %s && %s -database %s -pa %i -LTRStruct -debug"%(repeatmoder_dir, outdir, repeat_modeller, name_database, njobs)
 
         # add the location were eveything is installed and run
-        print("running repeatmodeler...")
-        #print(ninja_dir)
         repeatmodeler_std = "%s/repeatmodeler.std"%outdir
+        print("running repeatmodeler. The std is in %s"%repeatmodeler_std)        
         cmd += " -abblast_dir %s -cdhit_dir %s -genometools_dir %s -ltr_retriever_dir %s -mafft_dir %s -ninja_dir %s -recon_dir %s -repeatmasker_dir %s -rmblast_dir %s -rscout_dir %s -trf_prgm %s > %s 2>&1"%(abblast_dir, cdhit_dir, genometools_dir, ltr_retriever_dir, mafft_dir, ninja_dir, recon_dir, repeatmasker_dir, rmblast_dir, rscout_dir, trf_prgm_dir, repeatmodeler_std)
 
         run_cmd(cmd)
@@ -12287,6 +12428,8 @@ def run_repeat_modeller(reference_genome, threads=4, replace=False):
             if no_families_identified and not errors_in_repeatModeler: open(repeat_modeler_outfile, "w").write("no_families_identified")
 
             else: raise ValueError("RepeatModeler did not end properly. Check %s for the std"%repeatmodeler_std)
+
+        remove_file(repeatmodeler_std)
 
     # check if any new families were identified
     new_families_identified = open(repeat_modeler_outfile, "r").readlines()[0].strip()!="no_families_identified"
@@ -12325,8 +12468,9 @@ def run_repeat_masker(reference_genome, threads=4, replace=False, use_repeat_mod
     repeat_masker_std_default = "%s/%s.std.out"%(repeat_masker_outdir_default, genome_name)
 
     if file_is_empty(repeat_masker_outfile_default) or replace is True:
-        print("running repeatmasker to get the repeats of the genome in the default configuration")
+        print("running repeatmasker to get the repeats of the genome in the default configuration. The std is in %s"%repeat_masker_std_default)
         run_cmd("cd %s && %s -pa %i -dir %s -poly -html -gff %s > %s 2>&1"%(repeat_masker_outdir_default, repeat_masker, threads, repeat_masker_outdir_default, reference_genome, repeat_masker_std_default))
+        remove_file(repeat_masker_std_default)
 
     # run in the personal configuration
     repeat_masker_outfile_personal = "%s/%s.out"%(repeat_masker_outdir_personal, genome_name)
@@ -12335,12 +12479,16 @@ def run_repeat_masker(reference_genome, threads=4, replace=False, use_repeat_mod
     if use_repeat_modeller is True and new_families_identified is True:
         
         if file_is_empty(repeat_masker_outfile_personal) or replace is True:
-            print("running repeatmasker to get the repeats of the genome with the lib obtained with RepeatModeler")
+            print("running repeatmasker to get the repeats of the genome with the lib obtained with RepeatModeler. The std is in %s"%repeat_masker_std_personal)
             run_cmd("cd %s && %s -pa %i -dir %s -poly -html -gff -lib %s %s > %s 2>&1"%(repeat_masker_outdir_personal, repeat_masker, threads, repeat_masker_outdir_personal, library_repeats_repeatModeller, reference_genome, repeat_masker_std_personal))
+            
     else: 
 
         # empty file
-        run_cmd("head -n 3 %s > %s"%(repeat_masker_outfile_default, repeat_masker_outfile_personal))
+        print("avoiding the generation of the personal repeat masker. The stderr can be found in %s"%repeat_masker_std_personal)
+        run_cmd("head -n 3 %s > %s 2>%s"%(repeat_masker_outfile_default, repeat_masker_outfile_personal, repeat_masker_std_personal))
+
+    remove_file(repeat_masker_std_personal)
 
        
     return repeat_masker_outfile_personal, repeat_masker_outfile_default
