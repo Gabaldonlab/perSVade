@@ -16,7 +16,7 @@ if os.path.exists(ParentDir):
 else:
     run_in_cluster = True    
     ParentDir = "/gpfs/projects/bsc40/mschikora"
-    threads = 24
+    threads = 48
 
 
 # define the dir where all perSVade code is
@@ -77,7 +77,6 @@ close_shortReads_table_Cglabrata = "%s/scripts/perSVade/perSVade_repository/test
 goldenSet_dir_Cglabrata = "%s/scripts/perSVade/perSVade_repository/testing/Cglabrata_goldenSetReads_BG2"%ParentDir
 
 # define important info about each species: taxID, spName, ploidy
-
 species_Info = [("5478", "Candida_glabrata", 1, "mito_C_glabrata_CBS138"),
                 ("5476", "Candida_albicans", 2, "Ca22chrM_C_albicans_SC5314"),
                 ("5207", "Cryptococcus_neoformans", 1, "CP003834.1"),
@@ -86,6 +85,8 @@ species_Info = [("5478", "Candida_glabrata", 1, "mito_C_glabrata_CBS138"),
                 ("7227", "Drosophila_melanogaster", 2, "KJ947872.2")]
                 #("7955", "Danio_rerio", 2, "NC_002333.2")]
                 #("9606", "Homo_sapiens", 2, "NC_012920.1")]
+
+
 """
 species_Info = [("7227", "Drosophila_melanogaster", 2, "KJ947872.2")]
                 #("7955", "Danio_rerio", 2, "NC_002333.2")]
@@ -127,7 +128,7 @@ for taxID, spName, ploidy, mitochondrial_chromosome in species_Info:
         else: close_shortReads_table = "auto"
 
         # get the reads from SRA. 3 samples, 3 runs per sample. Process with the 
-        cmd = "%s --ref %s --threads %i -o %s --close_shortReads_table %s --target_taxID %s --n_close_samples 3 --nruns_per_sample 3 -f1 skip -f2 skip --mitochondrial_chromosome %s --gff %s --testAccuracy --StopAfter_testAccuracy_perSVadeRunning --StopAfter_readObtentionFromSRA"%(perSVade_py, genome, threads, outdir_perSVade, close_shortReads_table, taxID, mitochondrial_chromosome, gff)
+        cmd = "%s --ref %s --threads %i -o %s --close_shortReads_table %s --target_taxID %s --n_close_samples 3 --nruns_per_sample 3 -f1 skip -f2 skip --mitochondrial_chromosome %s --gff %s --testAccuracy --StopAfter_testAccuracy_perSVadeRunning --skip_SVcalling"%(perSVade_py, genome, threads, outdir_perSVade, close_shortReads_table, taxID, mitochondrial_chromosome, gff)
 
     elif type_run=="goldenSet":
 
@@ -140,7 +141,7 @@ for taxID, spName, ploidy, mitochondrial_chromosome in species_Info:
         cmd = "%s --ref %s --threads %i -o %s --target_taxID %s --n_close_samples 3 --nruns_per_sample 3 -f1 skip -f2 skip --mitochondrial_chromosome %s --gff %s --goldenSet_dir %s --skip_SVcalling"%(perSVade_py, genome, threads, outdir_perSVade, taxID, mitochondrial_chromosome, gff, goldenSet_dir)
 
     # add options depending on the machine
-    if run_in_cluster is True: cmd += " --job_array_mode greasy --queue_jobs bsc_ls --max_ncores_queue 144 --time_read_obtention 48:00:00 --time_perSVade_running 48:00:00"
+    if run_in_cluster is True: cmd += " --job_array_mode greasy --queue_jobs bsc_ls --max_ncores_queue 576 --time_read_obtention 48:00:00 --time_perSVade_running 48:00:00"
 
     else: cmd += " --job_array_mode local"
 
