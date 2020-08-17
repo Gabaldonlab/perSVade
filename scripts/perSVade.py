@@ -134,6 +134,9 @@ parser.add_argument("--replace_var_integration", dest="replace_var_integration",
 
 parser.add_argument("--pooled_sequencing", dest="pooled_sequencing", action="store_true", default=False, help="It is a pooled sequencing run, which means that the small variant calling is not done based on ploidy. If you are also running SV calling, check that the simulation_ploidies, resemble a population,")
 
+# verbosity
+parser.add_argument("--verbose", dest="verbose", action="store_true", default=False, help="Whether to print a verbose output. This is important if there are any errors in the run.")
+
 # repeat obtention
 parser.add_argument("--consider_repeats_smallVarCall", dest="consider_repeats_smallVarCall", action="store_true", default=False, help="If --run_smallVarsCNV, this option will imply that each small  variant will have an annotation of whether it overlaps a repeat region.")
 
@@ -223,17 +226,22 @@ if opt.pooled_sequencing is True: print("WARNING: If you are running SV calling,
 simulation_ploidies = opt.simulation_ploidies.split(",")
 
 # the window length for all operations
-fun.window_l = int(np.median([len_seq for chrom, len_seq  in fun.get_chr_to_len(opt.ref).items() if chrom not in opt.mitochondrial_chromosome.split(",")])*0.05) + 1
+print([len_seq for chrom, len_seq  in fun.get_chr_to_len(opt.ref).items() if chrom not in opt.mitochondrial_chromosome.split(",") and len_seq>=20000])
+fun.window_l = int(np.median([len_seq for chrom, len_seq  in fun.get_chr_to_len(opt.ref).items() if chrom not in opt.mitochondrial_chromosome.split(",") and len_seq>=20000])*0.05) + 1
+if pd.isna(fun.window_l): fun.window_l = 1000
 
 print("using a window length of %i"%fun.window_l)
+
+# define the verbosity. If opt.verbose is False, none of the 'print' statements of sv_functions will have an effect
+fun.printing_verbose_mode = opt.verbose
 
 # get the repeats table
 print("getting repeats")
 repeats_df, repeats_table_file = fun.get_repeat_maskerDF(opt.ref, threads=opt.threads, replace=opt.replace)
 
 if opt.StopAfter_repeatsObtention is True:
-	print("Stopping after the obtention of repeats")
-	sys.exit(0)
+    print("Stopping after the obtention of repeats")
+    sys.exit(0)
 
 #############################
 
@@ -412,6 +420,8 @@ if opt.StopAfter_obtentionOFcloseSVs:
 
 # test accuracy on real data
 if opt.testAccuracy is True:  
+
+    print("testing accuracy on simulations and real variants (if provided)")
 
     # test that you have provided a opt.close_shortReads_table
     if opt.close_shortReads_table is None or opt.fast_SVcalling is True: 

@@ -7,6 +7,7 @@
 # module imports
 import os
 import sys
+import pandas as pd
 
 # define the parent dir of the cluster or not
 ParentDir = "%s/samba"%(os.getenv("HOME")); # local
@@ -31,6 +32,7 @@ perSVade_py = "%s/perSVade.py"%perSVade_dir
 
 # define dirs
 outdir_testing = "%s/scripts/perSVade/perSVade_repository/testing/outdirs_testing_severalSpecies"%ParentDir; fun.make_folder(outdir_testing)
+CurDir = "%s/scripts/perSVade/perSVade_repository/testing"%ParentDir; fun.make_folder(outdir_testing)
 outdir_genomes_and_annotations = "%s/scripts/perSVade/perSVade_repository/testing/genomes_and_annotations"%ParentDir
 
 ################################
@@ -105,8 +107,20 @@ species_Info = [("5478", "Candida_glabrata", 1, "mito_C_glabrata_CBS138"),
 taxIDs_with_noON_overalpping = {"5476", "746128"}
 
 # define the type of run
-type_run = "normalRun" # can be 'normalRun' or 'goldenSet'
+running_type = "normalRun" # can be 'normalRun' or 'goldenSet'
 StopAfterPrefecth_of_reads = False
+
+# initialize the df with the timing information
+filename_timing_df = "%s/calculating_resources.tab"%CurDir
+header_fields = ["species", "sampleID", "type_run", "threads", "nvars", "nsimulations", "range_filtering_benchmark", "simulation_ploidies",  "run_time", "exit_status", "finishing_greasy_time", "overall_runID", "std_file", "last_error_line", "job_cmd"]
+
+#  generate the file if not already done
+if fun.file_is_empty(filename_timing_df): 
+    open(filename_timing_df, "w").write("\t".join(header_fields) + "\n")
+
+# define the overall_runID
+overall_runID = "run2"
+remember_changing_the_run
 
 # go through each species
 for taxID, spName, ploidy, mitochondrial_chromosome in species_Info:
@@ -121,16 +135,99 @@ for taxID, spName, ploidy, mitochondrial_chromosome in species_Info:
     # create an outdir
     outdir_perSVade = "%s/%s_%s"%(outdir_testing, taxID, spName); fun.make_folder(outdir_perSVade)
 
-    if type_run=="normalRun":
+    if running_type=="normalRun":
+
+
+        ###### compute the timing of previous runs ######
+
+        # define files
+        greasy_log = "%s/testing_Accuracy/STDfiles/testAccuracy_greasy.log"%outdir_perSVade
+        jobs_file = "%s/testing_Accuracy/jobs.testingRealDataAccuracy"%outdir_perSVade
+
+        print(greasy_log, jobs_file)
+
+        # check that both of these files exists to continue
+        if all([not fun.file_is_empty(x) for x in [greasy_log, jobs_file]]): 
+
+            # define the expected jobIDs
+            expected_jobIDs = set(range(1,28))
+
+            # define the finishing greasy time
+            finishing_greasy_time = ["_".join(l.split("]")[0].split("[")[1].split()) for l in open(greasy_log, "r").readlines() if "Finished greasing" in l][0]
+            if len(finishing_greasy_time)!=19: raise ValueError("the greasy log is not correct")
+  
+            # map each jobID to an exit status
+            jobID_to_exit_status = {int(l.split("located in line ")[1].split()[0]) : l.split()[9] for l in open(greasy_log, "r").readlines() if "Elapsed:" in l}
+
+            # check that all are failed or completed
+            if len(set(jobID_to_exit_status.values()).difference({"failed", "completed"}))>0: raise ValueError("All the exist status should be failed or completed")
+
+            # map each jobID to the elapsed time
+            jobID_to_elapsed_time = {int(l.split("located in line ")[1].split()[0]) : l.strip().split()[-1] for l in open(greasy_log, "r").readlines() if "Elapsed:" in l}
+
+            # add the remaining jobIDs
+            for remaining_jobID in expected_jobIDs.difference(set(jobID_to_elapsed_time)): 
+
+                jobID_to_elapsed_time[remaining_jobID] = "00:00:00"
+                jobID_to_exit_status[remaining_jobID] = "pending"
+
+
+            # go through each job
+            jobID_to_metadata = {}
+            for Ijob, job_cmd in enumerate(open(jobs_file, "r").readlines()):
+
+                # define the things derived from the outdir
+                outdir_job = job_cmd.split("--outdir ")[1].split()[0]
+                sampleID = outdir_job.split("/")[-1]
+                type_run = outdir_job.split("/")[-2]
+
+                # other things
+                threads = int(job_cmd.split("--threads ")[1].split()[0])
+                nvars = int(job_cmd.split("--nvars ")[1].split()[0])
+                nsimulations = int(job_cmd.split("--nsimulations ")[1].split()[0])
+                simulation_ploidies = job_cmd.split("--simulation_ploidies ")[1].split()[0]
+                range_filtering_benchmark = job_cmd.split("--range_filtering_benchmark ")[1].split()[0]
+
+                # get the log
+                std_file_original = job_cmd.split()[-2]
+                std_file = "%s/std_files_testingAccuracy/%s_%s_%s_%ithreads_%ivars_%isims_range:%s_ploidies:%s_greasyFinish:%s.std"%(CurDir, spName, sampleID, type_run, threads, nvars, nsimulations, range_filtering_benchmark, simulation_ploidies, finishing_greasy_time)
+                fun.run_cmd("cp %s %s"%(std_file_original, std_file))
+
+                # get the last line with an error
+                lines_with_error = [l.strip() for l in open(std_file_original, "r").readlines() if "ERROR" in l.upper()]
+                if len(lines_with_error)==0: last_error_line = "no_error"
+                else: last_error_line = lines_with_error[-1]
+
+
+                # get into dict
+                jobID_to_metadata[Ijob+1] = {'species': spName, 'sampleID': sampleID, 'type_run': type_run, 'threads': threads, 'nvars': nvars, 'nsimulations': nsimulations, 'simulation_ploidies': simulation_ploidies, 'run_time': jobID_to_elapsed_time[Ijob+1], 'range_filtering_benchmark':range_filtering_benchmark, 'exit_status': jobID_to_exit_status[Ijob+1], "finishing_greasy_time":finishing_greasy_time, "overall_runID":overall_runID, "std_file":std_file, "last_error_line":last_error_line, "job_cmd":job_cmd.split(" >")[0]}
+
+                # remove the 'failed'
+                if jobID_to_exit_status[Ijob+1]=="failed": fun.delete_folder(outdir_job)
+
+            # deifine as df
+            df_timimg = pd.DataFrame(jobID_to_metadata).transpose()[header_fields]
+
+            # add the previous df to drop duplicates
+            df_timimg = df_timimg.append(pd.read_csv(filename_timing_df, sep="\t")).drop_duplicates()
+
+            # append
+            df_timimg.to_csv(filename_timing_df, sep="\t", header=True, index=False)
+
+            #continue # debug
+
+        ################################################
+
+        
 
         # define the table with short reads
         if spName=="Candida_glabrata": close_shortReads_table = close_shortReads_table_Cglabrata
         else: close_shortReads_table = "auto"
 
-        # get the reads from SRA. 3 samples, 3 runs per sample. Process with the 
-        cmd = "%s --ref %s --threads %i -o %s --close_shortReads_table %s --target_taxID %s --n_close_samples 3 --nruns_per_sample 3 -f1 skip -f2 skip --mitochondrial_chromosome %s --gff %s --testAccuracy --StopAfter_testAccuracy_perSVadeRunning --skip_SVcalling"%(perSVade_py, genome, threads, outdir_perSVade, close_shortReads_table, taxID, mitochondrial_chromosome, gff)
+        # get the reads from SRA. 3 samples, 3 runs per sample. Process with the. --verbose
+        cmd = "%s --ref %s --threads %i -o %s --close_shortReads_table %s --target_taxID %s --n_close_samples 3 --nruns_per_sample 3 -f1 skip -f2 skip --mitochondrial_chromosome %s --gff %s --testAccuracy --StopAfter_testAccuracy_perSVadeRunning --skip_SVcalling --verbose"%(perSVade_py, genome, threads, outdir_perSVade, close_shortReads_table, taxID, mitochondrial_chromosome, gff)
 
-    elif type_run=="goldenSet":
+    elif running_type=="goldenSet":
 
         # define the goldenSet_dir
         if spName=="Candida_glabrata": goldenSet_dir = goldenSet_dir_Cglabrata
@@ -138,7 +235,7 @@ for taxID, spName, ploidy, mitochondrial_chromosome in species_Info:
 
         # get the golden set running 
         if taxID in taxIDs_with_noON_overalpping: continue
-        cmd = "%s --ref %s --threads %i -o %s --target_taxID %s --n_close_samples 3 --nruns_per_sample 3 -f1 skip -f2 skip --mitochondrial_chromosome %s --gff %s --goldenSet_dir %s --skip_SVcalling"%(perSVade_py, genome, threads, outdir_perSVade, taxID, mitochondrial_chromosome, gff, goldenSet_dir)
+        cmd = "%s --ref %s --threads %i -o %s --target_taxID %s --n_close_samples 3 --nruns_per_sample 3 -f1 skip -f2 skip --mitochondrial_chromosome %s --gff %s --goldenSet_dir %s --skip_SVcalling --verbose"%(perSVade_py, genome, threads, outdir_perSVade, taxID, mitochondrial_chromosome, gff, goldenSet_dir)
 
     # add options depending on the machine
     if run_in_cluster is True: cmd += " --job_array_mode greasy --queue_jobs bsc_ls --max_ncores_queue 576 --time_read_obtention 48:00:00 --time_perSVade_running 48:00:00"

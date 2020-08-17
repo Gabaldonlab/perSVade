@@ -7,6 +7,7 @@ testing/outdirs_testing_severalSpecies
 testing/Cglabrata_goldenSetReads_BG2
 testing/Cglabrata_table_short_reads.tab
 testing/taxdump.tar.gz
+testing/std_files_testingAccuracy
 installation/external_software
 sync_git.py
 installation/test_installation/__pycache__
