@@ -49,7 +49,7 @@ perSVade is written in python, R and bash for Linux. Most of the dependecies can
 
 ### 4. Automatic installation of additional dependencies 
 
-In addition, you should install some additional dependencies with the following commands:
+In addition, you should install some additional dependencies with the following command:
 
 `./installation/setup_environment.sh`
 

@@ -22,6 +22,8 @@ varcall_cnv_pipeline = "%s/varcall_cnv_pipeline.py"%scripts_dir
 import sv_functions as fun
 import multiprocessing as multiproc
 
+# change the verbosity
+fun.printing_verbose_mode = False
 
 # define the threads
 threads = multiproc.cpu_count()

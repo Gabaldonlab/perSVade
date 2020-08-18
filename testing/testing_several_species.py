@@ -79,6 +79,7 @@ close_shortReads_table_Cglabrata = "%s/scripts/perSVade/perSVade_repository/test
 goldenSet_dir_Cglabrata = "%s/scripts/perSVade/perSVade_repository/testing/Cglabrata_goldenSetReads_BG2"%ParentDir
 
 # define important info about each species: taxID, spName, ploidy
+"""
 species_Info = [("5478", "Candida_glabrata", 1, "mito_C_glabrata_CBS138"),
                 ("5476", "Candida_albicans", 2, "Ca22chrM_C_albicans_SC5314"),
                 ("5207", "Cryptococcus_neoformans", 1, "CP003834.1"),
@@ -88,7 +89,7 @@ species_Info = [("5478", "Candida_glabrata", 1, "mito_C_glabrata_CBS138"),
                 #("7955", "Danio_rerio", 2, "NC_002333.2")]
                 #("9606", "Homo_sapiens", 2, "NC_012920.1")]
 
-
+"""
 """
 species_Info = [("7227", "Drosophila_melanogaster", 2, "KJ947872.2")]
                 #("7955", "Danio_rerio", 2, "NC_002333.2")]
@@ -103,12 +104,14 @@ species_Info = [("5478", "Candida_glabrata", 1, "mito_C_glabrata_CBS138"),
 """
 #species_Info = [("7227", "Drosophila_melanogaster", 2, "KJ947872.2")]
 #species_Info = [("5476", "Candida_albicans", 2, "Ca22chrM_C_albicans_SC5314")]
+species_Info = [("5478", "Candida_glabrata", 1, "mito_C_glabrata_CBS138")]
 
 taxIDs_with_noON_overalpping = {"5476", "746128"}
 
 # define the type of run
 running_type = "normalRun" # can be 'normalRun' or 'goldenSet'
 StopAfterPrefecth_of_reads = False
+compute_timimng = False
 
 # initialize the df with the timing information
 filename_timing_df = "%s/calculating_resources.tab"%CurDir
@@ -120,7 +123,6 @@ if fun.file_is_empty(filename_timing_df):
 
 # define the overall_runID
 overall_runID = "run2"
-remember_changing_the_run
 
 # go through each species
 for taxID, spName, ploidy, mitochondrial_chromosome in species_Info:
@@ -137,7 +139,6 @@ for taxID, spName, ploidy, mitochondrial_chromosome in species_Info:
 
     if running_type=="normalRun":
 
-
         ###### compute the timing of previous runs ######
 
         # define files
@@ -147,7 +148,7 @@ for taxID, spName, ploidy, mitochondrial_chromosome in species_Info:
         print(greasy_log, jobs_file)
 
         # check that both of these files exists to continue
-        if all([not fun.file_is_empty(x) for x in [greasy_log, jobs_file]]): 
+        if all([not fun.file_is_empty(x) for x in [greasy_log, jobs_file]]) and compute_timimng is True: 
 
             # define the expected jobIDs
             expected_jobIDs = set(range(1,28))
@@ -203,7 +204,7 @@ for taxID, spName, ploidy, mitochondrial_chromosome in species_Info:
                 jobID_to_metadata[Ijob+1] = {'species': spName, 'sampleID': sampleID, 'type_run': type_run, 'threads': threads, 'nvars': nvars, 'nsimulations': nsimulations, 'simulation_ploidies': simulation_ploidies, 'run_time': jobID_to_elapsed_time[Ijob+1], 'range_filtering_benchmark':range_filtering_benchmark, 'exit_status': jobID_to_exit_status[Ijob+1], "finishing_greasy_time":finishing_greasy_time, "overall_runID":overall_runID, "std_file":std_file, "last_error_line":last_error_line, "job_cmd":job_cmd.split(" >")[0]}
 
                 # remove the 'failed'
-                if jobID_to_exit_status[Ijob+1]=="failed": fun.delete_folder(outdir_job)
+                #if jobID_to_exit_status[Ijob+1]=="failed": fun.delete_folder(outdir_job)
 
             # deifine as df
             df_timimg = pd.DataFrame(jobID_to_metadata).transpose()[header_fields]
@@ -218,14 +219,13 @@ for taxID, spName, ploidy, mitochondrial_chromosome in species_Info:
 
         ################################################
 
-        
-
         # define the table with short reads
         if spName=="Candida_glabrata": close_shortReads_table = close_shortReads_table_Cglabrata
         else: close_shortReads_table = "auto"
 
         # get the reads from SRA. 3 samples, 3 runs per sample. Process with the. --verbose
-        cmd = "%s --ref %s --threads %i -o %s --close_shortReads_table %s --target_taxID %s --n_close_samples 3 --nruns_per_sample 3 -f1 skip -f2 skip --mitochondrial_chromosome %s --gff %s --testAccuracy --StopAfter_testAccuracy_perSVadeRunning --skip_SVcalling --verbose"%(perSVade_py, genome, threads, outdir_perSVade, close_shortReads_table, taxID, mitochondrial_chromosome, gff)
+        cmd = "%s --ref %s --threads %i -o %s --close_shortReads_table %s --target_taxID %s --n_close_samples 3 --nruns_per_sample 3 -f1 skip -f2 skip --mitochondrial_chromosome %s --gff %s --testAccuracy --skip_SVcalling --verbose"%(perSVade_py, genome, threads, outdir_perSVade, close_shortReads_table, taxID, mitochondrial_chromosome, gff)
+        # --StopAfter_testAccuracy_perSVadeRunning
 
     elif running_type=="goldenSet":
 
