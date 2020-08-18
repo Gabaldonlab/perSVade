@@ -42,6 +42,8 @@ import urllib
 from subprocess import STDOUT, check_output
 import subprocess
 import subprocess, datetime, signal
+import json
+import sklearn
 
 #### UNIVERSAL FUNCTIONS ####
 
@@ -71,9 +73,15 @@ def get_date_and_time():
 #import psutil
 #from statsmodels.stats import multitest
 
-
+# chnage the errirs ti report
 warnings.simplefilter(action='ignore', category=pd.core.common.SettingWithCopyWarning) # avoid the slicing warning
 #pd.options.mode.chained_assignment = 'raise'
+warnings.simplefilter('ignore', sklearn.metrics.regression.UndefinedMetricWarning)
+warnings.simplefilter('ignore', np.RankWarning)
+
+np.seterr(divide='ignore', invalid='ignore')
+
+
 
 # load a specific matplotlib library for cluster envs
 try:
@@ -4358,6 +4366,7 @@ def run_gridssClove_given_filters(sorted_bam, reference_genome, working_dir, med
 
 
     """
+    print_if_verbose("running gridss and clove")
 
     # if the median_coverage is -1, calculate it from the provided sorted_bam
     if median_coverage==-1: 
@@ -5261,7 +5270,7 @@ def downsample_bamfile_keeping_pairs(bamfile, fraction_reads=0.1, replace=True, 
     """Takes a sorted and indexed bam and samples a fraction_reads randomly. This is a fast process so that it can be repeated many times"""
 
     # define the outfile
-    seed =  random.choice(list(range(300)))
+    seed = random.choice(list(range(300)))
 
     # define sampled_bamfile if not provided
     if sampled_bamfile is None:
@@ -7103,9 +7112,9 @@ def get_svtype_to_svfile_and_df_gridss_from_perSVade_outdir(perSVade_outdir, ref
 
     else: 
 
-        needtodevelopthesituationwiththedirty_perSVade_dir
-        gridss_vcf = jhdajhdajkdah
-
+        # assume that it is a not cleaned dir
+        gridss_vcf = "%s/gridss_output.vcf.withSimpleEventType.vcf"%outdir
+        svtype_to_svfile = {file.split(".structural_variants.")[1].split(".")[0] : "%s/%s"%(outdir, file) for file in os.listdir(outdir) if ".structural_variants." in file}
 
     # get the df gridss
     df_gridss = add_info_to_gridssDF(load_single_sample_VCF(gridss_vcf), reference_genome)
@@ -7539,10 +7548,17 @@ def get_insert_size_distribution(sorted_bam, replace=False, threads=4):
     # run
     if file_is_empty(outfile) or replace is True: 
         remove_file(outfile_tmp)
+
+        # downsample bam to 1%
+        print_if_verbose("getting 1pct of the reads to calculate insert size")
+        sampled_bam = downsample_bamfile_keeping_pairs(sorted_bam, fraction_reads=0.01, replace=replace, threads=threads)
+
+        # run the calculation of insert sizes
         picard_insertSize_std = "%s.generating.std"%outfile_tmp
         print_if_verbose("calculating insert size distribution. The std is in %s"%picard_insertSize_std)
-        run_cmd("%s CollectInsertSizeMetrics HISTOGRAM_FILE=%s INPUT=%s OUTPUT=%s > %s 2>&1"%(picard_exec, hist_file, sorted_bam, outfile_tmp, picard_insertSize_std))
+        run_cmd("%s CollectInsertSizeMetrics HISTOGRAM_FILE=%s INPUT=%s OUTPUT=%s > %s 2>&1"%(picard_exec, hist_file, sampled_bam, outfile_tmp, picard_insertSize_std))
         remove_file(picard_insertSize_std)
+        remove_file(sampled_bam)
 
         os.rename(outfile_tmp, outfile)
 
@@ -9829,6 +9845,67 @@ def get_best_parameters_for_GridssClove_run(sorted_bam, reference_genome, outdir
     return gridss_blacklisted_regions, gridss_maxcoverage, gridss_filters_dict, max_rel_coverage_to_consider_del, min_rel_coverage_to_consider_dup, df_cross_benchmark_best
 
 
+
+class NpEncoder(json.JSONEncoder):
+
+    """A class to encode the json for numpy objects"""
+
+    def default(self, obj):
+
+        if isinstance(obj, np.integer):
+            return int(obj)
+        elif isinstance(obj, np.floating):
+            return float(obj)
+        elif isinstance(obj, np.ndarray):
+            return obj.tolist()
+        else:
+            return super(NpEncoder, self).default(obj)
+
+def write_gridss_parameters_as_json(gridss_blacklisted_regions, gridss_maxcoverage, gridss_filters_dict, max_rel_coverage_to_consider_del, min_rel_coverage_to_consider_dup, json_file, replace=False):
+
+    """
+    This function takes all the gridss and clove parameters and writes a json under json_file
+    """
+
+    if file_is_empty(json_file) or replace is True:
+        print_if_verbose("saving parameters into %s"%json_file)
+
+        # get the json
+        parameters_dict = {"gridss_blacklisted_regions":gridss_blacklisted_regions,
+                           "gridss_maxcoverage":gridss_maxcoverage,
+                           "gridss_filters_dict":gridss_filters_dict,
+                           "max_rel_coverage_to_consider_del":max_rel_coverage_to_consider_del,
+                           "min_rel_coverage_to_consider_dup":min_rel_coverage_to_consider_dup}
+
+        parameters_json = json.dumps(parameters_dict, cls=NpEncoder, indent=4, sort_keys=True)
+
+        # write
+        json_file_tmp = "%s.tmp"%json_file
+        open(json_file_tmp, "w").write(parameters_json)
+        os.rename(json_file_tmp, json_file)
+
+def get_parameters_from_json(json_file):
+
+    """Takes a json file with the parameters and returns each important thing"""
+
+    with open(json_file) as f: parameters_dict = json.load(f)
+
+    # define things
+    gridss_blacklisted_regions = parameters_dict["gridss_blacklisted_regions"]
+    gridss_maxcoverage = parameters_dict["gridss_maxcoverage"]
+    gridss_filters_dict_initial = parameters_dict["gridss_filters_dict"]
+    max_rel_coverage_to_consider_del = parameters_dict["max_rel_coverage_to_consider_del"]
+    min_rel_coverage_to_consider_dup = parameters_dict["min_rel_coverage_to_consider_dup"]
+
+    # modify the filters
+    def convert_tuple_to_list(x):
+        if type(x)==list: return tuple(x)
+        else: return x
+
+    gridss_filters_dict = {k : convert_tuple_to_list(v) for k,v in gridss_filters_dict_initial.items()}
+
+    return gridss_blacklisted_regions, gridss_maxcoverage, gridss_filters_dict, max_rel_coverage_to_consider_del, min_rel_coverage_to_consider_dup
+
 def run_GridssClove_optimising_parameters(sorted_bam, reference_genome, outdir, threads=4, replace=False, n_simulated_genomes=2, mitochondrial_chromosome="mito_C_glabrata_CBS138", simulation_ploidies=["haploid", "diploid_homo", "diploid_hetero", "ref:2_var:1", "ref:3_var:1", "ref:4_var:1", "ref:5_var:1", "ref:9_var:1", "ref:19_var:1", "ref:99_var:1"], range_filtering_benchmark="theoretically_meaningful", nvars=100, fast_SVcalling=False, real_svtype_to_file={}, gridss_VCFoutput=""):
 
     """
@@ -9894,6 +9971,10 @@ def run_GridssClove_optimising_parameters(sorted_bam, reference_genome, outdir, 
 
     # define the final outdir 
     outdir_gridss_final = "%s/final_gridss_running"%outdir; make_folder(outdir_gridss_final)
+
+    # write the parameters of the running
+    json_file = "%s/perSVade_parameters.json"%outdir_gridss_final
+    write_gridss_parameters_as_json(gridss_blacklisted_regions, gridss_maxcoverage, gridss_filters_dict, max_rel_coverage_to_consider_del, min_rel_coverage_to_consider_dup, json_file, replace=replace)
 
     # define the final vcf dir
     final_gridss_vcf = "%s/output_gridss.vcf"%outdir_gridss_final
@@ -10288,27 +10369,96 @@ def plot_fraction_overlapping_realSVs(df_benchmarking, filename):
     svtype_to_shortSVtype = {"deletions":"del", "tandemDuplications":"tan", "insertions":"ins", "translocations":"tra", "inversions":"inv", "integrated":"all", "remaining":"rem"}
     df_benchmarking["svtype"] = df_benchmarking.svtype.apply(lambda x: svtype_to_shortSVtype[x])
 
-    fig = plt.figure(figsize=(len(set(df_benchmarking.svtype))*2, 5))
+    fig = plt.figure(figsize=(len(set(df_benchmarking.svtype)), 7))
 
-    for I, y in enumerate(["precision", "recall", "n_SVs", "n_HighConfidence_SVs"]):
+    label_to_ylabel = {"fraction overlapping SVs": "fraction overlap. SVs ~ precision" , "n SVs":"n SVs ~ recall"}
 
-        ax = plt.subplot(2, 2, I+1)
+    for I, y in enumerate(["fraction overlapping SVs", "n SVs"]): # 
+
+        ax = plt.subplot(2, 1, I+1)
 
         df_benchmarking[y] = df_benchmarking[y].astype(float)
 
         # get a violin plot
-        ax = sns.boxplot(x="svtype", y=y, data=df_benchmarking, hue="simulationID", palette=palette, boxprops=dict(alpha=.65))
+        ax = sns.boxplot(x="svtype", y=y, data=df_benchmarking, hue="simulationID", palette=palette, boxprops=dict(alpha=.45))
 
         ax = sns.swarmplot(x="svtype", y=y, hue="simulationID", data=df_benchmarking, palette=palette, dodge=True, linewidth=.5, edgecolor="k")
 
         ax.legend(bbox_to_anchor=(1, 1))
         ax.set_xlabel("")
+        ax.set_ylabel(label_to_ylabel[y])
 
-        if I in [0,2]: ax.get_legend().remove()
+        if I in [1]: ax.get_legend().remove()
 
 
     fig.savefig(filename, bbox_inches='tight')
     plt.close(fig)
+
+def plot_accuracy_of_parameters_on_test_samples(parameters_df, test_df, outdir, plots_dir, replace=False, threads=4):
+
+    """
+    This function runs the gridss+clove pipeline from several parameters (specified in parameters_df) on other datasets (specified in test_df). All the files will be written under outdir. At the end, a heatmap with the accuracy of each of the parameters on each of the test datasets will be generated. The index of each df should be a unique tuple indicating the cells in the final heatmap.
+    """
+
+    if replace is True: delete_folder(outdir)
+    make_folder(outdir)
+
+    # define the metadata of each df
+    parameters_df_metadata = [k for k in parameters_df.keys() if k not in {"parameters_json"}]
+    test_df_metadata = [k for k in test_df.keys() if k not in {"sorted_bam", "gridss_vcf", "reference_genome", "mitochondrial_chromosome", "svtables_prefix"}]
+
+    ######## CREATE A df_benchmarking CONTAINING ALL THE RESULTS ##########
+
+    # define the outdir
+    outdir_cross_benchmark_files = "%s/tmp_files"%outdir; make_folder(outdir_cross_benchmark_files)
+
+    # initialize the df of the benchmarking
+    benchmarking_fields = ['FN', 'FP', 'Fvalue', 'TP', 'nevents', 'precision', 'recall', 'svtype']
+    df_benchmark = pd.DataFrame(columns=["parms_%s"%x for x in parameters_df_metadata] + ["test_%s"%x for x in test_df_metadata] + benchmarking_fields)
+
+    for numeric_parameter_index, (Irow, parms_row) in enumerate(parameters_df.iterrows()):
+        Irow_str = "_".join(Irow)
+        print_if_verbose("\n\n---------\nusing best parameters by %s (%i/%i)"%(Irow_str, numeric_parameter_index+1, len(parameters_df)))
+        # get the parameters
+        gridss_blacklisted_regions, gridss_maxcoverage, gridss_filters_dict, max_rel_coverage_to_consider_del, min_rel_coverage_to_consider_dup = get_parameters_from_json(parms_row["parameters_json"])
+
+        for Itest, test_row in test_df.iterrows():
+            Itest_str = "_".join(Itest)
+            print_if_verbose("testing on %s"%(Itest_str))
+
+            # define an outdir and put the gridss vcf there with a softlink
+            outdir_cross_benchmark = "%s/%s_parameters_tested_on_%s"%(outdir_cross_benchmark_files, Irow_str, Itest_str); make_folder(outdir_cross_benchmark)
+            gridss_vcf = "%s/gridss_vcf.vcf"%outdir_cross_benchmark
+            soft_link_files(test_row["gridss_vcf"], gridss_vcf)
+
+            # calculate the median insert sizes
+            median_insert_size, median_insert_size_sd  = get_insert_size_distribution(test_row["sorted_bam"], replace=replace, threads=threads)
+
+            # get the gridss-clove run
+            sv_dict, df_gridss = run_gridssClove_given_filters(test_row["sorted_bam"], test_row["reference_genome"], outdir_cross_benchmark, -1, replace=replace, threads=threads, gridss_blacklisted_regions=gridss_blacklisted_regions, gridss_VCFoutput=gridss_vcf, gridss_maxcoverage=gridss_maxcoverage, median_insert_size=median_insert_size, median_insert_size_sd=median_insert_size_sd, gridss_filters_dict=gridss_filters_dict, run_in_parallel=True, max_rel_coverage_to_consider_del=max_rel_coverage_to_consider_del, min_rel_coverage_to_consider_dup=min_rel_coverage_to_consider_dup, replace_FromGridssRun=replace)
+
+            # get the known SV dict
+            known_sv_dict = {svtype : "%s_%s.tab"%(test_row["svtables_prefix"], svtype) for svtype in {"insertions", "deletions", "translocations", "inversions", "tandemDuplications"}}
+            if any([file_is_empty(x) for x in known_sv_dict.values()]): raise ValueError("There are some un existing files")
+
+            # get the benchmarking
+            fileprefix = "%s/benchmarking"%outdir_cross_benchmark
+            df_benchmark_test = benchmark_processedSVs_against_knownSVs_inHouse(sv_dict, known_sv_dict, fileprefix, replace=replace, add_integrated_benchmarking=True)
+
+            # add metadata fields
+            for x in parameters_df_metadata: df_benchmark_test["parms_%s"%x] = parms_row[x]
+            for x in test_df_metadata: df_benchmark_test["test_%s"%x] = test_row[x]
+
+            # keep
+            df_benchmark = df_benchmark.append(df_benchmark_test[list(df_benchmark.keys())])
+
+    #######################################################################
+
+    print(df_benchmark)
+
+    adkjgdaghkda
+
+  
 
 def report_accuracy_realSVs(close_shortReads_table, reference_genome, outdir, real_svtype_to_file, SVs_compatible_to_insert_dir, threads=4, replace=False, n_simulated_genomes=2, mitochondrial_chromosome="mito_C_glabrata_CBS138", simulation_ploidies=["haploid", "diploid_homo", "diploid_hetero", "ref:2_var:1", "ref:3_var:1", "ref:4_var:1", "ref:5_var:1", "ref:9_var:1", "ref:19_var:1", "ref:99_var:1"], range_filtering_benchmark="theoretically_meaningful", nvars=100, job_array_mode="local", max_ncores_queue=48, time_perSVade_running="02:00:00", queue_jobs="debug", StopAfter_testAccuracy_perSVadeRunning=False):
 
@@ -10365,6 +10515,7 @@ def report_accuracy_realSVs(close_shortReads_table, reference_genome, outdir, re
 
                 # define the final file 
                 final_file = "%s/perSVade_finished_file.txt"%outdir_runID
+                parameters_file = "%s/SVdetection_output/final_gridss_running/perSVade_parameters.json"%outdir_runID
 
                 # define the previous repeats file 
                 previous_repeats_table = "%s.repeats.tab"%reference_genome
@@ -10420,11 +10571,6 @@ def report_accuracy_realSVs(close_shortReads_table, reference_genome, outdir, re
             print_if_verbose("You already ran all the configurations of perSVade. Stopping after the running of perSVade on testAccuracy")
             sys.exit(0)
 
-
-
-        thishastobedeveloped
-
-
         print_if_verbose("getting ID_to_svtype_to_svDF")
         ID_to_svtype_to_svDF = get_sampleID_to_svtype_to_svDF_filtered(all_sampleID_to_svtype_to_file, all_sampleID_to_dfGRIDSS)
 
@@ -10440,7 +10586,6 @@ def report_accuracy_realSVs(close_shortReads_table, reference_genome, outdir, re
         print_if_verbose("loading objects")
         ID_to_svtype_to_svDF = load_object(ID_to_svtype_to_svDF_file)
         all_sampleID_to_dfBestAccuracy = load_object(all_sampleID_to_dfBestAccuracy_file) 
-
 
     # map each runID to the IDs of the same sample 
     runID_to_replicateIDs = {runID : set(df_reads[df_reads.sampleID==df_reads.loc[runID, "sampleID"]].index).difference({runID}) for runID in df_reads.runID}
@@ -10468,10 +10613,10 @@ def report_accuracy_realSVs(close_shortReads_table, reference_genome, outdir, re
             simulationID, runID = ID.split("||||")
 
             # only keep data if there are more than 10 svIDs
-            if len(svIDs)>=5: 
+            if len(svIDs)>=0: 
 
                 # define the svIDs in other runs of the same sample
-                list_other_svIDs = [ID_to_svtype_to_svIDs["%s||||%s"%(simulationID, otherRunID)][svtype] for otherRunID in runID_to_replicateIDs[runID]]
+                list_other_svIDs = [ID_to_svtype_to_svIDs["%s||||%s"%(simulationID, otherRunID)][svtype] for otherRunID in runID_to_replicateIDs[runID] if svtype in ID_to_svtype_to_svIDs["%s||||%s"%(simulationID, otherRunID)]] + [set()]
 
                 # define all the others
                 all_other_svIDs = set.union(*list_other_svIDs)
@@ -10479,19 +10624,20 @@ def report_accuracy_realSVs(close_shortReads_table, reference_genome, outdir, re
                 # define the true even
                 intersection_other_svIDs = set.intersection(*list_other_svIDs)
 
-                # define the precision
+                # define the overlap as the ratio 
                 n_SVs = len(svIDs)
                 n_overlapping = len(all_other_svIDs.intersection(svIDs))
-                precision = n_overlapping/len(svIDs)
+                if n_SVs>0: overlap_SVs = n_overlapping/len(svIDs)
+                else: overlap_SVs = 0
 
                 # define the 'recall' of real vars
                 TPs = intersection_other_svIDs.intersection(svIDs)
-                recall = len(TPs)/len(intersection_other_svIDs)
+                #recall = len(TPs)/len(intersection_other_svIDs)
 
                 # keep
                 IDdict = "%s||||%s"%(ID, svtype)
 
-                df_benchmarking_realSVs_dict[IDdict] = {"simulationID":simulationID, "runID":runID, "sampleID":df_reads.loc[runID, "sampleID"], "svtype":svtype, "precision":precision, "n_overlapping":n_overlapping, "n_SVs":n_SVs, "recall":recall, "n_HighConfidence_SVs":len(intersection_other_svIDs)}   
+                df_benchmarking_realSVs_dict[IDdict] = {"simulationID":simulationID, "runID":runID, "sampleID":df_reads.loc[runID, "sampleID"], "svtype":svtype, "fraction overlapping SVs":overlap_SVs, "n_overlapping":n_overlapping, "n SVs":n_SVs, "n_HighConfidence_SVs":len(intersection_other_svIDs)}   
 
     df_benchmarking_realSVs = pd.DataFrame(df_benchmarking_realSVs_dict).transpose()
 
@@ -10504,10 +10650,111 @@ def report_accuracy_realSVs(close_shortReads_table, reference_genome, outdir, re
     filename = "%s/accuracy_simulations.pdf"%plots_dir
     plot_accuracy_simulations_from_all_sampleID_to_dfBestAccuracy(all_sampleID_to_dfBestAccuracy, filename)
 
+    ########## plot the cross-accuracy between different parameters ##########
+
+    # initialize a dir that will contain the sorted bams and gridss vcf outputs
+    simulations_files_and_parameters_dir = "%s/simulations_files_and_parameters"%outdir
+    if replace is True: delete_folder(simulations_files_and_parameters_dir)
+    make_folder(simulations_files_and_parameters_dir)
+
+    # This requires the definition of two things:
+
+    # the parameters_df. The first cols are metadata (like sampleID, runID and optimisation type) and the others are things necessary for runnning gridss: and the path to the parameters_json
+    parameters_df_dict = {}
+
+    # test_df: This is info on which to test the running of gridss+clove. It contains metadata cols (sampleID, runID, optimisation type (real, uniform), simName, ploidy, svtype) and data to run the optimisation on (sorted_bam, gridss_vcf, reference_genome, mitochondrial_chromosome)
+    test_df_dict = {}
+
+    for typeSimulations in ["uniform", "realSVs", "fast"]:
+
+        # go through each sampleID
+        for sampleID in sorted(set(df_reads.sampleID)):
+
+            # go though each runID
+            for runID in sorted(set(df_reads[df_reads.sampleID==sampleID].runID)):
+
+                # define the outdir of the run
+                runID_outdir = "%s/%s/%s/SVdetection_output"%(outdir, typeSimulations, runID)
+
+                # get the parameters
+                parameters_json_origin = "%s/final_gridss_running/perSVade_parameters.json"%runID_outdir
+                parameters_json_dest = "%s/parameters_%s_%s_%s.json"%(simulations_files_and_parameters_dir, typeSimulations, sampleID, runID)
+                if file_is_empty(parameters_json_dest): 
+                    parameters_json_dest_tmp = "%s.tmp"%parameters_json_dest
+                    run_cmd("cp %s %s"%(parameters_json_origin, parameters_json_dest_tmp))
+                    os.rename(parameters_json_dest_tmp, parameters_json_dest)
+
+                parameters_df_dict[(sampleID, runID, typeSimulations)] = {"sampleID":sampleID, "runID":runID, "typeSimulations":typeSimulations, "parameters_json":parameters_json_dest}
+
+                # go through additional things
+                if typeSimulations!="fast":
+                    for Isim in range(n_simulated_genomes):
+
+                        # define the name
+                        simName = "simulation_%i"%(Isim+1)
+                        sim_outdir = "%s/parameter_optimisation/%s"%(runID_outdir, simName)
+
+                        # go through each ploidy
+                        for ploidy in simulation_ploidies:
+
+                            # define the destintaion bam 
+                            destination_bam = "%s/reads_%s_%s_%s_sim%i_%s.bam"%(simulations_files_and_parameters_dir, typeSimulations, sampleID, runID, Isim+1, ploidy)
+
+                            # change the place
+                            if file_is_empty(destination_bam): 
+
+                                # define the origin bam
+                                if ploidy=="haploid": suffix_ploidy = "bam.sorted"
+                                else: suffix_ploidy = "bam.sorted.%s.bam.sorted"%ploidy
+                                bam_files = ["%s/%s"%(sim_outdir, file) for file in os.listdir(sim_outdir) if file.startswith("aligned_reads") and ".".join(file.split(".")[1:])==suffix_ploidy]
+                                if len(bam_files)!=1: raise ValueError("There should be only one bam")
+                                origin_bam = bam_files[0]
+
+                                changealsothelocationoftheCollectInsertSizeMetrics_out
+
+                                # change the bai
+                                if file_is_empty("%s.bai"%destination_bam): os.rename("%s.bai"%origin_bam, "%s.bai"%destination_bam)
+
+                                # reanme the bam
+                                os.rename(origin_bam, destination_bam)
+                         
+                            # change the gridss vcf
+                            origin_gridss_vcf = "%s/benchmark_GridssClove_%s/benchmark_max50000x_ignoreRegionsFalse/gridss_output.vcf.withSimpleEventType.vcf"%(sim_outdir, ploidy)
+                            dest_gridss_vcf = "%s/gridss_vcf_%s_%s_%s_sim%i_%s.vcf"%(simulations_files_and_parameters_dir, typeSimulations, sampleID, runID, Isim+1, ploidy)
+                            if file_is_empty(dest_gridss_vcf): os.rename(origin_gridss_vcf, dest_gridss_vcf)
+
+                            # change the location of the simulated SVs
+                            svtables_prefix =  "%s/SVs_%s_%s_%s_sim%i"%(simulations_files_and_parameters_dir, typeSimulations, sampleID, runID, Isim+1)
+                            for svtype in {"insertions", "deletions", "translocations", "inversions", "tandemDuplications"}:
+
+                                # define the files
+                                origin_file = "%s/final_simulated_SVs/%s.tab"%(sim_outdir, svtype)
+                                dest_file = "%s_%s.tab"%(svtables_prefix, svtype)
+                                dest_file_tmp = "%s.tmp"%dest_file
+
+                                # move
+                                if file_is_empty(dest_file):
+                                    run_cmd("cp %s %s"%(origin_file, dest_file_tmp))
+                                    os.rename(dest_file_tmp, dest_file)
+
+                            # get the name
+                            test_df_dict[(sampleID, runID, typeSimulations, simName, ploidy)] = {"sampleID":sampleID, "runID":runID, "typeSimulations":typeSimulations, "simName":simName, "ploidy":ploidy, "sorted_bam":destination_bam, "gridss_vcf":dest_gridss_vcf, "reference_genome":reference_genome, "mitochondrial_chromosome":mitochondrial_chromosome, "svtables_prefix":svtables_prefix}
+
+    # get the dfs
+    parameters_df = pd.DataFrame(parameters_df_dict).transpose()[["sampleID", "runID", "typeSimulations", "parameters_json"]]
+    test_df = pd.DataFrame(test_df_dict).transpose()[["sampleID", "runID", "typeSimulations", "simName", "ploidy", "sorted_bam", "gridss_vcf", "reference_genome", "mitochondrial_chromosome", "svtables_prefix"]]
+
+    # plot the cross-accuracy
+    print_if_verbose("plotting cross-accuracy")
+    outdir_cross_accuracy = "%s/cross_accuracy_calculations"%outdir
+    plot_accuracy_of_parameters_on_test_samples(parameters_df, test_df, outdir_cross_accuracy, plots_dir, replace=replace, threads=threads)
+
+    ##########################################################################
+
 
 
     ##### VERY IMPORTANT: CLEAN THE OUTPUT #####
-    needsttobedeveloped
+    cleaningoutputforeachSVtypeneedstoBedeveloped
     clean_perSVade_outdir(xxx)
 
 

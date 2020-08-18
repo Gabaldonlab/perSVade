@@ -226,7 +226,6 @@ if opt.pooled_sequencing is True: print("WARNING: If you are running SV calling,
 simulation_ploidies = opt.simulation_ploidies.split(",")
 
 # the window length for all operations
-print([len_seq for chrom, len_seq  in fun.get_chr_to_len(opt.ref).items() if chrom not in opt.mitochondrial_chromosome.split(",") and len_seq>=20000])
 fun.window_l = int(np.median([len_seq for chrom, len_seq  in fun.get_chr_to_len(opt.ref).items() if chrom not in opt.mitochondrial_chromosome.split(",") and len_seq>=20000])*0.05) + 1
 if pd.isna(fun.window_l): fun.window_l = 1000
 
