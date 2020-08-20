@@ -44,6 +44,7 @@ import subprocess
 import subprocess, datetime, signal
 import json
 import sklearn
+import matplotlib.colors as mcolors
 
 #### UNIVERSAL FUNCTIONS ####
 
@@ -688,6 +689,7 @@ def write_coverage_per_gene_mosdepth_and_parallel(sorted_bam, reference_genome, 
         print_if_verbose("writing %s"%gene_to_coverage_file)
         os.rename(coverage_file_with_ID, gene_to_coverage_file)
 
+
 def run_gatk_HaplotypeCaller(outdir_gatk, ref, sorted_bam, ploidy, threads, coverage, replace=False):
 
     """Runs haplotype caller under outdir and returns the filename of the filtered results"""
@@ -1234,9 +1236,35 @@ def transform_cut_and_paste_to_copy_and_paste_insertions(reference_genome, rearr
                 chr_to_bpPositions[chrom] = np.array(sorted(chr_to_bpPositions[chrom]))
 
             # add the closest breakpoint position of ChrA in the reference
-            df["closest_5'breakpoint_position"] = df.apply(lambda r: find_nearest(chr_to_bpPositions[r["ChrA"]][chr_to_bpPositions[r["ChrA"]]<(r["StartA"])], r["StartA"]), axis=1)
+            df["closest_5'breakpoint_position"] = df.apply(lambda r: find_nearest(chr_to_bpPositions[r["ChrA"]][chr_to_bpPositions[r["ChrA"]]<(r["StartA"])], r["StartA"]), axis=1).apply(int)
 
-            df["closest_3'breakpoint_position"] = df.apply(lambda r: find_nearest(chr_to_bpPositions[r["ChrA"]][chr_to_bpPositions[r["ChrA"]]>(r["EndA"])], r["EndA"]), axis=1)
+            ######### debugging code #########
+            """
+            for Irow, r in df.iterrows():
+                print(Irow, r["ChrA"], "len", chr_to_lenSeq[r["ChrA"]])
+                print(chr_to_bpPositions[r["ChrA"]])
+
+                print(chr_to_bpPositions[r["ChrA"]]>=(r["EndA"]))
+                print(chr_to_bpPositions[r["ChrA"]]>=(r["EndA"]))
+
+                print(chr_to_bpPositions[r["ChrA"]][chr_to_bpPositions[r["ChrA"]]>=(r["EndA"])])
+
+                print(find_nearest(chr_to_bpPositions[r["ChrA"]][chr_to_bpPositions[r["ChrA"]]>=(r["EndA"])], r["EndA"]))
+            """
+            ##################################
+
+            df["closest_3'breakpoint_position"] = df.apply(lambda r: find_nearest(chr_to_bpPositions[r["ChrA"]][chr_to_bpPositions[r["ChrA"]]>=(r["EndA"])], r["EndA"]), axis=1).apply(int)
+
+            ######### debugging code #########
+            """
+            for Irow, r in df.iterrows():
+                
+                print(Irow, r["ChrA"], "len", chr_to_lenSeq[r["ChrA"]])
+                print(r["StartA"])
+                print(r["closest_5'breakpoint_position"])
+                print(chr_to_refSeq[r["ChrA"]][r["closest_5'breakpoint_position"]:r["StartA"]-1])
+            """
+            ##################################
 
             # get the 5' sequence (from one position after the closest breakpoint to the position before the breakpoint)
             df["5'sequence"] = df.apply(lambda r: chr_to_refSeq[r["ChrA"]][r["closest_5'breakpoint_position"]:r["StartA"]-1], axis=1)
@@ -1267,7 +1295,7 @@ def transform_cut_and_paste_to_copy_and_paste_insertions(reference_genome, rearr
                 chrA_refSeq = chr_to_refSeq[chrA]
                 if not(chrA_refSeq.count(ref_seq)==1 and all_rearranged_chromosomes_together.count(rearranged_seq)==1 and all_rearranged_chromosomes_together.count(ref_seq)==0): # chrA_refSeq.count(rearranged_seq)==0
 
-                    print_if_verbose("WARNING: insertion %i is not unique. setting as cut-and-paste instead of copy-and-paste")
+                    print_if_verbose("WARNING: insertion %i is not unique. setting as cut-and-paste instead of copy-and-paste"%(I+1))
                     row["Copied"] = False
 
                 else:
@@ -1462,17 +1490,17 @@ def get_svDF_in_coords_of_rearranged_genome(svDF, reference_genome, rearranged_g
             seq_field = "%s_seq"%chrom # the whole sequence
 
             # add the closest breakpoint position of chrom in the reference
-            svDF["%s_closest_5'bp_pos"%chrom] = svDF.apply(lambda r: find_nearest(chr_to_bpPositions[r[chrom]][chr_to_bpPositions[r[chrom]]<(r[bp_pos_fiel])], r[bp_pos_fiel]), axis=1)
+            svDF["%s_closest_5'bp_pos"%chrom] = svDF.apply(lambda r: find_nearest(chr_to_bpPositions[r[chrom]][chr_to_bpPositions[r[chrom]]<(r[bp_pos_fiel])], r[bp_pos_fiel]), axis=1).apply(int)
 
-            svDF["%s_closest_3'bp_pos"%chrom] = svDF.apply(lambda r: find_nearest(chr_to_bpPositions[r[chrom]][chr_to_bpPositions[r[chrom]]>(r[bp_pos_fiel])], r[bp_pos_fiel]), axis=1)
+            svDF["%s_closest_3'bp_pos"%chrom] = svDF.apply(lambda r: find_nearest(chr_to_bpPositions[r[chrom]][chr_to_bpPositions[r[chrom]]>(r[bp_pos_fiel])], r[bp_pos_fiel]), axis=1).apply(int)
 
             # add the sequences 
 
-            # 5' seq starts at the position after the breakpoint and ends including the breakpoint position
-            svDF[seq_5_field] = svDF.apply(lambda r: chr_to_refSeq[r[chrom]][r["%s_closest_5'bp_pos"%chrom] : (r[bp_pos_fiel]-1)], axis=1)
+            # 5' seq starts at the position after the breakpoint and ends including the breakpoint position (this may give errors)
+            svDF[seq_5_field] = svDF.apply(lambda r: chr_to_refSeq[r[chrom]][r["%s_closest_5'bp_pos"%chrom] : int(r[bp_pos_fiel]-1)], axis=1)
 
             # 3' seq starts right after the breakpoint and spans until the position before the nex breakpoint
-            svDF[seq_3_field] = svDF.apply(lambda r: chr_to_refSeq[r[chrom]][(r[bp_pos_fiel]-1) : (r["%s_closest_3'bp_pos"%chrom]-1)], axis=1)
+            svDF[seq_3_field] = svDF.apply(lambda r: chr_to_refSeq[r[chrom]][int(r[bp_pos_fiel]-1) : (r["%s_closest_3'bp_pos"%chrom]-1)], axis=1)
 
             # the merged seqs
             svDF[seq_field] = svDF[seq_5_field] + svDF[seq_3_field]
@@ -3226,7 +3254,7 @@ def get_genomeGraph_object(genome, df_bedpe, df_gridss_filt, genomeGraph_outfile
     genomeGraph_positions_df = "%s.df_positions.py"%genomeGraph_outfileprefix
 
     if any([file_is_empty(x) for x in {genomeGraph_outfile, genomeGraph_positions_df}]) or replace is True:
-    #if True: # debug
+        print_if_verbose("getting genome graph object")
 
         # map each chromosome to an offset
         chrom_to_lenSeq = {seq.id : len(seq.seq) for seq in SeqIO.parse(genome, "fasta")}
@@ -3289,36 +3317,57 @@ def get_genomeGraph_object(genome, df_bedpe, df_gridss_filt, genomeGraph_outfile
         print_if_verbose("genome graph got")
 
         # get the real ends of the chromosomes
-        sorted_positions = sorted(all_positions)
-        pos_to_nNeighbors = pd.Series(dict(zip(sorted_positions, map(lambda x: len(genome_graph.neighbors(x, mode="ALL")), sorted_positions))))
+        if df_bedpe is not None:
 
-        # debug
-        if any(pos_to_nNeighbors<1): raise ValueError("there are some unnconected nodes in the graph genome")
-        if any(pos_to_nNeighbors>100000): raise ValueError("there are some very highly connected regions in the graph genome")
-        if any(pd.isna(pos_to_nNeighbors)): raise ValueError("there are some NaNs in the graph genome")
+            print_if_verbose("get the ends of the chromosome")
+            sorted_positions = sorted(all_positions)
+            pos_to_nNeighbors = pd.Series(dict(zip(sorted_positions, map(lambda x: len(genome_graph.neighbors(x, mode="ALL")), sorted_positions))))
 
-        real_chromosome_end_nodes = set(pos_to_nNeighbors[pos_to_nNeighbors==1].index)
-        print_if_verbose("There are %i telomeric nodes in the graph genome"%len(real_chromosome_end_nodes))
+            # debug
+            if any(pos_to_nNeighbors<1): raise ValueError("there are some unnconected nodes in the graph genome")
+            if any(pos_to_nNeighbors>100000): raise ValueError("there are some very highly connected regions in the graph genome")
+            if any(pd.isna(pos_to_nNeighbors)): raise ValueError("there are some NaNs in the graph genome")
+
+            real_chromosome_end_nodes = set(pos_to_nNeighbors[pos_to_nNeighbors==1].index)
+            print_if_verbose("There are %i telomeric nodes in the graph genome"%len(real_chromosome_end_nodes))
+
+            # clean
+            del pos_to_nNeighbors
 
         # generate a df that maps each position to the real position
+        print_if_verbose("defining df_positions")
         positions_real = []
         chromosomes_real = []
+        is_end_of_chr = []
         for chrom, lenChrom in chrom_to_lenSeq.items():
             positions_real += list(range(lenChrom))
             chromosomes_real += [chrom]*lenChrom
+            is_end_of_chr += ([True] + [False]*(lenChrom-2) + [True])
 
+        print_if_verbose("adding lists to df_positions")
         df_positions = pd.DataFrame()
         df_positions["chromosome"] =  chromosomes_real
         df_positions["real_position"] =  positions_real
         df_positions["offset"] = df_positions.chromosome.apply(lambda x: chrom_to_offset[x])
         df_positions["graph_position"] = df_positions.real_position + df_positions.offset
-        df_positions["is_end_of_chr"] = df_positions.graph_position.isin(real_chromosome_end_nodes)
+
+        # add the is_end_of_chr depending on the 
+        if df_bedpe is not None: df_positions["is_end_of_chr"] = df_positions.graph_position.isin(real_chromosome_end_nodes)
+        else: df_positions["is_end_of_chr"] = is_end_of_chr
+        print_if_verbose("There are %i telomeric nodes in the graph genome"%sum(df_positions["is_end_of_chr"]))
 
         if set(df_positions.graph_position)!=all_positions: raise ValueError("There is a bad graph calculation of the positions")
 
         # save
-        save_object(genome_graph, genomeGraph_outfile)
-        save_object(df_positions, genomeGraph_positions_df)
+        print_if_verbose("saving graph object that has %.10f Mb"%(sys.getsizeof(genome_graph)/1000000))
+        genomeGraph_outfile_tmp = "%s.tmp"%genomeGraph_outfile
+        save_object(genome_graph, genomeGraph_outfile_tmp)
+        os.rename(genomeGraph_outfile_tmp, genomeGraph_outfile)
+
+        print_if_verbose("saving df positions objects")
+        genomeGraph_positions_df_tmp = "%s.tmp"%genomeGraph_positions_df
+        save_object(df_positions, genomeGraph_positions_df_tmp)
+        os.rename(genomeGraph_positions_df_tmp, genomeGraph_positions_df)
 
     else:
         print_if_verbose("loading graph genome")
@@ -9158,7 +9207,7 @@ def get_benchmarking_df_for_testSVs_from_trainSV_filterSets(test_SVdict, outdir,
 ################# GRAPHICS FUNCTIONS #################
 ######################################################
 
-def plot_clustermap_with_annotation(df, row_colors_df, col_colors_df, filename, title="clustermap", col_cluster=False, row_cluster=False, colorbar_label="default label", adjust_position=True, legend=True, idxs_separator_pattern="_", texts_to_strip={"L001"}, default_label_legend="control", df_annotations=None, cmap=sns.color_palette("RdBu_r", 50), ylabels_graphics_df=None, grid_lines=True, add_to_legend_x=1):
+def plot_clustermap_with_annotation(df, row_colors_df, col_colors_df, filename, title="clustermap", col_cluster=False, row_cluster=False, colorbar_label="default label", adjust_position=True, legend=True, idxs_separator_pattern="_", texts_to_strip={"L001"}, default_label_legend="control", df_annotations=None, cmap=sns.color_palette("RdBu_r", 50), ylabels_graphics_df=None, grid_lines=True, add_to_legend_x=1, figsize=None):
 
     """Takes a df were the index is the annotation and the cols are samples. It will be saved under filename. ylabels_graphics_df can be a df containing fontweight and color for each index value in df"""
 
@@ -9234,9 +9283,11 @@ def plot_clustermap_with_annotation(df, row_colors_df, col_colors_df, filename, 
 
         # define figsize 
         #figsize = (len(df.columns)*0.3, len(df)*0.35)
+        print(figsize)
 
         # get the clustermap
-        cm = sns.clustermap(df, col_cluster=col_cluster, row_cluster=row_cluster, row_colors=row_colors_df, col_colors=col_colors_df, cbar_kws={'label': colorbar_label}, xticklabels=False, square=True, cmap=cmap, annot=annot, fmt="", annot_kws={"size": 6}, linecolor=linecolor, linewidths=linewidths, yticklabels=yticklabels) # figsize=figsize, linecolor=linecolor, 
+        cm = sns.clustermap(df, col_cluster=col_cluster, row_cluster=row_cluster, row_colors=row_colors_df, col_colors=col_colors_df, cbar_kws={'label': colorbar_label}, xticklabels=False, square=True, cmap=cmap, annot=annot, fmt="", annot_kws={"size": 6}, linecolor=linecolor, linewidths=linewidths, yticklabels=yticklabels, figsize=figsize) # figsize=figsize, linecolor=linecolor, 
+
 
         ########### adjsut square position to the hm ###########
 
@@ -10394,6 +10445,245 @@ def plot_fraction_overlapping_realSVs(df_benchmarking, filename):
     fig.savefig(filename, bbox_inches='tight')
     plt.close(fig)
 
+
+def get_sorted_colors():
+    
+    """Returns a list with all CSS colors sorted"""
+
+    colors = mcolors.CSS4_COLORS
+
+    list_colors = sorted((tuple(mcolors.rgb_to_hsv(mcolors.to_rgb(color))), name) for name, color in colors.items())
+    sorted_colors = [x[1] for x in list_colors]
+
+    return sorted_colors
+
+def get_sampleID_and_runID_to_color(df):
+
+    """Returns a dict with unique sampleIDs and runIDs"""
+
+    # find the sample_and_run_ID_combinations 
+    sample_and_run_ID_combinations = set.union(*[{(s,r) for s,r in df[["%s_sampleID"%prefix, "%s_runID"%prefix]].values} for prefix in ["parms", "test"]])
+    sampleID_to_runIDs = {x[0]:[] for x in sample_and_run_ID_combinations}
+    for s, r in sample_and_run_ID_combinations: sampleID_to_runIDs[s].append(r)
+
+    # get the sorted colors
+    sorted_colors = get_sorted_colors()
+
+    # define the location of the sample colors
+    sample_colors_idxs = [int(x) for x in np.linspace(0, len(sorted_colors)-1, len(sampleID_to_runIDs))]
+    
+    # initialize the dicts
+    sampleID_to_color = {}
+    runID_to_color = {}
+    for Isample, (sampleID, runIDs) in enumerate(sampleID_to_runIDs.items()):
+
+        # define the color I
+        colorI = sample_colors_idxs[Isample]
+
+        # get the sample color
+        sampleID_to_color[sampleID]  = sorted_colors[colorI]
+
+        # start_runID_colorID
+        min_start_runID_colorI = 0
+        max_start_runID_colorI = max(sample_colors_idxs) - len(runIDs)
+        start_runID_colorI = colorI - int(len(runIDs)/2)
+
+        # debug the fact that it is inconsistent
+        if start_runID_colorI<min_start_runID_colorI: start_runID_colorI = min_start_runID_colorI
+        elif start_runID_colorI>max_start_runID_colorI: start_runID_colorI = max_start_runID_colorI
+
+        # go through each run, so that you get colors arround the sample color
+        for Irun, runID in enumerate(runIDs):
+
+            # define the colorI of the run
+            runID_colorI = start_runID_colorI +  Irun
+            runID_to_color[runID] = sorted_colors[runID_colorI]
+
+    return sampleID_to_color, runID_to_color
+ 
+def generate_heatmap_accuracy_of_parameters_on_test_samples(df_benchmark, plots_dir, replace=False, threads=4):
+
+    """
+    This function takes a df where each row is one set of training parameters and test data svtype, together with the accuracy records. It generates a heatmap were the rows are each of the training parameters and the cols are the test samples.
+    """
+
+    print_if_verbose("plotting cross-accuracy")
+
+    # define  graphics
+    simName_to_color = {"simulation_1":"black", "simulation_2":"gray", "simulation_3":"green"}
+    ploidy_to_color = {'consensus_ref': 'gray', 'haploid': 'black', 'diploid_hetero': 'maroon', 'ref:3_var:1': 'red', 'ref:9_var:1': 'lightsalmon', 'ref:99_var:1': 'white'}
+    svtype_to_color = {"tandemDuplications": "gray", "deletions": "black", "inversions": "blue", "translocations": "olive", "insertions": "red", "remaining":"magenta", "integrated":"c"}
+    typeSimulations_to_color = {"uniform":"blue", "realSVs":"red", "fast":"magenta"}
+    sampleID_to_color, runID_to_color = get_sampleID_and_runID_to_color(df_benchmark) # automatic definition of graphics of sampleID and runID
+
+    # map each cathegory to the colors
+    cathegory_to_colors_dict = {"parms_sampleID" : sampleID_to_color,
+                                "parms_runID" : runID_to_color,
+                                "parms_typeSimulations": typeSimulations_to_color,
+                                "test_sampleID" : sampleID_to_color,
+                                "test_runID" : runID_to_color,
+                                "test_typeSimulations": typeSimulations_to_color,
+                                "test_simName" : simName_to_color,
+                                "test_ploidy" : ploidy_to_color,
+                                "svtype": svtype_to_color
+                                }
+
+    # define the lists of things
+    #interesting_ploidies_list = [set(df_benchmark.test_ploidy), {"haploid"}, {"diploid_hetero"}]
+    interesting_ploidies_list = [set(df_benchmark.test_ploidy)]
+
+    #interesting_svtypes_list = [set(df_benchmark.svtype), {"integrated"}]
+    interesting_svtypes_list = [{"integrated"}]
+
+    
+    #interesting_typeSimulations_list = [set(df_benchmark.parms_typeSimulations), {"fast"}, {"uniform", "realSVs"}]
+    interesting_typeSimulations_list = [set(df_benchmark.parms_typeSimulations), {"uniform", "realSVs"}]
+    
+    interesting_accuracies = ["Fvalue", "precision", "recall"]
+
+    # go through each accuracy measurement
+    for accuracy in interesting_accuracies:
+        for interesting_ploidies in interesting_ploidies_list:
+            for interesting_svtypes in interesting_svtypes_list:
+                for interesting_typeSimulations in interesting_typeSimulations_list:
+
+                    # define the tags
+                    if len(interesting_ploidies)==1: ploidy_tag = next(iter(interesting_ploidies))
+                    else: ploidy_tag = "allPloidies"
+
+                    if len(interesting_svtypes)==1: svtype_tag = next(iter(interesting_svtypes))
+                    else: svtype_tag = "allSVtypes"
+
+                    if len(interesting_typeSimulations)==1: typeSimulations_tag = next(iter(interesting_typeSimulations))
+                    elif len(interesting_typeSimulations)==2: typeSimulations_tag = "realANDuniform"
+                    else: typeSimulations_tag = "allSimulations"
+
+                    # get the filtered df
+                    df = df_benchmark[(df_benchmark.test_ploidy.isin(interesting_ploidies)) & (df_benchmark.svtype.isin(interesting_svtypes)) & (df_benchmark.parms_typeSimulations.isin(interesting_typeSimulations))]
+
+                    # add the indices
+                    parms_keys = [k for k in df.keys() if k.startswith("parms_")]
+                    test_keys = [k for k in df.keys() if k.startswith("test_")] + ["svtype"]
+                    df["parms_idx"] = df.apply(lambda r: "||||".join([r[k] for k in parms_keys]), axis=1)
+                    df["test_idx"] = df.apply(lambda r: "||||".join([r[k] for k in test_keys]), axis=1)
+
+                    # add the label
+                    def get_label(r):
+
+                        if r["parms_sampleID"]==r["test_sampleID"] and r["parms_runID"]==r["test_runID"] and r["parms_typeSimulations"]==r["test_typeSimulations"]: label = "="
+                        else: label = ""
+
+                        return label
+
+                    df["label"] = df.apply(get_label, axis=1)
+
+                    # get the square df
+                    df_square = df[["parms_idx", "test_idx", accuracy]].pivot(index='parms_idx', columns='test_idx', values=accuracy)
+
+                    # define dicts mapping objects
+                    type_keys_to_keys = {"parms":parms_keys, "test":test_keys}
+
+
+                    # generate the cols colors df
+                    def get_colors_series(idx, type_keys="parms"):
+                        # type_keys can be parms or test
+
+                        # get the color dicts
+                        keys = type_keys_to_keys[type_keys]
+
+                        # get the content
+                        idx_content = idx.split("||||")
+
+                        # define the series
+                        field_to_color = {keys[I] : cathegory_to_colors_dict[keys[I]][c] for I,c in enumerate(idx_content)}
+
+                        return pd.Series(field_to_color)
+                    
+                    row_colors_df = pd.Series(df_square.index, index=df_square.index).apply(lambda x: get_colors_series(x, type_keys="parms"))
+                    col_colors_df = pd.Series(df_square.columns, index=df_square.columns).apply(lambda x: get_colors_series(x, type_keys="test"))
+
+
+                    # define the col clustering
+                    col_cluster = True
+                    row_cluster = True
+
+                    # define the annotations
+                    df_annotations = df[["parms_idx", "test_idx", "label"]].pivot(index='parms_idx', columns='test_idx', values="label")
+
+                    # define the filename
+                    filename = "%s/cross_accuracy_%s_%s_%s_%s.pdf"%(plots_dir, accuracy, ploidy_tag, svtype_tag, typeSimulations_tag)
+                    print_if_verbose("getting %s"%filename)
+
+                    # define the title
+                    title = "%s when running the best filters according for each sample/condition (rows) tested on each simulation (columns)"%accuracy
+
+                    # define the figure size
+                    figsize = (int(len(df_square.columns)*0.03), int(len(df_square)*0.03))
+                    #figsize = None
+
+                    plot_clustermap_with_annotation(df_square, row_colors_df, col_colors_df, filename, title=title, col_cluster=col_cluster, row_cluster=row_cluster, colorbar_label=accuracy, adjust_position=True, legend=True, idxs_separator_pattern="||||", texts_to_strip={"L001"}, default_label_legend="control", df_annotations=df_annotations, cmap=sns.color_palette("RdBu_r", 50), ylabels_graphics_df=None, grid_lines=False, figsize=figsize)
+
+def generate_boxplot_comparing_cross_accuracy(df_benchmark, plots_dir):
+
+    """This function takes a cross-benchmarking df from plot_accuracy_of_parameters_on_test_samples and generates a set of boxplots, each of them with one accuracy measurement. The x will be the svtype, and the hue the type of comparison (fastSVcalling, different_sample, different_run, same_run) """
+
+    print_if_verbose("plotting cross-accuracy boxplot")
+
+    df_benchmark = cp.deepcopy(df_benchmark)
+
+    # define a shortened version of svtype
+    svtype_to_shortSVtype = {"deletions":"del", "tandemDuplications":"tan", "insertions":"ins", "translocations":"tra", "inversions":"inv", "integrated":"all", "remaining":"rem"}
+    df_benchmark["svtype"] = df_benchmark.svtype.apply(lambda x: svtype_to_shortSVtype[x])
+
+    #df_benchmark = df_benchmark.iloc[0:1000].append(df_benchmark[df_benchmark.parms_typeSimulations=="fast"].iloc[0:100]) # debug
+
+    # add the type of comparison
+    def get_type_comparison(r):
+
+        if r["parms_typeSimulations"]=="fast": return "default parameters"
+        elif r["parms_sampleID"]!=r["test_sampleID"]: return "optimised on different taxID"
+        elif r["parms_sampleID"]==r["test_sampleID"] and r["parms_runID"]!=r["test_runID"]: return "optimised on different run"
+        elif r["parms_sampleID"]==r["test_sampleID"] and r["parms_runID"]==r["test_runID"]: return "optimised on same run"
+        else: raise ValueError("The row is not valid")
+
+    df_benchmark["type comparison"] = df_benchmark.apply(get_type_comparison, axis=1)
+
+    print_if_verbose("plotting")
+
+    #label_to_ylabel = {"fraction overlapping SVs": "fraction overlap. SVs ~ precision" , "n SVs":"n SVs ~ recall"}
+
+    for parms_tag, interesting_type_comps in [["allComparisons", set(df_benchmark["type comparison"])], ["noDefault", set(df_benchmark["type comparison"]).difference({"default parameters"})]]:
+
+        # filter
+        df_plot = df_benchmark[df_benchmark["type comparison"].isin(interesting_type_comps)]
+
+        fig = plt.figure(figsize=(len(set(df_benchmark.svtype)), 8))
+
+        for I, y in enumerate(["precision", "recall", "Fvalue"]): # 
+            print_if_verbose(y)
+
+            ax = plt.subplot(3, 1, I+1)
+
+            # get a violin plot
+            #ax = sns.boxplot(x="svtype", y=y, data=df_plot, hue="type comparison", boxprops=dict(alpha=.45))
+            ax = sns.violinplot(x="svtype", y=y, data=df_plot, hue="type comparison", boxprops=dict(alpha=.9))
+
+            #ax = sns.swarmplot(x="svtype", y=y, hue="type comparison", data=df_plot, dodge=True, linewidth=.5, edgecolor="k")
+            ax = sns.stripplot(x="svtype", y=y, hue="type comparison", data=df_plot, dodge=True, linewidth=.1, edgecolor="k", size=2)
+
+            ax.legend(bbox_to_anchor=(1, 1))
+            ax.set_xlabel("")
+            #ax.set_ylabel(label_to_ylabel[y])
+
+            if I in [1,2]: ax.get_legend().remove()
+
+
+        # save
+        print_if_verbose("saving")
+        filename = "%s/cross_benchmarking_boxplots_%s.pdf"%(plots_dir, parms_tag)
+        fig.savefig(filename, bbox_inches='tight')
+        plt.close(fig)
+
 def plot_accuracy_of_parameters_on_test_samples(parameters_df, test_df, outdir, plots_dir, replace=False, threads=4):
 
     """
@@ -10412,51 +10702,69 @@ def plot_accuracy_of_parameters_on_test_samples(parameters_df, test_df, outdir, 
     # define the outdir
     outdir_cross_benchmark_files = "%s/tmp_files"%outdir; make_folder(outdir_cross_benchmark_files)
 
-    # initialize the df of the benchmarking
-    benchmarking_fields = ['FN', 'FP', 'Fvalue', 'TP', 'nevents', 'precision', 'recall', 'svtype']
-    df_benchmark = pd.DataFrame(columns=["parms_%s"%x for x in parameters_df_metadata] + ["test_%s"%x for x in test_df_metadata] + benchmarking_fields)
+    # define the benchmarking file
+    df_benchmark_file = "%s/benchmarking_parameters.tab"%outdir
 
-    for numeric_parameter_index, (Irow, parms_row) in enumerate(parameters_df.iterrows()):
-        Irow_str = "_".join(Irow)
-        print_if_verbose("\n\n---------\nusing best parameters by %s (%i/%i)"%(Irow_str, numeric_parameter_index+1, len(parameters_df)))
-        # get the parameters
-        gridss_blacklisted_regions, gridss_maxcoverage, gridss_filters_dict, max_rel_coverage_to_consider_del, min_rel_coverage_to_consider_dup = get_parameters_from_json(parms_row["parameters_json"])
+    if file_is_empty(df_benchmark_file):
 
-        for Itest, test_row in test_df.iterrows():
-            Itest_str = "_".join(Itest)
-            print_if_verbose("testing on %s"%(Itest_str))
+        # initialize the df of the benchmarking
+        benchmarking_fields = ['FN', 'FP', 'Fvalue', 'TP', 'nevents', 'precision', 'recall', 'svtype']
+        df_benchmark = pd.DataFrame(columns=["parms_%s"%x for x in parameters_df_metadata] + ["test_%s"%x for x in test_df_metadata] + benchmarking_fields)
 
-            # define an outdir and put the gridss vcf there with a softlink
-            outdir_cross_benchmark = "%s/%s_parameters_tested_on_%s"%(outdir_cross_benchmark_files, Irow_str, Itest_str); make_folder(outdir_cross_benchmark)
-            gridss_vcf = "%s/gridss_vcf.vcf"%outdir_cross_benchmark
-            soft_link_files(test_row["gridss_vcf"], gridss_vcf)
+        for numeric_parameter_index, (Irow, parms_row) in enumerate(parameters_df.iterrows()):
+            Irow_str = "_".join(Irow)
+            print_if_verbose("\n\n---------\nusing best parameters by %s (%i/%i)"%(Irow_str, numeric_parameter_index+1, len(parameters_df)))
+            # get the parameters
+            gridss_blacklisted_regions, gridss_maxcoverage, gridss_filters_dict, max_rel_coverage_to_consider_del, min_rel_coverage_to_consider_dup = get_parameters_from_json(parms_row["parameters_json"])
 
-            # calculate the median insert sizes
-            median_insert_size, median_insert_size_sd  = get_insert_size_distribution(test_row["sorted_bam"], replace=replace, threads=threads)
+            for Itest, test_row in test_df.iterrows():
+                Itest_str = "_".join(Itest)
+                print_if_verbose("testing on %s"%(Itest_str))
 
-            # get the gridss-clove run
-            sv_dict, df_gridss = run_gridssClove_given_filters(test_row["sorted_bam"], test_row["reference_genome"], outdir_cross_benchmark, -1, replace=replace, threads=threads, gridss_blacklisted_regions=gridss_blacklisted_regions, gridss_VCFoutput=gridss_vcf, gridss_maxcoverage=gridss_maxcoverage, median_insert_size=median_insert_size, median_insert_size_sd=median_insert_size_sd, gridss_filters_dict=gridss_filters_dict, run_in_parallel=True, max_rel_coverage_to_consider_del=max_rel_coverage_to_consider_del, min_rel_coverage_to_consider_dup=min_rel_coverage_to_consider_dup, replace_FromGridssRun=replace)
+                # define an outdir and put the gridss vcf there with a softlink
+                outdir_cross_benchmark = "%s/%s_parameters_tested_on_%s"%(outdir_cross_benchmark_files, Irow_str, Itest_str); make_folder(outdir_cross_benchmark)
+                gridss_vcf = "%s/gridss_vcf.vcf"%outdir_cross_benchmark
+                soft_link_files(test_row["gridss_vcf"], gridss_vcf)
 
-            # get the known SV dict
-            known_sv_dict = {svtype : "%s_%s.tab"%(test_row["svtables_prefix"], svtype) for svtype in {"insertions", "deletions", "translocations", "inversions", "tandemDuplications"}}
-            if any([file_is_empty(x) for x in known_sv_dict.values()]): raise ValueError("There are some un existing files")
+                # calculate the median insert sizes
+                median_insert_size, median_insert_size_sd  = get_insert_size_distribution(test_row["sorted_bam"], replace=replace, threads=threads)
 
-            # get the benchmarking
-            fileprefix = "%s/benchmarking"%outdir_cross_benchmark
-            df_benchmark_test = benchmark_processedSVs_against_knownSVs_inHouse(sv_dict, known_sv_dict, fileprefix, replace=replace, add_integrated_benchmarking=True)
+                # get the gridss-clove run
+                sv_dict, df_gridss = run_gridssClove_given_filters(test_row["sorted_bam"], test_row["reference_genome"], outdir_cross_benchmark, -1, replace=replace, threads=threads, gridss_blacklisted_regions=gridss_blacklisted_regions, gridss_VCFoutput=gridss_vcf, gridss_maxcoverage=gridss_maxcoverage, median_insert_size=median_insert_size, median_insert_size_sd=median_insert_size_sd, gridss_filters_dict=gridss_filters_dict, run_in_parallel=True, max_rel_coverage_to_consider_del=max_rel_coverage_to_consider_del, min_rel_coverage_to_consider_dup=min_rel_coverage_to_consider_dup, replace_FromGridssRun=replace)
 
-            # add metadata fields
-            for x in parameters_df_metadata: df_benchmark_test["parms_%s"%x] = parms_row[x]
-            for x in test_df_metadata: df_benchmark_test["test_%s"%x] = test_row[x]
+                # get the known SV dict
+                known_sv_dict = {svtype : "%s_%s.tab"%(test_row["svtables_prefix"], svtype) for svtype in {"insertions", "deletions", "translocations", "inversions", "tandemDuplications"}}
+                if any([file_is_empty(x) for x in known_sv_dict.values()]): raise ValueError("There are some un existing files")
 
-            # keep
-            df_benchmark = df_benchmark.append(df_benchmark_test[list(df_benchmark.keys())])
+                # get the benchmarking
+                fileprefix = "%s/benchmarking"%outdir_cross_benchmark
+                df_benchmark_test = benchmark_processedSVs_against_knownSVs_inHouse(sv_dict, known_sv_dict, fileprefix, replace=replace, add_integrated_benchmarking=True)
+
+                # add metadata fields
+                for x in parameters_df_metadata: df_benchmark_test["parms_%s"%x] = parms_row[x]
+                for x in test_df_metadata: df_benchmark_test["test_%s"%x] = test_row[x]
+
+                # keep
+                df_benchmark = df_benchmark.append(df_benchmark_test[list(df_benchmark.keys())])
+
+        # save
+        print_if_verbose("saving")
+        df_benchmark_file_tmp = "%s.tmp"%df_benchmark_file
+        df_benchmark.to_csv(df_benchmark_file_tmp, sep="\t", index=False, header=True)
+        os.rename(df_benchmark_file_tmp, df_benchmark_file)
+
+    else: df_benchmark = pd.read_csv(df_benchmark_file, sep="\t")
+
+    # delete the folder with all the intermediate files
+    #delete_folder(outdir_cross_benchmark_files)
 
     #######################################################################
 
-    print(df_benchmark)
+    # plot boxplot
+    generate_boxplot_comparing_cross_accuracy(df_benchmark, plots_dir)
 
-    adkjgdaghkda
+    # plot heatmap of cross accuracy
+    generate_heatmap_accuracy_of_parameters_on_test_samples(df_benchmark, plots_dir, replace=replace, threads=threads)
 
   
 
@@ -10586,6 +10894,10 @@ def report_accuracy_realSVs(close_shortReads_table, reference_genome, outdir, re
         print_if_verbose("loading objects")
         ID_to_svtype_to_svDF = load_object(ID_to_svtype_to_svDF_file)
         all_sampleID_to_dfBestAccuracy = load_object(all_sampleID_to_dfBestAccuracy_file) 
+
+    if StopAfter_testAccuracy_perSVadeRunning is True: 
+        print_if_verbose("You already ran all the configurations of perSVade. Stopping after the running of perSVade on testAccuracy")
+        sys.exit(0)
 
     # map each runID to the IDs of the same sample 
     runID_to_replicateIDs = {runID : set(df_reads[df_reads.sampleID==df_reads.loc[runID, "sampleID"]].index).difference({runID}) for runID in df_reads.runID}
