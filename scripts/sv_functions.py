@@ -655,7 +655,7 @@ def get_availableGbRAM():
 
         lines_availableMem = [float(l.split()[1])/1000000 for l in open("/proc/meminfo", "r").readlines() if l.startswith("MemAvailable:") and l.strip().endswith("kB")]
 
-        if len(lines_availableMem)!=1: raise ValueError("there are more than one correct lines")
+        if len(lines_availableMem)!=1: raise ValueError("there are more than one correct lines when calculating the memory consumption.")
 
         available_mem = lines_availableMem[0]
 
@@ -7775,22 +7775,30 @@ def get_windows_infoDF_with_predictedFromFeatures_coverage(genome, distToTel_chr
             all_chromosomes = df.chromosome.unique()
             print_if_verbose("making plots")
 
-            fig = plt.figure(figsize=(10, len(all_chromosomes)*4.5))
-            for I, chrom in enumerate(all_chromosomes):
+            # define the chromosomes that are interesting
+            interesting_chromosomes = [c for c in all_chromosomes if len(df[df.chromosome==c])>=5]
+            print_if_verbose("There are %i/%i chromosomes with >=5 windows"%(len(interesting_chromosomes), len(all_chromosomes)))
+
+            fig = plt.figure(figsize=(10, len(interesting_chromosomes)*4.5))
+            for I, chrom in enumerate(interesting_chromosomes):
 
                 # get df
                 df_c = df[df.chromosome==chrom]
 
                 # print each of the predictions
-                ax = plt.subplot(len(all_chromosomes), 1, I+1)
+                ax = plt.subplot(len(interesting_chromosomes), 1, I+1)
                 sns.lineplot(x="start", y="predicted_relative_coverage", data=df_c, linewidth=2, color="blue")
 
                 ax.set_title(chrom)
 
-            fig.tight_layout()  # otherwise the right y-label is slightly 
-            filename="%s_predicted_relative_coverage.pdf"%(windows_file)
-            fig.savefig(filename, bbox_inches='tight');
-            plt.close(fig)
+            try:
+
+                fig.tight_layout()  # otherwise the right y-label is slightly 
+                filename="%s_predicted_relative_coverage.pdf"%(windows_file)
+                fig.savefig(filename, bbox_inches='tight');
+                plt.close(fig)
+
+            except: print_if_verbose("The rendering of the coverage as image did not work. This is likely because there are too many plots ")
 
         # save
         save_object(df, windows_infoDF_file)
@@ -10965,7 +10973,7 @@ def plot_accuracy_of_parameters_on_test_samples(parameters_df, test_df, outdir, 
 
   
 
-def report_accuracy_realSVs(close_shortReads_table, reference_genome, outdir, real_svtype_to_file, SVs_compatible_to_insert_dir, threads=4, replace=False, n_simulated_genomes=2, mitochondrial_chromosome="mito_C_glabrata_CBS138", simulation_ploidies=["haploid", "diploid_homo", "diploid_hetero", "ref:2_var:1", "ref:3_var:1", "ref:4_var:1", "ref:5_var:1", "ref:9_var:1", "ref:19_var:1", "ref:99_var:1"], range_filtering_benchmark="theoretically_meaningful", nvars=100, job_array_mode="local", max_ncores_queue=48, time_perSVade_running="02:00:00", queue_jobs="debug", StopAfter_testAccuracy_perSVadeRunning=False, skip_cleaning_simulations_files_and_parameters=False, skip_cleaning_outdir=False):
+def report_accuracy_realSVs(close_shortReads_table, reference_genome, outdir, real_svtype_to_file, SVs_compatible_to_insert_dir, threads=4, replace=False, n_simulated_genomes=2, mitochondrial_chromosome="mito_C_glabrata_CBS138", simulation_ploidies=["haploid", "diploid_homo", "diploid_hetero", "ref:2_var:1", "ref:3_var:1", "ref:4_var:1", "ref:5_var:1", "ref:9_var:1", "ref:19_var:1", "ref:99_var:1"], range_filtering_benchmark="theoretically_meaningful", nvars=100, job_array_mode="local", max_ncores_queue=48, time_perSVade_running="02:00:00", queue_jobs="debug", StopAfter_testAccuracy_perSVadeRunning=False, skip_cleaning_simulations_files_and_parameters=False, skip_cleaning_outdir=False, slurm_constraint=""):
 
 
     """This function runs the SV pipeline for all the datasets in close_shortReads_table with the fastSV, optimisation based on uniform parameters and optimisation based on realSVs (specified in real_svtype_to_file). The latter is skipped if real_svtype_to_file is empty.
@@ -11041,6 +11049,7 @@ def report_accuracy_realSVs(close_shortReads_table, reference_genome, outdir, re
                     if replace is True: cmd += " --replace"
                     if fast_SVcalling is True: cmd += " --fast_SVcalling"
                     if len(svtype_to_svfile)>0: cmd += " --SVs_compatible_to_insert_dir %s"%SVs_compatible_to_insert_dir
+                    if printing_verbose_mode is True: cmd += " --verbose"
 
                     # if the running in slurm is false, just run the cmd
                     if job_array_mode=="local": run_cmd(cmd)
@@ -11071,7 +11080,7 @@ def report_accuracy_realSVs(close_shortReads_table, reference_genome, outdir, re
                 jobs_filename = "%s/jobs.testingRealDataAccuracy"%outdir
                 open(jobs_filename, "w").write("\n".join(all_cmds))
 
-                generate_jobarray_file_greasy(jobs_filename, walltime=time_perSVade_running,  name="testAccuracy", queue=queue_jobs, sbatch=True, ncores_per_task=threads, constraint="", number_tasks_to_run_at_once="all", max_ncores_queue=max_ncores_queue )
+                generate_jobarray_file_greasy(jobs_filename, walltime=time_perSVade_running,  name="testAccuracy", queue=queue_jobs, sbatch=True, ncores_per_task=threads, constraint=slurm_constraint, number_tasks_to_run_at_once="all", max_ncores_queue=max_ncores_queue )
 
                 print_if_verbose("You have to wait under all the jobs in testRealSVs are done")
                 sys.exit(0)
