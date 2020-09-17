@@ -45,6 +45,9 @@ import subprocess, datetime, signal
 import json
 import sklearn
 import matplotlib.colors as mcolors
+import matplotlib.patches as mpatches
+from matplotlib.collections import PatchCollection
+import scipy.stats as stats
 
 #### UNIVERSAL FUNCTIONS ####
 
@@ -236,7 +239,7 @@ printing_verbose_mode = True
 wrong_SRRs = {"ERR2163728", "SRR8373447"}
 
 # define the fraction of RAM to dedicate to the pipeline
-fractionRAM_to_dedicate = 0.9
+fractionRAM_to_dedicate = 0.8
 
 svtype_to_color={"tandemDuplications": "gray", "deletions": "black", "inversions": "blue", "translocations": "olive", "insertions": "red", "remaining":"magenta", "integrated":"c"}
 
@@ -457,9 +460,14 @@ def get_file(filename): return filename.split("/")[-1]
 def save_object(obj, filename):
     
     """ This is for saving python objects """
+
+    filename_tmp = "%s.tmp"%filename
+    remove_file(filename_tmp)
     
-    with open(filename, 'wb') as output:  # Overwrites any existing file.
+    with open(filename_tmp, 'wb') as output:  # Overwrites any existing file.
         pickle.dump(obj, output, pickle.HIGHEST_PROTOCOL)
+
+    os.rename(filename_tmp, filename)
 
 def load_object(filename):
     
@@ -1214,11 +1222,11 @@ def transform_cut_and_paste_to_copy_and_paste_insertions(reference_genome, rearr
             if not file_is_empty(rearranged_genome_unmodified_tmp): os.rename(rearranged_genome_unmodified_tmp, rearranged_genome)
 
             # get the rearranged genome seq
-            chr_to_rearrangedSeq = {seq.id: str(seq.seq) for seq in SeqIO.parse(rearranged_genome, "fasta")}
+            chr_to_rearrangedSeq = {seq.id: str(seq.seq).upper() for seq in SeqIO.parse(rearranged_genome, "fasta")}
             all_rearranged_chromosomes_together = "".join(chr_to_rearrangedSeq.values())
 
             # get the seq
-            chr_to_refSeq = {seq.id: str(seq.seq) for seq in SeqIO.parse(reference_genome, "fasta")}
+            chr_to_refSeq = {seq.id: str(seq.seq).upper()  for seq in SeqIO.parse(reference_genome, "fasta")}
 
             # define the length of each chrom
             chr_to_lenSeq = {chrom : len(seq) for chrom, seq in chr_to_refSeq.items()}
@@ -1437,11 +1445,11 @@ def get_svDF_in_coords_of_rearranged_genome(svDF, reference_genome, rearranged_g
     if len(svDF)==0: return svDF
 
     # get the rearranged genome seq
-    chr_to_rearrangedSeq = {seq.id: str(seq.seq) for seq in SeqIO.parse(rearranged_genome, "fasta")}
+    chr_to_rearrangedSeq = {seq.id: str(seq.seq).upper() for seq in SeqIO.parse(rearranged_genome, "fasta")}
     #all_rearranged_chromosomes_together = "".join(chr_to_rearrangedSeq.values())
 
     # get the seq
-    chr_to_refSeq = {seq.id: str(seq.seq) for seq in SeqIO.parse(reference_genome, "fasta")}
+    chr_to_refSeq = {seq.id: str(seq.seq).upper() for seq in SeqIO.parse(reference_genome, "fasta")}
 
     # define the length of each chrom
     chr_to_ref_lenSeq = {chrom : len(seq) for chrom, seq in chr_to_refSeq.items()}
@@ -1515,6 +1523,10 @@ def get_svDF_in_coords_of_rearranged_genome(svDF, reference_genome, rearranged_g
             # check that the 3' seq is unique
             if not ( chr_to_rearrangedSeq[sv_row["ChrA"]].count(sv_row["ChrA_3seq"])==1 and chr_to_rearrangedSeq[sv_row["ChrB"]].count(sv_row["ChrB_3seq"])==1 ): 
 
+                print_if_verbose("The 3' seq appears %i times in chrA "%chr_to_rearrangedSeq[sv_row["ChrA"]].count(sv_row["ChrA_3seq"]))
+                print_if_verbose("The 3' seq appears %i times in chrB "%chr_to_rearrangedSeq[sv_row["ChrB"]].count(sv_row["ChrB_3seq"]))
+                #print_if_verbose("The 3' seq of chrA is %s"%sv_row["ChrA_3seq"])
+                #print_if_verbose("The 3' seq of chrB is %s"%sv_row["ChrB_3seq"])
                 print_if_verbose("WARNING: The sequences for %s are not unique enough to find the position of the bp in the rearranged genome"%ID)
                 continue
 
@@ -1547,7 +1559,9 @@ def get_svDF_in_coords_of_rearranged_genome(svDF, reference_genome, rearranged_g
             dict_var = {"ChrA":ChrA, "StartA":StartA, "EndA":EndA, "ChrB":ChrB, "StartB":StartB, "EndB":EndB, "Balanced":Balanced, "ID":ID}
             svDF_rearrangedCoords = svDF_rearrangedCoords.append(pd.DataFrame({ID: dict_var}).transpose()[svtype_to_fieldsDict[svtype]["all_fields"]])
 
-        print_if_verbose("You have been able to remap the positions for %i/%i translocations"%(len(svDF), len(svDF_rearrangedCoords)))
+        print_if_verbose("You have been able to remap the positions for %i/%i translocations"%(len(svDF_rearrangedCoords), len(svDF)))
+
+        if len(svDF)>5 and len(svDF_rearrangedCoords)==0: raise ValueError("The remapping of translocations did not work")
 
     else: raise ValueError("This has not been developed for %s"%svtype)
 
@@ -1623,7 +1637,7 @@ def get_genomeGraph_object_5to3_noBreakpoints(genome, genomeGraph_outfileprefix,
         print_if_verbose("getting nucleotide")
 
         # map each chromosome to a sequence
-        chr_to_seq = {seq.id: str(seq.seq) for seq in SeqIO.parse(genome, "fasta")}
+        chr_to_seq = {seq.id: str(seq.seq).upper() for seq in SeqIO.parse(genome, "fasta")}
 
         # map each chrom to each position to a seq
         print_if_verbose("getting positions dict")
@@ -1637,13 +1651,14 @@ def get_genomeGraph_object_5to3_noBreakpoints(genome, genomeGraph_outfileprefix,
         df_positions["chrom_AND_pos"] = df_positions.chromosome + "_" + df_positions.real_position.apply(str)
         df_positions["nucleotide"] = df_positions.chrom_AND_pos.map(chrom_AND_pos_to_seq)
         nucleotide_to_compNucleotide = {"A":"T", "C":"G", "T":"A", "G":"C", "N":"N", "W":"W", "S":"S", "M":"K", "K":"M", "R":"Y", "Y":"R", "B":"V", "D":"H", "H":"D", "V":"B", "Z":"Z"}
-        df_positions["complement_nucleotide"] = df_positions.nucleotide.map(nucleotide_to_compNucleotide)
+        df_positions["complement_nucleotide"] = df_positions.nucleotide.apply(lambda x: x.upper()).map(nucleotide_to_compNucleotide)        
 
         if set(df_positions.graph_position)!=all_positions: raise ValueError("There is a bad graph calculation of the positions")
 
         if any(pd.isna(df_positions.nucleotide)): raise ValueError("There should be no NaNs in the sequence")
         if any(pd.isna(df_positions.complement_nucleotide)): 
             print_if_verbose("These are the nts in the sequence:", set(df_positions.nucleotide))
+            print_if_verbose("These are the nts not in the sequence:", set(df_positions.nucleotide).difference(set(nucleotide_to_compNucleotide)))
             raise ValueError("There should be no NaNs in the complementary seq. This suggests that there are strange nulceotides in the genome which have not been considered. perSVade currently considers only %s"%set(nucleotide_to_compNucleotide))
 
         # save
@@ -1968,6 +1983,9 @@ def insert_translocations_into_rearranged_genome(reference_genome, input_rearran
 
             # keep the translocation for further printing
             feasible_translocation_IDs.add(ID)
+
+        # debug the fact that there are no translocations
+        if len(svDF)>0 and len(feasible_translocation_IDs)==0: raise ValueError("There are no translocations generated, there must be an error.")
 
         # save
         save_object(genome_graph, genomeGraph_final_file)
@@ -6275,9 +6293,11 @@ def get_is_matching_predicted_and_known_rows(rk, rp, equal_fields, approximate_f
 
     # ask if the equal fields match
     equal_fields_match = all([rp[f]==rk[f] for f in equal_fields])
+    if equal_fields_match is False: return False
 
     # ask if the approximate fields match
     approximate_fields_match = all([abs(rp[f]-rk[f])<=tol_bp for f in approximate_fields])
+    if approximate_fields_match is False: return False
 
     # if the rknown is all 0s, return False
     if "POS" in rk.keys():
@@ -7006,12 +7026,15 @@ def add_svID_to_IDtoSVTYPEtoDF(ID_to_svtype_to_svDF):
 
         # go through each sample looking for 
         for ID in ID_to_svtype_to_svDF:
+            print_if_verbose(ID)
 
             # if the svtype exists
             if svtype in ID_to_svtype_to_svDF[ID] and len(ID_to_svtype_to_svDF[ID][svtype])>0:
+                print_if_verbose(svtype)
 
                 # get the df
                 df = ID_to_svtype_to_svDF[ID][svtype].set_index("uniqueID")
+                print_if_verbose("There are %i variants"%len(df))
 
                 # initialize a dict that maps each uniqueID to a svID
                 uniqueID_to_svID = {}
@@ -7204,9 +7227,11 @@ def clean_perSVade_outdir(outdir):
        "aligned_reads.bam.sorted.tmp.MarkDups.metrics",
        "aligned_reads.bam.sorted.tmp.sortingBam_std.txt",
        "aligned_reads.bam.sorted.noMarkDups.MarkDups.metrics",
+       "aligned_reads.bam.sorted.read_length_dist_first5000reads.txt",
 
        # files under SVdetection
        "SVdetection_output/gridss_finished.txt",
+       "SVdetection_output/gridssClove_finished.txt"
 
     ]
 
@@ -7222,6 +7247,7 @@ def clean_perSVade_outdir(outdir):
     files_to_remove_final_gridss_running = [
         "aligned_reads.sorted.bam",
         "aligned_reads.sorted.bam.bai",
+        "coverage_windows_%ibp.tab"%(window_l),
         "empty_regions.bed",                       
         "gridss_output.vcf",
         "gridss_output.vcf.idx",
@@ -7262,29 +7288,99 @@ def clean_perSVade_outdir(outdir):
                                             "reference_genome.fasta.chr_to_len.py",
                                             "reference_genome.fasta.fai",
                                             "reference_genome.fasta.pac",
+                                            "reference_genome.fasta.img",
                                             "reference_genome.fasta.sa",
                                             "reference_genome_features.gff",
                                             "reference_genome.dict",
-                                            "reference_genome.fasta"
+                                            "reference_genome.fasta",
+                                            "reference_genome.fasta.gridsscache",
+                                            "reference_genome.fasta_genomeGraph_withoutBPs.py.df_positions.py",
+                                            "reference_genome.fasta_genomeGraph_withoutBPs.py.graph.py",
+                                            "reference_genome.fasta.GCcontent.tab"
                                             ]
 
     files_to_remove += ["reference_genome_dir/%s"%f for f in files_to_remove_reference_genome_dir]
     #######################################
 
-    ####### REMOVE AND CHANGE FILENAMES #######
+    ################## files in parameter_optimisation ##################
 
-    # remove 
-    for f in files_to_remove:
-        file = "%s/%s"%(outdir, f)
-        remove_file(file)
-        delete_folder(file)
+    # define the dirs
+    parameter_optimisation = "SVdetection_output/parameter_optimisation"
+
+    files_to_remove_parameter_optimisation  = ["genomeGraph_withoutBPs.df_positions.py",
+                                               "genomeGraph_withoutBPs.graph.py",
+                                               "genomeID_to_knownSVdict.py",
+                                               "coverage_per_regions%ibb"%window_l,
+                                               "simulation_reference_genome_%ibp_windows"%window_l,
+                                               "benchmarking_all_filters_for_all_genomes_and_ploidies/plots"
+
+                                            ]
+
+    file_to_dest_file_parameter_optimisation  = {
+    "coverage_per_regions%ibb/coverage_modelling_mtDNA.pdf"%window_l: "plots/coverage_modelling_mtDNA.pdf",
+    "coverage_per_regions%ibb/coverage_modelling_gDNA.pdf"%window_l: "plots/coverage_modelling_gDNA.pdf",
+    "benchmarking_all_filters_for_all_genomes_and_ploidies/plots/cross_accuracy_heatmaps": "plots/cross_accuracy_heatmaps",
+    }  
+    
+    # make the simulations' SVfiles directiory
+    parameter_optimisation_dir = "%s/%s"%(outdir, parameter_optimisation)
+    SVfiles_dir = "%s/SVfiles"%parameter_optimisation_dir
+    if os.path.isdir(parameter_optimisation_dir): 
+        make_folder(SVfiles_dir)
+
+        # go through each simulation
+        for simDir in [f for f in os.listdir(parameter_optimisation_dir) if f.startswith("simulation_")]:
+
+            # remove the dir
+            files_to_remove_parameter_optimisation.append(simDir)
+
+            # rename the SVfiles
+            file_to_dest_file_parameter_optimisation = {**file_to_dest_file_parameter_optimisation,
+            **{
+              "%s/final_simulated_SVs/deletions.tab"%simDir: "SVfiles/%s_deletions.tab"%simDir,
+              "%s/final_simulated_SVs/insertions.tab"%simDir: "SVfiles/%s_insertions.tab"%simDir,
+              "%s/final_simulated_SVs/inversions.tab"%simDir: "SVfiles/%s_inversions.tab"%simDir,
+              "%s/final_simulated_SVs/tandemDuplications.tab"%simDir: "SVfiles/%s_tandemDuplications.tab"%simDir,
+              "%s/final_simulated_SVs/translocations.tab"%simDir: "SVfiles/%s_translocations.tab"%simDir
+              }
+            }
+
+            # go through each ploidy
+            for ploidyDir in [f for f in os.listdir("%s/%s"%(parameter_optimisation_dir, simDir)) if f.startswith("benchmark_GridssClove_")]:
+
+                # define the ploidy
+                ploidy = "_".join(ploidyDir.split("_")[2:])
+
+                file_to_dest_file_parameter_optimisation = {**file_to_dest_file_parameter_optimisation,
+                **{
+                  "%s/%s/plots_benchmark"%(simDir, ploidyDir): "plots/plots_benchmark_%s"%ploidy,
+                  }             
+                }
+
+    # keep
+    files_to_remove += ["%s/%s"%(parameter_optimisation, f) for f in files_to_remove_parameter_optimisation]
+    file_to_dest_file = {**file_to_dest_file, **{"%s/%s"%(parameter_optimisation, origin) : "%s/%s"%(parameter_optimisation, dest) for origin, dest in file_to_dest_file_parameter_optimisation.items()}}
+
+    #####################################################################
+
+    ####### REMOVE AND CHANGE FILENAMES #######
 
     # change name
     for o, d in file_to_dest_file.items():
         origin = "%s/%s"%(outdir, o)
         dest = "%s/%s"%(outdir, d)
 
-        if not file_is_empty(origin): os.rename(origin, dest)
+        # try for files
+        if not file_is_empty(origin): os.rename(origin, dest)   
+
+        # try for directories
+        if os.path.isdir(origin) and not os.path.isdir(dest): os.rename(origin, dest)   
+
+    # remove 
+    for f in files_to_remove:
+        file = "%s/%s"%(outdir, f)
+        remove_file(file)
+        delete_folder(file)
 
     ###########################################
 
@@ -7615,7 +7711,7 @@ def get_insert_size_distribution(sorted_bam, replace=False, threads=4):
     wrong_foot_lines = [l for l in open(outfile, "r").readlines() if len(l.split("\t"))==2 and not l.startswith("## METRICS CLASS")]
     df = pd.read_csv(outfile, sep="\t", skip_blank_lines=False, header=6, skipfooter=len(wrong_foot_lines)+2, engine='python').iloc[0]
 
-    return (int(df["MEDIAN_INSERT_SIZE"]), int(df["MEDIAN_ABSOLUTE_DEVIATION"]))
+    return (int(float(df["MEDIAN_INSERT_SIZE"])), int(float(df["MEDIAN_ABSOLUTE_DEVIATION"])))
 
 
 def get_windows_infoDF_with_predictedFromFeatures_coverage(genome, distToTel_chrom_GC_to_coverage_fn, expected_coverage_per_bp, replace=False, threads=4, make_plots=True):
@@ -9283,7 +9379,6 @@ def plot_clustermap_with_annotation(df, row_colors_df, col_colors_df, filename, 
 
         # define figsize 
         #figsize = (len(df.columns)*0.3, len(df)*0.35)
-        print(figsize)
 
         # get the clustermap
         cm = sns.clustermap(df, col_cluster=col_cluster, row_cluster=row_cluster, row_colors=row_colors_df, col_colors=col_colors_df, cbar_kws={'label': colorbar_label}, xticklabels=False, square=True, cmap=cmap, annot=annot, fmt="", annot_kws={"size": 6}, linecolor=linecolor, linewidths=linewidths, yticklabels=yticklabels, figsize=figsize) # figsize=figsize, linecolor=linecolor, 
@@ -10413,6 +10508,7 @@ def plot_fraction_overlapping_realSVs(df_benchmarking, filename):
     """This function takes a df that has the fraction_overlapping vars of each svtype for each runID. It plots it for each svtype. """
 
     print_if_verbose("getting %s"%filename)
+    df_benchmarking = cp.deepcopy(df_benchmarking)
 
     palette = {"uniform":"navy", "realSVs":"red", "fast":"magenta"}
 
@@ -10445,6 +10541,61 @@ def plot_fraction_overlapping_realSVs(df_benchmarking, filename):
     fig.savefig(filename, bbox_inches='tight')
     plt.close(fig)
 
+
+def plot_fraction_overlapping_realSVs_precision_vs_recall(df_benchmarking, filename):
+
+    """This function takes a df that has the fraction_overlapping vars of each svtype for each runID. It plots it for each svtype as a precision vs recall plot """
+
+    print_if_verbose("getting %s"%filename)
+    df_benchmarking = cp.deepcopy(df_benchmarking)
+
+    palette = {"uniform":"navy", "realSVs":"red", "fast":"magenta"}
+    simID_to_marker = {"uniform":"o", "realSVs":"s", "fast":"X"}
+
+    # define the minimum accuracy
+    nsvtypes = len(set(df_benchmarking.svtype))
+    fig = plt.figure(figsize=(nsvtypes*5, 4))
+
+    for I, svtype in enumerate(sorted(set(df_benchmarking.svtype))):
+        ax = plt.subplot(1, nsvtypes, I+1)
+
+        df_sv = df_benchmarking[df_benchmarking.svtype==svtype]
+
+        # get a scatter plot
+        ax = sns.scatterplot(x="n SVs", y="fraction overlapping SVs", data=df_sv, hue="simulationID", palette=palette, style="simulationID", markers=simID_to_marker)
+
+        # add a shaded error bar with the median and mad
+        for simID, color in palette.items():
+
+            # define the data
+            df_sim = df_sv[df_sv.simulationID==simID]
+            x = df_sim["n SVs"].apply(float)
+            y = df_sim["fraction overlapping SVs"].apply(float)
+
+            # median
+            median_x = np.median(x); mad_x = stats.median_absolute_deviation(x)
+            median_y = np.median(y); mad_y = stats.median_absolute_deviation(y)
+
+            # mean
+            median_x = np.mean(x); mad_x = np.std(x)
+            median_y = np.mean(y); mad_y = np.std(y)
+
+            # add the patch
+            fancybox = mpatches.FancyBboxPatch([median_x-mad_x, median_y-mad_y], 2*mad_x, 2*mad_y, boxstyle=mpatches.BoxStyle("Round", pad=0))
+            ax.add_collection(PatchCollection([fancybox], color=color, alpha=0.3))
+
+            # add the median
+            plt.scatter(median_x, median_y, s=42, c=color, marker=simID_to_marker[simID], linewidths=.65, edgecolor="black")
+        
+        # graphic parms
+        ax.set_title(svtype)
+        if I==0: ax.set_ylabel("fraction overlap. SVs ~ precision")
+        ax.set_xlabel("n SVs ~ recall")
+        #ax.legend(bbox_to_anchor=(1, 1))
+        #if I in [1]: ax.get_legend().remove()
+
+    fig.savefig(filename, bbox_inches='tight')
+    plt.close(fig)
 
 def get_sorted_colors():
     
@@ -10697,6 +10848,21 @@ def plot_accuracy_of_parameters_on_test_samples(parameters_df, test_df, outdir, 
     parameters_df_metadata = [k for k in parameters_df.keys() if k not in {"parameters_json"}]
     test_df_metadata = [k for k in test_df.keys() if k not in {"sorted_bam", "gridss_vcf", "reference_genome", "mitochondrial_chromosome", "svtables_prefix"}]
 
+    # keep only one "fast" if typeSimulations is there:
+    if "typeSimulations" in parameters_df.keys():
+
+        parameters_df_noFast = parameters_df[parameters_df.typeSimulations!="fast"]
+        parameters_df_Fast = parameters_df[parameters_df.typeSimulations=="fast"].iloc[0]
+        parameters_df = parameters_df_noFast.append(parameters_df_Fast)
+
+    # add the parameters as a dict
+    parameters_df["parameters_json_dict"] = parameters_df.parameters_json.apply(get_parameters_from_json)
+
+    # map each parameterID to the equivalent parameters
+    parmID_to_equal_parmIDs = {parmID : {other_parmID for other_parmID, r_other in parameters_df.iterrows() if r_other["parameters_json_dict"]==r["parameters_json_dict"] and other_parmID!=parmID} for parmID, r in parameters_df.iterrows()}
+    for parmID, equal_parmIDs in parmID_to_equal_parmIDs.items(): 
+        if len(equal_parmIDs)>0: print_if_verbose("%s and %s have equal parms"%(parmID, equal_parmIDs))
+
     ######## CREATE A df_benchmarking CONTAINING ALL THE RESULTS ##########
 
     # define the outdir
@@ -10713,32 +10879,63 @@ def plot_accuracy_of_parameters_on_test_samples(parameters_df, test_df, outdir, 
 
         for numeric_parameter_index, (Irow, parms_row) in enumerate(parameters_df.iterrows()):
             Irow_str = "_".join(Irow)
-            print_if_verbose("\n\n---------\nusing best parameters by %s (%i/%i)"%(Irow_str, numeric_parameter_index+1, len(parameters_df)))
+            
             # get the parameters
             gridss_blacklisted_regions, gridss_maxcoverage, gridss_filters_dict, max_rel_coverage_to_consider_del, min_rel_coverage_to_consider_dup = get_parameters_from_json(parms_row["parameters_json"])
 
-            for Itest, test_row in test_df.iterrows():
+            for numeric_test_index, (Itest, test_row) in enumerate(test_df.iterrows()):
                 Itest_str = "_".join(Itest)
-                print_if_verbose("testing on %s"%(Itest_str))
+                print_if_verbose("\n\n---------\nusing best parameters by %s (%i/%i)"%(Irow_str, numeric_parameter_index+1, len(parameters_df)))
+                print_if_verbose("testing on %s (%i/%i)"%(Itest_str, numeric_test_index+1, len(test_df)))
 
                 # define an outdir and put the gridss vcf there with a softlink
                 outdir_cross_benchmark = "%s/%s_parameters_tested_on_%s"%(outdir_cross_benchmark_files, Irow_str, Itest_str); make_folder(outdir_cross_benchmark)
-                gridss_vcf = "%s/gridss_vcf.vcf"%outdir_cross_benchmark
-                soft_link_files(test_row["gridss_vcf"], gridss_vcf)
 
-                # calculate the median insert sizes
-                median_insert_size, median_insert_size_sd  = get_insert_size_distribution(test_row["sorted_bam"], replace=replace, threads=threads)
+                # define the test data file
+                df_benchmark_test_file = "%s/df_benchmark_test.py"%outdir_cross_benchmark
 
-                # get the gridss-clove run
-                sv_dict, df_gridss = run_gridssClove_given_filters(test_row["sorted_bam"], test_row["reference_genome"], outdir_cross_benchmark, -1, replace=replace, threads=threads, gridss_blacklisted_regions=gridss_blacklisted_regions, gridss_VCFoutput=gridss_vcf, gridss_maxcoverage=gridss_maxcoverage, median_insert_size=median_insert_size, median_insert_size_sd=median_insert_size_sd, gridss_filters_dict=gridss_filters_dict, run_in_parallel=True, max_rel_coverage_to_consider_del=max_rel_coverage_to_consider_del, min_rel_coverage_to_consider_dup=min_rel_coverage_to_consider_dup, replace_FromGridssRun=replace)
+                # generate this file through softlinking of equivalent parameterIDs
+                equal_parmIDs = parmID_to_equal_parmIDs[Irow]
+                if len(equal_parmIDs)>0:
 
-                # get the known SV dict
-                known_sv_dict = {svtype : "%s_%s.tab"%(test_row["svtables_prefix"], svtype) for svtype in {"insertions", "deletions", "translocations", "inversions", "tandemDuplications"}}
-                if any([file_is_empty(x) for x in known_sv_dict.values()]): raise ValueError("There are some un existing files")
+                    for equal_parmID in equal_parmIDs:
 
-                # get the benchmarking
-                fileprefix = "%s/benchmarking"%outdir_cross_benchmark
-                df_benchmark_test = benchmark_processedSVs_against_knownSVs_inHouse(sv_dict, known_sv_dict, fileprefix, replace=replace, add_integrated_benchmarking=True)
+                        # define the equal parmID test dir
+                        equal_parmID_outdir_cross_benchmark = "%s/%s_parameters_tested_on_%s"%(outdir_cross_benchmark_files, "_".join(equal_parmID), Itest_str); make_folder(outdir_cross_benchmark)
+
+                        # define the equal parm ID df_benchmark_test 
+                        equal_parmID_df_benchmark_test_file = "%s/df_benchmark_test.py"%equal_parmID_outdir_cross_benchmark
+
+                        if not file_is_empty(equal_parmID_df_benchmark_test_file): 
+                            print_if_verbose("Taking df benchmark from %s for %s"%("_".join(equal_parmID), Irow_str))
+                            soft_link_files(equal_parmID_df_benchmark_test_file, df_benchmark_test_file)
+
+                # get this file if not done
+                if file_is_empty(df_benchmark_test_file) or replace is True:
+
+                    # define the outdir
+                    gridss_vcf = "%s/gridss_vcf.vcf"%outdir_cross_benchmark
+                    soft_link_files(test_row["gridss_vcf"], gridss_vcf)
+
+                    # calculate the median insert sizes
+                    median_insert_size, median_insert_size_sd  = get_insert_size_distribution(test_row["sorted_bam"], replace=replace, threads=threads)
+
+                    # get the gridss-clove run
+                    sv_dict, df_gridss = run_gridssClove_given_filters(test_row["sorted_bam"], test_row["reference_genome"], outdir_cross_benchmark, -1, replace=replace, threads=threads, gridss_blacklisted_regions=gridss_blacklisted_regions, gridss_VCFoutput=gridss_vcf, gridss_maxcoverage=gridss_maxcoverage, median_insert_size=median_insert_size, median_insert_size_sd=median_insert_size_sd, gridss_filters_dict=gridss_filters_dict, run_in_parallel=True, max_rel_coverage_to_consider_del=max_rel_coverage_to_consider_del, min_rel_coverage_to_consider_dup=min_rel_coverage_to_consider_dup, replace_FromGridssRun=replace)
+
+                    # get the known SV dict
+                    known_sv_dict = {svtype : "%s_%s.tab"%(test_row["svtables_prefix"], svtype) for svtype in {"insertions", "deletions", "translocations", "inversions", "tandemDuplications"}}
+                    if any([file_is_empty(x) for x in known_sv_dict.values()]): raise ValueError("There are some un existing files")
+
+                    # get the benchmarking
+                    fileprefix = "%s/benchmarking"%outdir_cross_benchmark
+                    df_benchmark_test = benchmark_processedSVs_against_knownSVs_inHouse(sv_dict, known_sv_dict, fileprefix, replace=replace, add_integrated_benchmarking=True)
+
+                    # save
+                    print_if_verbose("saving")
+                    save_object(df_benchmark_test, df_benchmark_test_file)
+
+                else: df_benchmark_test = load_object(df_benchmark_test_file)
 
                 # add metadata fields
                 for x in parameters_df_metadata: df_benchmark_test["parms_%s"%x] = parms_row[x]
@@ -10756,7 +10953,7 @@ def plot_accuracy_of_parameters_on_test_samples(parameters_df, test_df, outdir, 
     else: df_benchmark = pd.read_csv(df_benchmark_file, sep="\t")
 
     # delete the folder with all the intermediate files
-    #delete_folder(outdir_cross_benchmark_files)
+    delete_folder(outdir_cross_benchmark_files)
 
     #######################################################################
 
@@ -10768,7 +10965,7 @@ def plot_accuracy_of_parameters_on_test_samples(parameters_df, test_df, outdir, 
 
   
 
-def report_accuracy_realSVs(close_shortReads_table, reference_genome, outdir, real_svtype_to_file, SVs_compatible_to_insert_dir, threads=4, replace=False, n_simulated_genomes=2, mitochondrial_chromosome="mito_C_glabrata_CBS138", simulation_ploidies=["haploid", "diploid_homo", "diploid_hetero", "ref:2_var:1", "ref:3_var:1", "ref:4_var:1", "ref:5_var:1", "ref:9_var:1", "ref:19_var:1", "ref:99_var:1"], range_filtering_benchmark="theoretically_meaningful", nvars=100, job_array_mode="local", max_ncores_queue=48, time_perSVade_running="02:00:00", queue_jobs="debug", StopAfter_testAccuracy_perSVadeRunning=False):
+def report_accuracy_realSVs(close_shortReads_table, reference_genome, outdir, real_svtype_to_file, SVs_compatible_to_insert_dir, threads=4, replace=False, n_simulated_genomes=2, mitochondrial_chromosome="mito_C_glabrata_CBS138", simulation_ploidies=["haploid", "diploid_homo", "diploid_hetero", "ref:2_var:1", "ref:3_var:1", "ref:4_var:1", "ref:5_var:1", "ref:9_var:1", "ref:19_var:1", "ref:99_var:1"], range_filtering_benchmark="theoretically_meaningful", nvars=100, job_array_mode="local", max_ncores_queue=48, time_perSVade_running="02:00:00", queue_jobs="debug", StopAfter_testAccuracy_perSVadeRunning=False, skip_cleaning_simulations_files_and_parameters=False, skip_cleaning_outdir=False):
 
 
     """This function runs the SV pipeline for all the datasets in close_shortReads_table with the fastSV, optimisation based on uniform parameters and optimisation based on realSVs (specified in real_svtype_to_file). The latter is skipped if real_svtype_to_file is empty.
@@ -10804,6 +11001,11 @@ def report_accuracy_realSVs(close_shortReads_table, reference_genome, outdir, re
         # initialize the cmds to run 
         all_cmds = []
 
+
+        # predefine if some jobs need to be ran
+        n_remaining_jobs = sum([sum([file_is_empty("%s/%s/%s/perSVade_finished_file.txt"%(outdir, typeSimulations, runID)) for runID in set(df_reads.runID)]) for typeSimulations in ["uniform", "fast", "realSVs"]])
+        print_if_verbose("There are %i remaining jobs"%n_remaining_jobs)
+
         # go through each run and configuration
         for typeSimulations, svtype_to_svfile, fast_SVcalling in [("uniform", {}, False), ("realSVs", real_svtype_to_file, False), ("fast", {}, True)]:
 
@@ -10828,9 +11030,9 @@ def report_accuracy_realSVs(close_shortReads_table, reference_genome, outdir, re
                 # define the previous repeats file 
                 previous_repeats_table = "%s.repeats.tab"%reference_genome
                 if file_is_empty(previous_repeats_table): raise ValueError("%s should exist"%previous_repeats_table)
-
+                
                 # only contine if the final file is not defined
-                if file_is_empty(final_file) or replace is True:
+                if file_is_empty(final_file) or replace is True:# or file_is_empty(parameters_file):
 
                     # define the cmd. This is a normal perSvade.py run with the vars of the previous dir  
                     cmd = "python %s -r %s --threads %i --outdir %s --nvars %i --nsimulations %i --simulation_ploidies %s --range_filtering_benchmark %s --mitochondrial_chromosome %s -f1 %s -f2 %s --previous_repeats_table %s --skip_cleaning_outdir"%(perSVade_py, reference_genome, threads, outdir_runID, nvars, n_simulated_genomes, ",".join(simulation_ploidies), range_filtering_benchmark, mitochondrial_chromosome, r1, r2, previous_repeats_table)
@@ -10899,9 +11101,9 @@ def report_accuracy_realSVs(close_shortReads_table, reference_genome, outdir, re
         print_if_verbose("You already ran all the configurations of perSVade. Stopping after the running of perSVade on testAccuracy")
         sys.exit(0)
 
+    print_if_verbose("getting the plots about accuracy")
     # map each runID to the IDs of the same sample 
     runID_to_replicateIDs = {runID : set(df_reads[df_reads.sampleID==df_reads.loc[runID, "sampleID"]].index).difference({runID}) for runID in df_reads.runID}
-
 
     # map each ID to the svIDs 
     ID_to_svIDs = {ID : set.union(*[set(svDF.svID) for svDF in svtype_to_svDF.values() if len(svDF)>0]) for ID, svtype_to_svDF in ID_to_svtype_to_svDF.items()}
@@ -10919,6 +11121,11 @@ def report_accuracy_realSVs(close_shortReads_table, reference_genome, outdir, re
     df_benchmarking_realSVs_dict = {}
 
     for ID, svtype_to_svIDs in ID_to_svtype_to_svIDs.items():
+
+        # initialize the total numbers
+        nSVs_list = []
+        fraction_overlapping_list = []
+
         for svtype, svIDs in svtype_to_svIDs.items():
 
             # define the IDs
@@ -10949,15 +11156,32 @@ def report_accuracy_realSVs(close_shortReads_table, reference_genome, outdir, re
                 # keep
                 IDdict = "%s||||%s"%(ID, svtype)
 
-                df_benchmarking_realSVs_dict[IDdict] = {"simulationID":simulationID, "runID":runID, "sampleID":df_reads.loc[runID, "sampleID"], "svtype":svtype, "fraction overlapping SVs":overlap_SVs, "n_overlapping":n_overlapping, "n SVs":n_SVs, "n_HighConfidence_SVs":len(intersection_other_svIDs)}   
+                #df_benchmarking_realSVs_dict[IDdict] = {"simulationID":simulationID, "runID":runID, "sampleID":df_reads.loc[runID, "sampleID"], "svtype":svtype, "fraction overlapping SVs":overlap_SVs, "n_overlapping":n_overlapping, "n SVs":n_SVs, "n_HighConfidence_SVs":len(intersection_other_svIDs)}   
+
+                #keep
+                nSVs_list.append(n_SVs)
+                fraction_overlapping_list.append(overlap_SVs)
+
+                # only keep important things
+                df_benchmarking_realSVs_dict[IDdict] = {"simulationID":simulationID, "runID":runID, "sampleID":df_reads.loc[runID, "sampleID"], "svtype":svtype, "fraction overlapping SVs":overlap_SVs, "n SVs":n_SVs}  
+
+
+        # add the integrated vars
+        integrated_n_SVs = sum(nSVs_list)
+        integeated_overlap_SVs = np.mean(make_flat_listOflists([[fraction_overlapping_list[Isvtype]]*nSVs for Isvtype, nSVs in enumerate(nSVs_list)]))
+
+        df_benchmarking_realSVs_dict["%s||||integrated"%ID] = {"simulationID":simulationID, "runID":runID, "sampleID":df_reads.loc[runID, "sampleID"], "svtype":"integrated", "fraction overlapping SVs":integeated_overlap_SVs, "n SVs":integrated_n_SVs}  
 
     df_benchmarking_realSVs = pd.DataFrame(df_benchmarking_realSVs_dict).transpose()
 
-
-    # plot the frac
+    # plot the fraction of overlapping real SVs as a boxplot
     filename = "%s/accuracy_realSVs.pdf"%plots_dir
     plot_fraction_overlapping_realSVs(df_benchmarking_realSVs, filename)
-    
+
+    # plot the fraction of overlapping real SVs as a precision-vs-recall plot
+    filename = "%s/accuracy_realSVs_precisionVSrecall.pdf"%plots_dir
+    plot_fraction_overlapping_realSVs_precision_vs_recall(df_benchmarking_realSVs, filename)
+ 
     # plot the accuracy on simulations
     filename = "%s/accuracy_simulations.pdf"%plots_dir
     plot_accuracy_simulations_from_all_sampleID_to_dfBestAccuracy(all_sampleID_to_dfBestAccuracy, filename)
@@ -10992,6 +11216,9 @@ def report_accuracy_realSVs(close_shortReads_table, reference_genome, outdir, re
                 parameters_json_origin = "%s/final_gridss_running/perSVade_parameters.json"%runID_outdir
                 parameters_json_dest = "%s/parameters_%s_%s_%s.json"%(simulations_files_and_parameters_dir, typeSimulations, sampleID, runID)
                 if file_is_empty(parameters_json_dest): 
+
+
+                    print(parameters_json_origin, parameters_json_dest)
                     parameters_json_dest_tmp = "%s.tmp"%parameters_json_dest
                     run_cmd("cp %s %s"%(parameters_json_origin, parameters_json_dest_tmp))
                     os.rename(parameters_json_dest_tmp, parameters_json_dest)
@@ -11021,15 +11248,30 @@ def report_accuracy_realSVs(close_shortReads_table, reference_genome, outdir, re
                                 bam_files = ["%s/%s"%(sim_outdir, file) for file in os.listdir(sim_outdir) if file.startswith("aligned_reads") and ".".join(file.split(".")[1:])==suffix_ploidy]
                                 if len(bam_files)!=1: raise ValueError("There should be only one bam")
                                 origin_bam = bam_files[0]
-
-                                changealsothelocationoftheCollectInsertSizeMetrics_out
+   
+                                # copy the metrics
+                                origin_metrics = "%s/%s/%s/aligned_reads.bam.sorted.CollectInsertSizeMetrics.out"%(outdir, typeSimulations, runID)
+                                destination_metrics = "%s.CollectInsertSizeMetrics.out"%destination_bam
+                                destination_metrics_tmp = "%s.tmp"%destination_metrics
+                                if file_is_empty(destination_metrics):
+                                    run_cmd("cp %s %s"%(origin_metrics, destination_metrics_tmp))
+                                    os.rename(destination_metrics_tmp, destination_metrics)
 
                                 # change the bai
                                 if file_is_empty("%s.bai"%destination_bam): os.rename("%s.bai"%origin_bam, "%s.bai"%destination_bam)
 
-                                # reanme the bam
+                                # change the coverage per window (this is any destination)
+                                if file_is_empty("%s.coverage_per_window.tab"%destination_bam): os.rename("%s.coverage_per_window.tab"%origin_bam, "%s.coverage_per_window.tab"%destination_bam)
+
+                                # change the coverage per constant windows
+                                calculating_windowcoverage_dir = "%s.calculating_windowcoverage"%destination_bam; make_folder(calculating_windowcoverage_dir)
+                                destination_windowcoverage_file = "%s/coverage_windows_%ibp.tab"%(calculating_windowcoverage_dir, window_l)
+                                origin_windowcoverage_file = "%s/benchmark_GridssClove_%s/coverage_windows_%ibp.tab"%(sim_outdir, ploidy, window_l)
+                                if file_is_empty(destination_windowcoverage_file): os.rename(origin_windowcoverage_file, destination_windowcoverage_file)
+
+                                # rename the bam
                                 os.rename(origin_bam, destination_bam)
-                         
+
                             # change the gridss vcf
                             origin_gridss_vcf = "%s/benchmark_GridssClove_%s/benchmark_max50000x_ignoreRegionsFalse/gridss_output.vcf.withSimpleEventType.vcf"%(sim_outdir, ploidy)
                             dest_gridss_vcf = "%s/gridss_vcf_%s_%s_%s_sim%i_%s.vcf"%(simulations_files_and_parameters_dir, typeSimulations, sampleID, runID, Isim+1, ploidy)
@@ -11063,12 +11305,31 @@ def report_accuracy_realSVs(close_shortReads_table, reference_genome, outdir, re
 
     ##########################################################################
 
-
-
     ##### VERY IMPORTANT: CLEAN THE OUTPUT #####
-    cleaningoutputforeachSVtypeneedstoBedeveloped
-    clean_perSVade_outdir(xxx)
 
+    # clean the simulations_files_and_parameters if not stated otherwise
+    if skip_cleaning_simulations_files_and_parameters is False: 
+        print_if_verbose("cleaning simulations_files_and_parameters_dir")
+        delete_folder(simulations_files_and_parameters_dir)
+
+    if skip_cleaning_outdir is False:
+        print_if_verbose("cleaning outdir of each run")
+
+        # clean the outdir of each sample
+        for typeSimulations in ["uniform", "realSVs", "fast"]:
+
+            # go though each runID
+            for runID in set(df_reads.runID):
+                print(typeSimulations, runID)
+
+                # define an outdir for this runID and clean
+                outdir_runID = "%s/%s/%s"%(outdir, typeSimulations, runID)
+                clean_perSVade_outdir(outdir_runID)
+
+                # remove the bam files
+                for f in ["aligned_reads.bam.sorted", "aligned_reads.bam.sorted.bai"]: remove_file("%s/%s"%(outdir_runID, f))
+
+    #############################################
 
 def get_simulated_bamFile(outdir, reference_genome, replace=False, threads=4, total_nread_pairs=10000000, read_length=150, median_insert_size=500, median_insert_size_sd=50):
 
@@ -11261,13 +11522,24 @@ def get_sortedBam_with_duplicatesMarked(sorted_bam, threads=4, replace=False):
         print_if_verbose("marking duplicate reads")
 
         # define the java memory
-        javaRamGb = int(get_availableGbRAM()*fractionRAM_to_dedicate)
+        #javaRamGb = int(get_availableGbRAM()*fractionRAM_to_dedicate) # At Broad, we run MarkDuplicates with 2GB Java heap (java -Xmx2g) and 10GB hard memory limit
+        #javaRamGb = int(get_availableGbRAM()*0.5) # At Broad, we run MarkDuplicates with 2GB Java heap (java -Xmx2g) and 10GB hard memory limit
+        #javaRamGb = int(get_availableGbRAM() - 2) # rule of thumb from GATK
+        javaRamGb = 4 # this is from a post from 2011, reccommended for a 170Gb RAM
+
+        # define the MAX_RECORDS_IN_RAM
+        MAX_RECORDS_IN_RAM = int(250000*javaRamGb*0.8) # 250,000 reads for each Gb given (for SortSam, I don't know if this will work for Picard tools)
+
+        # define the number of MAX_FILE_HANDLES_FOR_READ_ENDS_MAP
+        max_nfilehandles = int(subprocess.check_output("ulimit -n", shell=True))
+        MAX_FILE_HANDLES_FOR_READ_ENDS_MAP = int(max_nfilehandles*0.5) # a little lower than ulimit -n
+
+        # SORTING_COLLECTION_SIZE_RATIO is 0.25 by default. If I have memory issues I can reduce this number.
 
         markduplicates_std = "%s.markingDuplicates.std"%sorted_bam
-        print_if_verbose("running MarkDuplicates with %iGb of RAM. The std is in %s"%(javaRamGb, markduplicates_std))
+        print_if_verbose("running MarkDuplicates with %iGb of RAM and %i MAX_FILE_HANDLES_FOR_READ_ENDS_MAP. The std is in %s"%(javaRamGb, MAX_FILE_HANDLES_FOR_READ_ENDS_MAP, markduplicates_std))
 
-
-        run_cmd("%s -Xmx%ig MarkDuplicates I=%s O=%s M=%s > %s 2>&1"%(picard_exec, javaRamGb, sorted_bam, sorted_bam_dupMarked_tmp, sorted_bam_dupMarked_metrics, markduplicates_std))
+        run_cmd("%s -Xmx%ig MarkDuplicates I=%s O=%s M=%s ASSUME_SORT_ORDER=coordinate MAX_FILE_HANDLES_FOR_READ_ENDS_MAP=%i MAX_RECORDS_IN_RAM=%i > %s 2>&1"%(picard_exec, javaRamGb, sorted_bam, sorted_bam_dupMarked_tmp, sorted_bam_dupMarked_metrics, MAX_FILE_HANDLES_FOR_READ_ENDS_MAP, MAX_RECORDS_IN_RAM, markduplicates_std))
         #REMOVE_DUPLICATES=Boolean
 
         remove_file(markduplicates_std)
