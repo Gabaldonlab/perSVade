@@ -138,9 +138,11 @@ parser.add_argument("--pooled_sequencing", dest="pooled_sequencing", action="sto
 # verbosity
 parser.add_argument("--verbose", dest="verbose", action="store_true", default=False, help="Whether to print a verbose output. This is important if there are any errors in the run.")
 
+# the greasy options
+parser.add_argument("--slurm_constraint", dest="slurm_constraint", type=str, default="", help="The value to pass to the argument --constraint of sbatch. This will only take effect if you are running in a slurm system. By default there is no constraint. In MN, if you specifiy 'highmem' you will get 8Gb of RAM per core.")
+
 # repeat obtention
 parser.add_argument("--consider_repeats_smallVarCall", dest="consider_repeats_smallVarCall", action="store_true", default=False, help="If --run_smallVarsCNV, this option will imply that each small  variant will have an annotation of whether it overlaps a repeat region.")
-
 parser.add_argument("--previous_repeats_table", dest="previous_repeats_table", default=None, help="This may be the path to a file that contains the processed output of RepeatMasker (such as the one output by the function get_repeat_maskerDF). This should be a table with the following header: 'SW_score, perc_div, perc_del, perc_ins, chromosome, begin_repeat, end_repeat, left_repeat, strand, repeat, type, position_inRepeat_begin, position_inRepeat_end, left_positionINrepeat, IDrepeat'. It is created by parsing the tabular output of RepeatMasker and putting into a real .tab format.")
 
 # small varCall stop options
@@ -159,7 +161,8 @@ fun.make_folder(opt.outdir)
 
 # define the name as the sample as the first 10 characters of the outdir
 name_sample = fun.get_file(opt.outdir)[0:10]
-print("getting into %s"%opt.outdir)
+print("Running perSVade into %s"%opt.outdir)
+print("Running with %i Gb of RAM and %i cores"%(int(fun.get_availableGbRAM()), opt.threads))
 
 #### REPLACE THE REF GENOME ####
 
@@ -427,7 +430,7 @@ if opt.testAccuracy is True:
     if opt.close_shortReads_table is None or opt.fast_SVcalling is True: 
         raise ValueError("You have to specify a --close_shortReads_table and not run in --fast_SVcalling to test the accuracy of the pipeline on several datasets (--testAccuracy)")
 
-    fun.report_accuracy_realSVs(opt.close_shortReads_table, opt.ref, "%s/testing_Accuracy"%opt.outdir, real_svtype_to_file, opt.SVs_compatible_to_insert_dir, threads=opt.threads, replace=opt.replace, n_simulated_genomes=opt.nsimulations, mitochondrial_chromosome=opt.mitochondrial_chromosome, simulation_ploidies=simulation_ploidies, range_filtering_benchmark=opt.range_filtering_benchmark, nvars=opt.nvars, job_array_mode=opt.job_array_mode, max_ncores_queue=opt.max_ncores_queue, time_perSVade_running=opt.time_perSVade_running, queue_jobs=opt.queue_jobs, StopAfter_testAccuracy_perSVadeRunning=opt.StopAfter_testAccuracy_perSVadeRunning, skip_cleaning_simulations_files_and_parameters=opt.skip_cleaning_simulations_files_and_parameters, skip_cleaning_outdir=opt.skip_cleaning_outdir)
+    fun.report_accuracy_realSVs(opt.close_shortReads_table, opt.ref, "%s/testing_Accuracy"%opt.outdir, real_svtype_to_file, opt.SVs_compatible_to_insert_dir, threads=opt.threads, replace=opt.replace, n_simulated_genomes=opt.nsimulations, mitochondrial_chromosome=opt.mitochondrial_chromosome, simulation_ploidies=simulation_ploidies, range_filtering_benchmark=opt.range_filtering_benchmark, nvars=opt.nvars, job_array_mode=opt.job_array_mode, max_ncores_queue=opt.max_ncores_queue, time_perSVade_running=opt.time_perSVade_running, queue_jobs=opt.queue_jobs, StopAfter_testAccuracy_perSVadeRunning=opt.StopAfter_testAccuracy_perSVadeRunning, skip_cleaning_simulations_files_and_parameters=opt.skip_cleaning_simulations_files_and_parameters, skip_cleaning_outdir=opt.skip_cleaning_outdir, slurm_constraint=opt.slurm_constraint)
 
 
 # get the golden set
