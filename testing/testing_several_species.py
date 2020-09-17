@@ -80,6 +80,7 @@ goldenSet_dir_Cglabrata = "%s/scripts/perSVade/perSVade_repository/testing/Cglab
 
 # define important info about each species: taxID, spName, ploidy
 
+"""
 species_Info = [("5478", "Candida_glabrata", 1, "mito_C_glabrata_CBS138"),
                 ("5476", "Candida_albicans", 2, "Ca22chrM_C_albicans_SC5314"),
                 ("5207", "Cryptococcus_neoformans", 1, "CP003834.1"),
@@ -88,7 +89,7 @@ species_Info = [("5478", "Candida_glabrata", 1, "mito_C_glabrata_CBS138"),
                 ("7227", "Drosophila_melanogaster", 2, "KJ947872.2")]
                 #("7955", "Danio_rerio", 2, "NC_002333.2")]
                 #("9606", "Homo_sapiens", 2, "NC_012920.1")]
-
+"""
 
 """
 species_Info = [("7227", "Drosophila_melanogaster", 2, "KJ947872.2")]
@@ -103,8 +104,18 @@ species_Info = [("5478", "Candida_glabrata", 1, "mito_C_glabrata_CBS138"),
                 ("746128", "Aspergillus_fumigatus", 1, "CM016889.1")]
 """
 #species_Info = [("7227", "Drosophila_melanogaster", 2, "KJ947872.2")]
+#species_Info  = [("3702", "Arabidopsis_thaliana", 2, "BK010421.1,AP000423.1")]
 #species_Info = [("5476", "Candida_albicans", 2, "Ca22chrM_C_albicans_SC5314")]
 #species_Info = [("5478", "Candida_glabrata", 1, "mito_C_glabrata_CBS138")]
+#species_Info = [("5207", "Cryptococcus_neoformans", 1, "CP003834.1")]
+
+"""
+species_Info = [("746128", "Aspergillus_fumigatus", 1, "CM016889.1"),
+                ("5207", "Cryptococcus_neoformans", 1, "CP003834.1")]
+"""
+
+species_Info = [("7227", "Drosophila_melanogaster", 2, "KJ947872.2"),
+                ("3702", "Arabidopsis_thaliana", 2, "BK010421.1,AP000423.1")]
 
 taxIDs_with_noON_overalpping = {"5476", "746128"}
 
@@ -147,8 +158,8 @@ for taxID, spName, ploidy, mitochondrial_chromosome in species_Info:
             print("timing")
 
             # define the overall_runID
-            overall_runID = "run2"
-            youneedtochangetherunID
+            overall_runID = "run3"
+            needtochangetheID
 
             # define the expected jobIDs
             expected_jobIDs = set(range(1,28))
@@ -212,7 +223,6 @@ for taxID, spName, ploidy, mitochondrial_chromosome in species_Info:
                 if len(lines_with_error)==0: last_error_line = "no_error"
                 else: last_error_line = lines_with_error[-1]
 
-
                 # get into dict
                 jobID_to_metadata[Ijob+1] = {'species': spName, 'sampleID': sampleID, 'type_run': type_run, 'threads': threads, 'nvars': nvars, 'nsimulations': nsimulations, 'simulation_ploidies': simulation_ploidies, 'run_time': jobID_to_elapsed_time[Ijob+1], 'range_filtering_benchmark':range_filtering_benchmark, 'exit_status': jobID_to_exit_status[Ijob+1], "finishing_greasy_time":finishing_greasy_time, "overall_runID":overall_runID, "std_file":std_file, "last_error_line":last_error_line, "job_cmd":job_cmd.split(" >")[0]}
 
@@ -235,7 +245,6 @@ for taxID, spName, ploidy, mitochondrial_chromosome in species_Info:
 
         ####### delete the folders that did not complete in any of the previous runs #######
 
-        #"%s/testing_Accuracy/jobs.testingRealDataAccuracy"%outdir_perSVade
         for typeSim in ["fast", "uniform", "realSVs"]:
             outdir_testAccuracy = "%s/testing_Accuracy/%s"%(outdir_perSVade, typeSim)
 
@@ -248,15 +257,12 @@ for taxID, spName, ploidy, mitochondrial_chromosome in species_Info:
 
         ####################################################################################
 
-        # this should be done for run1, run2
-        timing_df = pd.read_csv(filename_timing_df, sep="\t")
-
         # define the table with short reads
         if spName=="Candida_glabrata": close_shortReads_table = close_shortReads_table_Cglabrata
         else: close_shortReads_table = "auto"
 
         # get the reads from SRA. 3 samples, 3 runs per sample. Process with the. --verbose
-        cmd = "%s --ref %s --threads %i -o %s --close_shortReads_table %s --target_taxID %s --n_close_samples 3 --nruns_per_sample 3 -f1 skip -f2 skip --mitochondrial_chromosome %s --gff %s --testAccuracy --skip_SVcalling --verbose --StopAfter_testAccuracy_perSVadeRunning"%(perSVade_py, genome, threads, outdir_perSVade, close_shortReads_table, taxID, mitochondrial_chromosome, gff)
+        cmd = "%s --ref %s --threads %i -o %s --close_shortReads_table %s --target_taxID %s --n_close_samples 3 --nruns_per_sample 3 -f1 skip -f2 skip --mitochondrial_chromosome %s --gff %s --testAccuracy --skip_SVcalling --verbose --skip_cleaning_simulations_files_and_parameters --StopAfter_testAccuracy_perSVadeRunning"%(perSVade_py, genome, threads, outdir_perSVade, close_shortReads_table, taxID, mitochondrial_chromosome, gff)
         # --StopAfter_testAccuracy_perSVadeRunning
 
     elif running_type=="goldenSet":
@@ -270,7 +276,7 @@ for taxID, spName, ploidy, mitochondrial_chromosome in species_Info:
         cmd = "%s --ref %s --threads %i -o %s --target_taxID %s --n_close_samples 3 --nruns_per_sample 3 -f1 skip -f2 skip --mitochondrial_chromosome %s --gff %s --goldenSet_dir %s --skip_SVcalling --verbose"%(perSVade_py, genome, threads, outdir_perSVade, taxID, mitochondrial_chromosome, gff, goldenSet_dir)
 
     # add options depending on the machine
-    if run_in_cluster is True: cmd += " --job_array_mode greasy --queue_jobs bsc_ls --max_ncores_queue 576 --time_read_obtention 48:00:00 --time_perSVade_running 48:00:00"
+    if run_in_cluster is True: cmd += " --job_array_mode greasy --queue_jobs bsc_ls --max_ncores_queue 480 --time_read_obtention 48:00:00 --time_perSVade_running 48:00:00"
 
     else: cmd += " --job_array_mode local"
 

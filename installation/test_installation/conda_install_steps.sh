@@ -81,7 +81,24 @@ conda install -c conda-forge -y r-argparser=0.4 &&
 conda install -c conda-forge -y r-emdbook=1.3.12 &&
 conda install -c bioconda -y bioconductor-rtracklayer=1.48.0 &&
 conda install -c conda-forge -y r-r.utils=2.9.2 &&
-conda install -c bioconda -y bioconductor-structuralvariantannotation=1.4.0;
+conda install -c bioconda -y bioconductor-structuralvariantannotation=1.4.0 &&
+
+
+conda install -c anaconda xlrd=1.2.0
+# The following NEW packages will be INSTALLED:
+
+#   xlrd               anaconda/linux-64::xlrd-1.2.0-py36_0
+
+# The following packages will be UPDATED:
+
+#   ca-certificates    conda-forge::ca-certificates-2020.6.2~ --> anaconda::ca-certificates-2020.6.24-0
+
+# The following packages will be SUPERSEDED by a higher-priority channel:
+
+#   certifi            conda-forge::certifi-2020.6.20-py36h9~ --> anaconda::certifi-2020.6.20-py36_0
+#   openssl            conda-forge::openssl-1.1.1g-h516909a_1 --> anaconda::openssl-1.1.1g-h7b6447c_0
+
+
 
 
 # the environment can be exported as:
