@@ -797,6 +797,30 @@ def run_bwa_mem(fastq1, fastq2, ref, outdir, bamfile, sorted_bam, index_bam, nam
             os.rename("%s.tmp"%bamfile , bamfile)
 
 
+        if MarkDuplicates is True:
+            bamfile_MarkedDuplicates = get_bam_with_duplicatesMarkedSpark(bamfile, threads=threads, replace=replace, remove_indices=True)
+
+        else: bamfile_MarkedDuplicates = bamfile
+
+
+        kajdhkjahdah
+
+
+        # sort bam
+
+        # index sorted bam
+
+        # remove all the intermediate files
+
+        ajhdjkahkjadhda
+
+   
+
+        # define dirs
+        bam_dupMarked = "%s.MarkDups.bam"%bamfile
+        bam_dupMarked_tmp = "%s.MarkDups.tmp.bam"%bamfile
+
+
         # define the sorted_bam with Dups
         sorted_bam_noMarkDups = "%s.noMarkDups"%sorted_bam
         sorted_bam_noMarkDups_tmp = "%s.tmp"%sorted_bam_noMarkDups
@@ -825,6 +849,7 @@ def run_bwa_mem(fastq1, fastq2, ref, outdir, bamfile, sorted_bam, index_bam, nam
             if MarkDuplicates is True:
 
                 print_if_verbose("marking duplicates")
+
                 # mark duplicates
                 sorted_bam_MarkedDuplicates = get_sortedBam_with_duplicatesMarked(sorted_bam_noMarkDups, threads=threads, replace=replace)
 
@@ -6030,7 +6055,115 @@ def close_shortReads_table_is_correct(close_shortReads_table):
     if any([file_is_empty(f) for f in reads_files]): return False
     else: return True
 
-def get_close_shortReads_table_close_to_taxID(target_taxID, reference_genome, outdir, ploidy, n_close_samples=3, nruns_per_sample=3, replace=False, threads=4, min_fraction_reads_mapped=0.1, coverage_subset_reads=0.1, min_coverage=30, job_array_mode="local", StopAfter_sampleIndexingFromSRA=False, queue_jobs="debug", max_ncores_queue=768, time_read_obtention="02:00:00", StopAfterPrefecth_of_reads=False, get_lowest_coverage_possible=False):
+
+def get_median_readLength_fastqgz(fastqgz, nlines=1000, replace=False):
+
+    """Takes a fastqgz file and returns the median read length"""
+
+    # define the file
+    read_len_file = "%s.readLengths"%fastqgz
+    read_len_file_tmp = "%s.tmp"%read_len_file
+
+    if file_is_empty(read_len_file) or replace is True:
+
+        read_len_file_stderr = "%s.getting.stderr"%read_len_file
+        print_if_verbose("getting median read lengths. The stderr is in %s"%read_len_file_stderr)
+        run_cmd("zcat %s | head -n %i | sed -n '2~4p' > %s 2>%s"%(fastqgz, nlines, read_len_file_tmp, read_len_file_stderr))
+
+        remove_file(read_len_file_stderr)
+        os.rename(read_len_file_tmp, read_len_file)
+
+    return int(np.median([len(l.strip()) for l in open(read_len_file, "r").readlines()]))
+
+def generate_downsampledReads(fastqgz, downsampled_fastqgz, fraction_downsample, replace=False):
+
+    """Takes some reads and downsamples them to fraction_downsample into downsampled_fastqgz."""
+
+    if file_is_empty(downsampled_fastqgz) or replace is True:
+
+        downsampled_fastqgz_tmp = "%s.tmp.fastq.gz"%downsampled_fastqgz
+        downsampled_fastqgz_stderr = "%s.generating.stderr"%downsampled_fastqgz
+        print_if_verbose("downsampling into %s. The stderr is in %s"%(downsampled_fastqgz, downsampled_fastqgz_stderr))
+
+        run_cmd("%s sample -s100 %s %.4f | %s > %s 2>%s"%(seqtk, fastqgz, fraction_downsample, pigz, downsampled_fastqgz_tmp, downsampled_fastqgz_stderr))
+
+        remove_file(downsampled_fastqgz_stderr)
+        os.rename(downsampled_fastqgz_tmp, downsampled_fastqgz)
+
+def downsample_close_shortReads_table(close_shortReads_table, close_shortReads_table_df, max_coverage_sra_reads, reference_genome, replace=False, threads=4):
+
+    """This function takes a df with the close_reads downloaded from SRA and replaces them with a downsampled version"""
+
+    # initialize the corresponding file
+    new_close_shortReads_table = "%s.max_%ix"%(close_shortReads_table, max_coverage_sra_reads)
+
+    if file_is_empty(new_close_shortReads_table) or replace is True:
+        print_if_verbose("getting the new fastqc files to coverage %ix..."%max_coverage_sra_reads)
+
+        # initialize a df that has the modified reads (possibly downsampled)
+        new_close_shortReads_table_df = pd.DataFrame(columns=close_shortReads_table_df.columns)
+
+        # calculate the genome size
+        genome_length = sum(get_chr_to_len(reference_genome).values())
+
+        # go through each runID
+        for I, row in close_shortReads_table_df.iterrows():
+            print_if_verbose(row["runID"])
+
+            # calculate the read length
+            read_len = get_median_readLength_fastqgz(row["short_reads1"], replace=replace)
+
+            # calculate the number of reads
+            npairs = get_n_pairs_in_fastqgz(row["short_reads1"])
+
+            # calculate the expected coverage
+            expected_coverage = (npairs*read_len)/genome_length
+            print_if_verbose("The expected coverage is %.3fx"%expected_coverage)
+
+            # downsample if the expected coverage is above max_coverage_sra_reads
+            if expected_coverage > max_coverage_sra_reads:
+
+                # define the maximum number of read pairs and the fraction to downsample
+                max_npairs = (max_coverage_sra_reads*genome_length)/read_len
+                fraction_downsample = max_npairs/npairs
+                if fraction_downsample>1: raise ValueError("The fraction has to be below 1")
+
+                # downsample
+                new_short_reads1 = "%s.%ix.fastq.gz"%(row["short_reads1"], max_coverage_sra_reads)
+                new_short_reads2 = "%s.%ix.fastq.gz"%(row["short_reads2"], max_coverage_sra_reads)
+
+                generate_downsampledReads(row["short_reads1"], new_short_reads1, fraction_downsample, replace=replace)
+
+                generate_downsampledReads(row["short_reads2"], new_short_reads2, fraction_downsample, replace=replace)
+
+                # check that the reads are correct
+                check_that_paired_reads_are_correct(new_short_reads1, new_short_reads2)
+
+            else:
+                new_short_reads1 = row["short_reads1"]
+                new_short_reads2 = row["short_reads2"]
+
+            # add to df
+            df_dict = {"sampleID":row["sampleID"], "runID":row["runID"], "short_reads1":new_short_reads1, "short_reads2":new_short_reads2}
+            df = pd.DataFrame({I : df_dict}).transpose()
+            new_close_shortReads_table_df = new_close_shortReads_table_df.append(df, sort=True)
+
+
+        print(new_close_shortReads_table_df)
+
+        # save
+        new_close_shortReads_table_tmp = "%s.tmp"%new_close_shortReads_table
+        new_close_shortReads_table_df.to_csv(new_close_shortReads_table_tmp, sep="\t", index=False, header=True)
+        os.rename(new_close_shortReads_table_tmp, new_close_shortReads_table)
+
+
+    else: new_close_shortReads_table_df = pd.read_csv(new_close_shortReads_table, sep="\t")
+
+    return new_close_shortReads_table, new_close_shortReads_table_df
+
+
+
+def get_close_shortReads_table_close_to_taxID(target_taxID, reference_genome, outdir, ploidy, n_close_samples=3, nruns_per_sample=3, replace=False, threads=4, min_fraction_reads_mapped=0.1, coverage_subset_reads=0.1, min_coverage=30, job_array_mode="local", StopAfter_sampleIndexingFromSRA=False, queue_jobs="debug", max_ncores_queue=768, time_read_obtention="02:00:00", StopAfterPrefecth_of_reads=False, get_lowest_coverage_possible=False, max_coverage_sra_reads=10000000000000000):
 
     """
     This function takes a taxID and returns the close_shortReads_table that is required to do optimisation of parameters
@@ -6097,9 +6230,9 @@ def get_close_shortReads_table_close_to_taxID(target_taxID, reference_genome, ou
             # define the finalisation file
             if StopAfterPrefecth_of_reads is True: final_file = SRRfile
             else: final_file = trimmed_reads2 # the last one generated
-
+  
             # get the cmd if necessary
-            if file_is_empty(final_file) and file_is_empty(trimmed_reads2) or replace is True:
+            if (file_is_empty(final_file) and file_is_empty(trimmed_reads2)) or replace is True:
 
                 # define the cmd and add it
                 cmd = "%s --srr %s --outdir %s --threads %i"%(get_trimmed_reads_for_srr_py, srr, outdir_srr, threads)
@@ -6145,9 +6278,6 @@ def get_close_shortReads_table_close_to_taxID(target_taxID, reference_genome, ou
 
             else: raise ValueError("%s is not valid"%job_array_mode)
 
-
-
-
         if StopAfterPrefecth_of_reads is True: 
             print_if_verbose("Stopping after prefetch of the reads. You still need to re-run this pipeline to get the actual reads.")
             sys.exit(0)
@@ -6167,12 +6297,18 @@ def get_close_shortReads_table_close_to_taxID(target_taxID, reference_genome, ou
         print_if_verbose("Stopping after prefetch of the reads. You still need to re-run this pipeline to get the actual reads.")
         sys.exit(0)
 
+    # define the initially important files
+    initial_important_files = set(close_shortReads_table_df["short_reads1"]).union(close_shortReads_table_df["short_reads2"])
+
+    # downsample the reads according to max_coverage_sra_reads
+    print_if_verbose("downsampling the reads to a max coverage of %ix"%max_coverage_sra_reads)
+    close_shortReads_table, close_shortReads_table_df = downsample_close_shortReads_table(close_shortReads_table, close_shortReads_table_df, max_coverage_sra_reads, reference_genome, replace=replace, threads=threads)
 
     # debug
     if not close_shortReads_table_is_correct(close_shortReads_table): raise ValueError("%s has empty reads files"%close_shortReads_table)
     
     # define the important files
-    important_files = set(close_shortReads_table_df["short_reads1"]).union(close_shortReads_table_df["short_reads2"])
+    important_files = set(close_shortReads_table_df["short_reads1"]).union(close_shortReads_table_df["short_reads2"]).union(initial_important_files)
 
     # remove the files that are not the reads
     for srr in os.listdir(reads_dir):
@@ -6185,7 +6321,7 @@ def get_close_shortReads_table_close_to_taxID(target_taxID, reference_genome, ou
     # remove all the other unimportant files and folders
     for f in os.listdir(outdir):
 
-        if f not in {"close_shortReads_table.tbl", "final_SRA_runInfo_df.py", "reads"}:
+        if f not in {"final_SRA_runInfo_df.py", "reads", get_file(close_shortReads_table)}:
 
             path = "%s/%s"%(outdir, f)
             delete_folder(path)
@@ -6193,7 +6329,7 @@ def get_close_shortReads_table_close_to_taxID(target_taxID, reference_genome, ou
 
     # last check
     if not close_shortReads_table_is_correct(close_shortReads_table): raise ValueError("%s has empty reads files"%close_shortReads_table)
- 
+
     #########################################
 
     return close_shortReads_table
@@ -10372,6 +10508,8 @@ def generate_jobarray_file_greasy(jobs_filename, walltime="48:00:00",  name="Job
     # define and write the run filename
     jobs_filename_run = "%s.run"%jobs_filename
     with open(jobs_filename_run, "w") as fd: fd.write("\n".join(arguments))
+
+    stoppingatthesubmission
     
     # run in cluster if specified
     if sbatch is True: run_cmd("sbatch %s"%jobs_filename_run)
@@ -11009,7 +11147,6 @@ def report_accuracy_realSVs(close_shortReads_table, reference_genome, outdir, re
         # initialize the cmds to run 
         all_cmds = []
 
-
         # predefine if some jobs need to be ran
         n_remaining_jobs = sum([sum([file_is_empty("%s/%s/%s/perSVade_finished_file.txt"%(outdir, typeSimulations, runID)) for runID in set(df_reads.runID)]) for typeSimulations in ["uniform", "fast", "realSVs"]])
         print_if_verbose("There are %i remaining jobs"%n_remaining_jobs)
@@ -11518,6 +11655,80 @@ def remove_smallVarsCNV_nonEssentialFiles(outdir, ploidy):
 
     for f in files_to_remove: remove_file(f)
 
+def get_bam_with_duplicatesMarkedSpark(bam, threads=4, replace=False, remove_indices=False):
+
+    """
+    This function takes a bam file and runs MarkDuplicatesSpark (most efficient when the input bam is NOT coordinate-sorted) returning the bam with the duplicates sorted. It does not compute metrics to make it faster. Some notes about MarkDuplicatesSpark:
+
+    - it is optimised to run on query-name-sorted bams. It is slower if not
+    - by default it does not calculate duplicate metrics
+    - for 30x coverage WGS, it is recconnended to have at least 16Gb
+    - by default it takes all the cores
+
+    it reurns the bam with duplicates marked
+
+    """
+
+    # define dirs
+    bam_dupMarked = "%s.MarkDups.bam"%bam
+    bam_dupMarked_tmp = "%s.MarkDups.tmp.bam"%bam
+
+    if file_is_empty(bam_dupMarked) or replace is True:
+        print_if_verbose("marking duplicate reads")
+
+        # define the java memory
+        #javaRamGb = int(get_availableGbRAM()*fractionRAM_to_dedicate) # At Broad, we run MarkDuplicates with 2GB Java heap (java -Xmx2g) and 10GB hard memory limit
+        javaRamGb = int(get_availableGbRAM()*0.5) # At Broad, we run MarkDuplicates with 2GB Java heap (java -Xmx2g) and 10GB hard memory limit
+        #javaRamGb = int(get_availableGbRAM() - 2) # rule of thumb from GATK
+        #javaRamGb = 4 # this is from a post from 2011, reccommended for a 170Gb RAM
+
+        # define the MAX_RECORDS_IN_RAM
+        #MAX_RECORDS_IN_RAM = int(250000*javaRamGb*0.8) # 250,000 reads for each Gb given (for SortSam, I don't know if this will work for Picard tools)
+
+        # define the number of MAX_FILE_HANDLES_FOR_READ_ENDS_MAP
+        #max_nfilehandles = int(subprocess.check_output("ulimit -n", shell=True))
+        #MAX_FILE_HANDLES_FOR_READ_ENDS_MAP = int(max_nfilehandles*0.5) # a little lower than ulimit -n
+
+        # define the memory
+        min_javaRamGb = javaRamGb #  It is recommended to set the minimum heap size equivalent to the maximum heap size in order to minimize the garbage collection.
+        max_javaRamGb = javaRamGb
+
+        # define the tmpdir
+        tmpdir = "%s.runningMarkDups_tmp"%bam
+        delete_folder(tmpdir)
+        make_folder(tmpdir)
+
+        # remove any files with .tmp.
+        for f in os.listdir(get_dir(bam)):
+            if f.startswith(get_file(bam_dupMarked_tmp)): 
+                path = "%s/%s"%(get_dir(bam), f)
+                remove_file(path)
+                delete_folder(path)
+
+        # SORTING_COLLECTION_SIZE_RATIO is 0.25 by default. If I have memory issues I can reduce this number.
+
+        markduplicates_std = "%s.markingDuplicates.std"%bam
+        print_if_verbose("running MarkDuplicates with %iGb of RAM. The std is in %s"%(max_javaRamGb, markduplicates_std))
+
+        # running with the spark MarkDuplicates implementation
+        #REMOVE_DUPLICATES=Boolean
+        # 
+        run_cmd("%s --java-options '-Xms%ig -Xmx%ig' MarkDuplicatesSpark -I %s -O %s --verbosity INFO --tmp-dir %s  --create-output-variant-index false --create-output-bam-splitting-index false --create-output-bam-index false > %s 2>&1"%(gatk, min_javaRamGb, max_javaRamGb, bam, bam_dupMarked_tmp, tmpdir, markduplicates_std))
+
+        remove_file(markduplicates_std)
+        delete_folder(tmpdir)
+
+        # keep
+        os.rename(bam_dupMarked_tmp, bam_dupMarked)
+
+    # remove the indices
+    if remove_indices is True: 
+        kjhdajkgad
+    kgadkjgadkj
+
+    return bam_dupMarked
+
+        
 def get_sortedBam_with_duplicatesMarked(sorted_bam, threads=4, replace=False):
 
     """This function takes a sorted bam and returns the equivalent with the duplicates marked with picard MarkDuplicates. It also indexes this bam"""
@@ -11533,8 +11744,8 @@ def get_sortedBam_with_duplicatesMarked(sorted_bam, threads=4, replace=False):
         # define the java memory
         #javaRamGb = int(get_availableGbRAM()*fractionRAM_to_dedicate) # At Broad, we run MarkDuplicates with 2GB Java heap (java -Xmx2g) and 10GB hard memory limit
         #javaRamGb = int(get_availableGbRAM()*0.5) # At Broad, we run MarkDuplicates with 2GB Java heap (java -Xmx2g) and 10GB hard memory limit
-        #javaRamGb = int(get_availableGbRAM() - 2) # rule of thumb from GATK
-        javaRamGb = 4 # this is from a post from 2011, reccommended for a 170Gb RAM
+        javaRamGb = int(get_availableGbRAM() - 2) # rule of thumb from GATK
+        #javaRamGb = 4 # this is from a post from 2011, reccommended for a 170Gb RAM
 
         # define the MAX_RECORDS_IN_RAM
         MAX_RECORDS_IN_RAM = int(250000*javaRamGb*0.8) # 250,000 reads for each Gb given (for SortSam, I don't know if this will work for Picard tools)
@@ -11548,6 +11759,7 @@ def get_sortedBam_with_duplicatesMarked(sorted_bam, threads=4, replace=False):
         markduplicates_std = "%s.markingDuplicates.std"%sorted_bam
         print_if_verbose("running MarkDuplicates with %iGb of RAM and %i MAX_FILE_HANDLES_FOR_READ_ENDS_MAP. The std is in %s"%(javaRamGb, MAX_FILE_HANDLES_FOR_READ_ENDS_MAP, markduplicates_std))
 
+        # running with the traditional MarkDuplicates implementation
         run_cmd("%s -Xmx%ig MarkDuplicates I=%s O=%s M=%s ASSUME_SORT_ORDER=coordinate MAX_FILE_HANDLES_FOR_READ_ENDS_MAP=%i MAX_RECORDS_IN_RAM=%i > %s 2>&1"%(picard_exec, javaRamGb, sorted_bam, sorted_bam_dupMarked_tmp, sorted_bam_dupMarked_metrics, MAX_FILE_HANDLES_FOR_READ_ENDS_MAP, MAX_RECORDS_IN_RAM, markduplicates_std))
         #REMOVE_DUPLICATES=Boolean
 
@@ -12875,7 +13087,6 @@ def write_variantInfo_table(vcf, variantInfo_table, replace=False):
     # return as df
     print_if_verbose("returning df")
     return pd.read_csv(variantInfo_table, sep="\t")
-
 
 
 def report_variant_calling_statistics(df, variantCallingStats_tablePrefix, programs):

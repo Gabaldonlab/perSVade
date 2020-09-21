@@ -2312,3 +2312,108 @@ def get_fraction_differing_positions_AvsB(snpsA, snpsB, length_genome):
 
     return fraction_different_positions
 
+
+
+def run_bwa_mem(fastq1, fastq2, ref, outdir, bamfile, sorted_bam, index_bam, name_sample, threads=1, replace=False, MarkDuplicates=True):
+
+    """Takes a set of files and runs bwa mem getting sorted_bam and index_bam. skip_MarkingDuplicates will not mark duplicates"""
+
+    if file_is_empty(sorted_bam) or file_is_empty(index_bam) or replace is True:
+
+        #index fasta
+        index_files = ["%s.%s"%(ref, x) for x in ["amb", "ann", "bwt", "pac", "sa"]]
+
+        if any([file_is_empty(x) for x in index_files]) or replace is True:
+
+            # create a branch reference, which will have a tag that is unique to this run. This is important since sometimes you run this pipeline in parallel, and this may give errors in fasta indexing.
+            branch_ref = "%s.%s.fasta"%(ref, id_generator())
+            shutil.copy2(ref, branch_ref)
+
+            # run indexing in the copy
+            indexFasta_std = "%s.std.txt"%branch_ref
+            print_if_verbose("indexing fasta. The std can be found in %s"%indexFasta_std)
+            cmd_indexFasta = "%s index %s > %s 2>&1"%(bwa, branch_ref, indexFasta_std); run_cmd(cmd_indexFasta) # creates a set of indexes of fasta
+            index_files_branch = ["%s.%s"%(branch_ref, x) for x in ["amb", "ann", "bwt", "pac", "sa"]]
+
+            # rename each of the indices so that it matches the ref format
+            for branchIDX, realIDX in dict(zip(index_files_branch, index_files)).items(): os.rename(branchIDX, realIDX)
+
+            # rm the branch
+            os.unlink(branch_ref)
+            os.unlink(indexFasta_std)
+
+        #BWA MEM --> get .sam
+        samfile = "%s/aligned_reads.sam"%outdir;
+        if (file_is_empty(samfile) and file_is_empty(bamfile)) or replace is True:
+
+            # remove previuous generated temporary file
+            if os.path.isfile("%s.tmp"%samfile): os.unlink("%s.tmp"%samfile)
+
+            bwa_mem_stderr = "%s.tmp.stderr"%samfile
+            print_if_verbose("running bwa mem. The std is in %s"%bwa_mem_stderr)
+            cmd_bwa = '%s mem -R "@RG\\tID:%s\\tSM:%s" -t %i %s %s %s > %s.tmp 2>%s'%(bwa, name_sample, name_sample, threads, ref, fastq1, fastq2, samfile, bwa_mem_stderr); run_cmd(cmd_bwa)
+            os.rename("%s.tmp"%samfile , samfile)
+            remove_file(bwa_mem_stderr)
+
+        # convert to bam 
+        if file_is_empty(bamfile) or replace is True:
+            bamconversion_stderr = "%s.tmp.stderr"%bamfile
+            print_if_verbose("Converting to bam. The std is in %s"%bamconversion_stderr)
+            cmd_toBAM = "%s view -Sbu %s > %s.tmp 2>%s"%(samtools, samfile, bamfile, bamconversion_stderr); run_cmd(cmd_toBAM)
+
+            # remove the sam
+            os.unlink(samfile)
+            remove_file(bamconversion_stderr)
+            os.rename("%s.tmp"%bamfile , bamfile)
+
+
+        # define the sorted_bam with Dups
+        sorted_bam_noMarkDups = "%s.noMarkDups"%sorted_bam
+        sorted_bam_noMarkDups_tmp = "%s.tmp"%sorted_bam_noMarkDups
+
+        # sorting bam
+        if file_is_empty(sorted_bam_noMarkDups) or replace is True:
+            print_if_verbose("Sorting bam")
+
+            # remove all temporary files generated previously in samtools sort (they'd make a new sort to be an error)
+            for outdir_file in os.listdir(outdir): 
+                fullfilepath = "%s/%s"%(outdir, outdir_file)
+                if outdir_file.startswith("aligned_reads") and ".tmp." in outdir_file: os.unlink(fullfilepath)
+
+            # sort
+            bam_sort_std = "%s.tmp.sortingBam_std.txt"%sorted_bam
+            print_if_verbose("the sorting bam std is in %s"%bam_sort_std)
+            cmd_sort = "%s sort --threads %i -o %s %s > %s 2>&1"%(samtools, threads, sorted_bam_noMarkDups_tmp, bamfile, bam_sort_std); run_cmd(cmd_sort)
+
+            # rename
+            remove_file(bam_sort_std)
+            os.rename(sorted_bam_noMarkDups_tmp, sorted_bam_noMarkDups)
+
+        # mark duplicates or not, depending on MarkDuplicates
+        if file_is_empty(sorted_bam) or replace is True:
+
+            if MarkDuplicates is True:
+
+                print_if_verbose("marking duplicates")
+
+                # mark duplicates
+                sorted_bam_MarkedDuplicates = get_sortedBam_with_duplicatesMarked(sorted_bam_noMarkDups, threads=threads, replace=replace)
+
+                # remove the the raw bam file
+                remove_file("%s.bai"%sorted_bam_MarkedDuplicates)
+
+                # replace
+                os.rename(sorted_bam_MarkedDuplicates, sorted_bam)
+
+            else: os.rename(sorted_bam_noMarkDups, sorted_bam)
+
+        # remove unnecessary files
+        remove_file(bamfile)
+        remove_file(sorted_bam_noMarkDups)
+
+    # indexing bam
+    if file_is_empty(index_bam) or replace is True:
+        bam_index_std = "%s.indexingBam_std.txt"%sorted_bam
+        print_if_verbose("indexing bam. The std is in %s"%bam_index_std)
+        cmd_indexBam = "%s index -@ %i %s > %s 2>&1"%(samtools, threads, sorted_bam, bam_index_std); run_cmd(cmd_indexBam)   # creates a .bai of sorted_bam
+        remove_file(bam_index_std)

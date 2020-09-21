@@ -119,7 +119,10 @@ parser.add_argument("--skip_cleaning_simulations_files_and_parameters", dest="sk
 # arg to run the trimming of the reads
 parser.add_argument("--QC_and_trimming_reads", dest="QC_and_trimming_reads", action="store_true", default=False, help="Will run fastq and trimmomatic of reads, and use the trimmed reads for downstream analysis. This option will generate files under the same dir as f1 and f2, so be aware of it.")
 
-# small VarCalk and CNV args
+# maximum coverage args
+parser.add_argument("--max_coverage_sra_reads", dest="max_coverage_sra_reads", default=10000000000000000, type=int, help="This is the maximum coverage allowed in the reads downloaded by SRA. If the datasets have a coverage above this perSVade will randmomly subset reads to match this.")
+
+# small VarCall and CNV args
 parser.add_argument("--run_smallVarsCNV", dest="run_smallVarsCNV", action="store_true", default=False, help="Will call small variants and CNV.")
 parser.add_argument("-gff", "--gff-file", dest="gff", default=None, help="path to the GFF3 annotation of the reference genome. Make sure that the IDs are completely unique for each 'gene' tag. This is necessary for both the CNV analysis (it will look at genes there) and the annotation of the variants.")
 parser.add_argument("-caller", "--caller", dest="caller", required=False, default="all", help="SNP caller option to obtain vcf file. options: no/all/HaplotypeCaller/bcftools/freebayes. It can be a comma-sepparated string, like 'HaplotypeCaller,freebayes'")
@@ -388,7 +391,7 @@ elif opt.fast_SVcalling is False and opt.close_shortReads_table is not None:
         # define the outdir where the close genomes whould be downloaded
         outdir_getting_closeReads = "%s/getting_closeReads"%outdir_finding_realVars; fun.make_folder(outdir_getting_closeReads)
 
-        opt.close_shortReads_table = fun.get_close_shortReads_table_close_to_taxID(opt.target_taxID, opt.ref, outdir_getting_closeReads, opt.ploidy, n_close_samples=opt.n_close_samples, nruns_per_sample=opt.nruns_per_sample, replace=opt.replace, threads=opt.threads, job_array_mode=opt.job_array_mode, StopAfter_sampleIndexingFromSRA=opt.StopAfter_sampleIndexingFromSRA, queue_jobs=opt.queue_jobs, max_ncores_queue=opt.max_ncores_queue, time_read_obtention=opt.time_read_obtention, StopAfterPrefecth_of_reads=opt.StopAfterPrefecth_of_reads)
+        opt.close_shortReads_table = fun.get_close_shortReads_table_close_to_taxID(opt.target_taxID, opt.ref, outdir_getting_closeReads, opt.ploidy, n_close_samples=opt.n_close_samples, nruns_per_sample=opt.nruns_per_sample, replace=opt.replace, threads=opt.threads, job_array_mode=opt.job_array_mode, StopAfter_sampleIndexingFromSRA=opt.StopAfter_sampleIndexingFromSRA, queue_jobs=opt.queue_jobs, max_ncores_queue=opt.max_ncores_queue, time_read_obtention=opt.time_read_obtention, StopAfterPrefecth_of_reads=opt.StopAfterPrefecth_of_reads, max_coverage_sra_reads=opt.max_coverage_sra_reads)
 
     # skip the running of the pipeline 
     if opt.StopAfter_readObtentionFromSRA:
