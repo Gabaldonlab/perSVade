@@ -39,19 +39,6 @@ reference_genome = "%s/Candida_glabrata.fasta"%outdir_genomes_and_annotations
 ############################
 
 bedpe_breakpoints = "%s/M12_WT_Cglabrata_SVs.bedpe"%CurDir
-fun.simulate_SVs_in_genome(reference_genome, "mito_C_glabrata_CBS138", CurDir, nvars=10, bedpe_breakpoints=bedpe_breakpoints)
+#bedpe_breakpoints = None
+final_svtype_to_svfile, final_rearranged_genome = fun.simulate_SVs_in_genome(reference_genome, "mito_C_glabrata_CBS138", CurDir, nvars=50, bedpe_breakpoints=bedpe_breakpoints, replace=False)
 
-"""
-argp = add_argument(argp, "--regions_bed", help="Path to the bed file where the simulations should be generated")
-
-argp = add_argument(argp, "--number_Ins", default=10, help="The number of insertions to generate")
-argp = add_argument(argp, "--number_Inv", default=10, help="The number of inversions to generate")
-argp = add_argument(argp, "--number_Del", default=10, help="The number of deletions to generate")
-argp = add_argument(argp, "--number_Tra", default=10, help="The number of translocations to generate")
-argp = add_argument(argp, "--number_Dup", default=10, help="The number of duplications to generate")
-
-argp = add_argument(argp, "--len_shortest_chr", default=100000, help="The number of duplications to generate")
-argp = add_argument(argp, "--percCopiedIns", default=0.5, help="The fraction of INS that are copy-and-paste")
-argp = add_argument(argp, "--percBalancedTrans", default=1, help="The fraction of TRA that are balanced")
-argp = add_argument(argp, "--max_time_rearrangement", default=120, help="The maximum number of seconds which a rearrangement will take. This is important because sometimes the simulateSV function gets stuck when simulating mtDNA variation")
-"""
