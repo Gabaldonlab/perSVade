@@ -1,0 +1,13 @@
+ChrA	StartA	EndA	ChrB	StartB	EndB	Balanced	ID
+ChrF_C_glabrata_CBS138	680350	927101	ChrK_C_glabrata_CBS138	1297715	1302831	True	translocation_1_sim_gDNA
+ChrB_C_glabrata_CBS138	353309	502101	ChrJ_C_glabrata_CBS138	963018	1195129	True	translocation_2_sim_gDNA
+ChrK_C_glabrata_CBS138	1	522764	ChrH_C_glabrata_CBS138	1	501356	True	translocation_3_sim_gDNA
+ChrC_C_glabrata_CBS138	422384	558804	ChrM_C_glabrata_CBS138	855489	1402899	True	translocation_4_sim_gDNA
+ChrE_C_glabrata_CBS138	1	223541	ChrF_C_glabrata_CBS138	1	252047	True	translocation_5_sim_gDNA
+ChrA_C_glabrata_CBS138	1	42409	ChrD_C_glabrata_CBS138	394825	651701	True	translocation_6_sim_gDNA
+ChrG_C_glabrata_CBS138	944915	992211	ChrI_C_glabrata_CBS138	1	545729	True	translocation_7_sim_gDNA
+ChrJ_C_glabrata_CBS138	1	79376	ChrB_C_glabrata_CBS138	1	183357	True	translocation_8_sim_gDNA
+ChrG_C_glabrata_CBS138	1	473113	ChrL_C_glabrata_CBS138	1	453339	True	translocation_9_sim_gDNA
+ChrM_C_glabrata_CBS138	1	308886	ChrH_C_glabrata_CBS138	943879	1050361	True	translocation_10_sim_gDNA
+ChrI_C_glabrata_CBS138	1058912	1100349	ChrL_C_glabrata_CBS138	1045349	1455689	True	translocation_11_sim_gDNA
+ChrD_C_glabrata_CBS138	1	219653	ChrE_C_glabrata_CBS138	451852	687738	True	translocation_12_sim_gDNA

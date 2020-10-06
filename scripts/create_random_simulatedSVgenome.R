@@ -26,6 +26,7 @@ argp = add_argument(argp, "--number_Del", default=0, help="The number of deletio
 argp = add_argument(argp, "--number_Tra", default=0, help="The number of translocations to generate")
 argp = add_argument(argp, "--number_Dup", default=0, help="The number of duplications to generate")
 
+argp = add_argument(argp, "--len_shortest_chr", default=1000, help="Len of the shortest chrom")
 argp = add_argument(argp, "--percCopiedIns", default=0.5, help="The fraction of INS that are copy-and-paste")
 argp = add_argument(argp, "--percBalancedTrans", default=1, help="The fraction of TRA that are balanced")
 argp = add_argument(argp, "--max_time_rearrangement", default=120, help="The maximum number of seconds which a rearrangement will take. This is important because sometimes the simulateSV function gets stuck when simulating mtDNA variation")
@@ -49,6 +50,7 @@ input_genome = argv$input_genome
 outdir = argv$outdir
 regions_bed = argv$regions_bed
 regions_tra_bed = argv$regions_tra_bed
+len_shortest_chr = argv$len_shortest_chr
 
 # get the genome object, only taking the ID (first space)
 genome_obj = readDNAStringSet(input_genome)
@@ -60,9 +62,6 @@ if (length(chromosomes) == 1) { argv$number_Tra = 0 }
 
 # make the outdir
 if (!dir.exists(outdir)){dir.create(outdir)}
-
-# define the length of the shortest chromosome
-len_shortest_chr = min(width(genome_obj[chromosomes]))
   
 # initialize the rearranged genome
 rearranged_genome_generated = FALSE # a tag that defines that the rearranged genome has been created
