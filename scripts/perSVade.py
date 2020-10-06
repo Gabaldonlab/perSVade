@@ -122,6 +122,9 @@ parser.add_argument("--QC_and_trimming_reads", dest="QC_and_trimming_reads", act
 # maximum coverage args
 parser.add_argument("--max_coverage_sra_reads", dest="max_coverage_sra_reads", default=10000000000000000, type=int, help="This is the maximum coverage allowed in the reads downloaded by SRA. If the datasets have a coverage above this perSVade will randmomly subset reads to match this.")
 
+# min chromosome name
+parser.add_argument("--min_chromosome_len", dest="min_chromosome_len", default=100000, type=int, help="The minimum length to consider chromosomes from the provided fasta for calculating the window length.")
+
 # small VarCall and CNV args
 parser.add_argument("--run_smallVarsCNV", dest="run_smallVarsCNV", action="store_true", default=False, help="Will call small variants and CNV.")
 parser.add_argument("-gff", "--gff-file", dest="gff", default=None, help="path to the GFF3 annotation of the reference genome. Make sure that the IDs are completely unique for each 'gene' tag. This is necessary for both the CNV analysis (it will look at genes there) and the annotation of the variants.")
@@ -129,12 +132,14 @@ parser.add_argument("-caller", "--caller", dest="caller", required=False, defaul
 parser.add_argument("-c", "--coverage", dest="coverage", default=20, type=int, help="minimum Coverage (int)")
 parser.add_argument("--minAF_smallVars", dest="minAF_smallVars", default="infer", help="The minimum fraction of reads covering a variant to be called. The default is 'infer', which will set a threshold based on the ploidy. This is only relevant for the final vcfs, where only PASS vars are considered. It can be a number between 0 and 1.")
 
-
 parser.add_argument("-mcode", "--mitochondrial_code", dest="mitochondrial_code", default=3, type=int, help="The code of the NCBI mitochondrial genetic code. For yeasts it is 3. You can find the numbers for your species here https://www.ncbi.nlm.nih.gov/Taxonomy/Utils/wprintgc.cgi")
 parser.add_argument("-gcode", "--gDNA_code", dest="gDNA_code", default=1, type=int, help="The code of the NCBI gDNA genetic code. You can find the numbers for your species here https://www.ncbi.nlm.nih.gov/Taxonomy/Utils/wprintgc.cgi . For C. albicans it is 12. ")
 parser.add_argument("--remove_smallVarsCNV_nonEssentialFiles", dest="remove_smallVarsCNV_nonEssentialFiles", action="store_true", default=False, help="Will remove all the varCall files except the integrated final file and the bam file.")
 parser.add_argument("--markDuplicates_inBam", dest="markDuplicates_inBam", action="store_true", default=False, help="Will mark the duplicates in the bam file. This is only necessary if the input of the pipeline is a sorted bam (-sbam) instead of raw reads.")
 parser.add_argument("--replace_var_integration", dest="replace_var_integration", action="store_true", help="Replace all the variant integration steps for smallVariantCalling.")
+parser.add_argument("--generate_alternative_genome", dest="generate_alternative_genome", default=False, action="store_true", help="Generate an alternative genome in smallVariantCalling.")
+parser.add_argument("--skip_cnv_analysis", dest="skip_cnv_analysis", default=False, action="store_true", help="Don't perform the cnv analysis")
+
 
 parser.add_argument("--pooled_sequencing", dest="pooled_sequencing", action="store_true", default=False, help="It is a pooled sequencing run, which means that the small variant calling is not done based on ploidy. If you are also running SV calling, check that the simulation_ploidies, resemble a population,")
 
@@ -233,9 +238,11 @@ if opt.pooled_sequencing is True: print("WARNING: If you are running SV calling,
 simulation_ploidies = opt.simulation_ploidies.split(",")
 
 # the window length for all operations
-fun.window_l = int(np.median([len_seq for chrom, len_seq  in fun.get_chr_to_len(opt.ref).items() if chrom not in opt.mitochondrial_chromosome.split(",") and len_seq>=20000])*0.05) + 1
+valid_chrom_lens = [len_seq for chrom, len_seq  in fun.get_chr_to_len(opt.ref).items() if chrom not in opt.mitochondrial_chromosome.split(",") and len_seq>=opt.min_chromosome_len]
+if len(valid_chrom_lens)==0: raise ValueError("There are no chromosomes to calculate the window_l. Decrease --min_chromosome_len.")
+print("There are %i chromosomes to calculate window length"%len(valid_chrom_lens))
+fun.window_l = int(np.median(valid_chrom_lens)*0.05) + 1
 if pd.isna(fun.window_l): fun.window_l = 1000
-
 print("using a window length of %i"%fun.window_l)
 
 # define the verbosity. If opt.verbose is False, none of the 'print' statements of sv_functions will have an effect
@@ -476,6 +483,8 @@ if opt.run_smallVarsCNV:
     if opt.replace_var_integration is True: varcall_cmd += " --replace_var_integration"
     if opt.pooled_sequencing is True: varcall_cmd += " --pooled_sequencing"
     if opt.consider_repeats_smallVarCall is True: varcall_cmd += " --repeats_table %s"%repeats_table_file
+    if opt.generate_alternative_genome is True: varcall_cmd += " --generate_alternative_genome"
+    if opt.skip_cnv_analysis is True: varcall_cmd += " --skip_cnv_analysis"
 
     # run
     if __name__ == '__main__': fun.run_cmd(varcall_cmd)
