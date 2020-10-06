@@ -113,9 +113,13 @@ species_Info = [("5478", "Candida_glabrata", 1, "mito_C_glabrata_CBS138"),
 species_Info = [("746128", "Aspergillus_fumigatus", 1, "CM016889.1"),
                 ("5207", "Cryptococcus_neoformans", 1, "CP003834.1")]
 """
-
+"""
 species_Info = [("7227", "Drosophila_melanogaster", 2, "KJ947872.2", 30),
                 ("3702", "Arabidopsis_thaliana", 2, "BK010421.1,AP000423.1", 30)]
+"""
+species_Info = [("3702", "Arabidopsis_thaliana", 2, "BK010421.1,AP000423.1", 30)]
+#species_Info = [("7227", "Drosophila_melanogaster", 2, "KJ947872.2", 30)]
+
 
 taxIDs_with_noON_overalpping = {"5476", "746128"}
 
@@ -245,10 +249,9 @@ for taxID, spName, ploidy, mitochondrial_chromosome, max_coverage_sra_reads in s
 
         ####### delete the folders that did not complete in any of the previous runs #######
 
-        """
-
         for typeSim in ["fast", "uniform", "realSVs"]:
             outdir_testAccuracy = "%s/testing_Accuracy/%s"%(outdir_perSVade, typeSim)
+            if not os.path.isdir(outdir_testAccuracy): continue
 
             for f in os.listdir(outdir_testAccuracy): 
                 outdir_f = "%s/%s"%(outdir_testAccuracy, f)
@@ -256,7 +259,6 @@ for taxID, spName, ploidy, mitochondrial_chromosome, max_coverage_sra_reads in s
 
                     print("deleting %s"%outdir_f)
                     fun.delete_folder(outdir_f)
-        """
 
         ####################################################################################
 
@@ -266,7 +268,7 @@ for taxID, spName, ploidy, mitochondrial_chromosome, max_coverage_sra_reads in s
 
         # get the reads from SRA. 3 samples, 3 runs per sample. Process with the. --verbose
         cmd = "%s --ref %s --threads %i -o %s --close_shortReads_table %s --target_taxID %s --n_close_samples 3 --nruns_per_sample 3 -f1 skip -f2 skip --mitochondrial_chromosome %s --gff %s --testAccuracy --skip_SVcalling --verbose --skip_cleaning_simulations_files_and_parameters --StopAfter_testAccuracy_perSVadeRunning --max_coverage_sra_reads %i"%(perSVade_py, genome, threads, outdir_perSVade, close_shortReads_table, taxID, mitochondrial_chromosome, gff, max_coverage_sra_reads)
-        # --StopAfter_testAccuracy_perSVadeRunning --slurm_constraint 
+        # --StopAfter_testAccuracy_perSVadeRunning --slurm_constraint, --StopAfter_obtentionOFcloseSVs
 
     elif running_type=="goldenSet":
 
@@ -279,15 +281,13 @@ for taxID, spName, ploidy, mitochondrial_chromosome, max_coverage_sra_reads in s
         cmd = "%s --ref %s --threads %i -o %s --target_taxID %s --n_close_samples 3 --nruns_per_sample 3 -f1 skip -f2 skip --mitochondrial_chromosome %s --gff %s --goldenSet_dir %s --skip_SVcalling --verbose"%(perSVade_py, genome, threads, outdir_perSVade, taxID, mitochondrial_chromosome, gff, goldenSet_dir)
 
     # add options depending on the machine
-    if run_in_cluster is True: cmd += " --job_array_mode greasy --queue_jobs bsc_ls --max_ncores_queue 480 --time_read_obtention 48:00:00 --time_perSVade_running 48:00:00"
+    if run_in_cluster is True: cmd += " --job_array_mode greasy --queue_jobs bsc_ls --max_ncores_queue 48 --time_read_obtention 48:00:00 --time_perSVade_running 48:00:00"
 
     else: cmd += " --job_array_mode local"
 
     if StopAfterPrefecth_of_reads is True: cmd += " --StopAfterPrefecth_of_reads"
 
     fun.run_cmd(cmd)
-
-    adkljhdajkadh
 
     #if taxID=="5476": adkjhdakg # stop after C. albicans
 
@@ -311,9 +311,23 @@ cd ~/samba/CandidaMine_data_generation/v1/data/Candida_albicans_5476/varCall_out
 python /gpfs/projects/bsc40/mschikora/scripts/perSVade/perSVade_repository/scripts/perSVade.py -r /gpfs/projects/bsc40/mschikora/scripts/perSVade/perSVade_repository/testing/outdirs_testing_severalSpecies/5478_Candida_glabrata/reference_genome_dir/reference_genome.fasta --threads 48 --outdir /gpfs/projects/bsc40/mschikora/scripts/perSVade/perSVade_repository/testing/outdirs_testing_severalSpecies/5478_Candida_glabrata/testing_Accuracy/fast/BG2_ANI --nvars 50 --nsimulations 2 --simulation_ploidies haploid,diploid_hetero --range_filtering_benchmark theoretically_meaningful --mitochondrial_chromosome mito_C_glabrata_CBS138 -f1 /gpfs/projects/bsc40/mschikora/Cglabrata_antifungals/data/trimmed_reads/RUN1_BG2_11B_ANI_R1_trimmed.fq.gz -f2 /gpfs/projects/bsc40/mschikora/Cglabrata_antifungals/data/trimmed_reads/RUN1_BG2_11B_ANI_R2_trimmed.fq.gz --fast_SVcalling --previous_repeats_table /gpfs/projects/bsc40/mschikora/scripts/perSVade/perSVade_repository/testing/outdirs_testing_severalSpecies/5478_Candida_glabrata/reference_genome.fasta.repeats.tab
 
 
+source ~/.bash_profile
+run_interactive_session_debug
+conda activate perSVade_env
+
 # testing on drosophila:
 
+cd /gpfs/projects/bsc40/mschikora/scripts/perSVade/perSVade_repository/testing/outdirs_testing_severalSpecies/7227_Drosophila_melanogaster/testing_Accuracy/uniform/sample7240_SRR1210633 
+
 python /gpfs/projects/bsc40/mschikora/scripts/perSVade/perSVade_repository/scripts/perSVade.py -r /gpfs/projects/bsc40/mschikora/scripts/perSVade/perSVade_repository/testing/outdirs_testing_severalSpecies/7227_Drosophila_melanogaster/reference_genome_dir/reference_genome.fasta --threads 48 --outdir /gpfs/projects/bsc40/mschikora/scripts/perSVade/perSVade_repository/testing/outdirs_testing_severalSpecies/7227_Drosophila_melanogaster/testing_Accuracy/uniform/sample7240_SRR1210633 --nvars 50 --nsimulations 2 --simulation_ploidies haploid,diploid_hetero --range_filtering_benchmark theoretically_meaningful --mitochondrial_chromosome KJ947872.2 -f1 /gpfs/projects/bsc40/mschikora/scripts/perSVade/perSVade_repository/testing/outdirs_testing_severalSpecies/7227_Drosophila_melanogaster/findingRealSVs_automaticFindingOfCloseReads/getting_closeReads/reads/SRR1210633/SRR1210633_trimmed_reads_1.fastq.gz.30x.fastq.gz -f2 /gpfs/projects/bsc40/mschikora/scripts/perSVade/perSVade_repository/testing/outdirs_testing_severalSpecies/7227_Drosophila_melanogaster/findingRealSVs_automaticFindingOfCloseReads/getting_closeReads/reads/SRR1210633/SRR1210633_trimmed_reads_2.fastq.gz.30x.fastq.gz --previous_repeats_table /gpfs/projects/bsc40/mschikora/scripts/perSVade/perSVade_repository/testing/outdirs_testing_severalSpecies/7227_Drosophila_melanogaster/reference_genome_dir/reference_genome.fasta.repeats.tab --skip_cleaning_outdir --verbose &
+
+# testing on Arabidopsis
+
+cd /gpfs/projects/bsc40/mschikora/scripts/perSVade/perSVade_repository/testing/outdirs_testing_severalSpecies/3702_Arabidopsis_thaliana/testing_Accuracy/uniform/sample2608267_ERR3514863
+
+
+python /gpfs/projects/bsc40/mschikora/scripts/perSVade/perSVade_repository/scripts/perSVade.py -r /gpfs/projects/bsc40/mschikora/scripts/perSVade/perSVade_repository/testing/outdirs_testing_severalSpecies/3702_Arabidopsis_thaliana/reference_genome_dir/reference_genome.fasta --threads 48 --outdir /gpfs/projects/bsc40/mschikora/scripts/perSVade/perSVade_repository/testing/outdirs_testing_severalSpecies/3702_Arabidopsis_thaliana/testing_Accuracy/uniform/sample2608267_ERR3514863 --nvars 50 --nsimulations 2 --simulation_ploidies haploid,diploid_hetero --range_filtering_benchmark theoretically_meaningful --mitochondrial_chromosome BK010421.1,AP000423.1 -f1 /gpfs/projects/bsc40/mschikora/scripts/perSVade/perSVade_repository/testing/outdirs_testing_severalSpecies/3702_Arabidopsis_thaliana/findingRealSVs_automaticFindingOfCloseReads/getting_closeReads/reads/ERR3514863/ERR3514863_trimmed_reads_1.fastq.gz.30x.fastq.gz -f2 /gpfs/projects/bsc40/mschikora/scripts/perSVade/perSVade_repository/testing/outdirs_testing_severalSpecies/3702_Arabidopsis_thaliana/findingRealSVs_automaticFindingOfCloseReads/getting_closeReads/reads/ERR3514863/ERR3514863_trimmed_reads_2.fastq.gz.30x.fastq.gz --previous_repeats_table /gpfs/projects/bsc40/mschikora/scripts/perSVade/perSVade_repository/testing/outdirs_testing_severalSpecies/3702_Arabidopsis_thaliana/reference_genome_dir/reference_genome.fasta.repeats.tab --skip_cleaning_outdir --verbose &
+
 
 """
 

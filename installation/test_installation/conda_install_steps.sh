@@ -98,7 +98,7 @@ conda install -c anaconda xlrd=1.2.0
 #   certifi            conda-forge::certifi-2020.6.20-py36h9~ --> anaconda::certifi-2020.6.20-py36_0
 #   openssl            conda-forge::openssl-1.1.1g-h516909a_1 --> anaconda::openssl-1.1.1g-h7b6447c_0
 
-
+conda install -c anaconda psutil=5.7.2
 
 
 # the environment can be exported as:

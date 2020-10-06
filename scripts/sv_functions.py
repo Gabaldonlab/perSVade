@@ -48,6 +48,7 @@ import matplotlib.colors as mcolors
 import matplotlib.patches as mpatches
 from matplotlib.collections import PatchCollection
 import scipy.stats as stats
+import psutil
 
 #### UNIVERSAL FUNCTIONS ####
 
@@ -181,6 +182,9 @@ run_trimmomatic_and_fastqc_py = "%s/run_trimmomatic_and_fastqc.py"%CWD
 get_trimmed_reads_for_srr_py = "%s/get_trimmed_reads_for_srr.py"%CWD
 run_vep = "%s/run_vep.py"%CWD
 
+create_simulatedSVgenome_R = "%s/create_simulatedSVgenome.R"%CWD
+
+
 ######################################################
 ######################################################
 
@@ -239,7 +243,7 @@ printing_verbose_mode = True
 wrong_SRRs = {"ERR2163728", "SRR8373447"}
 
 # define the fraction of RAM to dedicate to the pipeline
-fractionRAM_to_dedicate = 0.8
+fractionRAM_to_dedicate = 0.5
 
 svtype_to_color={"tandemDuplications": "gray", "deletions": "black", "inversions": "blue", "translocations": "olive", "insertions": "red", "remaining":"magenta", "integrated":"c"}
 
@@ -629,7 +633,7 @@ def extract_BEDofGENES_of_gff3(gff, bed, replace=False, reference=""):
     return regions_filename
 
 
-def get_availableGbRAM():
+def get_availableGbRAM_withFiles():
 
     """This function returns a float with the available memory in your system"""
 
@@ -663,6 +667,13 @@ def get_availableGbRAM():
 
     return available_mem
 
+
+
+def get_availableGbRAM():
+
+    """This function returns a float with the available memory in your system"""
+
+    return psutil.virtual_memory().available/1e9
 
 def write_coverage_per_gene_mosdepth_and_parallel(sorted_bam, reference_genome, cnv_outdir, bed, gene_to_coverage_file, replace=False):
 
@@ -748,7 +759,7 @@ def run_bwa_mem(fastq1, fastq2, ref, outdir, bamfile, sorted_bam, index_bam, nam
 
     """Takes a set of files and runs bwa mem getting sorted_bam and index_bam. skip_MarkingDuplicates will not mark duplicates"""
 
-    if file_is_empty(sorted_bam) or file_is_empty(index_bam) or replace is True:
+    if file_is_empty(sorted_bam) or replace is True:
 
         #index fasta
         index_files = ["%s.%s"%(ref, x) for x in ["amb", "ann", "bwt", "pac", "sa"]]
@@ -798,35 +809,11 @@ def run_bwa_mem(fastq1, fastq2, ref, outdir, bamfile, sorted_bam, index_bam, nam
 
 
         if MarkDuplicates is True:
-            bamfile_MarkedDuplicates = get_bam_with_duplicatesMarkedSpark(bamfile, threads=threads, replace=replace, remove_indices=True)
+            bamfile_MarkedDuplicates = get_bam_with_duplicatesMarkedSpark(bamfile, threads=threads, replace=replace)
 
         else: bamfile_MarkedDuplicates = bamfile
 
-
-        kajdhkjahdah
-
-
-        # sort bam
-
-        # index sorted bam
-
-        # remove all the intermediate files
-
-        ajhdjkahkjadhda
-
-   
-
-        # define dirs
-        bam_dupMarked = "%s.MarkDups.bam"%bamfile
-        bam_dupMarked_tmp = "%s.MarkDups.tmp.bam"%bamfile
-
-
-        # define the sorted_bam with Dups
-        sorted_bam_noMarkDups = "%s.noMarkDups"%sorted_bam
-        sorted_bam_noMarkDups_tmp = "%s.tmp"%sorted_bam_noMarkDups
-
-        # sorting bam
-        if file_is_empty(sorted_bam_noMarkDups) or replace is True:
+        if file_is_empty(sorted_bam) or replace is True:
             print_if_verbose("Sorting bam")
 
             # remove all temporary files generated previously in samtools sort (they'd make a new sort to be an error)
@@ -835,43 +822,23 @@ def run_bwa_mem(fastq1, fastq2, ref, outdir, bamfile, sorted_bam, index_bam, nam
                 if outdir_file.startswith("aligned_reads") and ".tmp." in outdir_file: os.unlink(fullfilepath)
 
             # sort
-            bam_sort_std = "%s.tmp.sortingBam_std.txt"%sorted_bam
+            sorted_bam_tmp = "%s.tmp"%sorted_bam
+            bam_sort_std = "%s.generating.txt"%sorted_bam
             print_if_verbose("the sorting bam std is in %s"%bam_sort_std)
-            cmd_sort = "%s sort --threads %i -o %s %s > %s 2>&1"%(samtools, threads, sorted_bam_noMarkDups_tmp, bamfile, bam_sort_std); run_cmd(cmd_sort)
+            cmd_sort = "%s sort --threads %i -o %s %s > %s 2>&1"%(samtools, threads, sorted_bam_tmp, bamfile_MarkedDuplicates, bam_sort_std); run_cmd(cmd_sort)
+
+            # remove files
+            for f in [bam_sort_std, bamfile_MarkedDuplicates, bamfile]: remove_file(f)
 
             # rename
-            remove_file(bam_sort_std)
-            os.rename(sorted_bam_noMarkDups_tmp, sorted_bam_noMarkDups)
+            os.rename(sorted_bam_tmp, sorted_bam)
 
-        # mark duplicates or not, depending on MarkDuplicates
-        if file_is_empty(sorted_bam) or replace is True:
-
-            if MarkDuplicates is True:
-
-                print_if_verbose("marking duplicates")
-
-                # mark duplicates
-                sorted_bam_MarkedDuplicates = get_sortedBam_with_duplicatesMarked(sorted_bam_noMarkDups, threads=threads, replace=replace)
-
-                # remove the the raw bam file
-                remove_file("%s.bai"%sorted_bam_MarkedDuplicates)
-
-                # replace
-                os.rename(sorted_bam_MarkedDuplicates, sorted_bam)
-
-            else: os.rename(sorted_bam_noMarkDups, sorted_bam)
-
-        # remove unnecessary files
-        remove_file(bamfile)
-        remove_file(sorted_bam_noMarkDups)
-
-    # indexing bam
     if file_is_empty(index_bam) or replace is True:
+
         bam_index_std = "%s.indexingBam_std.txt"%sorted_bam
         print_if_verbose("indexing bam. The std is in %s"%bam_index_std)
         cmd_indexBam = "%s index -@ %i %s > %s 2>&1"%(samtools, threads, sorted_bam, bam_index_std); run_cmd(cmd_indexBam)   # creates a .bai of sorted_bam
         remove_file(bam_index_std)
-
 
 def make_flat_listOflists(LoL):
 
@@ -2186,6 +2153,127 @@ def get_translocations_randomly_placed_in_target_regions(target_regions_bed, tra
 
     print_if_verbose("writing %s"%translocations_file)
     tra_df.to_csv(translocations_file, sep="\t")
+
+
+
+def simulate_SVs_in_genome(reference_genome, mitochondrial_chromosome, outdir, nvars=200, replace=False, svtypes={"insertions", "deletions", "inversions", "translocations", "tandemDuplications", "translocations"}, bedpe_breakpoints=None):
+
+    """This function generates nvars into the reference genome splitting by gDNA and mtDNA with files written under outdir"""
+
+    print_if_verbose("generating random simulations")
+
+    # initialize a df that will contain the randomly-simulated vars
+    random_svtype_to_svDF = {svtype : pd.DataFrame() for svtype in svtypes}
+
+    # define the different types of chromosomes. Note that the mtDNA chromosomes will be simulated appart
+    all_chromosomes = {s.id for s in SeqIO.parse(reference_genome, "fasta")}
+    if mitochondrial_chromosome!="no_mitochondria": mtDNA_chromosomes = set(mitochondrial_chromosome.split(","))
+    else: mtDNA_chromosomes = set()
+    gDNA_chromosomes = all_chromosomes.difference(mtDNA_chromosomes)
+
+    # map the chromosome to the length
+    chrom_to_len = {s.id : len(s.seq) for s in SeqIO.parse(reference_genome, "fasta")}
+
+    # go through each of the mtDNA and gDNA
+    for type_genome, chroms in [("mtDNA", mtDNA_chromosomes), ("gDNA", gDNA_chromosomes)]:
+        print_if_verbose(type_genome)
+
+        if type_genome=="mtDNA": continue # debug
+
+        # if there are chroms just continue
+        if len(chroms)==0: continue
+
+        # if the genome is mtDNA you shoudl simulate less vars
+        if type_genome=="gDNA": vars_to_simulate = nvars
+        else: vars_to_simulate = int(nvars*0.05) + 1
+
+        # define the outdir
+        genome_outdir = "%s/simulation_%s"%(outdir, type_genome); make_folder(genome_outdir)
+
+        # get the genome 
+        genome_file = "%s/genome.fasta"%genome_outdir
+        SeqIO.write([c for c in SeqIO.parse(reference_genome, "fasta") if c.id in chroms], genome_file, "fasta")
+
+        # define a bed file with all the regions
+        if bedpe_breakpoints is None:
+            print_if_verbose("simulating randomly distributed SVs")
+
+            all_regions_bed_df = pd.DataFrame({chrom: {"start":1, "end":chrom_to_len[chrom]} for chrom in chroms}).transpose()
+            all_regions_bed_df["chromosome"] = all_regions_bed_df.index
+            all_regions_bed_df = all_regions_bed_df[["chromosome", "start", "end"]]
+            all_regions_bed = "%s/all_regions_index1.bed"%genome_outdir
+            
+
+        else:
+            print_if_verbose("simulating SVs arround %s"%bedpe_breakpoints)
+            df_bedpe = pd.read_csv(bedpe_breakpoints, sep="\t")
+            df_bedpe.columns = ['chrom1', 'start1', 'end1', 'chrom2', 'start2', 'end2', 'name', 'score', 'strand1', 'strand2']
+            bed_1 = df_bedpe[['chrom1', 'start1', 'end1']].rename(columns={"chrom1":"chromosome", "start1":"start", "end1":"end"})
+            bed_2 = df_bedpe[['chrom2', 'start2', 'end2']].rename(columns={"chrom2":"chromosome", "start2":"start", "end2":"end"})
+            all_regions_bed_df = bed_1.append(bed_2)
+            all_regions_bed_df["medium"] = (all_regions_bed_df.start + ((all_regions_bed_df.end - all_regions_bed_df.start)/2) ).apply(int)
+            all_regions_bed_df["start"] = all_regions_bed_df.medium
+            all_regions_bed_df["end"] = all_regions_bed_df.start + 1
+
+            all_regions_bed = "%s/provided_regions.bed"%genome_outdir
+
+        all_lens = all_regions_bed_df.end - all_regions_bed_df.start
+        print_if_verbose("The maximum length of the regions considered is %i"%(max(all_lens)))
+
+        # write
+        all_regions_bed_df[["chromosome", "start", "end"]].to_csv(all_regions_bed, sep="\t", header=False, index=False)
+
+
+        # simulate random SVs into regions without previous SVs 
+        random_sim_dir = "%s/random_SVs"%genome_outdir
+        delete_folder(random_sim_dir)
+
+        # define the len_shortest_chr
+        len_shortest_chr = min([lenChrom for lenChrom in chrom_to_len.values() if lenChrom>=window_l])
+
+        #### GET THE RANDOM INS,INV,DEL ####
+
+        # define the expected svtypes
+        expected_svtypes = {"insertions", "deletions", "inversions", "tandemDuplications", "translocations"}.intersection(svtypes)
+        if len(chroms)==1: expected_svtypes = {s for s in expected_svtypes if s!="translocations"}
+
+        if any([file_is_empty("%s/%s.tab"%(random_sim_dir, svtype)) for svtype in expected_svtypes]) or replace is True:
+            print_if_verbose("generating random SVs")
+
+            # make and delete the folder
+            delete_folder(random_sim_dir); make_folder(random_sim_dir)
+
+            # get the cmd of the simulation
+            randomSV_cmd = "%s --input_genome %s --outdir %s --regions_bed %s --len_shortest_chr %i"%(create_simulatedSVgenome_R, genome_file, random_sim_dir, all_regions_bed,  len_shortest_chr)
+
+            # add the number of each SV that should be added
+            svtype_to_arg = {"insertions":"number_Ins", "deletions":"number_Del", "inversions":"number_Inv", "tandemDuplications":"number_Dup", "translocations":"number_Tra"}
+        
+            for svtype, arg in svtype_to_arg.items(): 
+                if svtype not in svtype_to_arg or svtype not in svtypes: continue
+
+                if svtype=="translocations": randomSV_cmd += " --%s %i"%(arg, vars_to_simulate) # debug
+                elif svtype=="insertions": randomSV_cmd += " --%s %i"%(arg, vars_to_simulate) # debug
+
+
+                else: randomSV_cmd += " --%s 0"%(arg)
+
+                # this does not work for insertions, deletions
+
+            # run the random simulation
+            #std_rearranging_genome = "%s/simulation_std.txt"%random_sim_dir
+            std_rearranging_genome = "stdout"
+            print_if_verbose("getting random SVs. The std is in %s"%std_rearranging_genome)
+            if std_rearranging_genome!="stdout": run_cmd("%s > %s 2>&1"%(randomSV_cmd, std_rearranging_genome))
+            else: run_cmd(randomSV_cmd)
+            remove_file(std_rearranging_genome)
+            kljhaekjehj
+
+            # edit the insertions 
+            insertions_file = "%s/insertions.tab"%random_sim_dir
+            rewrite_insertions_uniformizedFormat_simulateSV(insertions_file)
+
+        ########################################
 
 def get_random_svtype_to_svDF(reference_genome, mitochondrial_chromosome, outdir, nvars=200, replace=False, svtypes={"insertions", "deletions", "inversions", "translocations", "tandemDuplications"}, check_random_genome_generation=False, only_5_to_3_translocations=False):
 
@@ -5467,7 +5555,71 @@ def get_n_pairs_in_fastqgz(file):
     if nlines%4!=0: raise ValueError("nlines %i is not valid"%nlines)
 
     # get the number of lines between 4
+    return int(nlines/4)
+
+def get_n_pairs_in_fastqgz_gunzip(file, min_lines=10):
+
+    """Takes a fastqgz file and returns the number of reads"""
+
+    # get the number of lines into file
+    file_wc = "%s.gunzip.wc"%file
+    file_wc_tmp = "%s.tmp"%file_wc
+    if file_is_empty(file_wc):
+
+        unpigz_stderr = "%s.generating.stderr"%file_wc_tmp
+        print_if_verbose("calculating # reads for %s. The stderr is in %s"%(file, unpigz_stderr))
+
+        run_cmd("gunzip -c %s | wc -l > %s 2>%s"%(file, file_wc_tmp, unpigz_stderr))
+        remove_file(unpigz_stderr)
+
+        # test that it worked
+        nlines = int(open(file_wc, "r").readlines()[0].strip())
+        if nlines<min_lines: raise ValueError("There should be at least %i lines"%min_lines)
+
+        os.rename(file_wc_tmp, file_wc)
+
+    # get the number
+    nlines = int(open(file_wc, "r").readlines()[0].strip())
+
+    # check that it is multiple of 4
+    if nlines%4!=0: raise ValueError("nlines %i is not valid"%nlines)
+
+    # get the number of lines between 4
     return nlines/4
+
+def get_approx_n_pairs_in_fastqgz(file, nlines=10000):
+
+    """This function calculates the approximate number of lines in a fastq.gz file"""
+
+    print_if_verbose("calculating approximate npairs")
+
+    # get size of a file
+    total_gb = os.path.getsize(file)/1e9
+
+    # get a partial file with nlines
+    partial_file = "%s.%ilines.fastq.gz"%(file, nlines)
+
+    if file_is_empty(partial_file):
+
+        # define files
+        partial_file_tmp = "%s.tmp"%partial_file
+        partial_file_stderr = "%s.generating.stderr"%partial_file
+
+        print_if_verbose("getting partial file. The stderr is in %s"%partial_file_stderr)
+        run_cmd("zcat %s | head -n %i | gzip > %s 2>%s"%(file, nlines, partial_file_tmp, partial_file_stderr))
+
+        remove_file(partial_file_stderr)
+        os.rename(partial_file_tmp, partial_file)
+
+
+    # calculate the size of the partial
+    partial_gb = os.path.getsize(partial_file)/1e9
+
+    # calculate the real nlines
+    real_nlines = int((nlines * total_gb) / partial_gb)
+
+    # get the number of lines between 4
+    return int(real_nlines/4)
 
 def readIDs_are_correct(readIDs):
 
@@ -6085,7 +6237,10 @@ def generate_downsampledReads(fastqgz, downsampled_fastqgz, fraction_downsample,
         downsampled_fastqgz_stderr = "%s.generating.stderr"%downsampled_fastqgz
         print_if_verbose("downsampling into %s. The stderr is in %s"%(downsampled_fastqgz, downsampled_fastqgz_stderr))
 
-        run_cmd("%s sample -s100 %s %.4f | %s > %s 2>%s"%(seqtk, fastqgz, fraction_downsample, pigz, downsampled_fastqgz_tmp, downsampled_fastqgz_stderr))
+        try: run_cmd("%s sample -s100 %s %.4f | %s > %s 2>%s"%(seqtk, fastqgz, fraction_downsample, pigz, downsampled_fastqgz_tmp, downsampled_fastqgz_stderr))
+        except:
+            print_if_verbose("downsampling with pigz failed. downsampling with gzip")
+            run_cmd("%s sample -s100 %s %.4f | gzip > %s 2>%s"%(seqtk, fastqgz, fraction_downsample, downsampled_fastqgz_tmp, downsampled_fastqgz_stderr))
 
         remove_file(downsampled_fastqgz_stderr)
         os.rename(downsampled_fastqgz_tmp, downsampled_fastqgz)
@@ -6097,47 +6252,65 @@ def downsample_close_shortReads_table(close_shortReads_table, close_shortReads_t
     # initialize the corresponding file
     new_close_shortReads_table = "%s.max_%ix"%(close_shortReads_table, max_coverage_sra_reads)
 
-    if file_is_empty(new_close_shortReads_table) or replace is True:
+    if file_is_empty(new_close_shortReads_table) or replace is True or not close_shortReads_table_is_correct(new_close_shortReads_table):
         print_if_verbose("getting the new fastqc files to coverage %ix..."%max_coverage_sra_reads)
 
         # initialize a df that has the modified reads (possibly downsampled)
         new_close_shortReads_table_df = pd.DataFrame(columns=close_shortReads_table_df.columns)
 
-        # calculate the genome size
-        genome_length = sum(get_chr_to_len(reference_genome).values())
-
         # go through each runID
         for I, row in close_shortReads_table_df.iterrows():
             print_if_verbose(row["runID"])
 
-            # calculate the read length
-            read_len = get_median_readLength_fastqgz(row["short_reads1"], replace=replace)
+            # calculate the genome size
+            genome_length = sum(get_chr_to_len(reference_genome).values())
 
-            # calculate the number of reads
-            npairs = get_n_pairs_in_fastqgz(row["short_reads1"])
+            # calculate the coverage
+            fraction_downsample_file = "%s.fraction_downsample.py"%row["short_reads1"]
 
-            # calculate the expected coverage
-            expected_coverage = (npairs*read_len)/genome_length
-            print_if_verbose("The expected coverage is %.3fx"%expected_coverage)
+            if file_is_empty(fraction_downsample_file) or replace is True:
+                print_if_verbose("calculating the fraction to downsample")
 
-            # downsample if the expected coverage is above max_coverage_sra_reads
-            if expected_coverage > max_coverage_sra_reads:
+                # calculate the read length
+                read_len = get_median_readLength_fastqgz(row["short_reads1"], replace=replace)
+
+                # calculate the number of reads
+                npairs = get_approx_n_pairs_in_fastqgz(row["short_reads1"]) # approximate, faster way
+                #npairs = get_n_pairs_in_fastqgz(row["short_reads1"])
+
+                # calculate the expected coverage
+                expected_coverage = (npairs*read_len)/genome_length
+                print_if_verbose("The expected coverage is %.3fx"%expected_coverage)
 
                 # define the maximum number of read pairs and the fraction to downsample
                 max_npairs = (max_coverage_sra_reads*genome_length)/read_len
                 fraction_downsample = max_npairs/npairs
-                if fraction_downsample>1: raise ValueError("The fraction has to be below 1")
+                
+                # save
+                save_object(fraction_downsample, fraction_downsample_file)
+
+            else: fraction_downsample = load_object(fraction_downsample_file)
+
+            # downsample if the expected coverage is above max_coverage_sra_reads
+            if fraction_downsample < 1:
 
                 # downsample
                 new_short_reads1 = "%s.%ix.fastq.gz"%(row["short_reads1"], max_coverage_sra_reads)
                 new_short_reads2 = "%s.%ix.fastq.gz"%(row["short_reads2"], max_coverage_sra_reads)
 
-                generate_downsampledReads(row["short_reads1"], new_short_reads1, fraction_downsample, replace=replace)
+                if file_is_empty(new_short_reads1) or file_is_empty(new_short_reads2):
 
-                generate_downsampledReads(row["short_reads2"], new_short_reads2, fraction_downsample, replace=replace)
+                    new_short_reads1_tmp = "%s.tmp.fastq.gz"%new_short_reads1
+                    new_short_reads2_tmp = "%s.tmp.fastq.gz"%new_short_reads2
 
-                # check that the reads are correct
-                check_that_paired_reads_are_correct(new_short_reads1, new_short_reads2)
+                    generate_downsampledReads(row["short_reads1"], new_short_reads1_tmp, fraction_downsample, replace=replace)
+                    generate_downsampledReads(row["short_reads2"], new_short_reads2_tmp, fraction_downsample, replace=replace)
+
+                    # check that the reads are correct
+                    check_that_paired_reads_are_correct(new_short_reads1_tmp, new_short_reads2_tmp)
+
+                    os.rename(new_short_reads1_tmp, new_short_reads1)
+                    os.rename(new_short_reads2_tmp, new_short_reads2)
 
             else:
                 new_short_reads1 = row["short_reads1"]
@@ -6147,9 +6320,6 @@ def downsample_close_shortReads_table(close_shortReads_table, close_shortReads_t
             df_dict = {"sampleID":row["sampleID"], "runID":row["runID"], "short_reads1":new_short_reads1, "short_reads2":new_short_reads2}
             df = pd.DataFrame({I : df_dict}).transpose()
             new_close_shortReads_table_df = new_close_shortReads_table_df.append(df, sort=True)
-
-
-        print(new_close_shortReads_table_df)
 
         # save
         new_close_shortReads_table_tmp = "%s.tmp"%new_close_shortReads_table
@@ -6239,6 +6409,7 @@ def get_close_shortReads_table_close_to_taxID(target_taxID, reference_genome, ou
                 if StopAfterPrefecth_of_reads is True: cmd += " --stop_after_prefetch"
 
                 all_cmds.append(cmd)
+                continue
 
             # keep the files
             srr_to_readsDict[srr] = {"short_reads1":trimmed_reads1, "short_reads2":trimmed_reads2}
@@ -11642,12 +11813,17 @@ def remove_smallVarsCNV_nonEssentialFiles(outdir, ploidy):
                              "variants_atLeast2PASS_ploidy%i.vcf"%ploidy,
                              "variants_atLeast3PASS_ploidy%i.vcf"%ploidy,
 
+                             "variants_atLeast1PASS_ploidy%i_alternative_genome.fasta"%ploidy,
+                             "variants_atLeast2PASS_ploidy%i_alternative_genome.fasta"%ploidy,
+                             "variants_atLeast3PASS_ploidy%i_alternative_genome.fasta"%ploidy,
+
                              "variants_atLeast1PASS_ploidy%i.withMultiAlt.vcf"%ploidy,
                              "variants_atLeast2PASS_ploidy%i.withMultiAlt.vcf"%ploidy,
                              "variants_atLeast3PASS_ploidy%i.withMultiAlt.vcf"%ploidy,
 
                              "variant_calling_stats_ploidy%i_called.tab"%ploidy,
                              "variant_calling_stats_ploidy%i_PASS.tab"%ploidy
+
                              }
 
 
@@ -11655,7 +11831,7 @@ def remove_smallVarsCNV_nonEssentialFiles(outdir, ploidy):
 
     for f in files_to_remove: remove_file(f)
 
-def get_bam_with_duplicatesMarkedSpark(bam, threads=4, replace=False, remove_indices=False):
+def get_bam_with_duplicatesMarkedSpark(bam, threads=4, replace=False):
 
     """
     This function takes a bam file and runs MarkDuplicatesSpark (most efficient when the input bam is NOT coordinate-sorted) returning the bam with the duplicates sorted. It does not compute metrics to make it faster. Some notes about MarkDuplicatesSpark:
@@ -11677,21 +11853,10 @@ def get_bam_with_duplicatesMarkedSpark(bam, threads=4, replace=False, remove_ind
         print_if_verbose("marking duplicate reads")
 
         # define the java memory
-        #javaRamGb = int(get_availableGbRAM()*fractionRAM_to_dedicate) # At Broad, we run MarkDuplicates with 2GB Java heap (java -Xmx2g) and 10GB hard memory limit
-        javaRamGb = int(get_availableGbRAM()*0.5) # At Broad, we run MarkDuplicates with 2GB Java heap (java -Xmx2g) and 10GB hard memory limit
+        javaRamGb = int(get_availableGbRAM()*fractionRAM_to_dedicate) # At Broad, we run MarkDuplicates with 2GB Java heap (java -Xmx2g) and 10GB hard memory limit
+        #javaRamGb = int(get_availableGbRAM()*0.5) # At Broad, we run MarkDuplicates with 2GB Java heap (java -Xmx2g) and 10GB hard memory limit
         #javaRamGb = int(get_availableGbRAM() - 2) # rule of thumb from GATK
         #javaRamGb = 4 # this is from a post from 2011, reccommended for a 170Gb RAM
-
-        # define the MAX_RECORDS_IN_RAM
-        #MAX_RECORDS_IN_RAM = int(250000*javaRamGb*0.8) # 250,000 reads for each Gb given (for SortSam, I don't know if this will work for Picard tools)
-
-        # define the number of MAX_FILE_HANDLES_FOR_READ_ENDS_MAP
-        #max_nfilehandles = int(subprocess.check_output("ulimit -n", shell=True))
-        #MAX_FILE_HANDLES_FOR_READ_ENDS_MAP = int(max_nfilehandles*0.5) # a little lower than ulimit -n
-
-        # define the memory
-        min_javaRamGb = javaRamGb #  It is recommended to set the minimum heap size equivalent to the maximum heap size in order to minimize the garbage collection.
-        max_javaRamGb = javaRamGb
 
         # define the tmpdir
         tmpdir = "%s.runningMarkDups_tmp"%bam
@@ -11708,23 +11873,18 @@ def get_bam_with_duplicatesMarkedSpark(bam, threads=4, replace=False, remove_ind
         # SORTING_COLLECTION_SIZE_RATIO is 0.25 by default. If I have memory issues I can reduce this number.
 
         markduplicates_std = "%s.markingDuplicates.std"%bam
-        print_if_verbose("running MarkDuplicates with %iGb of RAM. The std is in %s"%(max_javaRamGb, markduplicates_std))
+        print_if_verbose("running MarkDuplicates with %iGb of RAM. The std is in %s"%(javaRamGb, markduplicates_std))
 
         # running with the spark MarkDuplicates implementation
         #REMOVE_DUPLICATES=Boolean
         # 
-        run_cmd("%s --java-options '-Xms%ig -Xmx%ig' MarkDuplicatesSpark -I %s -O %s --verbosity INFO --tmp-dir %s  --create-output-variant-index false --create-output-bam-splitting-index false --create-output-bam-index false > %s 2>&1"%(gatk, min_javaRamGb, max_javaRamGb, bam, bam_dupMarked_tmp, tmpdir, markduplicates_std))
+        run_cmd("%s --java-options '-Xms%ig -Xmx%ig' MarkDuplicatesSpark -I %s -O %s --verbosity INFO --tmp-dir %s  --create-output-variant-index false --create-output-bam-splitting-index false --create-output-bam-index false > %s 2>&1"%(gatk, javaRamGb, javaRamGb, bam, bam_dupMarked_tmp, tmpdir, markduplicates_std))
 
         remove_file(markduplicates_std)
         delete_folder(tmpdir)
 
         # keep
         os.rename(bam_dupMarked_tmp, bam_dupMarked)
-
-    # remove the indices
-    if remove_indices is True: 
-        kjhdajkgad
-    kgadkjgadkj
 
     return bam_dupMarked
 
@@ -13538,3 +13698,90 @@ def get_repeat_maskerDF(reference_genome, threads=4, replace=False):
     else: df = pd.read_csv(repeats_table_file, sep="\t")
 
     return df, repeats_table_file
+
+
+
+def get_bgzip_and_and_tabix_vcf_file(file, reference_genome, replace=False):
+
+
+    """Takes a vcf file and returns a tabixed and gzipped file"""
+
+    # define files
+    file_gz = "%s.gz"%file
+    file_tmp_gz = "%s.tmp.gz"%file
+    file_gz_tbi = "%s.gz.tbi"%file
+    file_tmp_gz_tbi = "%s.tmp.gz.tbi"%file
+
+    if file_is_empty(file_gz) or file_is_empty(file_gz_tbi) or replace is True:
+
+        # bgzip
+        bgzip_stderr = "%s.generating.stderr"%file_tmp_gz
+        print_if_verbose("bgzipping. The stderr is in %s"%bgzip_stderr)
+        run_cmd("%s -c %s > %s 2>%s"%(bgzip, file, file_tmp_gz, bgzip_stderr))
+
+        # tabix
+        tabix_std = "%s.tabixing.std"%file_tmp_gz
+        print_if_verbose("tabix-ing. The std is in %s"%tabix_std)
+        run_cmd("%s -p vcf %s > %s 2>&1"%(tabix, file_tmp_gz, tabix_std))
+
+        # remove files
+        remove_file(bgzip_stderr)
+        remove_file(tabix_std)
+
+        # rename
+        os.rename(file_tmp_gz, file_gz)
+        os.rename(file_tmp_gz_tbi, file_gz_tbi)
+
+    return file_gz, file_gz_tbi
+
+
+def get_alternative_genome(reference_genome, vcf, alternative_genome, replace=False, threads=4, only_SNPs=False):
+
+    """This function takes a vcf (with no multiallelics) and generates the alternative_genome"""
+
+
+    if file_is_empty(alternative_genome) or replace is True:
+
+        # get only SNPs
+        if only_SNPs is True:
+            print_if_verbose("geting vcf with only SNPs")
+
+            df_vcf, header = get_df_and_header_from_vcf(vcf)
+
+            def get_isSNP(r):
+
+                if "," not in r["ALT"]: return (len(r["REF"])==1 and len(r["ALT"])==1)
+                else: return (len(r["REF"])==1 and all([len(x)==1 for x in r["ALT"].split(",") ]))
+
+            # get only SNPs
+            df_vcf = df_vcf[df_vcf.apply(get_isSNP, axis=1)]
+
+            # get the lines
+            vcf_lines = df_vcf.to_csv(sep="\t", header=True, index=False)  
+
+            # write
+            vcf_to_analyze = "%s.onlySNPs.vcf"%vcf 
+            vcf_to_analyze_tmp = "%s.tmp"%vcf_to_analyze
+            open(vcf_to_analyze_tmp, "w").write("\n".join(header) + "\n" + vcf_lines)
+            os.rename(vcf_to_analyze_tmp, vcf_to_analyze)
+
+        else: vcf_to_analyze = vcf
+        
+        # get the gzipped vcf
+        vcf_gz, vcf_tbi = get_bgzip_and_and_tabix_vcf_file(vcf_to_analyze, reference_genome, replace=replace)
+
+        # remove the vcf to analyze if it is not as vcf
+        if only_SNPs is True: remove_file(vcf_to_analyze)
+
+        # files
+        altgenome_stderr = "%s.generating.stderr"%alternative_genome
+        alternative_genome_tmp = "%s.tmp"%alternative_genome
+
+        print_if_verbose("getting alternative genome %s. The stderr is in %s"%(alternative_genome_tmp, altgenome_stderr))
+        run_cmd("%s consensus -f %s --haplotype 1 %s > %s 2>%s"%(bcftools, reference_genome, vcf_gz, alternative_genome_tmp, altgenome_stderr))
+
+        remove_file(altgenome_stderr)
+        remove_file(vcf_gz)
+        remove_file(vcf_tbi)
+
+        os.rename(alternative_genome_tmp, alternative_genome)
