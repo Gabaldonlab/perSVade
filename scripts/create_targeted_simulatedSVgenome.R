@@ -96,7 +96,7 @@ if (!is.na(argv$tandemDuplications_file)) {
 }
 
 # get the rearranged genome
-rearranged_genome = simulateSV(output=NA, genome=genome_obj, random=FALSE, verbose=TRUE, regionsDels=regionsDels, regionsInvs=regionsInvs, regionsIns=regionsIns, regionsDups=regionsDups, regionsTrans=regionsTrans, bpSeqSize=50, maxDups=4)
+rearranged_genome = simulateSV(output=NA, genome=genome_obj, random=FALSE, verbose=TRUE, regionsDels=regionsDels, regionsInvs=regionsInvs, regionsIns=regionsIns, regionsDups=regionsDups, regionsTrans=regionsTrans, bpSeqSize=50, maxDups=4, percBalancedTrans=1)
 
 # test that all the insetions are cut-and-paste (this is so because after this they should be changed to copy-paste )
 if (!is.na(argv$insertions_file)){
