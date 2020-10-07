@@ -40,5 +40,5 @@ reference_genome = "%s/Candida_glabrata.fasta"%outdir_genomes_and_annotations
 
 bedpe_breakpoints = "%s/M12_WT_Cglabrata_SVs.bedpe"%CurDir
 #bedpe_breakpoints = None
-final_svtype_to_svfile, final_rearranged_genome = fun.simulate_SVs_in_genome(reference_genome, "mito_C_glabrata_CBS138", CurDir, nvars=50, bedpe_breakpoints=bedpe_breakpoints, replace=False)
+final_svtype_to_svfile, final_rearranged_genome = fun.simulate_SVs_in_genome(reference_genome, "mito_C_glabrata_CBS138", CurDir, nvars=100, bedpe_breakpoints=bedpe_breakpoints, replace=False)
 
