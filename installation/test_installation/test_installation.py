@@ -92,11 +92,11 @@ if fun.file_is_empty(repeat_masker_db): raise ValueError("%s is missing. Check t
 #test_fun.test_conda_env_generation(testing_outputs_dir, replace=False)
 
 # test repeat masker obtention
-test_fun.test_get_repeat_maskerDF(ref_genome, replace=False) # this will not work for repeat masker
+#test_fun.test_get_repeat_maskerDF(ref_genome, replace=False) # this will not work for repeat masker
 
 # test the repeat masker obtention for a long chromosome 1, 2 and 6
-test_fun.test_get_repeat_maskerDF(Calbicans_chr1_2_6, replace=False)
-print("repeat masker works on chromosome 1, 2 and 6 of C. albicans")
+#test_fun.test_get_repeat_maskerDF(Calbicans_chr1_2_6, replace=False)
+#print("repeat masker works on chromosome 1, 2 and 6 of C. albicans")
 
 # test read simulation by simulating reads from the mutated genome
 r1_mutGenome, r2_mutGenome = test_fun.test_read_simulation_and_get_reads(mut_genome)
@@ -121,11 +121,18 @@ sorted_bam_svGenome = test_fun.test_bwa_mem_and_get_bam(r1_svGenome, r2_svGenome
 # test whether you can run the gridss and clove pipeline
 outdir_testing_gridss_clove = "%s/testing_gridss_clove_pipeline_default_parms"%(testing_outputs_dir)
 test_fun.test_gridss_clove_pipeline(sorted_bam_svGenome, ref_genome, outdir_testing_gridss_clove, replace=False)
-kljhadjkahd
 
 # test whether the parameter optimisation pipeline works well to find the rearrangements
 outdir_testing_parameterOptimisation = "%s/testing_parameter_optimisation_pipeline"%(testing_outputs_dir)
 test_fun.test_parameter_optimisation_perSVade(sorted_bam_svGenome, ref_genome, outdir_testing_parameterOptimisation, replace=False)
+
+# after the test_SRAdb_query_downloading_and_readTrimming, you should test the 
+
+# generate a bam out of the 3 C. albicans chromosomes with 50 SVs.
+
+# run perSVade with default parameters on simulated C. albicans bam with real SVs determined
+
+ljhdakjdahkgda
 
 ### TESTING THINGS THAT ARE DISPENSABLE ###
 
@@ -138,7 +145,14 @@ test_fun.test_greasy()
 
 ############################################
 
+
+test_integrationRealSVsIntooneBedpe
+
+test_realData_introduction_and_runningWithGoodParamteres
+
 print("\n\n---\nSUCCESS: perSVade was properly installed\n---\n\n")
+
+
 
 
 

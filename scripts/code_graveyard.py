@@ -2417,3 +2417,1912 @@ def run_bwa_mem(fastq1, fastq2, ref, outdir, bamfile, sorted_bam, index_bam, nam
         print_if_verbose("indexing bam. The std is in %s"%bam_index_std)
         cmd_indexBam = "%s index -@ %i %s > %s 2>&1"%(samtools, threads, sorted_bam, bam_index_std); run_cmd(cmd_indexBam)   # creates a .bai of sorted_bam
         remove_file(bam_index_std)
+
+
+
+def insert_translocations_into_rearranged_genome_graphBased(reference_genome, input_rearranged_genome, output_rearranged_genome, svDF, translocations_file, svtype_to_svDF, replace=False):
+
+    """This function takes a rearranged genome and insert the translocations generating output_rearranged_genome. This substitutes the translocations_file in case that some translocations cannot be inserted. svtype_to_svDF should contain translocations. The svDF should have 1s on it. svDF has to be in 1-based coordinates"""
+
+    print_if_verbose("inserting translocations inHouse")
+
+    # test that all are balanced translocations
+    if not all(svDF.Balanced): raise ValueError("This has not been developed for unbalanced translocations")
+
+    # get the svDF in coordinates of the rearranged genome
+    svDF_rearrangedCoords = get_svDF_in_coords_of_rearranged_genome(svDF, reference_genome, input_rearranged_genome, "translocations", svtype_to_svDF)
+
+    if len(svDF_rearrangedCoords)>0:
+
+        # add fields to the rearrangedCoords df
+        chr_to_rearranged_len = get_chr_to_len(input_rearranged_genome)
+        svDF_rearrangedCoords["orientation"] = svDF_rearrangedCoords.apply(lambda r: get_orientation_translocation(r, chr_to_rearranged_len), axis=1) 
+        svDF_rearrangedCoords["ChrA_bp_pos"] = svDF_rearrangedCoords["EndA"]
+        svDF_rearrangedCoords["ChrB_bp_pos"] = svDF_rearrangedCoords.apply(lambda r: get_ChrB_bp_pos_translocations(r, chr_to_rearranged_len), axis=1)
+
+        # rewrite positions so that they are 0-based (so that each position is the real one)
+        for pos_f in ["StartA", "EndA", "StartB", "EndB", "ChrA_bp_pos", "ChrB_bp_pos"]: svDF_rearrangedCoords[pos_f] = svDF_rearrangedCoords[pos_f] - 1
+
+    # get the rearranged genome as a directed liner graph
+    genomeGraph_outfileprefix = "%s.linearDirectedGraph"%input_rearranged_genome
+    genome_graph, df_positions = get_genomeGraph_object_5to3_noBreakpoints(input_rearranged_genome, genomeGraph_outfileprefix, replace=replace) # everything here is 0-based locations
+
+    # define the index of the positons df as the chromosome and real_position
+    df_positions = df_positions.set_index(["chromosome", "real_position"], drop=False)
+
+    # define the file that will store the rearranged graph
+    genomeGraph_final_file = "%s.linearDirectedGraph.graph.py"%output_rearranged_genome
+    feasible_translocation_IDs_file = "%s.feasible_translocation_IDs.py"%translocations_file
+    df_inverted_positions_file = "%s.df_inverted_positions.py"%output_rearranged_genome
+
+    if file_is_empty(genomeGraph_final_file) or file_is_empty(feasible_translocation_IDs_file) or file_is_empty(df_inverted_positions_file) or replace is True:
+
+        # initialize the set of feasible IDs
+        feasible_translocation_IDs = set()
+
+        # initialize a df that has as index all the positions in the genome
+        df_inverted_positions = pd.DataFrame({"graph_position":list(df_positions.graph_position)})
+
+        # inialize the positions that have been already inverted
+        already_inverted_positions = set()
+
+        # go through each translocation and modify the corresponding edges in the genome graph
+        for ID, r in svDF_rearrangedCoords.iterrows():
+            print_if_verbose("generating %s in the graph"%ID)
+
+            # define coords in the location of the graph
+            chrA_bp = df_positions.loc[(r["ChrA"], r["ChrA_bp_pos"]), "graph_position"]
+            chrB_bp = df_positions.loc[(r["ChrB"], r["ChrB_bp_pos"]), "graph_position"]
+
+            # define the next positions and before ones
+            chrA_bp_3pos = genome_graph.successors(chrA_bp)[0]
+            chrA_bp_5pos = genome_graph.predecessors(chrA_bp)[0]
+
+            chrB_bp_3pos = genome_graph.successors(chrB_bp)[0]
+            chrB_bp_5pos = genome_graph.predecessors(chrB_bp)[0]
+
+            # check that the chrA and chrB are different, and skip if it is not the case. Sometimes successive balanced translocations make others being in the same chromosome
+            all_chrA_positions = cp.deepcopy(set(genome_graph.subcomponent(chrA_bp, mode="ALL")))
+            all_chrB_positions = cp.deepcopy(set(genome_graph.subcomponent(chrB_bp, mode="ALL")))
+            all_chrAandB_positions = all_chrA_positions.union(all_chrB_positions)
+
+            if len(all_chrA_positions.intersection(all_chrB_positions))>0: 
+                print_if_verbose("%s is not between different chromosomes (maybe because the multiple rearrangements performed), skipping..."%ID)
+                continue
+
+            # if any of the chrB or chrB positions was already inverted, skip this translocation
+            if len(already_inverted_positions.intersection(all_chrAandB_positions))>0: 
+                print_if_verbose("The chromosome A or B were already inverted once, skipping...")
+                continue
+
+            ##### 5_to_5 positions are straightforward because they don't alter the order of anything #####
+            if r["orientation"]=="5_to_5":
+
+                # delete the WT unions in chromosome A and chromosome B
+                genome_graph.delete_edges([(chrA_bp, chrA_bp_3pos), (chrB_bp, chrB_bp_3pos)])
+
+                # add the union between chrA and the position after chromosome B
+                genome_graph.add_edges([(chrA_bp, chrB_bp_3pos)])
+
+                # add the union between chromosome B and the next position of chrA
+                genome_graph.add_edges([(chrB_bp, chrA_bp_3pos)])
+
+            ###############################################################################################
+
+            ####### 5_to_3 orientations require changing the orientation of many nodes #######
+            elif r["orientation"]=="5_to_3":
+                print_if_verbose("inverted translocation")
+
+
+                # chrA 5' is united with chromB 5' and chrB 3' is united with chrB 3'. We will change the orientation of the connections in chromosome B so that they follow this
+
+                # get the connection bewteen each chrB node and its positions
+                pos_to_pos5 = cp.deepcopy({pos : genome_graph.predecessors(pos)[0] for pos in all_chrB_positions if len(genome_graph.predecessors(pos))>0})
+                pos_to_pos3 = cp.deepcopy({pos5 : pos for pos, pos5 in pos_to_pos5.items()})
+
+
+                # keep the positions that will be inverted (those of chromosome)              
+                already_inverted_positions.update(all_chrB_positions)
+
+                # add the chrB positions to the inverted genome
+                df_inverted_positions[ID] = df_inverted_positions.graph_position.isin(all_chrB_positions)
+
+                # check that the length
+                if not len(all_chrB_positions)==(len(pos_to_pos5)+1): raise ValueError("something went wrong with the graph")
+
+                #### delete edges ####
+
+                # delete all the connections in chromosome B
+                genome_graph.delete_edges([(pos, pos3) for pos, pos3 in pos_to_pos3.items()])
+
+                # delete the edge in chrA
+                genome_graph.delete_edges([(chrA_bp, chrA_bp_3pos)]) # this does not work sometimes
+
+                #######################
+
+                #### add simple edges ####
+
+                # add the edge between the ChrA pos and the ChrB pos
+                genome_graph.add_edges([(chrA_bp, chrB_bp)])
+
+                # add the edge between ChrB+1 and ChrA+1
+                genome_graph.add_edges([(chrB_bp_3pos, chrA_bp_3pos)])
+
+                ###########################
+
+                # add the 3'->5' connections in chrB, unless it is chrB_bp_3pos
+                genome_graph.add_edges([(pos, pos5) for pos, pos5 in pos_to_pos5.items() if pos!=chrB_bp_3pos])
+
+            ##################################################################################
+
+            else: raise ValueError("orientation is not correct")
+
+
+            # keep the translocation for further printing
+            feasible_translocation_IDs.add(ID)
+
+        # debug the fact that there are no translocations
+        if len(svDF)>0 and len(feasible_translocation_IDs)==0: raise ValueError("There are no translocations generated, there must be an error.")
+
+        # save
+        save_object(genome_graph, genomeGraph_final_file)
+        save_object(feasible_translocation_IDs, feasible_translocation_IDs_file)
+        save_object(df_inverted_positions, df_inverted_positions_file)
+
+    else:  
+
+        print_if_verbose("loading graph and feasible translocation IDs and inverted positions df")
+        genome_graph = load_object(genomeGraph_final_file)
+        feasible_translocation_IDs = load_object(feasible_translocation_IDs_file)
+        df_inverted_positions = load_object(df_inverted_positions_file)
+
+    # write fasta for the rearranged genome
+    write_genome_graph_to_fasta(genome_graph, df_positions, output_rearranged_genome, svDF, df_inverted_positions, replace=replace)
+
+    #### replace translocations file ####
+
+    # delete the translocations file because it has to be rewritten as the end point of this function
+    remove_file(translocations_file)
+ 
+    # write into translocations file (this is important so that in case any of the translocations could not be mapped from the sequence)
+    svDF_final = svDF[svDF.ID.isin(feasible_translocation_IDs)][svtype_to_fieldsDict["translocations"]["all_fields"]]
+    svDF_final.to_csv(translocations_file, sep="\t", header=True, index=False)
+
+    #####################################
+
+    print_if_verbose("There are %i/%i translocations that are feasible"%(len(svDF_final), len(svDF)))
+
+   
+
+def generate_rearranged_genome_from_svtype_to_svDF_oldBAdMemory(reference_genome, svtype_to_svDF, outdir, replace=False):
+
+    """This function generates a rearranged genome for the provided svDFs, writing their fileds under outdir"""    
+
+    # define the rearranged genome, and generated if not already done
+    rearranged_genome = "%s/rearranged_genome.fasta"%outdir
+    rearranged_genome_InsInvDelTan = "%s/rearranged_genome_InsInvDelTan.fasta"%outdir
+    rearranged_genome_InsInvDelTan_tmp = "%s.tmp.fasta"%rearranged_genome_InsInvDelTan
+    rearranged_genome_finalFile = "%s.performed"%(rearranged_genome)
+
+    if file_is_empty(rearranged_genome_finalFile) or replace is True:
+
+        # generate the rearranged genome with INS,DEL,INV,TAN
+        if file_is_empty(rearranged_genome_InsInvDelTan) or replace is True:
+
+            # remove the outdir
+            delete_folder(outdir); make_folder(outdir)
+
+            # initialize a cmd to create the simulated genome
+            targetSV_cmd = "%s --input_genome %s --output_genome %s"%(create_targeted_simulatedSVgenome_R, reference_genome, rearranged_genome_InsInvDelTan_tmp)
+
+            for svtype, svDF in svtype_to_svDF.items():
+
+                # shift the insertions by 15 bp so that they are not at the beginning of the chrom
+                if svtype=="insertions": svDF["StartA"] = svDF["StartA"] + 10
+
+                # keep only the interesting svs
+                svDF = svDF[svtype_to_fieldsDict[svtype]["all_fields"]]
+
+                # write file
+                svfile = "%s/%s.tab"%(outdir, svtype)
+                svDF.to_csv(svfile, sep="\t", header=True, index=False)
+
+                # skip translocations from simulation
+                if svtype=="translocations": continue
+
+                # add the generation of SVs into targetSV_cmd
+                targetSV_cmd += " --%s_file %s"%(svtype, svfile)
+
+            # run the cmd
+            std_rearranging_genome = "%s/simulation_std.txt"%outdir
+            #std_rearranging_genome = "stdout" # debug
+            print_if_verbose("rearranging genome. The std is in %s"%std_rearranging_genome)
+
+            if std_rearranging_genome!="stdout": run_cmd("%s > %s 2>&1"%(targetSV_cmd, std_rearranging_genome))
+            else: run_cmd(targetSV_cmd)
+
+            # transform the cut-and-paste insertions to copy-and-paste, whenever necessary
+            insertions_file = "%s/insertions.tab"%outdir
+            if not file_is_empty(insertions_file):
+
+                # transform the insertions
+                transform_cut_and_paste_to_copy_and_paste_insertions(reference_genome, rearranged_genome_InsInvDelTan_tmp, insertions_file, svtype_to_svDF)
+
+                # edit the insertions so that they are in the correct format
+                rewrite_insertions_uniformizedFormat_simulateSV(insertions_file)
+
+
+            remove_file(std_rearranging_genome)
+
+            # rename the genome 
+            os.rename(rearranged_genome_InsInvDelTan_tmp, rearranged_genome_InsInvDelTan)
+
+        
+        # generate translocations
+        translocations_file = "%s/translocations.tab"%outdir
+        if "translocations" in svtype_to_svDF: insert_translocations_into_rearranged_genome(reference_genome, rearranged_genome_InsInvDelTan, rearranged_genome, svtype_to_svDF["translocations"], translocations_file, svtype_to_svDF)
+
+        # rewrite the variants so that they are optimal for comparison. This is important to re-sort the chromosomes if necessary
+        print_if_verbose("rewriting %s"%translocations_file)
+        if not file_is_empty(translocations_file): rewrite_translocations_uniformizedFormat_simulateSV(translocations_file, reference_genome)
+
+        # write a file that indicates that this has finsihed
+        open(rearranged_genome_finalFile, "w").write("finsihed")
+
+
+
+def get_svDF_in_coords_of_rearranged_genome_noPreviousTranslocations(svDF, reference_genome, rearranged_genome, svtype, svtype_to_svDF):
+
+    """Takes an svDF and returns it with the coordinates matching those of the rearranged genome (by unique sequence). Those events that can't be mapped will be discarded from the returned svDF. These should be 1-based and the chromosomes in one place should match the chromosomes in the other"""
+
+    # if it is empty, just return it as it is
+    if len(svDF)==0: return svDF
+
+    # get the rearranged genome seq
+    chr_to_rearrangedSeq = {seq.id: str(seq.seq).upper() for seq in SeqIO.parse(rearranged_genome, "fasta")}
+    #all_rearranged_chromosomes_together = "".join(chr_to_rearrangedSeq.values())
+
+    # get the seq
+    chr_to_refSeq = {seq.id: str(seq.seq).upper() for seq in SeqIO.parse(reference_genome, "fasta")}
+
+    # define the length of each chrom
+    chr_to_ref_lenSeq = {chrom : len(seq) for chrom, seq in chr_to_refSeq.items()}
+    chr_to_rearranged_lenSeq = {chrom : len(seq) for chrom, seq in chr_to_rearrangedSeq.items()}
+
+    # define all the positions with breakpoints (this also includes the breakpoints of this svDF). These are positions of the refGenome
+    df_positions = pd.concat([get_breakpoint_positions_df_in_svDF(df) for svtype, df in svtype_to_svDF.items()])
+    chr_to_bpPositions = dict(df_positions.groupby("Chr").apply(lambda df_c: set(df_c["Pos"])))
+
+    # add the ends of the chromosome, and convert to np array
+    for chrom, lenSeq in chr_to_ref_lenSeq.items(): 
+
+        if chrom in chr_to_bpPositions.keys(): chr_to_bpPositions[chrom].update({1, lenSeq})
+        else: chr_to_bpPositions[chrom] = {1, lenSeq}
+
+        chr_to_bpPositions[chrom] = np.array(sorted(chr_to_bpPositions[chrom]))
+
+
+    # check that the ID is unique 
+    if len(set(svDF.ID))!=len(svDF): raise ValueError("IDs are not unique")
+
+    ##### PIPELINE DIFFERENTIAL FOR EACH SVTYPE #####
+
+    if svtype=="translocations":
+
+        # make sure that the format is correct
+        if set(svDF["StartA"])!={1}: raise ValueError("This svDF is not properly formatted")
+
+        # set the index to be the ID
+        svDF = svDF.set_index("ID", drop=False)
+
+        # add if it is 5_to_5 or 5_t_3
+        svDF["orientation"] = svDF.apply(lambda r: get_orientation_translocation(r, chr_to_ref_lenSeq), axis=1) 
+
+        # add the position of each breakpoint
+        svDF["ChrA_bp_pos"] = svDF["EndA"]
+        svDF["ChrB_bp_pos"] = svDF.apply(lambda r: get_ChrB_bp_pos_translocations(r, chr_to_ref_lenSeq), axis=1)
+
+        # at the positions of the closest breakpoints and the corresponding sequences arround the breakpoints
+        for chrom in ["ChrA", "ChrB"]:
+
+            # define the breakpoint position field and the sequences
+            bp_pos_fiel = "%s_bp_pos"%chrom
+            seq_5_field = "%s_5seq"%chrom # this will include until the position before the breakpoint
+            seq_3_field = "%s_3seq"%chrom # this will start on the position of the breakpoint
+            seq_field = "%s_seq"%chrom # the whole sequence
+
+            # add the closest breakpoint position of chrom in the reference
+            svDF["%s_closest_5'bp_pos"%chrom] = svDF.apply(lambda r: find_nearest(chr_to_bpPositions[r[chrom]][chr_to_bpPositions[r[chrom]]<(r[bp_pos_fiel])], r[bp_pos_fiel]), axis=1).apply(int)
+
+            svDF["%s_closest_3'bp_pos"%chrom] = svDF.apply(lambda r: find_nearest(chr_to_bpPositions[r[chrom]][chr_to_bpPositions[r[chrom]]>(r[bp_pos_fiel])], r[bp_pos_fiel]), axis=1).apply(int)
+
+            # add the sequences 
+
+            # 5' seq starts at the position after the breakpoint and ends including the breakpoint position (this may give errors)
+            svDF[seq_5_field] = svDF.apply(lambda r: chr_to_refSeq[r[chrom]][r["%s_closest_5'bp_pos"%chrom] : int(r[bp_pos_fiel]-1)], axis=1)
+
+            # 3' seq starts right after the breakpoint and spans until the position before the nex breakpoint
+            svDF[seq_3_field] = svDF.apply(lambda r: chr_to_refSeq[r[chrom]][int(r[bp_pos_fiel]-1) : (r["%s_closest_3'bp_pos"%chrom]-1)], axis=1)
+
+            # the merged seqs
+            svDF[seq_field] = svDF[seq_5_field] + svDF[seq_3_field]
+
+
+        # initialize the df svDF_rearrangedCoords
+        svDF_rearrangedCoords = pd.DataFrame(columns=svtype_to_fieldsDict[svtype]["all_fields"])
+
+        # go through each SVdf and add to svDF_rearrangedCoords if the sequences are unique
+        for ID, sv_row  in svDF.iterrows():
+
+            # check that the 3' seq is unique
+            if not ( chr_to_rearrangedSeq[sv_row["ChrA"]].count(sv_row["ChrA_3seq"])==1 and chr_to_rearrangedSeq[sv_row["ChrB"]].count(sv_row["ChrB_3seq"])==1 ): 
+
+                print_if_verbose("The 3' seq appears %i times in chrA "%chr_to_rearrangedSeq[sv_row["ChrA"]].count(sv_row["ChrA_3seq"]))
+                print_if_verbose("The 3' seq appears %i times in chrB "%chr_to_rearrangedSeq[sv_row["ChrB"]].count(sv_row["ChrB_3seq"]))
+                #print_if_verbose("The 3' seq of chrA is %s"%sv_row["ChrA_3seq"])
+                #print_if_verbose("The 3' seq of chrB is %s"%sv_row["ChrB_3seq"])
+                print_if_verbose("WARNING: The sequences for %s are not unique enough to find the position of the bp in the rearranged genome"%ID)
+                continue
+
+            # define general parameters of the rearranged genome
+            ChrA = sv_row["ChrA"]
+            ChrB = sv_row["ChrB"]
+            Balanced = sv_row["Balanced"]
+            StartA = 1
+
+            # define the breakpoint positions in 1-based coordinates (the find() returns 0 if not found)
+            ChrA_bp_pos = chr_to_rearrangedSeq[ChrA].find(sv_row["ChrA_3seq"]) + 1
+            ChrB_bp_pos = chr_to_rearrangedSeq[ChrB].find(sv_row["ChrB_3seq"]) + 1
+
+            if any([x==0 for x in {ChrA_bp_pos, ChrB_bp_pos}]): raise ValueError("The breakpoints can't be at 0")
+
+            # define the other coordinates
+            EndA = ChrA_bp_pos
+
+            if sv_row["orientation"]=="5_to_5": 
+                StartB = 1
+                EndB = ChrB_bp_pos
+
+            elif sv_row["orientation"]=="5_to_3":
+                StartB = ChrB_bp_pos
+                EndB = chr_to_rearranged_lenSeq[ChrB]
+
+            else: raise ValueError('sv_row["orientation"] is incorrect') 
+
+            # add to df
+            dict_var = {"ChrA":ChrA, "StartA":StartA, "EndA":EndA, "ChrB":ChrB, "StartB":StartB, "EndB":EndB, "Balanced":Balanced, "ID":ID}
+            svDF_rearrangedCoords = svDF_rearrangedCoords.append(pd.DataFrame({ID: dict_var}).transpose()[svtype_to_fieldsDict[svtype]["all_fields"]])
+
+        print_if_verbose("You have been able to remap the positions for %i/%i translocations"%(len(svDF_rearrangedCoords), len(svDF)))
+
+        if len(svDF)>5 and len(svDF_rearrangedCoords)==0: raise ValueError("The remapping of translocations did not work")
+
+    else: raise ValueError("This has not been developed for %s"%svtype)
+
+    return svDF_rearrangedCoords
+
+
+def simulate_SVs_in_genome_randomTranslocation(reference_genome, mitochondrial_chromosome, outdir, nvars=200, replace=False, svtypes={"insertions", "deletions", "inversions", "translocations", "tandemDuplications", "translocations"}, bedpe_breakpoints=None):
+
+    """This function generates nvars into the reference genome splitting by gDNA and mtDNA with files written under outdir"""
+
+    print_if_verbose("generating simulations")
+
+    # initialize a df that will contain the randomly-simulated vars
+    final_svtype_to_svDF = {svtype : pd.DataFrame() for svtype in svtypes}
+
+    # define the different types of chromosomes. Note that the mtDNA chromosomes will be simulated appart
+    all_chromosomes = {s.id for s in SeqIO.parse(reference_genome, "fasta")}
+    if mitochondrial_chromosome!="no_mitochondria": mtDNA_chromosomes = set(mitochondrial_chromosome.split(","))
+    else: mtDNA_chromosomes = set()
+    gDNA_chromosomes = all_chromosomes.difference(mtDNA_chromosomes)
+
+    # map the chromosome to the length
+    chrom_to_len = {s.id : len(s.seq) for s in SeqIO.parse(reference_genome, "fasta")}
+
+    # go through each of the mtDNA and gDNA
+    for type_genome, chroms in [("mtDNA", mtDNA_chromosomes), ("gDNA", gDNA_chromosomes)]:
+        print_if_verbose(type_genome)
+
+        # if there are chroms just continue
+        if len(chroms)==0: continue
+
+        # if the genome is mtDNA you shoudl simulate less vars
+        if type_genome=="gDNA": vars_to_simulate = nvars
+        else: vars_to_simulate = int(nvars*0.05) + 1
+
+        # define the outdir
+        genome_outdir = "%s/simulation_%s"%(outdir, type_genome); make_folder(genome_outdir)
+
+        # get the genome 
+        genome_file = "%s/genome.fasta"%genome_outdir
+        SeqIO.write([c for c in SeqIO.parse(reference_genome, "fasta") if c.id in chroms], genome_file, "fasta")
+
+        # define a bed file with all the regions
+        if bedpe_breakpoints is None:
+            print_if_verbose("simulating randomly distributed SVs")
+
+            all_regions_bed_df = pd.DataFrame({chrom: {"start":1, "end":chrom_to_len[chrom]} for chrom in chroms}).transpose()
+            all_regions_bed_df["chromosome"] = all_regions_bed_df.index
+            all_regions_bed_df = all_regions_bed_df[["chromosome", "start", "end"]]
+            all_regions_bed = "%s/all_regions_index1.bed"%genome_outdir
+
+        else:
+            print_if_verbose("simulating SVs arround %s"%bedpe_breakpoints)
+            df_bedpe = pd.read_csv(bedpe_breakpoints, sep="\t")
+            df_bedpe.columns = ['chrom1', 'start1', 'end1', 'chrom2', 'start2', 'end2', 'name', 'score', 'strand1', 'strand2']
+            bed_1 = df_bedpe[['chrom1', 'start1', 'end1']].rename(columns={"chrom1":"chromosome", "start1":"start", "end1":"end"})
+            bed_2 = df_bedpe[['chrom2', 'start2', 'end2']].rename(columns={"chrom2":"chromosome", "start2":"start", "end2":"end"})
+            all_regions_bed_df = bed_1.append(bed_2)
+            all_regions_bed_df["medium"] = (all_regions_bed_df.start + ((all_regions_bed_df.end - all_regions_bed_df.start)/2) ).apply(int)
+            all_regions_bed_df["start"] = all_regions_bed_df.medium
+            all_regions_bed_df["end"] = all_regions_bed_df.start + 1
+            all_regions_bed_df = all_regions_bed_df[all_regions_bed_df.chromosome.isin(chroms)]
+
+            all_regions_bed = "%s/provided_regions.bed"%genome_outdir
+
+        # write
+        all_regions_bed_df[["chromosome", "start", "end"]].to_csv(all_regions_bed, sep="\t", header=False, index=False)
+
+        # simulate random SVs into regions without previous SVs 
+        random_sim_dir = "%s/random_SVs"%genome_outdir
+
+        # define the len_shortest_chr
+        len_shortest_chr = min([lenChrom for lenChrom in chrom_to_len.values() if lenChrom>=window_l])
+
+        #### GET THE RANDOM INS,INV,DEL ####
+
+        # initialize the cmd
+        randomSV_cmd = "%s --input_genome %s --outdir %s --regions_bed %s --len_shortest_chr %i"%(create_random_simulatedSVgenome_R, genome_file, random_sim_dir, all_regions_bed,  len_shortest_chr) 
+
+        # add the numbers of SVs depending on if it is random or not
+        if bedpe_breakpoints is None:  expected_svtypes = {"insertions", "deletions", "inversions", "tandemDuplications", "translocations"}.intersection(svtypes)
+        else: expected_svtypes = {"translocations"}.intersection(svtypes)
+
+        # if there is only one, get the expecyed SVtypes
+        if len(chroms)==1: expected_svtypes = {s for s in expected_svtypes if s!="translocations"}
+
+        # add to cmd        
+        svtype_to_arg = {"insertions":"number_Ins", "deletions":"number_Del", "inversions":"number_Inv", "tandemDuplications":"number_Dup", "translocations":"number_Tra"}
+        for svtype in expected_svtypes: randomSV_cmd += " --%s %i"%(svtype_to_arg[svtype], vars_to_simulate)
+
+        # define the finalisation file
+        random_sims_performed_file = "%s/random_sims_performed.txt"%random_sim_dir
+
+        # run the cmd if necessary
+        if file_is_empty(random_sims_performed_file) or replace is True:
+            print_if_verbose("generating random SVs")
+
+            # make and delete the folder
+            delete_folder(random_sim_dir); make_folder(random_sim_dir)
+
+            # run the random simulation
+            #std_rearranging_genome = "%s/simulation_std.txt"%random_sim_dir
+            std_rearranging_genome = "stdout"
+            print_if_verbose("getting random SVs. The std is in %s"%std_rearranging_genome)
+            if std_rearranging_genome!="stdout": run_cmd("%s > %s 2>&1"%(randomSV_cmd, std_rearranging_genome))
+            else: run_cmd(randomSV_cmd)
+            remove_file(std_rearranging_genome)
+
+            # edit the insertions 
+            insertions_file = "%s/insertions.tab"%random_sim_dir
+            if not file_is_empty(insertions_file): rewrite_insertions_uniformizedFormat_simulateSV(insertions_file)
+
+            open(random_sims_performed_file, "w").write("random simulations performed")          
+
+        ########################################
+
+        ##### GET THE RANDOM TAN,DEL,INV,INS ARROUND PROVIDED BREAKPOINTS #####
+        if bedpe_breakpoints is not None:
+
+            # define the translocations 
+            translocations_file = "%s/translocations.tab"%random_sim_dir
+            get_SVs_arround_breakpoints_notInTranslocations(genome_file, df_bedpe, vars_to_simulate, translocations_file, svtypes.difference({"translocations"}), replace=replace)
+
+        #######################################################################
+
+        ######### KEEP VARS #########
+       
+        for svtype in final_svtype_to_svDF.keys():
+            svDF = final_svtype_to_svDF[svtype]
+
+            # skip translocations of 1 chromosome
+            if len(chroms)==1 and svtype=="translocations": continue
+
+            # get the new sv
+            file = "%s/%s.tab"%(random_sim_dir, svtype)
+            new_svDF = pd.read_csv(file, sep="\t")
+            new_svDF = new_svDF[[c for c in new_svDF.keys() if "BpSeq" not in c]]
+
+            # add the name
+            new_svDF["ID"] = new_svDF.Name + "_sim_%s"%type_genome
+
+            # append 
+            final_svtype_to_svDF[svtype] = svDF.append(new_svDF, sort=True)
+
+        ##############################
+
+    ##### REARRANGE THE GENOME WITH THE CALCULATED VARS #####
+
+    # define the final outdirs
+    final_simulated_SVs_dir = "%s/final_simulated_SVs"%(outdir); 
+    final_rearranged_genome = "%s/rearranged_genome.fasta"%final_simulated_SVs_dir
+    final_rearranged_genome_finalFile = "%s.performed"%(final_rearranged_genome)
+
+    # insert the predicted  
+    generate_rearranged_genome_from_svtype_to_svDF(reference_genome, final_svtype_to_svDF, final_simulated_SVs_dir, replace=replace)
+
+    # get the final svtype
+    final_svtype_to_svfile = {svtype : "%s/%s.tab"%(final_simulated_SVs_dir, svtype) for svtype in svtypes}
+
+    return final_svtype_to_svfile, final_rearranged_genome
+
+    ############################################################
+
+
+
+def get_SVs_arround_breakpoints_notInTranslocations(genome_file, df_bedpe, nvars, translocations_file, svtypes, replace=False):
+
+    """This function takes a df bedpe and defines svtypes arround these breakpoints."""
+
+    # get the dir
+    outdir = get_dir(translocations_file)
+    expected_files = {"%s/%s.tab"%(outdir, s) for s in svtypes}
+
+    if any([file_is_empty(f) for f in expected_files]) or replace is True:
+        print_if_verbose("calculating random variants among the provided breakpoints")
+        # deifine the genome
+        chrom_to_len = get_chr_to_len(genome_file)
+
+        # define the chroms
+        chroms = set(chrom_to_len)
+
+        # define the interesting bedpe, the one compromised by chroms and reshufle and reindex
+        df_bedpe = df_bedpe[(df_bedpe.chrom1.isin(chroms)) & (df_bedpe.chrom2.isin(chroms))].sample(frac=1)
+        df_bedpe.index = list(range(0, len(df_bedpe)))
+
+        # define the interval to add for overlaps
+        add_interval_bp = 100
+
+        # add things
+        df_bedpe["affected_positions_arroundBp"] = df_bedpe.apply(lambda r: get_affected_positions_from_bedpe_r(r, extra_bp=add_interval_bp), axis=1)
+        df_bedpe["medium1"] = (df_bedpe.start1 + (df_bedpe.end1 - df_bedpe.start1)/2).apply(int)
+        df_bedpe["medium2"] = (df_bedpe.start2 + (df_bedpe.end2 - df_bedpe.start2)/2).apply(int)
+        df_bedpe["length"] = df_bedpe.apply(get_length_bedpe_r, axis=1)
+
+        # define the legths of the variants
+        lengths_SVs = list(df_bedpe[(~pd.isna(df_bedpe.length)) & (df_bedpe.length>=50)].length)
+        random.shuffle(lengths_SVs)
+
+        # get the bed regions affected by translocations (arround the bp). Initialize the already_affected_positions by those that are around the breakpoit
+        if not file_is_empty(translocations_file):
+
+            # get the bed
+            svDF_tra  = pd.read_csv(translocations_file, sep="\t")
+            regions_bed_translocations, nsvs = get_affected_region_bed_for_SVdf(svDF_tra, "translocations", chroms, add_interval_bp=add_interval_bp, first_position_idx=0, translocations_type="breakpoint_pos", chr_to_len=chrom_to_len, insertions_type="only_one_chrB_breakpoint")
+
+            # get the affected positions
+            already_affected_positions = get_affected_positions_from_bed_df(regions_bed_translocations)
+
+        else: already_affected_positions = set()
+
+        # already_affected_positions contains a set of "chrom_pos" with the already affected positions. It will be updated with each 
+
+        ############ DEFINE THE RANDOM SVs INVOLVING df_bedpe ############
+
+
+        # initialize a dict with each svtype and the current number of locations, a
+        svtype_to_svDF = {svtype : pd.DataFrame(columns=[x for x in svtype_to_fieldsDict[svtype]["all_fields"] if x!="ID"]) for svtype in svtypes}
+
+        # initialize a set of the svtypes that are already full, meaning that they already have nvars
+        already_nvars_svtypes = set()
+
+        # initialize a set that will contain the bad bedpe rows
+        bpID_to_tried_svtypes = {bpID : set() for bpID in df_bedpe.index}
+
+        # define the number of breakpoints traversed
+        original_n_breakpoints = len(df_bedpe)
+
+        # go through each breakpoint and assign it to a cahegory. Break if a
+        while len(df_bedpe)>0:
+            print("already traversed %i/%i breakpoints"%(original_n_breakpoints - len(df_bedpe), original_n_breakpoints))
+
+            # interate through each svtype
+            for svtype in sorted(svtypes):
+                svDF = svtype_to_svDF[svtype]
+
+                # if there are already nvars, skip
+                if len(svDF)>=nvars:
+                    already_nvars_svtypes.add(svtype)
+                    continue
+
+                # get only bedpe rows that are not overlapping the current positions, in terms of breakpoints
+                df_bedpe = df_bedpe[(df_bedpe.affected_positions_arroundBp.apply(lambda positions: positions.intersection(already_affected_positions)).apply(len))==0]
+                #print("There are %i breakpoints corresponding to translocations"%(original_n_breakpoints - len(df_bedpe)))
+
+                # get only bedpe rows that have not already been tried to assign to all svtypes
+                good_bpIDs = {bpID for bpID, tried_svtypes in bpID_to_tried_svtypes.items() if tried_svtypes!=svtypes}.intersection(set(df_bedpe.index))
+                df_bedpe = df_bedpe.loc[good_bpIDs]
+
+                # if empty, continue
+                if len(df_bedpe)==0: continue
+
+                # get the first bedpe row
+                r = df_bedpe.iloc[0]
+
+                # record that this was already tried
+                bpID_to_tried_svtypes[r.name].add(svtype)
+
+                # assign the breakpoint to the df_sv_r
+                if svtype in {"inversions", "tandemDuplications", "deletions"}:
+
+                    # it should be in the same chromosome
+                    if r["chrom1"]!=r["chrom2"]: continue
+
+                    # define the resulting df_sv_r
+                    df_sv_r = pd.DataFrame({"Chr":[r["chrom1"]], "Start":[int(r["medium1"])], "End":[int(r["medium2"])]})
+
+                    # get the affected positions of this svtype
+                    affected_positions = get_affected_positions_from_bed_df(get_affected_region_bed_for_SVdf(df_sv_r, svtype, {r["chrom1"]}, add_interval_bp=add_interval_bp, first_position_idx=0, translocations_type="breakpoint_pos", chr_to_len=chrom_to_len, insertions_type="only_one_chrB_breakpoint")[0])
+                    
+                    # only keep if the already affected positions do not overlap this SV
+                    if affected_positions.intersection(already_affected_positions)!=set(): continue
+
+                    # keep
+                    already_affected_positions.update(affected_positions)
+                    svtype_to_svDF[svtype] = svDF.append(df_sv_r)
+
+                elif svtype=="insertions":  
+
+                    # go through different lengths
+                    for length_ins in lengths_SVs:
+
+                        # the insertion will be from medium1 - length_ins ----> medium2. The Copied will be a 50% possibility
+                        startA = int(r["medium1"] - length_ins)
+                        endA = int(r["medium1"])
+                        startB = int(r["medium2"])
+                        endB = int(r["medium2"] + length_ins)
+                        copied = (random.random()>=0.5)
+
+                        # don't consider insertions at the border of the chromosome
+                        if startA<50 or (chrom_to_len[r["chrom2"]]-endB)<50: continue
+
+                        # define the resulting df_sv_r
+                        df_sv_r = pd.DataFrame({"ChrA":[r["chrom1"]], "StartA":[startA], "EndA":[endA], "ChrB":[r["chrom2"]], "StartB":[startB], "EndB":[endB], "Copied":[copied]})
+
+                        # get the affected positions of this svtype
+                        affected_positions = get_affected_positions_from_bed_df(get_affected_region_bed_for_SVdf(df_sv_r, svtype, {r["chrom1"], r["chrom2"]}, add_interval_bp=add_interval_bp, first_position_idx=0, translocations_type="breakpoint_pos", chr_to_len=chrom_to_len, insertions_type="only_one_chrB_breakpoint")[0])
+                    
+                        # only keep if the already affected positions do not overlap this SV
+                        if affected_positions.intersection(already_affected_positions)!=set(): continue
+
+                        # keep
+                        already_affected_positions.update(affected_positions)
+                        svtype_to_svDF[svtype] = svDF.append(df_sv_r)
+
+                        # break if you could get an insertion
+                        break 
+
+                else: raise ValueError("%s is not valid"%svtype)
+
+            # if all the svs have been created, exit
+            if already_nvars_svtypes==svtypes:
+                print_if_verbose("all svtypes found")
+                break
+
+        ##################################################################
+
+        # add IDs and write
+        for svtype, svDF in svtype_to_svDF.items():
+            svDF["index_val"] = list(range(0, len(svDF))) 
+            svDF["ID"] = svtype + "_" + svDF.index_val.apply(str)
+            svDF["Name"] = svDF.ID
+            svDF[svtype_to_fieldsDict[svtype]["all_fields"] + ["Name"]].to_csv("%s/%s.tab"%(outdir, svtype), sep="\t", index=False, header=True)
+
+
+
+def get_genomeGraph_object_5to3_noBreakpoints(genome, genomeGraph_outfileprefix, replace=False, check_genome=False):
+
+    """This function takes a genome and generates a directed graph where each node is a position in the genome and the edges are 5->3 relationships. It is saved under genomeGraph_outfileprefix"""
+
+    # define the files
+    genomeGraph_outfile = "%s.graph.py"%genomeGraph_outfileprefix
+    genomeGraph_positions_df = "%s.df_positions.py"%genomeGraph_outfileprefix
+
+    if any([file_is_empty(x) for x in {genomeGraph_outfile, genomeGraph_positions_df}]) or replace is True:
+        print_if_verbose("getting genome graph")
+
+        # map each chromosome to an offset
+        chrom_to_lenSeq = get_chr_to_len(genome)
+
+        # deffine an offset for each chromosome, which is necessary to keep all the positions of the genome as independent numbers
+        chrom_to_offset = {}
+        current_offset = 0
+        for chrom, seqLen in chrom_to_lenSeq.items():
+            chrom_to_offset[chrom] = current_offset
+            current_offset+=seqLen
+
+        # create the graph
+        genome_graph = igraph.Graph(directed=True)
+
+        # add one vertex (node) for each position in the genome
+        npositions = sum(chrom_to_lenSeq.values())
+        genome_graph.add_vertices(npositions)
+
+        # define the edges that are the end of chromosomes
+        chromosome_start_nodes = {offset for chrom, offset in chrom_to_offset.items()}
+        chromosome_end_nodes = {(offset + chrom_to_lenSeq[chrom] - 1) for chrom, offset in chrom_to_offset.items()}
+
+        # define the edges mappping each position to the next one, but not the chromosome_end ones
+        all_positions = set(range(npositions))
+        non_end_positons = all_positions.difference(chromosome_end_nodes)
+        all_edges = [(pos, pos+1) for pos in non_end_positons]
+
+        # add the edges to the graph
+        genome_graph.add_edges(all_edges)
+        print_if_verbose("genome graph got")
+
+        # get the real ends of the chromosomes (regardless of the connected regions)
+        if check_genome is True:
+
+            sorted_positions = sorted(all_positions)
+            pos_to_nNeighbors = pd.Series(dict(zip(sorted_positions, map(lambda x: len(genome_graph.neighbors(x, mode="ALL")), sorted_positions))))
+
+            real_chromosome_end_nodes = set(pos_to_nNeighbors[pos_to_nNeighbors==1].index)
+            print_if_verbose("There are %i telomeric nodes in the graph genome"%len(real_chromosome_end_nodes))
+
+        print_if_verbose("getting positions df")
+
+        # generate a df that maps each position to the real position
+        positions_real = []
+        chromosomes_real = []
+        for chrom, lenChrom in chrom_to_lenSeq.items():
+            positions_real += list(range(lenChrom))
+            chromosomes_real += [chrom]*lenChrom
+
+        df_positions = pd.DataFrame()
+        df_positions["chromosome"] =  chromosomes_real
+        df_positions["real_position"] =  positions_real
+        df_positions["offset"] = df_positions.chromosome.apply(lambda x: chrom_to_offset[x])
+        df_positions["graph_position"] = df_positions.real_position + df_positions.offset
+        df_positions["is_start_of_chr"] = df_positions.graph_position.isin(chromosome_start_nodes)
+        df_positions["is_end_of_chr"] = df_positions.graph_position.isin(chromosome_end_nodes)
+
+        print_if_verbose("getting nucleotide")
+
+        # map each chromosome to a sequence
+        chr_to_seq = {seq.id: str(seq.seq).upper() for seq in SeqIO.parse(genome, "fasta")}
+
+        # map each chrom to each position to a seq
+        print_if_verbose("getting positions dict")
+        chrom_to_pos_to_seq = {chrom : dict(zip(range(len(seq)) , seq)) for chrom, seq in chr_to_seq.items()}
+
+        chrom_AND_pos_to_seq = {}
+        for chrom, pos_to_seq in chrom_to_pos_to_seq.items():
+            for pos, seq in pos_to_seq.items(): chrom_AND_pos_to_seq["%s_%i"%(chrom, pos)] = seq
+
+        print_if_verbose("adding to df")
+        df_positions["chrom_AND_pos"] = df_positions.chromosome + "_" + df_positions.real_position.apply(str)
+        df_positions["nucleotide"] = df_positions.chrom_AND_pos.map(chrom_AND_pos_to_seq)
+        nucleotide_to_compNucleotide = {"A":"T", "C":"G", "T":"A", "G":"C", "N":"N", "W":"W", "S":"S", "M":"K", "K":"M", "R":"Y", "Y":"R", "B":"V", "D":"H", "H":"D", "V":"B", "Z":"Z"}
+        df_positions["complement_nucleotide"] = df_positions.nucleotide.apply(lambda x: x.upper()).map(nucleotide_to_compNucleotide)        
+
+        if set(df_positions.graph_position)!=all_positions: raise ValueError("There is a bad graph calculation of the positions")
+
+        if any(pd.isna(df_positions.nucleotide)): raise ValueError("There should be no NaNs in the sequence")
+        if any(pd.isna(df_positions.complement_nucleotide)): 
+            print_if_verbose("These are the nts in the sequence:", set(df_positions.nucleotide))
+            print_if_verbose("These are the nts not in the sequence:", set(df_positions.nucleotide).difference(set(nucleotide_to_compNucleotide)))
+            raise ValueError("There should be no NaNs in the complementary seq. This suggests that there are strange nulceotides in the genome which have not been considered. perSVade currently considers only %s"%set(nucleotide_to_compNucleotide))
+
+        # save
+        save_object(genome_graph, genomeGraph_outfile)
+        save_object(df_positions, genomeGraph_positions_df)
+
+    else:
+        print_if_verbose("loading graph genome")
+        genome_graph = load_object(genomeGraph_outfile)
+        df_positions = load_object(genomeGraph_positions_df)
+
+    return genome_graph, df_positions
+
+def get_graph_subcomponents(graph):
+
+    """Takes a graph and returns a list of unique subcomponents (ordered tuples)"""
+
+    components_set = set()
+
+    for node in graph.vs.indices:
+
+        # get the component
+        all_graph_positions = tuple(sorted(set(graph.subcomponent(node, mode="ALL"))))
+
+        # add
+        components_set.add(all_graph_positions)
+
+    return components_set
+
+
+def get_clusters_translocated_chromosomes(translocations_df):
+
+    """Takes a translocations df and returns a list of sets, each of which contains a set of chromosomes that are translocated with each other"""
+
+    # get all chromosomes
+    all_chromosomes = sorted(set(translocations_df["ChrA"]).union(translocations_df["ChrB"]))
+    cID_to_chromosome = dict(zip(range(len(all_chromosomes)), all_chromosomes))
+    chrom_to_cID = {chromosome : cID for cID, chromosome in cID_to_chromosome.items()}
+
+    # initialize a graph
+    chrom_graph = igraph.Graph(directed=False)
+
+    # add one vertex for each chromosome
+    chrom_graph.add_vertices(len(cID_to_chromosome))
+
+    # add connections for each pair of rearranged chromosomes
+    edges = [(chrom_to_cID[chrA], chrom_to_cID[chrB]) for chrA, chrB in translocations_df[["ChrA", "ChrB"]].values]
+    chrom_graph.add_edges(edges)
+
+    # get all the components of this graph
+    chromosomes_set_of_tuples = get_graph_subcomponents(chrom_graph)
+
+    # get as list of sets
+    clusters_translocated_chromosomes = [set([cID_to_chromosome[ID] for ID in set_tuples]) for set_tuples in chromosomes_set_of_tuples]
+
+    return clusters_translocated_chromosomes
+
+
+def map_number_inversions_to_isComplement(ninversions):
+
+    """takes the number of inversions that a position in the genome has and returns whether the complementary nucleotide should be considered"""
+
+    if ninversions%2==0: return False
+    else: return True
+
+
+def write_genome_graph_to_fasta(genome_graph, df_positions, outfile_fasta, translocations_df, df_inverted_positions, replace=False):
+
+    """This function writes a  genome graoh and the associated df_positions into the outfile fasta. It makes some prints to validate that it is correct"""
+
+    print_if_verbose("writing genome graph to %s "%outfile_fasta)
+
+    if file_is_empty(outfile_fasta) or replace is True:
+
+        # set the index of the inverted positions to be the one of the graph_position
+        df_inverted_positions = df_inverted_positions.set_index("graph_position", drop=True)
+
+        # get the graph position as the index of the chromosome
+        df_positions = df_positions.set_index("graph_position", drop=False)
+
+        # add the nucleotide has to be complementary
+        print_if_verbose("adding whether the complementary nt should be obtained")
+        df_positions["number_inversions"] = df_inverted_positions.sum(axis=1).loc[df_positions.index]
+        df_positions["is_complement_nt"] = df_positions.number_inversions.apply(map_number_inversions_to_isComplement)
+
+        print_if_verbose("These are the number of inversions:", set(df_positions.number_inversions))
+
+        # get the final nucleotide
+        print_if_verbose("getting the final nucleotide")
+        series_nucleotide = df_positions[~df_positions.is_complement_nt]["nucleotide"]
+        series_complement_nucleotide = df_positions[df_positions.is_complement_nt]["complement_nucleotide"]
+        df_positions["final_nucleotide"] = series_nucleotide.append(series_complement_nucleotide).loc[df_positions.index]
+
+        print_if_verbose("There are %i positions that should be complemented "%(sum(df_positions["is_complement_nt"])))
+
+        # get the clusters of translocated chromosomes
+        print_if_verbose("getting clusters of translocated chroms")
+        clusters_translocated_chromosomes = get_clusters_translocated_chromosomes(translocations_df)
+
+        # add content to each of the df_positions
+        df_positions["n_succesors"] = df_positions.graph_position.apply(lambda x: genome_graph.successors(x)).apply(len)
+        df_positions["n_predecessors"] = df_positions.graph_position.apply(lambda x: genome_graph.predecessors(x)).apply(len)
+        df_positions["is_start"] = df_positions.n_predecessors==0
+        df_positions["is_end"] = df_positions.n_succesors==0
+
+        # debug
+        if any(df_positions["n_succesors"]>1) or any(df_positions["n_predecessors"]>1) or any((df_positions["is_start"]) & df_positions["is_end"]): raise ValueError("Your graph is incorrect")
+
+        # define the end and start positions of the chromosome
+        start_positions = set(df_positions[df_positions.is_start]["graph_position"])
+        end_positions = set(df_positions[df_positions.is_end]["graph_position"])
+        all_positions = set(df_positions["graph_position"])
+
+        # define all the chromosome names, and check that their length is equal to the number of start_pos
+        all_chromosomes = set(df_positions.chromosome)
+        if len(all_chromosomes)!=len(start_positions) or len(all_chromosomes)!=len(end_positions): raise ValueError("The number of chromosomes and the one of end or start positions does not match")
+
+        # map each end position to a chromosome
+        startPos_to_chrom = dict(df_positions[df_positions.is_start]["chromosome"])
+        endPos_to_chrom = dict(df_positions[df_positions.is_end]["chromosome"])
+
+        # initialize all the found positions (to check that the genome is a linear graph)
+        all_matched_positions = set()
+        all_matched_end_positions = set()
+
+        #initialize an iteratior of seq records
+        all_chromosomes_SeqRecords = []
+
+        print_if_verbose("There are %i start and %i end positions"%(len(start_positions), len(end_positions)))
+
+        # go through each start position and find the end
+        for start_pos in start_positions:
+            print_if_verbose("working on start pos %i"%start_pos)
+
+            # get all the positions interconnected
+            all_chr_positions = set(genome_graph.subcomponent(start_pos, mode="OUT"))
+
+            # define the end pos
+            end_pos = end_positions.intersection(all_chr_positions)
+            if len(end_pos)!=1: raise ValueError("There can't be more or less than 1 end position")
+            end_pos = next(iter(end_pos))
+
+            # get the paths from start to end
+            all_paths = genome_graph.get_shortest_paths(start_pos, end_pos, mode="OUT")
+            if len(all_paths)!=1: raise ValueError("There has to be only one path from start to end")
+            chr_path = all_paths[0]
+
+            # get the sequence
+            chrom_seq = "".join(df_positions.loc[chr_path, "final_nucleotide"])
+
+            # get the ID randomly of the start and end IDs
+            start_chrom = startPos_to_chrom[start_pos]
+            end_chrom = endPos_to_chrom[end_pos]
+            if start_chrom==end_chrom: print_if_verbose("The start and end chromosomes are the same for %s"%start_chrom)
+
+            # take the chromosome from the available chromosomes, if there are none, from the chromosomes that are in there
+            chromosomes_this_chr = set(df_positions.loc[chr_path, "chromosome"])
+            available_chromosomes = chromosomes_this_chr.intersection(all_chromosomes)
+            
+            # if there is no such intersection pick any chromosome from the same cluster
+            if len(available_chromosomes)==0: 
+                print_if_verbose("looking for chromosomes in the similar cluster")
+
+                available_chromosomes = set.union(*[cluster for cluster in clusters_translocated_chromosomes if len(chromosomes_this_chr.intersection(cluster))>0]).intersection(all_chromosomes)
+
+            chrom_ID = next(iter(available_chromosomes))
+
+            # add to the SeqRecord
+            all_chromosomes_SeqRecords.append(SeqRecord(Seq(chrom_seq), id=chrom_ID, name=chrom_ID, description=chrom_ID))
+
+            # delete this from all chromosomes
+            all_chromosomes = all_chromosomes.difference({chrom_ID})
+
+            # record which positions have been added to a chromosome
+            all_matched_positions.update(all_chr_positions)
+            all_matched_end_positions.add(end_pos)
+
+        # check that each end and each position is correctly placed
+        if all_matched_positions!=all_positions: raise ValueError("Not all positions have been included in the genome")
+        if all_matched_end_positions!=end_positions: raise ValueError("Not all end positions have been included")
+        if len(all_chromosomes)!=0: raise ValueError("Not all chromosomes were picked")
+
+        print_if_verbose("writing %s"%outfile_fasta)
+        SeqIO.write(all_chromosomes_SeqRecords, outfile_fasta, "fasta")
+
+def get_bedpe_df_with_added_feats(df_bedpe, df_gridss):
+
+    """This function takes a bedpe file and a df gridss and returns de bedpe as df with the real_af of each of the breakends"""
+
+    # add the eventID to the gridss df
+    df_gridss["eventID"] = df_gridss.INFO_EVENT.apply(lambda x: x+"o")
+
+    # map each eventID to the chromosome and the af
+    eventID_to_chrom_to_pos_to_af = df_gridss.groupby("eventID").apply(lambda df_e: df_e.set_index(["#CHROM", "POS"])["real_AF"])
+
+    # map each event to an af
+    df_bedpe["af_1"] = df_bedpe.apply(lambda r: [af for pos,af in dict(eventID_to_chrom_to_pos_to_af.loc[(r["name"], r["chrom1"])]).items() if pos>=r["start1"] and pos<=r["end1"]][0], axis=1)
+    df_bedpe["af_2"] = df_bedpe.apply(lambda r: [af for pos,af in dict(eventID_to_chrom_to_pos_to_af.loc[(r["name"], r["chrom2"])]).items() if pos>=r["start2"] and pos<=r["end2"]][0], axis=1)
+
+    # get the ploidy
+    df_bedpe["bp1_heterozygous"] = df_bedpe.af_1<0.75
+    df_bedpe["bp2_heterozygous"] = df_bedpe.af_2<0.75
+
+    ##### add the 5'->3' added regions #####
+    def get_tuple_5_to_3_positions(r):
+
+        """Takes a row of the bedpe and returns a tuple where there is the 5' position and the 3' attached. This depends on the orientation. See the clove paper to understand what the orientations mean. Only tandem duplictaions are avoided"""
+
+        # get data
+        chrom1 = r["chrom1"]
+        pos1 = r["start1"]
+        strand1 = r["strand1"]
+        chrom2 = r["chrom2"]
+        pos2 = r["start2"]
+        strand2 = r["strand2"]
+
+        # define for chroms that are the same
+        if chrom1==chrom2:
+
+            # first check that the second position is 3'
+            if pos2<=pos1: raise ValueError("Your bedpe may not be properly formated as pos2<=pos1")
+
+            # for TANDEM duplications just add the next position
+            if strand1=="-" and strand2=="+": tuple_5_to_3_positions = [(chrom2, pos2), (chrom2, pos2+1)]
+
+            # INV1, DEL and INV2 are the same
+            else: tuple_5_to_3_positions = [(chrom1, pos1), (chrom2, pos2)]
+
+        # define for chroms that are different
+        else: tuple_5_to_3_positions = [(chrom1, pos1), (chrom2, pos2)]
+
+        return tuple_5_to_3_positions
+
+    
+    df_bedpe["5_to_3_positions_tuple_withoutTAN"] = df_bedpe.apply(get_tuple_5_to_3_positions, axis=1)
+
+    ########################################
+
+    return df_bedpe
+
+
+
+def get_genomeGraph_object(genome, df_bedpe, df_gridss_filt, genomeGraph_outfileprefix, replace=False):
+
+    """This function takes a bedpe and generates an undirected graph where each position is mapped to the 3' position in the genome. Tandem duplications are not considered as they may get weird loops"""
+
+    # define the files
+    genomeGraph_outfile = "%s.graph.py"%genomeGraph_outfileprefix
+    genomeGraph_positions_df = "%s.df_positions.py"%genomeGraph_outfileprefix
+
+    if any([file_is_empty(x) for x in {genomeGraph_outfile, genomeGraph_positions_df}]) or replace is True:
+        print_if_verbose("getting genome graph object")
+
+        # map each chromosome to an offset
+        chrom_to_lenSeq = {seq.id : len(seq.seq) for seq in SeqIO.parse(genome, "fasta")}
+
+        # deffine an offset for each chromosome, which is necessary to keep all the positions of the genome as independent numbers
+        chrom_to_offset = {}
+        current_offset = 0
+        for chrom, seqLen in chrom_to_lenSeq.items():
+            chrom_to_offset[chrom] = current_offset
+            current_offset+=seqLen
+
+        # create the graph
+        genome_graph = igraph.Graph(directed=False)
+
+        # add one vertex (node) for each position in the genome
+        npositions = sum(chrom_to_lenSeq.values())
+        genome_graph.add_vertices(npositions)
+
+        # define the edges that are the end of chromosomes
+        chromosome_start_nodes = {offset for chrom, offset in chrom_to_offset.items()}
+        chromosome_end_nodes = {(offset + chrom_to_lenSeq[chrom] - 1) for chrom, offset in chrom_to_offset.items()}
+
+        # define the connections (edges, parts of the genomes that are linked) from the breakpoint
+        all_edges = [] 
+
+        # if a df bedpe is provided, calculate the edges resulting from the breakpoints
+        if df_bedpe is not None and len(df_bedpe)>0:
+
+            # get the 5' to 3' positions and ploidy of the breakpoints into bedpe
+            df_bedpe = get_bedpe_df_with_added_feats(df_bedpe, df_gridss_filt)
+            print_if_verbose("getting graph-based genome")
+
+            for (bp1_heterozygous, bp2_heterozygous, bp_positions_tuple) in df_bedpe[["bp1_heterozygous", "bp2_heterozygous", "5_to_3_positions_tuple_withoutTAN"]].values:
+
+                # initialize a list of the existing edges in the form of [(chr1, pos1), (chr2, pos2)]
+                existing_joined_positions = []
+
+                # add the breakpoint edge
+                existing_joined_positions.append(bp_positions_tuple)
+
+                # get the positions of the breakpoint
+                chrom1, pos1 = bp_positions_tuple[0]
+                chrom2, pos2 = bp_positions_tuple[1]
+
+                # add the map between each position and next one if it is heterozygous
+                if bp1_heterozygous: existing_joined_positions.append([(chrom1, pos1), (chrom1, pos1+1)])
+                if bp2_heterozygous: existing_joined_positions.append([(chrom2, pos2), (chrom2, pos2+1)])
+
+                # add the existing mapped positions
+                all_edges += [(chrom_to_offset[pos1[0]]+pos1[1], chrom_to_offset[pos2[0]]+pos2[1]) for pos1, pos2 in existing_joined_positions]
+
+        # add the non-mapped positions to the 3' ones
+        positions_already_added = {edge[0] for edge in all_edges}
+        all_positions = set(range(npositions))
+        remaining_positions = all_positions.difference(positions_already_added.union(chromosome_end_nodes))
+        all_edges += [(pos, pos+1) for pos in remaining_positions]
+
+        # add the edges to the graph
+        genome_graph.add_edges(all_edges)
+        print_if_verbose("genome graph got")
+
+        # get the real ends of the chromosomes
+        if df_bedpe is not None:
+
+            print_if_verbose("get the ends of the chromosome")
+            sorted_positions = sorted(all_positions)
+            pos_to_nNeighbors = pd.Series(dict(zip(sorted_positions, map(lambda x: len(genome_graph.neighbors(x, mode="ALL")), sorted_positions))))
+
+            # debug
+            if any(pos_to_nNeighbors<1): raise ValueError("there are some unnconected nodes in the graph genome")
+            if any(pos_to_nNeighbors>100000): raise ValueError("there are some very highly connected regions in the graph genome")
+            if any(pd.isna(pos_to_nNeighbors)): raise ValueError("there are some NaNs in the graph genome")
+
+            real_chromosome_end_nodes = set(pos_to_nNeighbors[pos_to_nNeighbors==1].index)
+            print_if_verbose("There are %i telomeric nodes in the graph genome"%len(real_chromosome_end_nodes))
+
+            # clean
+            del pos_to_nNeighbors
+
+        # generate a df that maps each position to the real position
+        print_if_verbose("defining df_positions")
+        positions_real = []
+        chromosomes_real = []
+        is_end_of_chr = []
+        for chrom, lenChrom in chrom_to_lenSeq.items():
+            positions_real += list(range(lenChrom))
+            chromosomes_real += [chrom]*lenChrom
+            is_end_of_chr += ([True] + [False]*(lenChrom-2) + [True])
+
+        print_if_verbose("adding lists to df_positions")
+        df_positions = pd.DataFrame()
+        df_positions["chromosome"] =  chromosomes_real
+        df_positions["real_position"] =  positions_real
+        df_positions["offset"] = df_positions.chromosome.apply(lambda x: chrom_to_offset[x])
+        df_positions["graph_position"] = df_positions.real_position + df_positions.offset
+
+        # add the is_end_of_chr depending on the 
+        if df_bedpe is not None: df_positions["is_end_of_chr"] = df_positions.graph_position.isin(real_chromosome_end_nodes)
+        else: df_positions["is_end_of_chr"] = is_end_of_chr
+        print_if_verbose("There are %i telomeric nodes in the graph genome"%sum(df_positions["is_end_of_chr"]))
+
+        if set(df_positions.graph_position)!=all_positions: raise ValueError("There is a bad graph calculation of the positions")
+
+        # save
+        print_if_verbose("saving graph object that has %.10f Mb"%(sys.getsizeof(genome_graph)/1000000))
+        genomeGraph_outfile_tmp = "%s.tmp"%genomeGraph_outfile
+        save_object(genome_graph, genomeGraph_outfile_tmp)
+        os.rename(genomeGraph_outfile_tmp, genomeGraph_outfile)
+
+        print_if_verbose("saving df positions objects")
+        genomeGraph_positions_df_tmp = "%s.tmp"%genomeGraph_positions_df
+        save_object(df_positions, genomeGraph_positions_df_tmp)
+        os.rename(genomeGraph_positions_df_tmp, genomeGraph_positions_df)
+
+    else:
+        print_if_verbose("loading graph genome")
+        genome_graph = load_object(genomeGraph_outfile)
+        df_positions = load_object(genomeGraph_positions_df)
+
+    return genome_graph, df_positions
+
+
+
+def generate_rearranged_genome_from_svtype_to_svDF_tryiningToInsertTranslocationsButFailing(reference_genome, svtype_to_svDF, outdir, replace=False):
+
+    """This function generates a rearranged genome for the provided svDFs, writing their fileds under outdir. It simulates all of them, and then changes the insertions from cut-and-paste to copy-and-paste"""    
+
+    # define the rearranged genome, and generated if not already done
+    rearranged_genome = "%s/rearranged_genome.fasta"%outdir
+    rearranged_genome_tmp = "%s/rearranged_genome.tmp.fasta"%outdir
+    
+    # generate the rearranged genome with all variants. Just that all insertions are cut-and-paste
+    if file_is_empty(rearranged_genome) or replace is True:
+        print_if_verbose("rearranging genome")
+
+        # remove the outdir
+        delete_folder(outdir); make_folder(outdir)
+
+        # define the outdir
+        outdir_sim = "%s/rearranging_genomeRSVsim"%outdir; 
+        delete_folder(outdir_sim); make_folder(outdir_sim)
+
+        # initialize a cmd to create the simulated genome
+        targetSV_cmd = "%s --input_genome %s --output_genome %s --output_dir %s"%(create_targeted_simulatedSVgenome_R, reference_genome, rearranged_genome_tmp, outdir_sim)
+
+        for svtype, svDF in svtype_to_svDF.items():
+
+            # shift the insertions by 15 bp so that they are not at the beginning of the chrom
+            #if svtype=="insertions": svDF["StartA"] = svDF["StartA"] + 10
+
+            # keep only the interesting svs
+            svDF = svDF[svtype_to_fieldsDict[svtype]["all_fields"]]
+
+            # for translocations, write a bed with the breakpoint positions
+            if svtype=="translocations":
+
+                translocations_file = "%s/translocations.tab"%outdir
+                svDF.to_csv(translocations_file, sep="\t", header=True, index=False)
+                rewrite_translocations_uniformizedFormat_simulateSV(translocations_file, reference_genome)
+                svDF = pd.read_csv(translocations_file, sep="\t")
+                remove_file(translocations_file)
+
+
+                # get the bed df
+                chroms_all = set(svDF.ChrA).union(set(svDF.ChrB))
+                add_interval_bp = 100
+                chrom_to_len = get_chr_to_len(reference_genome)
+                bed_df = get_affected_region_bed_for_SVdf(svDF, "translocations", chroms_all, add_interval_bp=add_interval_bp, first_position_idx=1, translocations_type="breakpoint_pos", chr_to_len=chrom_to_len, insertions_type="only_one_chrB_breakpoint")[0]
+
+                # write
+                svfile = "%s/translocations_regions.bed"%outdir
+                bed_df.to_csv(svfile, sep="\t", header=False, index=False)
+
+                continue
+
+                # add the number of transloactions
+                targetSV_cmd += " --number_Tra %i"%len(svDF)
+
+            else:
+                # write file
+                svfile = "%s/%s.tab"%(outdir, svtype)
+                svDF.to_csv(svfile, sep="\t", header=True, index=False)
+
+            # add the generation of SVs into targetSV_cmd
+            targetSV_cmd += " --%s_file %s"%(svtype, svfile)
+
+        # run the cmd
+        #std_rearranging_genome = "%s/simulation_std.txt"%outdir
+        std_rearranging_genome = "stdout" # debug
+        print_if_verbose("rearranging genome. The std is in %s"%std_rearranging_genome)
+
+        if std_rearranging_genome!="stdout": run_cmd("%s > %s 2>&1"%(targetSV_cmd, std_rearranging_genome))
+        else: run_cmd(targetSV_cmd)
+
+        sakjsakhj
+        
+        # transform the cut-and-paste insertions to copy-and-paste, whenever necessary
+        insertions_file = "%s/insertions.tab"%outdir
+        if not file_is_empty(insertions_file):
+
+            # transform the insertions
+            transform_cut_and_paste_to_copy_and_paste_insertions(reference_genome, rearranged_genome_tmp, insertions_file, svtype_to_svDF)
+
+            # edit the insertions so that they are in the correct format
+            rewrite_insertions_uniformizedFormat_simulateSV(insertions_file)
+
+
+        # rewrite translocations
+        translocations_file = "%s/translocations.tab"%outdir
+        if not file_is_empty(translocations_file): rewrite_translocations_uniformizedFormat_simulateSV(translocations_file, reference_genome)
+
+  
+        # write a file that indicates that this has finsihed
+        rearranged_genome_finalFile = "%s.performed"%(rearranged_genome)
+        open(rearranged_genome_finalFile, "w").write("finsihed")
+
+        # keep
+        remove_file(std_rearranging_genome)
+        os.rename(rearranged_genome_tmp, rearranged_genome)
+
+
+
+def rearrange_genomes_simulateSV_oldVersionBadMemory(reference_genome, outdir, replace=False, nvars=50, mitochondrial_chromosome="mito_C_glabrata_CBS138", simulated_svtype_to_svfile={}, svtypes={"insertions", "deletions", "inversions", "translocations", "tandemDuplications"}, check_consistency=False):
+
+    """Runs a simulation of nvars SVs of each type into the reference genome. It will be sepparated by gDNA and mtDNA. mtDNA will only include 5% of the gDNA vars. Everything is written to outdir. simulated_svtype_to_svfile is a dictionary that maps each svtype to a file with it. This function will insert these SVs plus the remaining ones up to nvars (which will be placed randomly in the remaining spots on the genome). Note that only balanced translocations will be simulated, as unbalanced translocations are hard to bechmark based on coverage. 
+
+    Keep in mind that all RSVSim are 1-based coordinates"""
+
+
+    # change the simulated simulated_svtype_to_svfile to not include translocations
+    #simulated_svtype_to_svfile = {svtype : svfile for svtype, svfile in simulated_svtype_to_svfile.items() if svtype!="translocations"} # debug    
+
+    # only random var
+    #simulated_svtype_to_svfile = {}
+
+    # map each chrom to a len
+    chr_to_len = get_chr_to_len(reference_genome)
+
+    # check that the vars provided are consistent
+    real_svtype_to_svDF = {svtype : pd.read_csv(file, sep="\t") for svtype, file in simulated_svtype_to_svfile.items()}
+    if check_consistency is True: check_consistency_of_svtype_to_svDF(real_svtype_to_svDF, set(chr_to_len), chr_to_len)
+
+    # define the final outdirs
+    final_simulated_SVs_dir = "%s/final_simulated_SVs"%(outdir); 
+    final_rearranged_genome = "%s/rearranged_genome.fasta"%final_simulated_SVs_dir
+    final_rearranged_genome_finalFile = "%s.performed"%(final_rearranged_genome)
+
+
+    if file_is_empty(final_rearranged_genome_finalFile) or replace is True:
+    #if True:
+
+        #delete_folder(final_simulated_SVs_dir); make_folder(final_simulated_SVs_dir)
+
+        # get random simulations for number of variants (twice the nvars if it is for future merge with simulated_svtype_to_svfile)
+        if len(simulated_svtype_to_svfile)==0: random_nvars = nvars
+        else: random_nvars = 2*nvars
+        random_svtype_to_svDF = get_random_svtype_to_svDF(reference_genome, mitochondrial_chromosome, outdir, nvars=random_nvars, replace=replace, svtypes=svtypes)
+
+        # get the real vars so that no var covers the whole chromosome if it is a tandem duplication, as this is circularization and you we don't want to simulate it
+        for svtype, svDF in real_svtype_to_svDF.items():
+
+            if svtype=="tandemDuplications": svDF = svDF[~svDF.apply(lambda r: r["Start"]<(chr_to_len[r["Chr"]]*0.02) and r["End"]>(chr_to_len[r["Chr"]]*0.98), axis=1)]
+
+            real_svtype_to_svDF[svtype] = svDF
+
+        # get a df with all the bed regions of the real vars
+        list_affected_bed_regions = [get_affected_region_bed_for_SVdf(svDF, svtype, set(chr_to_len), first_position_idx=1, translocations_type="breakpoint_pos", chr_to_len=chr_to_len)[0] for svtype, svDF in real_svtype_to_svDF.items()]
+        if len(list_affected_bed_regions)>0: all_real_SVs_bed_df = pd.concat(list_affected_bed_regions)
+        else: all_real_SVs_bed_df = pd.DataFrame()
+
+        # initialize the final_svtype_to_svDF, which will contain vars for both real and simulated regions 
+        final_svtype_to_svDF = {}
+
+        # add random vars to final_svtype_to_svDF if they do not overlap with the bed regions
+        for svtype in svtypes:
+            print_if_verbose("generating %s"%svtype)
+
+            # define the real svtype
+            if svtype in real_svtype_to_svDF: real_svDF = real_svtype_to_svDF[svtype]
+            else: real_svDF = pd.DataFrame(columns=svtype_to_fieldsDict[svtype]["all_fields"])
+
+            # define the random svtypes
+            random_svDF = random_svtype_to_svDF[svtype]
+
+            if len(random_svDF)>0:
+
+                # add to the random SVtype if it overlaps any real svtypes
+                random_svDF["overlaps_realSV"] = random_svDF.apply(lambda r: target_svDFseries_overlaps_bed_df(r, all_real_SVs_bed_df, svtype, 1, "breakpoint_pos", chr_to_len), axis=1)
+
+                random_svDF = random_svDF[~random_svDF.overlaps_realSV]
+
+            # for translocations, get the nvars to be twice. This is because some of them may not be feasible
+            if svtype=="translocations": real_nvars = nvars*2
+            else: real_nvars = nvars
+
+            # get the concatenated df
+            svDF = real_svDF.append(random_svDF, sort=True).iloc[0:real_nvars]
+   
+            # add all the mitochondrial variants (they may be excluded with real_nvars)
+            mitochondrial_chromosomes_set = set(mitochondrial_chromosome.split(","))
+            random_svDF_mito = random_svDF[random_svDF.apply(lambda r: any([r[f] in mitochondrial_chromosomes_set for f in svtype_to_fieldsDict[svtype]["chromosome_fields"]]), axis=1)].iloc[0:real_nvars]
+
+            svDF = svDF.append(random_svDF_mito, sort=True).drop_duplicates(subset=svtype_to_fieldsDict[svtype]["all_fields"])
+
+            # add to the final set
+            final_svtype_to_svDF[svtype] = svDF
+
+        # check the consistency of the genome
+        if check_consistency is True: check_consistency_of_svtype_to_svDF(final_svtype_to_svDF, set(chr_to_len), chr_to_len)
+
+        # get the rearranged genome and simulations
+        print_if_verbose("rearranging genome with real + random SVs")
+        make_folder(final_simulated_SVs_dir)
+        generate_rearranged_genome_from_svtype_to_svDF(reference_genome, final_svtype_to_svDF, final_simulated_SVs_dir, replace=replace)
+
+    # define the map between each svtype and the file that defines it
+    final_svtype_to_svfile = {svtype : "%s/%s.tab"%(final_simulated_SVs_dir, svtype) for svtype in svtypes}
+
+    return final_svtype_to_svfile, final_rearranged_genome
+
+
+def get_random_svtype_to_svDF(reference_genome, mitochondrial_chromosome, outdir, nvars=200, replace=False, svtypes={"insertions", "deletions", "inversions", "translocations", "tandemDuplications"}, check_random_genome_generation=False, only_5_to_3_translocations=False):
+
+    """This function generates nvars into the reference genome splitting by gDNA and mtDNA with files written under outdir. It returns the randomly drawn variants and no-genome"""
+
+
+    print_if_verbose("generating random simulations")
+
+    # initialize a df that will contain the randomly-simulated vars
+    random_svtype_to_svDF = {svtype : pd.DataFrame() for svtype in svtypes}
+
+    # define the different types of chromosomes. Note that the mtDNA chromosomes will be simulated appart
+    all_chromosomes = {s.id for s in SeqIO.parse(reference_genome, "fasta")}
+    if mitochondrial_chromosome!="no_mitochondria": mtDNA_chromosomes = set(mitochondrial_chromosome.split(","))
+    else: mtDNA_chromosomes = set()
+    gDNA_chromosomes = all_chromosomes.difference(mtDNA_chromosomes)
+
+    # map the chromosome to the length
+    chrom_to_len = {s.id : len(s.seq) for s in SeqIO.parse(reference_genome, "fasta")}
+
+    # go through each of the mtDNA and gDNA
+    for type_genome, chroms in [("mtDNA", mtDNA_chromosomes), ("gDNA", gDNA_chromosomes)]:
+        print_if_verbose(type_genome)
+
+        # if there are chroms just continue
+        if len(chroms)==0: continue
+
+        # if the genome is mtDNA you shoudl simulate less vars
+        if type_genome=="gDNA": vars_to_simulate = nvars
+        else: vars_to_simulate = int(nvars*0.05) + 1
+
+        # define the outdir
+        genome_outdir = "%s/simulation_%s"%(outdir, type_genome); make_folder(genome_outdir)
+
+        # get the genome 
+        genome_file = "%s/genome.fasta"%genome_outdir
+        SeqIO.write([c for c in SeqIO.parse(reference_genome, "fasta") if c.id in chroms], genome_file, "fasta")
+
+        # define a bed file with all the regions
+        all_regions_bed_df = pd.DataFrame({chrom: {"start":1, "end":chrom_to_len[chrom]} for chrom in chroms}).transpose()
+        all_regions_bed_df["chromosome"] = all_regions_bed_df.index
+        all_regions_bed_df = all_regions_bed_df[["chromosome", "start", "end"]]
+        all_regions_bed = "%s/all_regions_index1.bed"%genome_outdir
+        all_regions_bed_df.to_csv(all_regions_bed, sep="\t", header=False, index=False)
+
+        # simulate random SVs into regions without previous SVs 
+        random_sim_dir = "%s/random_SVs"%genome_outdir
+
+        #### GET THE RANDOM INS,INV,DEL ####
+
+        if any([file_is_empty("%s/%s.tab"%(random_sim_dir, svtype)) for svtype in {"insertions", "deletions", "inversions", "tandemDuplications"}.intersection(svtypes)]) or replace is True:
+
+            print_if_verbose("generating random SVs")
+
+            # make and delete the folder
+            delete_folder(random_sim_dir); make_folder(random_sim_dir)
+
+            # get the cmd of the simulation
+            randomSV_cmd = "%s --input_genome %s --outdir %s --regions_bed %s"%(create_random_simulatedSVgenome_R, genome_file, random_sim_dir, all_regions_bed)
+
+            # add the number of each SV that should be added
+            svtype_to_arg = {"insertions":"number_Ins", "deletions":"number_Del", "inversions":"number_Inv", "tandemDuplications":"number_Dup"}
+        
+            for svtype, arg in svtype_to_arg.items(): 
+                if svtype not in svtype_to_arg or svtype not in svtypes: continue
+
+                randomSV_cmd += " --%s %i"%(arg, vars_to_simulate)
+
+            # run the random simulation
+            std_rearranging_genome = "%s/simulation_std.txt"%random_sim_dir
+            #std_rearranging_genome = "stdout"
+            print_if_verbose("getting random SVs. The std is in %s"%std_rearranging_genome)
+            if std_rearranging_genome!="stdout": run_cmd("%s > %s 2>&1"%(randomSV_cmd, std_rearranging_genome))
+            else: run_cmd(randomSV_cmd)
+            remove_file(std_rearranging_genome)
+
+            # edit the insertions 
+            insertions_file = "%s/insertions.tab"%random_sim_dir
+            rewrite_insertions_uniformizedFormat_simulateSV(insertions_file)
+
+        ########################################
+
+        # define the translocations file
+        translocations_file = "%s/translocations.tab"%random_sim_dir
+
+        if file_is_empty(translocations_file) or replace is True:
+
+            ##### CREATE RANDOMLY PLACED TRANSLOCATIONS #####
+            if len(chroms)>1 and "translocations" in svtypes: 
+                print_if_verbose("generating non-overlapping translocations")
+
+                # get a bed with the previous variants' locations
+                InsInvDelTan_bed_df = pd.concat([get_affected_region_bed_for_SVdf("%s/%s.tab"%(random_sim_dir, svtype), svtype, chroms, first_position_idx=1, translocations_type="breakpoint_pos")[0] for svtype in {"insertions", "deletions", "inversions", "tandemDuplications"}.intersection(svtypes)]).sort_values(by=["chromosome", "start", "end"])
+
+                InsInvDelTan_bed = "%s/InsInvDelTan_regions.bed"%genome_outdir
+                InsInvDelTan_bed_df.to_csv(InsInvDelTan_bed, sep="\t", header=False, index=False)
+
+                # get a bed file where to place the randomly chosen 
+                noInsInvDelTan_bed = "%s/noInsInvDelTan_regions.bed"%genome_outdir
+                noInsInvDelTan_bed_stderr = "%s.generating.stderr"%noInsInvDelTan_bed
+                print_if_verbose("the stderr is in %s "%noInsInvDelTan_bed_stderr)
+                run_cmd("%s subtract -a %s -b %s > %s 2>%s"%(bedtools, all_regions_bed, InsInvDelTan_bed, noInsInvDelTan_bed, noInsInvDelTan_bed_stderr))
+                remove_file(noInsInvDelTan_bed_stderr)
+
+                # get the translocations randomly placed
+                get_translocations_randomly_placed_in_target_regions(noInsInvDelTan_bed, translocations_file, chrom_to_len, nvars=nvars*2, only_5_to_3=only_5_to_3_translocations)
+            #################################################
+
+            # write an empty translocations file
+            else: open(translocations_file, "w").write("\t".join(["Name", "ChrA", "StartA", "EndA", "SizeA", "ChrB", "StartB", "EndB", "SizeB", "Balanced", "BpSeqA", "BpSeqB"])) # this needs to be
+
+        # add the simulations into random_svtype_to_svDF
+        for svtype in random_svtype_to_svDF.keys():
+            svDF = random_svtype_to_svDF[svtype]
+
+            # get the new sv
+            new_svDF = pd.read_csv("%s/%s.tab"%(random_sim_dir, svtype), sep="\t")
+            new_svDF = new_svDF[[c for c in new_svDF.keys() if "BpSeq" not in c]]
+
+            # add the name
+            new_svDF["ID"] = new_svDF.Name + "_sim_%s"%type_genome
+
+            # define the merged df
+
+
+            # append 
+            random_svtype_to_svDF[svtype] = svDF.append(new_svDF, sort=True)
+
+
+    ####### test that you can insert the randomly simulated variants into the genome #######
+
+    if check_random_genome_generation is True:
+        print_if_verbose("checking random genome generation")
+
+        # check the consistency of the generated vars. This takes a lot of time
+        #check_consistency_of_svtype_to_svDF(random_svtype_to_svDF, set(chrom_to_len), chrom_to_len)
+
+        # get the outdir
+        outdir_randomVars_rearranging_genome = "%s/randomVars_rearranging_genome"%outdir; make_folder(outdir_randomVars_rearranging_genome)
+
+        # get the rearranged genome
+        generate_rearranged_genome_from_svtype_to_svDF(reference_genome, random_svtype_to_svDF, outdir_randomVars_rearranging_genome, replace=replace)
+
+    ########################################################################################
+
+    return random_svtype_to_svDF
+
+
+      
+def get_distance_to_telomere_series(df_chromosome_position, genome_graph, df_positions_graph):
+
+    """This function takes a df with chromosome and position and returns the distance to the telomere according to the genome graph"""
+
+    print_if_verbose("getting distance to the telomere")
+
+    # rename the df to have chrom and pos
+    df_chromosome_position = df_chromosome_position.rename(columns=dict(zip(df_chromosome_position.columns, ["chromosome", "position"])))
+
+    # add the graph positions
+    df_chromosome_position = df_chromosome_position.merge(df_positions_graph, left_on=["chromosome", "position"], right_on=["chromosome", "real_position"], how="left", validate="one_to_one")
+
+    # define all the positions
+    all_positions = sorted(set(df_chromosome_position.graph_position))
+
+    # define the positions that are ends of chromosomes
+    chrom_end_positions = sorted(set(df_positions_graph[df_positions_graph.is_end_of_chr].graph_position))
+
+    # calculate the distance from each position to the 
+    print_if_verbose("calculating shortest paths in genome graph from %i end positions to %i positions. This may take a lot if there are a lot of end positions"%(len(chrom_end_positions), len(all_positions)))
+    shortestPath_lengths_df = pd.DataFrame(genome_graph.shortest_paths(source=chrom_end_positions, target=all_positions, mode="IN"), columns=all_positions, index=chrom_end_positions)
+    distance_telomere_series = shortestPath_lengths_df.apply(min, axis=0).apply(int)
+    print_if_verbose("distance calculated")
+
+    #distance_telomere_series = pd.Series([1]*len(all_positions), index=all_positions)  # debug
+
+    # reorder so that it fits the input df
+    distance_telomere_series = pd.Series(distance_telomere_series.loc[df_chromosome_position.graph_position])
+    distance_telomere_series.index = df_chromosome_position.index
+
+    # return ordered as in df_chromosome_position
+    return distance_telomere_series
+
+
+#### test how well the finding of SVs in an assembly works ####
+if opt.testSVgen_from_DefaulReads:
+
+    outdir_test_FindSVinAssembly = "%s/test_FindSVfromDefaultSimulations"%opt.outdir
+    if __name__ == '__main__': fun.test_SVgeneration_from_DefaultParms(opt.ref, outdir_test_FindSVinAssembly, sorted_bam, threads=opt.threads, replace=opt.replace, n_simulated_genomes=opt.nsimulations, mitochondrial_chromosome=opt.mitochondrial_chromosome, nvars=opt.nvars)
+
+###############################################################
+
+
+def test_SVgeneration_from_DefaultParms(reference_genome, outdir, sample_sorted_bam, threads=4, replace=False, n_simulated_genomes=2, mitochondrial_chromosome="mito_C_glabrata_CBS138", nvars=100):
+
+    """This function reports how well the finding of SV from reads works from random simulations. Writing under outdir"""
+
+    # define the output
+    precision_and_recall_filename = "%s/precision_and_recall_SVgeneration_from_reads.pdf"%(outdir)
+    allele_frequency_boxplots_filename = "%s/allele_frequency_boxplots_SVgeneration_from_reads.pdf"%(outdir)
+    if file_is_empty(precision_and_recall_filename) or file_is_empty(allele_frequency_boxplots_filename) or replace is True:
+
+        # initialize the start time
+        pipeline_start_time = time.time()
+
+        # prepare files
+        make_folder(outdir)
+
+        print_if_verbose("WORKING ON THE VALIDATION THAT WE CAN FIND READS IN AN ASSEMBLY")
+
+        # initialize a df that will contain the benchmarking
+        all_df_benchmark_longReads = pd.DataFrame()
+
+        # iniialize dicts
+        sampleID_to_svtype_to_file = {}
+        sampleID_to_dfGRIDSS = {}
+
+        # go through each simulation
+        for simID in range(n_simulated_genomes):
+            print_if_verbose("working on simulation %i"%simID)
+
+            # define outdir 
+            outdir_sim = "%s/simulation_%i"%(outdir, simID); make_folder(outdir_sim)
+
+            # generate genome with simulated SVs
+            sim_svtype_to_svfile, rearranged_genome = rearrange_genomes_simulateSV(reference_genome, outdir_sim, replace=replace, nvars=nvars, mitochondrial_chromosome=mitochondrial_chromosome)
+
+            # get the variants by simulating short reads from the genome
+            print_if_verbose("getting SVs from reads")
+
+            # define properties of the run
+            chr_to_len = get_chr_to_len(reference_genome)
+            median_insert_size, median_insert_size_sd  = get_insert_size_distribution(sample_sorted_bam, replace=replace, threads=threads)
+            read_length = get_read_length(sample_sorted_bam, threads=threads, replace=replace)
+            total_nread_pairs = count_number_read_pairs(sample_sorted_bam, replace=replace, threads=threads)
+            expected_coverage_per_bp = int((total_nread_pairs*read_length) / sum(chr_to_len.values())) +  1 
+
+            # define the function that gets coverage from seq properties
+            distToTel_chrom_GC_to_coverage_fn = (lambda x,y,z: expected_coverage_per_bp)
+
+            # get the info of the reference genome with predictions of coverage per window
+            df_genome_info = get_windows_infoDF_with_predictedFromFeatures_coverage(rearranged_genome, distToTel_chrom_GC_to_coverage_fn, expected_coverage_per_bp, replace=replace, threads=threads)
+
+            # simulate reads and align them to the reference genome
+            outdir_simulation_short_reads = "%s/simulation_shortReads"%(outdir_sim); make_folder(outdir_simulation_short_reads)
+            simulated_bam_file = simulate_and_align_PairedReads_perWindow(df_genome_info, rearranged_genome, reference_genome, total_nread_pairs, read_length, outdir_simulation_short_reads, median_insert_size, median_insert_size_sd, replace=replace, threads=threads)
+
+            # call GRIDSS and CLOVE for the simulated reads
+            final_run_dir = "%s/final_run_dir"%(outdir_simulation_short_reads); make_folder(final_run_dir)
+
+            predicted_svtype_to_svfile, df_gridss = run_GridssClove_optimising_parameters(simulated_bam_file, reference_genome, final_run_dir, threads=threads, replace=replace, mitochondrial_chromosome=mitochondrial_chromosome, fast_SVcalling=True)
+
+            # get a df of benchmarking
+            fileprefix = "%s/rearranged_genome_benchmarking_SV"%outdir_sim
+            df_benchmark_longReads = benchmark_processedSVs_against_knownSVs_inHouse(predicted_svtype_to_svfile, sim_svtype_to_svfile, fileprefix, replace=replace)
+
+            # keep
+            df_benchmark_longReads["simID"] = [simID]*len(df_benchmark_longReads)
+            all_df_benchmark_longReads = all_df_benchmark_longReads.append(df_benchmark_longReads)
+
+            # keep the gridss df and files
+            sampleID_to_svtype_to_file[simID] = predicted_svtype_to_svfile
+            sampleID_to_dfGRIDSS[simID] = df_gridss
+ 
+        # plot the benchmarking
+        plot_bars_single_df_benchmark(all_df_benchmark_longReads, precision_and_recall_filename)
+
+        # get the sampleID_to_svtype_to_svDF
+        sampleID_to_svtype_to_svDF = get_sampleID_to_svtype_to_svDF_filtered(sampleID_to_svtype_to_file, sampleID_to_dfGRIDSS)
+
+        # get the boxplots of the allele frequencies
+        plot_boxplots_allele_freqs(sampleID_to_svtype_to_svDF, allele_frequency_boxplots_filename)
+
+        # at the end clean the generation
+        clean_reference_genome_windows_files(reference_genome)
+
+        print_if_verbose("--- the testing of SV generation from an assembly took %s seconds in %i cores ---"%(time.time() - pipeline_start_time, threads))
+
+
+
+
+def plot_bars_single_df_benchmark(df_benchmark, filename):
+
+    """Takes a df_benchmark with different SV types and plots the results into benchmark"""
+
+    palette_dict = {"precision":"black", "recall":"magenta", "Fvalue":"cyan", "FN":"magenta", "FP": "black", "TP":"cyan", "nevents":"gray"}
+
+    # make a long df where you have a "value" field
+    df_long = pd.melt(df_benchmark, id_vars=["svtype"], value_vars=["precision", "recall", "Fvalue", "FN", "FP", "TP", "nevents"])
+
+    # make two subplots, one for each type of data
+    fig = plt.figure(figsize=(5, 7))
+
+    for I, variable_fields in enumerate([["precision", "recall", "Fvalue"], ["FP","FN","TP","nevents"]]):
+
+        # initialize subpplot
+        ax =  plt.subplot(2, 1, I+1)
+
+        # get df and get barplot
+        df = df_long[df_long.variable.isin(variable_fields)]
+        sns.barplot(x="svtype", y="value", data=df, hue="variable", palette=palette_dict)
+
+        # add a line
+        if I==0: 
+            for Y in [0.9, 0.95, 1.0]: plt.axhline(Y, color="gray", linewidth=0.9, linestyle="--")
+
+        # change rotation
+        for label in ax.get_xticklabels(): label.set_rotation(45)
+
+    #plt.show()
+    fig.tight_layout()  # otherwise the right y-label is slightly 
+    fig.savefig(filename, bbox_inches='tight');
+    plt.close(fig)
+
+
+
+
+def plot_boxplots_allele_freqs(sampleID_to_svtype_to_svDF, filename):
+
+    """This function takes a sampleID_to_svtype_to_svDF and draws a boxplot were the x is the svtype and the y is the allele frequency, for different allele frequencies as hue. Different plots are several IDs """
+
+    print_if_verbose("getting boxplot allele frequencies for sampleID_to_svtype_to_svDF")
+
+    sampleID_to_svtype_to_svDF = cp.deepcopy(sampleID_to_svtype_to_svDF)
+
+    # make two subplots, one for each type of data
+    fig = plt.figure(figsize=(10, 4*len(sampleID_to_svtype_to_svDF)))
+
+    # go through each ID
+    for I, (ID, svtype_to_svDF) in enumerate(sampleID_to_svtype_to_svDF.items()):
+
+        # sepparate insertions into copy-paste and cut-paste
+        svDF_insertions = svtype_to_svDF["insertions"]
+        svtype_to_svDF["insertions_copy"] = svDF_insertions[svDF_insertions.Copied]
+        svtype_to_svDF["insertions_cut"] = svDF_insertions[~svDF_insertions.Copied]
+        del svtype_to_svDF["insertions"]
+
+        # initialize subpplot
+        ax =  plt.subplot(len(sampleID_to_svtype_to_svDF), 1, I+1)
+
+        # initialize a df that will contain the allele freqs and the svtype
+        df = pd.DataFrame()
+
+        for svtype, svDF in svtype_to_svDF.items():
+            for afEstimate in ["estimate_AF_min", "estimate_AF_max", "estimate_AF_mean"]:
+
+                df_af = svDF[[afEstimate]].rename(columns={afEstimate:"af"})
+
+                df_af["svtype"] = svtype
+                df_af["af_estimate"] = afEstimate
+
+                df = df.append(df_af, sort=False)
+
+        # get boxplot
+        #bp = sns.boxplot(x="svtype", y="af", data=df, hue="af_estimate", notch=True, boxprops=dict(alpha=.99), linewidth=0.5)
+        jit = sns.swarmplot(x="svtype", y="af", data=df, hue="af_estimate", dodge=True, size=5, edgecolor="black", linewidth=0.5)
+
+        ax.set_title(ID)
+
+        # add hlines
+        for y in [0.25, 0.5, 0.75, 0.9, 1]: plt.axhline(y, color="k", linewidth=.2, linestyle="--")
+
+    # get figure
+    fig.tight_layout() 
+    fig.savefig(filename, bbox_inches='tight');
+    plt.close(fig)
+
+def get_compatible_real_bedpe_breakpoints_old_realSVfiles(close_shortReads_table, reference_genome, outdir, replace=False, threads=4, max_nvars=100, mitochondrial_chromosome="mito_C_glabrata_CBS138", job_array_mode="local", max_ncores_queue=768, time_perSVade_running="48:00:00", queue_jobs="bsc_ls", name_job_array="getRealSVs"):
+
+    """This function generates a dict of svtype to the file for SVs that are compatible and ready to insert into the reference_genome. All the files are written into outdir. Only a set of 'high-confidence' SVs are reported, which are those that, for each sampleID inclose_shortReads_table, have a reasonable minimum allele frequency and all breakpoints with 'PASS' and are found in all the genomes of the same sampleID.
+
+    At the end, this pipeline reports a set of compatible SVs, that are ready to insert into RSVsim (so that the coordinates are 1-based). 
+
+    Rememeber that this will not include 'remaining' events, as these can't be inserted 
+    
+    max_nvars is the maximum number of variants of each type that will be generated
+    """
+
+    # initialize the start time
+    pipeline_start_time = time.time()
+
+    # get all the high-confidence real variants
+    ID_to_svtype_to_svDF = get_ID_to_svtype_to_svDF_for_setOfGenomes_highConfidence(close_shortReads_table, reference_genome, outdir, replace=replace, threads=threads, mitochondrial_chromosome=mitochondrial_chromosome, job_array_mode=job_array_mode, max_ncores_queue=max_ncores_queue, time_perSVade_running=time_perSVade_running, queue_jobs=queue_jobs, max_nvars=max_nvars, name_job_array=name_job_array)
+
+    # define the df with the realVars info
+    all_realVars_dir = "%s/all_realVars"%(outdir)
+
+    ########## GET THE FILES OF COMPATIBLE SVs ##########
+
+    # create a folder where to write the high-confidence vars
+    highConfidenceVars_perGenome_dir = "%s/highConfidenceVars_perGenome"%all_realVars_dir
+    make_folder(highConfidenceVars_perGenome_dir)
+
+    # create a folder where you have the set of compatible vars
+    SVs_compatible_to_insert_dir = "%s/SVs_compatible_to_insert"%outdir; make_folder(SVs_compatible_to_insert_dir)
+
+    # initialize the dict that will contain the final files
+    compatible_real_svtype_to_file = {}
+
+    # initialize a bed_df with all the regions
+    df_bed_allRegions = pd.DataFrame()
+
+    # define all chromosomes as interesting
+    all_chromosomes = {seq.id for seq in SeqIO.parse(reference_genome, "fasta")}
+
+    # go through each svtype
+    all_svtypes = set.union(*[set(x.keys()) for x in ID_to_svtype_to_svDF.values()]).difference({"remaining"})
+    all_svtypes = [s for s in ["insertions", "translocations", "inversions", "tandemDuplications", "deletions"] if s in all_svtypes]
+
+    # map each chromosome to the len
+    chr_to_len = {seq.id: len(seq.seq) for seq in SeqIO.parse(reference_genome, "fasta")}
+
+    # inialize a file that will contain the number of each real SV
+    nSVs_statistics_filecontent = "svtype\tnSVs\n" 
+
+    for svtype in all_svtypes:
+        outfile_compatible_SVs = "%s/%s.tab"%(SVs_compatible_to_insert_dir, svtype)
+
+        if file_is_empty(outfile_compatible_SVs) or replace is True:
+        #if True:
+
+            # initalize a df with all the compatible svDFs
+            compatible_svDF = pd.DataFrame(columns=svtype_to_fieldsDict[svtype]["all_fields"])
+
+            # go through each ID
+            print_if_verbose("getting %s"%svtype)
+            for ID in ID_to_svtype_to_svDF.keys():
+                print_if_verbose(ID)
+
+                # debug empty dfs
+                if svtype not in ID_to_svtype_to_svDF[ID] or len(ID_to_svtype_to_svDF[ID][svtype])==0: continue
+
+                svDF = ID_to_svtype_to_svDF[ID][svtype].set_index("uniqueID", drop=False).iloc[0:max_nvars]
+
+                # write the svDF to the high-confidence dir
+                sampleDir = "%s/%s"%(highConfidenceVars_perGenome_dir, ID); make_folder(sampleDir)
+                svDF.to_csv("%s/%s.tab"%(sampleDir, svtype), sep="\t", header=True, index=False)
+
+                # go though each variant
+                for varID, sv_series in svDF.iterrows():
+
+                    # define series as df
+                    sv_series_df = pd.DataFrame({0 : sv_series}).transpose()
+
+                    # get the bed of this var (for translocations only consider the positions)
+                    sv_bed, nSVs = get_affected_region_bed_for_SVdf(sv_series_df, svtype, all_chromosomes, translocations_type="breakpoint_pos", chr_to_len=chr_to_len)
+
+                    # get if there is any overlap with df_bed_allRegions
+                    regions_overlapping = df_bed_allRegions.apply(lambda rprevious: any(sv_bed.apply(lambda rnew: get_is_overlapping_query_vs_target_region(rprevious, rnew), axis=1)), axis=1)
+
+                    # if there is any region matching with the previous, continue, if not, keep
+                    if any(regions_overlapping): continue
+                    else:
+
+                        # add the bed to the regions matching
+                        df_bed_allRegions = df_bed_allRegions.append(sv_bed, sort=True)
+
+                        # add to the compatible SVs
+                        compatible_svDF = compatible_svDF.append(sv_series_df, sort=True)
+
+
+            if len(compatible_svDF)>0:
+
+                # get only the important fields
+                compatible_svDF = compatible_svDF[svtype_to_fieldsDict[svtype]["all_fields"]]
+                compatible_svDF.index = list(range(len(compatible_svDF)))
+
+                # define the maping between the position field and the chromosome field
+                posF_to_chrF = svtype_to_fieldsDict[svtype]["positionField_to_chromosome"]
+
+                # add +1 to all the positions (this is because RSVSim requires 1-based positions), also that the last position of the chromosome is not exceeded
+                for f in svtype_to_fieldsDict[svtype]["position_fields"]: compatible_svDF[f] = compatible_svDF.apply(lambda r: set_position_to_max(add1_unless_it_is_minus1(r[f]), chr_to_len[r[posF_to_chrF[f]]]), axis=1)
+
+
+                # if this number exceeds the number of variants it will chop the df
+                if len(compatible_svDF)>max_nvars: compatible_svDF = compatible_svDF.iloc[0:max_nvars]
+
+            # write the compatible svDF into the final set of vars
+            compatible_svDF.to_csv(outfile_compatible_SVs, sep="\t", header=True, index=False)
+
+        # keep 
+        compatible_real_svtype_to_file[svtype] = outfile_compatible_SVs
+
+        # write the number
+        nVars = len(pd.read_csv(outfile_compatible_SVs, sep="\t"))
+        print_if_verbose("Defining %i compatible %s"%(nVars, svtype))
+        nSVs_statistics_filecontent += "%s\t%i\n"%(svtype, nVars)
+
+    # write the statistics file
+    open("%s/number_SVs.tab"%SVs_compatible_to_insert_dir, "w").write(nSVs_statistics_filecontent)
+
+
+    #####################################################
+
+    print_if_verbose("--- the generation of real SVs took %s seconds in %i cores ---"%(time.time() - pipeline_start_time, threads))
+
+    return compatible_real_svtype_to_file
+
+
+
+def get_coverage_list_relative_to_predictedFromTelomereAndGCcontent(df_cov, genome, distToTel_chrom_GC_to_coverage_fn, genome_graph, df_positions_graph, outdir, real_coverage_field="mediancov_1", replace=False):
+
+    """This function takes a df with coverage for some windows of the genome and coverage. The returned list is in the same order as the df_cov"""
+
+
+    print_if_verbose("getting coverage relative to the one predicted from seq features")
+
+    # make the outdir
+    make_folder(outdir)
+
+    # rename the training df and copy
+    df = cp.deepcopy(df_cov.rename(columns={"#chrom":"chromosome", real_coverage_field:"coverage"}))
+    df.index = list(range(len(df)))
+    initial_index = list(df.index)
+
+    # add the distance to the telomere
+    df_with_distance_to_telomere_file = "%s/df_with_distance_to_telomere_file.py"%outdir
+    if file_is_empty(df_with_distance_to_telomere_file) or replace is True:
+
+        df["middle_position"] = (df.start + (df.end - df.start)/2).apply(int)
+        df["distance_to_telomere"] = get_distance_to_telomere_series(df[["chromosome", "middle_position"]], genome_graph, df_positions_graph)
+
+        save_object(df, df_with_distance_to_telomere_file)
+
+    else: df = load_object(df_with_distance_to_telomere_file)
+
+    # add the gc content
+    gcontent_outfile = "%s/GCcontent.py"%outdir
+    df = get_df_with_GCcontent(df, genome, gcontent_outfile, replace=replace)
+
+    # predict genome from the sequence features 
+    df["cov_predicted_from_features"] = df.apply(lambda r: distToTel_chrom_GC_to_coverage_fn(r["distance_to_telomere"], r["chromosome"], r["GCcontent"]), axis=1)
+
+    # get the relative to the 
+    df["cov_rel_to_predFromFeats"] = df.coverage/df.cov_predicted_from_features
+    if any(pd.isna(df["cov_rel_to_predFromFeats"])): raise ValueError("There was a problem with the prediction from features")
+
+    # get the final list
+    final_list = list(df.loc[initial_index, "cov_rel_to_predFromFeats"])
+
+    return final_list
+

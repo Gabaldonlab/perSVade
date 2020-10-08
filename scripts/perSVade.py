@@ -62,9 +62,12 @@ parser.add_argument("--n_close_samples", dest="n_close_samples", default=5, type
 
 parser.add_argument("--nruns_per_sample", dest="nruns_per_sample", default=3, type=int, help="Number of runs to download for each sample in the case that --target_taxID is specified. ")
 
-parser.add_argument("--SVs_compatible_to_insert_dir", dest="SVs_compatible_to_insert_dir", type=str, default=None, help="A directory with one file for each SV that can be inserted into the reference genome in simulations. It may be created with --close_shortReads_table. If both --SVs_compatible_to_insert_dir and --close_shortReads_table are provided, --SVs_compatible_to_insert_dir will be used, and --close_shortReads_table will have no effect. If none of them are provided, this pipeline will base the parameter optimization on randomly inserted SVs (the default behavior). The coordinates have to be 1-based, as they are ready to insert into RSVsim.")
+parser.add_argument("--real_bedpe_breakpoints", dest="real_bedpe_breakpoints", type=str, default=None, help="A file with the list of 'real' breakpoints arround which to insert the SVs in simulations. It may be created with --close_shortReads_table. If both --real_bedpe_breakpoints and --close_shortReads_table are provided, --real_bedpe_breakpoints will be used, and --close_shortReads_table will have no effect. If none of them are provided, this pipeline will base the parameter optimization on randomly inserted SVs (the default behavior). The coordinates have to be 1-based, as they are ready to insert into RSVsim.")
 
-parser.add_argument("--fast_SVcalling", dest="fast_SVcalling", action="store_true", default=False, help="Run SV calling with a default set of parameters. There will not be any optimisation nor reporting of accuracy. This is expected to work almost as fast as gridss and clove together.")
+parser.add_argument("--parameters_json_file", dest="parameters_json_file", type=str, default=None, help="A file with the json parameters to use. This only has effect if --fast_SVcalling is specified")
+
+
+parser.add_argument("--fast_SVcalling", dest="fast_SVcalling", action="store_true", default=False, help="Run SV calling with a default set of parameters. There will not be any optimisation nor reporting of accuracy. This is expected to work almost as fast as gridss and clove together. If --parameters_json_file, the parameters are substituted by the json parameters.")
 
 # pipeline skipping options 
 parser.add_argument("--skip_SVcalling", dest="skip_SVcalling", action="store_true", default=False, help="Do not run SV calling.")
@@ -79,7 +82,7 @@ parser.add_argument("--StopAfter_genomeObtention", dest="StopAfter_genomeObtenti
 parser.add_argument("--StopAfter_bamFileObtention", dest="StopAfter_bamFileObtention", action="store_true", default=False, help="Stop after obtaining the BAM file of aligned reads.")
 parser.add_argument("--StopAfterPrefecth_of_reads", dest="StopAfterPrefecth_of_reads", action="store_true", default=False, help="Stop after obtaining the prefetched .srr file in case close_shortReads_table is 'auto'")
 parser.add_argument("--StopAfterPrefecth_of_reads_goldenSet", dest="StopAfterPrefecth_of_reads_goldenSet", action="store_true", default=False, help="Stop after obtaining the prefetched .srr file in case --goldenSet_dir is specified.")
-parser.add_argument("--StopAfter_obtentionOFcloseSVs", dest="StopAfter_obtentionOFcloseSVs", action="store_true", default=False, help="Stop after obtaining the SVs_compatible_to_insert_dir ")
+parser.add_argument("--StopAfter_obtentionOFcloseSVs", dest="StopAfter_obtentionOFcloseSVs", action="store_true", default=False, help="Stop after obtaining the real_bedpe_breakpoints ")
 parser.add_argument("--StopAfter_repeatsObtention", dest="StopAfter_repeatsObtention", action="store_true", default=False, help="Stop after obtaining  the repeats table")
 
 parser.add_argument("--StopAfter_testAccuracy_perSVadeRunning", dest="StopAfter_testAccuracy_perSVadeRunning", action="store_true", default=False, help="When --testAccuracy is specified, the pipeline will stop after the running of perSVade on all the inputs of --close_shortReads_table with the different configurations.")
@@ -248,6 +251,17 @@ print("using a window length of %i"%fun.window_l)
 # define the verbosity. If opt.verbose is False, none of the 'print' statements of sv_functions will have an effect
 fun.printing_verbose_mode = opt.verbose
 
+# change the default parameters if specified
+if opt.parameters_json_file is not None:
+
+	gridss_blacklisted_regions, gridss_maxcoverage, gridss_filters_dict, max_rel_coverage_to_consider_del, min_rel_coverage_to_consider_dup = fun.get_parameters_from_json(opt.parameters_json_file)
+
+	fun.default_filtersDict_gridss = gridss_filters_dict
+	fun.default_gridss_blacklisted_regions = gridss_blacklisted_regions
+	fun.default_gridss_maxcoverage = gridss_maxcoverage
+	fun.default_max_rel_coverage_to_consider_del = max_rel_coverage_to_consider_del
+	fun.default_min_rel_coverage_to_consider_dup = min_rel_coverage_to_consider_dup
+
 # get the repeats table
 print("getting repeats")
 repeats_df, repeats_table_file = fun.get_repeat_maskerDF(opt.ref, threads=opt.threads, replace=opt.replace)
@@ -360,22 +374,13 @@ if opt.StopAfter_bamFileObtention is True:
 ##### STRUCTURAL VARIATION ##########
 #####################################
 
-#### test how well the finding of SVs in an assembly works ####
-if opt.testSVgen_from_DefaulReads:
-
-    outdir_test_FindSVinAssembly = "%s/test_FindSVfromDefaultSimulations"%opt.outdir
-    if __name__ == '__main__': fun.test_SVgeneration_from_DefaultParms(opt.ref, outdir_test_FindSVinAssembly, sorted_bam, threads=opt.threads, replace=opt.replace, n_simulated_genomes=opt.nsimulations, mitochondrial_chromosome=opt.mitochondrial_chromosome, nvars=opt.nvars)
-
-###############################################################
 
 ##### find a dict that maps each svtype to a file with a set of real SVs (real_svtype_to_file) #####
 all_svs = {'translocations', 'insertions', 'deletions', 'inversions', 'tandemDuplications'}
 
-if opt.SVs_compatible_to_insert_dir is not None and opt.fast_SVcalling is False: 
-    print("using the set of real variants from %s"%opt.SVs_compatible_to_insert_dir)
-
-    # if it is already predefined
-    real_svtype_to_file = {svtype : "%s/%s.tab"%(opt.SVs_compatible_to_insert_dir, svtype) for svtype in all_svs if not fun.file_is_empty("%s/%s.tab"%(opt.SVs_compatible_to_insert_dir, svtype))}
+if opt.real_bedpe_breakpoints is not None and opt.fast_SVcalling is False: 
+    print("using the set of real variants from %s"%opt.real_bedpe_breakpoints)
+    real_bedpe_breakpoints = opt.real_bedpe_breakpoints
 
 elif opt.fast_SVcalling is False and opt.close_shortReads_table is not None:
     
@@ -411,16 +416,15 @@ elif opt.fast_SVcalling is False and opt.close_shortReads_table is not None:
         sys.exit(0) 
 
     # get the real SVs
-    real_svtype_to_file = fun.get_compatible_real_svtype_to_file(opt.close_shortReads_table, opt.ref, outdir_finding_realVars, replace=opt.replace, threads=opt.threads, max_nvars=opt.nvars, mitochondrial_chromosome=opt.mitochondrial_chromosome, job_array_mode=opt.job_array_mode, max_ncores_queue=opt.max_ncores_queue, time_perSVade_running=opt.time_perSVade_running, queue_jobs=opt.queue_jobs)
+    real_bedpe_breakpoints = fun.get_compatible_real_bedpe_breakpoints(opt.close_shortReads_table, opt.ref, outdir_finding_realVars, replace=opt.replace, threads=opt.threads, max_nvars=opt.nvars, mitochondrial_chromosome=opt.mitochondrial_chromosome, job_array_mode=opt.job_array_mode, max_ncores_queue=opt.max_ncores_queue, time_perSVade_running=opt.time_perSVade_running, queue_jobs=opt.queue_jobs)
 
-    # redefine the SVs_compatible_to_insert_dir
-    opt.SVs_compatible_to_insert_dir = "%s/SVs_compatible_to_insert"%outdir_finding_realVars
+    kjhdakdahkghkgda
 
 else: 
     print("Avoiding the simulation of real variants. Only inserting randomSV.")
 
     # define the set of vars as empty. This will trigger the random generation of vars
-    real_svtype_to_file = {}
+    real_bedpe_breakpoints = None
 
 
 if opt.StopAfter_obtentionOFcloseSVs: 
@@ -453,7 +457,7 @@ if opt.goldenSet_dir is not None:
 if opt.skip_SVcalling is False and not any([x=="skip" for x in {opt.fastq1, opt.fastq2}]):
 
     SVdetection_outdir = "%s/SVdetection_output"%opt.outdir
-    fun.run_GridssClove_optimising_parameters(sorted_bam, opt.ref, SVdetection_outdir, threads=opt.threads, replace=opt.replace, n_simulated_genomes=opt.nsimulations, mitochondrial_chromosome=opt.mitochondrial_chromosome, simulation_ploidies=simulation_ploidies, range_filtering_benchmark=opt.range_filtering_benchmark, nvars=opt.nvars, fast_SVcalling=opt.fast_SVcalling, real_svtype_to_file=real_svtype_to_file)
+    fun.run_GridssClove_optimising_parameters(sorted_bam, opt.ref, SVdetection_outdir, threads=opt.threads, replace=opt.replace, n_simulated_genomes=opt.nsimulations, mitochondrial_chromosome=opt.mitochondrial_chromosome, simulation_ploidies=simulation_ploidies, range_filtering_benchmark=opt.range_filtering_benchmark, nvars=opt.nvars, fast_SVcalling=opt.fast_SVcalling, real_bedpe_breakpoints=real_bedpe_breakpoints)
 
 
 print("structural variation analysis with perSVade finished")
