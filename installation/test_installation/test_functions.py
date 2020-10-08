@@ -5,6 +5,7 @@
 # module imports
 import sys
 import os
+import traceback
 
 # get the cwd were all the scripts are 
 test_dir = "/".join(__file__.split("/")[0:-1]); sys.path.insert(0, test_dir)
@@ -23,7 +24,7 @@ import sv_functions as fun
 import multiprocessing as multiproc
 
 # change the verbosity
-fun.printing_verbose_mode = False
+fun.printing_verbose_mode = True
 
 # define the threads
 threads = multiproc.cpu_count()
@@ -218,6 +219,10 @@ def test_smallVarCall_CNV_running(sorted_bam, outdir, ref_genome, gff, threads=t
     print("small variant calling and CNV of genes works")
 
 
+
+
+
+
 def test_SRAdb_query_downloading_and_readTrimming(outdir, reference_genome, target_taxID, replace=False, threads=threads):
 
     """This function runs get_close_shortReads_table_close_to_taxID for the MERS coronavirus and taking the lowest coverage reads. This tests that sra tools, entrez tools, trimmomatic and fastqc work well.
@@ -234,10 +239,8 @@ def test_SRAdb_query_downloading_and_readTrimming(outdir, reference_genome, targ
     ploidy=1
 
     try:
-
         # run with 'get_lowest_coverage_possible=True', which will take the lowest coverage datasets
         close_shortReads_table = fun.get_close_shortReads_table_close_to_taxID(target_taxID, reference_genome, outdir, ploidy, n_close_samples=2, nruns_per_sample=1, replace=replace, threads=threads, min_fraction_reads_mapped=0.0, coverage_subset_reads=0.1, min_coverage=5, job_array_mode="local", StopAfter_sampleIndexingFromSRA=False, queue_jobs="debug", max_ncores_queue=768, time_read_obtention="02:00:00", StopAfterPrefecth_of_reads=False, get_lowest_coverage_possible=True)
-
 
         # check
         df_close_shortReads_table = fun.pd.read_csv(close_shortReads_table, sep="\t")
@@ -246,10 +249,17 @@ def test_SRAdb_query_downloading_and_readTrimming(outdir, reference_genome, targ
 
         print("The system to query the SRA database, dowload and trim reads works")
 
-    except:
+    except Exception as err:
+
 
         print("\n\n---\nWARNING: The connection to SRA did not work. This means that the automated obtention of reads of close species for benchmarking (involving the arguments --target_taxID, --n_close_samples, --nruns_per_sample or --goldenSet_dir) may fail. You can download the reads on your own and provide them with --close_shortReads_table. This can be also due to network problems at this moment. \n---\n\n")
-        
+
+        print("---\nThis is the error:")
+
+        traceback.print_tb(err.__traceback__)
+        print(err)
+        print("---\n")
+
 def test_rearranging_genome_random(ref_genome, replace=False, threads=threads, mitochondrial_chromosome="mito_C_glabrata_CBS138", nvars=5):
 
 
@@ -259,8 +269,7 @@ def test_rearranging_genome_random(ref_genome, replace=False, threads=threads, m
     # define the outdir
     outdir = "%s.testing_rearranged_genome_generation"%(ref_genome); fun.make_folder(outdir)
 
-    sim_svtype_to_svfile, rearranged_genome = fun.rearrange_genomes_simulateSV(ref_genome, outdir, replace=replace, nvars=nvars, mitochondrial_chromosome=mitochondrial_chromosome)
-
+    sim_svtype_to_svfile, rearranged_genome = fun.simulate_SVs_in_genome(ref_genome, mitochondrial_chromosome, outdir, nvars=nvars, bedpe_breakpoints=None, replace=replace)
 
     print("The generation of a genome with randomly-inserted SVs works")
 
@@ -287,9 +296,13 @@ def test_parameter_optimisation_perSVade(sorted_bam, reference_genome, outdir, t
 
     """This pipeline will test the parameter optimisation features of perSVade into outdir. It is expected to work for C.glabrata"""
 
-    cmd = "%s -r %s -thr %i -o %s -sbam %s --nvars 5 --simulation_ploidies haploid,diploid_hetero --range_filtering_benchmark theoretically_meaningful -mchr mito_C_glabrata_CBS138"%(fun.perSVade_py, reference_genome, threads, outdir, sorted_bam)
+    if fun.file_is_empty("%s/perSVade_finished_file.txt"%outdir):
 
-    fun.run_cmd(cmd)
+        cmd = "%s -r %s -thr %i -o %s -sbam %s --nvars 5 --simulation_ploidies haploid,diploid_hetero --range_filtering_benchmark theoretically_meaningful -mchr mito_C_glabrata_CBS138 --min_chromosome_len 100 "%(fun.perSVade_py, reference_genome, threads, outdir, sorted_bam)
+
+        if fun.printing_verbose_mode is True: cmd += " --verbose"
+
+        fun.run_cmd(cmd)
 
     print("parameter optimisation worked successfully")
 
@@ -310,11 +323,15 @@ def test_greasy():
 
         print("greasy can be used for running parallel perSVade jobs")
 
-    except:
+    except Exception as err:
 
         print("\n\n---\nWARNING: greasy is not installed properly in your system. This means that setting '--job_array_mode greasy' will fail. You can set '--job_array_mode local' and run jobs sequentially and not in parallel. '--job_array_mode greasy' will only work on machines that use SLURM for managing jobs and greasy installed (and callable with a command like 'module load greasy && greasy <jobs_file>', and '<jobs_file>' is a file where each line corresponds to a command to be executed in a sepparate SLURM job) \n---\n\n")
 
 
+        print("---\nThis is the error:")
 
+        traceback.print_tb(err.__traceback__)
+        print(err)
+        print("---\n")
 
 
