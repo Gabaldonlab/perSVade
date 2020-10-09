@@ -538,8 +538,6 @@ def get_chr_to_len(genome, replace=False):
 def get_uniqueVals_df(df): return set.union(*[set(df[col]) for col in df.columns])
 
 
-
-
 def get_date():
 
     """Gets the date of today"""
@@ -912,9 +910,6 @@ def get_affected_region_bed_for_SVdf(svDF, svtype, interesting_chromosomes, add_
                 # add the end only with the start
                 chrB_df = svDF.rename(columns={"ChrB":"chromosome", "StartB":"start", "EndB":"end"})
                 affected_region_bed_df = affected_region_bed_df.append(chrB_df[["chromosome", "start", "end"]], sort=True)
-
-
-
 
         elif svtype=="translocations":
 
@@ -1859,9 +1854,12 @@ def get_affected_positions_bed_row(r):
 
     """TAkes a bed row and returns the affected positions as a set of chrom_pos"""
 
-    positions = range(int(r["start"]), int(r["end"]))
+    # get the positions as a series
+    positions_range = range(int(r["start"]), int(r["end"]))
+    index = range(0, len(positions_range))
+    positions = "%s_"%r["chromosome"] + pd.Series(positions_range, index=index).apply(str)
 
-    return set(map(lambda pos: "%s_%i"%(r["chromosome"], pos), positions))
+    return set(positions)
 
 def get_affected_positions_from_bed_df(bed_df):
 
@@ -1896,7 +1894,36 @@ def get_length_bedpe_r(r):
 
     else: return np.nan
 
-def get_SVs_arround_breakpoints(genome_file, df_bedpe, nvars, outdir, svtypes, replace=False):
+def get_df_bedpe_with_nonOverlappingBreakpoints(df_bedpe):
+
+    """Gets a df_bedpe that has affected_positions_arroundBp and returns the set of breakpoints that are not overlapping"""
+
+    # check that the indices are unique
+    if len(df_bedpe)!=len(set(df_bedpe.index)): raise ValueError("indices should be unique")
+
+    # initialize the correct indices
+    coorect_indices = set()
+
+    # initialize the already affected positions
+    already_affected_positions = set()
+
+    # go through each breakpoint
+    for I in df_bedpe.index:
+
+        positons = df_bedpe.loc[I, "affected_positions_arroundBp"]
+
+        # if the positions overlap with previous breakpoints, skip
+        if positons.intersection(already_affected_positions)!=set(): continue
+
+        #keep 
+        already_affected_positions.update(positons)
+        coorect_indices.add(I)
+
+    df_bedpe = df_bedpe.loc[coorect_indices]
+
+    return df_bedpe
+
+def get_SVs_arround_breakpoints(genome_file, df_bedpe, nvars, outdir, svtypes, replace=False, max_ninsertions=100):
 
     """This function takes a df bedpe and defines svtypes arround these breakpoints. interchromosomal breakpoints will be equally distributed to """
 
@@ -1908,6 +1935,10 @@ def get_SVs_arround_breakpoints(genome_file, df_bedpe, nvars, outdir, svtypes, r
     if any([file_is_empty(f) for f in expected_files]) or replace is True:
         print_if_verbose("calculating random variants among the provided breakpoints")
 
+
+        # initialize a dict with each svtype and the current number of locations, a
+        svtype_to_svDF = {svtype : pd.DataFrame(columns=[x for x in svtype_to_fieldsDict[svtype]["all_fields"] if x!="ID"]) for svtype in svtypes}
+
         # deifine the genome len
         chrom_to_len = get_chr_to_len(genome_file)
 
@@ -1918,149 +1949,155 @@ def get_SVs_arround_breakpoints(genome_file, df_bedpe, nvars, outdir, svtypes, r
         df_bedpe = df_bedpe[(df_bedpe.chrom1.isin(chroms)) & (df_bedpe.chrom2.isin(chroms))].sample(frac=1)
         df_bedpe.index = list(range(0, len(df_bedpe)))
 
-        # define the interval to add for overlaps
-        add_interval_bp = 100
+        # set the max_n_breakpoints, 
+        max_n_breakpoints = nvars*30
+        if len(df_bedpe)>max_n_breakpoints: 
+    
+            """
+            # setting half of them to be interchromosomal
+            half_max_n_breakpoints = int(max_n_breakpoints/2)
 
-        # add things
-        df_bedpe["affected_positions_arroundBp"] = df_bedpe.apply(lambda r: get_affected_positions_from_bedpe_r(r, extra_bp=add_interval_bp), axis=1)
-        df_bedpe["medium1"] = (df_bedpe.start1 + (df_bedpe.end1 - df_bedpe.start1)/2).apply(int)
-        df_bedpe["medium2"] = (df_bedpe.start2 + (df_bedpe.end2 - df_bedpe.start2)/2).apply(int)
-        df_bedpe["length"] = df_bedpe.apply(get_length_bedpe_r, axis=1)
+            df_bedpe["is_interchromosomal_bp"] = df_bedpe.chrom1!=df_bedpe.chrom2
+            df_bedpe_same_chrom = df_bedpe[~(df_bedpe.is_interchromosomal_bp)].iloc[0:half_max_n_breakpoints]
+            df_bedpe_dif_chrom =  df_bedpe[df_bedpe.is_interchromosomal_bp].iloc[0:half_max_n_breakpoints]
 
-        # define the legths of the variants
-        lengths_SVs = list(df_bedpe[(~pd.isna(df_bedpe.length)) & (df_bedpe.length>=50)].length)
-        random.shuffle(lengths_SVs)
+            df_bedpe = df_bedpe_dif_chrom.append(df_bedpe_same_chrom)
+            df_bedpe.index = list(range(0, len(df_bedpe)))
+            """
 
-        # already_affected_positions contains a set of "chrom_pos" with the already affected positions. It will be updated with each new variant
-        already_affected_positions = set()
+            df_bedpe = df_bedpe.iloc[0:max_n_breakpoints]
 
-        ############ DEFINE THE RANDOM SVs INVOLVING df_bedpe ############
+        if len(df_bedpe)>0:
 
-        # initialize a dict with each svtype and the current number of locations, a
-        svtype_to_svDF = {svtype : pd.DataFrame(columns=[x for x in svtype_to_fieldsDict[svtype]["all_fields"] if x!="ID"]) for svtype in svtypes}
+            # define the interval to add for overlaps
+            add_interval_bp = 100
 
-        # initialize a set of the svtypes that are already full, meaning that they already have nvars
-        already_nvars_svtypes = set()
+            # add things
+            df_bedpe["affected_positions_arroundBp"] = df_bedpe.apply(lambda r: get_affected_positions_from_bedpe_r(r, extra_bp=add_interval_bp), axis=1)
+            df_bedpe["medium1"] = (df_bedpe.start1 + (df_bedpe.end1 - df_bedpe.start1)/2).apply(int)
+            df_bedpe["medium2"] = (df_bedpe.start2 + (df_bedpe.end2 - df_bedpe.start2)/2).apply(int)
+            df_bedpe["length"] = df_bedpe.apply(get_length_bedpe_r, axis=1)
 
-        # initialize a set that will contain the bad bedpe rows
-        bpID_to_tried_svtypes = {bpID : set() for bpID in df_bedpe.index}
+            # get breakpoints that are above 50 bp
+            df_bedpe = df_bedpe[(df_bedpe.length>=50) | (pd.isna(df_bedpe.length))]
 
-        # define the number of breakpoints traversed
-        original_n_breakpoints = len(df_bedpe)
+            # keep breakpoints that are non overlapping by add_interval_bp
+            print_if_verbose("getting non redundant breakpoints out of %i of them"%len(df_bedpe))
+            df_bedpe = get_df_bedpe_with_nonOverlappingBreakpoints(df_bedpe)
 
-        # sort the bedpe so that interchromosomal events are first
-        df_bedpe["order_by_chrom"] =  df_bedpe.apply(lambda r: {True:10, False:1}[r["chrom1"]==r["chrom2"]], axis=1)
+            # define the legths of the variants
+            lengths_SVs = list(df_bedpe[(~pd.isna(df_bedpe.length)) & (df_bedpe.length>=50)].length)
+            random.shuffle(lengths_SVs)
 
-        # go through each breakpoint and assign it to a cahegory. Break if a
-        while len(df_bedpe)>0:
-            print_if_verbose("already traversed %i/%i breakpoints"%(original_n_breakpoints - len(df_bedpe), original_n_breakpoints))
+            # already_affected_positions contains a set of "chrom_pos" with the already affected positions. It will be updated with each new variant
+            already_affected_positions = set()
 
-            # get the sorted svtypes
-            sorted_svtypes = [x for x in ["translocations", "tandemDuplications", "deletions", "inversions", "insertions"] if x in svtypes]
+            ############ DEFINE THE RANDOM SVs INVOLVING df_bedpe ############
 
-            # interate through each svtype
-            for svtype in sorted_svtypes:
-                svDF = svtype_to_svDF[svtype]
+            # initialize a set of the svtypes that are already full, meaning that they already have nvars
+            already_nvars_svtypes = set()
 
-                # if there are already nvars, skip
-                if len(svDF)>=nvars:
-                    already_nvars_svtypes.add(svtype)
-                    continue
+            # initialize a set that will contain the bad bedpe rows
+            bpID_to_tried_svtypes = {bpID : set() for bpID in df_bedpe.index}
 
-                # get only bedpe rows that are not overlapping the current positions, in terms of breakpoints
-                df_bedpe = df_bedpe[(df_bedpe.affected_positions_arroundBp.apply(lambda positions: positions.intersection(already_affected_positions)).apply(len))==0]
+            # define the number of breakpoints traversed
+            original_n_breakpoints = cp.deepcopy(len(df_bedpe))
 
-                # get only bedpe rows that have not already been tried to assign to all svtypes
-                good_bpIDs = {bpID for bpID, tried_svtypes in bpID_to_tried_svtypes.items() if tried_svtypes!=svtypes}.intersection(set(df_bedpe.index))
-                df_bedpe = df_bedpe.loc[good_bpIDs]
+            # sort the bedpe so that interchromosomal events are first
+            df_bedpe["order_by_chrom"] =  df_bedpe.apply(lambda r: {True:10, False:1}[r["chrom1"]==r["chrom2"]], axis=1)
 
-                # if empty, continue
-                if len(df_bedpe)==0: continue
+            print("There are %i/%i interchromosomal breakpoints"%(sum(df_bedpe.order_by_chrom==1), len(df_bedpe)))
 
-                # get the first bedpe row. Sorting in a way that the interchromosomal events will happen always first. This is to prioritize translocations
-                df_bedpe = df_bedpe.sort_values(by="order_by_chrom")
-                r = df_bedpe.iloc[0]
+            # go through each breakpoint and assign it to a cahegory. Break if a
+            while len(df_bedpe)>0:
+                print_if_verbose("already traversed %i/%i breakpoints. There are %i affected positions"%(original_n_breakpoints - len(df_bedpe), original_n_breakpoints, len(already_affected_positions)))
 
-                # record that this was already tried
-                bpID_to_tried_svtypes[r.name].add(svtype)
+                # get the sorted svtypes
+                sorted_svtypes = [x for x in ["translocations", "tandemDuplications", "deletions", "inversions", "insertions"] if x in svtypes]
 
-                # assign the breakpoint to the df_sv_r
-                if svtype in {"inversions", "tandemDuplications", "deletions", "translocations"}:
+                # print the current numbers
+                for svtype in sorted_svtypes: print_if_verbose("%i/%i %s defined"%(len(svtype_to_svDF[svtype]), nvars, svtype))
 
-                    # it should be in the same chromosome unless they are translocations
-                    if r["chrom1"]!=r["chrom2"] and svtype!="translocations": continue
-                    if r["chrom1"]==r["chrom2"] and svtype=="translocations": continue
+                # if you already found all the interchromosomal events, keep only df_breakpoints among the same chromosome
+                if already_nvars_svtypes==(svtypes.intersection({"translocations", "insertions"})):
+                    df_bedpe = df_bedpe[df_bedpe.order_by_chrom==10]
 
-                    # define the svdf depending on the svtype
-                    if svtype in {"inversions", "tandemDuplications", "deletions"}:
+                # interate through each svtype
+                for svtype in sorted_svtypes:  
 
-                        # define the resulting df_sv_r
-                        df_sv_r = pd.DataFrame({"Chr":[r["chrom1"]], "Start":[int(r["medium1"])], "End":[int(r["medium2"])]})
+                    # get only bedpe rows that are not overlapping the current positions, in terms of breakpoints
+                    df_bedpe = df_bedpe[(df_bedpe.affected_positions_arroundBp.apply(lambda positions: positions.intersection(already_affected_positions)).apply(len))==0]
 
-                        # define the chroms
-                        chroms_calculating_positions =  {r["chrom1"]}
+                    # get only bedpe rows that have not already been tried to assign to all svtypes
+                    good_bpIDs = {bpID for bpID, tried_svtypes in bpID_to_tried_svtypes.items() if tried_svtypes!=svtypes}.intersection(set(df_bedpe.index))
+                    df_bedpe = df_bedpe.loc[good_bpIDs]
 
-                    # for translocations
-                    else:
+                    # if empty, continue
+                    if len(df_bedpe)==0: continue
 
-                        # define the coordinates. These are always the same:
-                        chrA = r["chrom1"]
-                        startA = 1
-                        endA = int(r["medium1"])
-                        chrB = r["chrom2"]
+                    # get the first bedpe row. Sorting in a way that the interchromosomal events will happen always first. This is to prioritize translocations
+                    df_bedpe = df_bedpe.sort_values(by="order_by_chrom")
+                    r = df_bedpe.iloc[0]
 
-                        # the orientation determines chrB start and end
-                        orientation = {True: "5_to_5", False: "5_to_3"}[(random.random()>=0.5)]
-                        if orientation=="5_to_5": 
-                            startB = 1
-                            endB = int(r["medium2"])
+                    # record that this was already tried
+                    bpID_to_tried_svtypes[r.name].add(svtype)
 
-                        elif orientation=="5_to_3":
-                            startB = int(r["medium2"])
-                            endB = chrom_to_len[chrB]
+                    # if there are already nvars, skip
+                    svDF = svtype_to_svDF[svtype]
+                    if len(svDF)>=nvars:
+                        already_nvars_svtypes.add(svtype)
+                        continue
 
-                        else: raise ValueError("%s is not valid"%orientation) 
-                       
-                        # don't consider translocations at the border of the chromosomes
-                        if endA<50 or r["medium2"]<50 or (chrom_to_len[chrA]-endA)<50 or (chrom_to_len[chrB]-r["medium2"])<50: continue
+                    # assign the breakpoint to the df_sv_r
+                    if svtype in {"inversions", "tandemDuplications", "deletions", "translocations"}:
 
-                        # define the resulting df_sv_r
-                        df_sv_r = pd.DataFrame({"ChrA":[chrA], "StartA":[startA], "EndA":[endA], "ChrB":[chrB], "StartB":[startB], "EndB":[endB], "Balanced":[True]})
+                        # it should be in the same chromosome unless they are translocations
+                        if r["chrom1"]!=r["chrom2"] and svtype!="translocations": continue
+                        if r["chrom1"]==r["chrom2"] and svtype=="translocations": continue
 
-                        # define the chroms
-                        chroms_calculating_positions =  {chrA, chrB}
+                        # define the svdf depending on the svtype
+                        if svtype in {"inversions", "tandemDuplications", "deletions"}:
 
-                    # get the affected positions of this svtype
-                    affected_positions = get_affected_positions_from_bed_df(get_affected_region_bed_for_SVdf(df_sv_r, svtype, chroms_calculating_positions, add_interval_bp=add_interval_bp, first_position_idx=0, translocations_type="breakpoint_pos", chr_to_len=chrom_to_len, insertions_type="only_one_chrB_breakpoint")[0])
-                    
-                    # only keep if the already affected positions do not overlap this SV
-                    if affected_positions.intersection(already_affected_positions)!=set(): continue
+                            # define the resulting df_sv_r
+                            df_sv_r = pd.DataFrame({"Chr":[r["chrom1"]], "Start":[int(r["medium1"])], "End":[int(r["medium2"])]})
 
-                    # keep
-                    already_affected_positions.update(affected_positions)
-                    svtype_to_svDF[svtype] = svDF.append(df_sv_r)
+                            # define the chroms
+                            chroms_calculating_positions =  {r["chrom1"]}
 
-                elif svtype=="insertions":  
+                        # for translocations
+                        else:
 
-                    # go through different lengths
-                    for length_ins in lengths_SVs:
+                            # define the coordinates. These are always the same:
+                            chrA = r["chrom1"]
+                            startA = 1
+                            endA = int(r["medium1"])
+                            chrB = r["chrom2"]
 
-                        # the insertion will be from medium1 - length_ins ----> medium2. The Copied will be a 50% possibility
-                        startA = int(r["medium1"] - length_ins)
-                        endA = int(r["medium1"])
-                        startB = int(r["medium2"])
-                        endB = int(r["medium2"] + length_ins)
-                        copied = (random.random()>=0.5)
+                            # the orientation determines chrB start and end
+                            orientation = {True: "5_to_5", False: "5_to_3"}[(random.random()>=0.5)]
+                            if orientation=="5_to_5": 
+                                startB = 1
+                                endB = int(r["medium2"])
 
-                        # don't consider insertions at the border of the chromosome
-                        if startA<50 or (chrom_to_len[r["chrom2"]]-endB)<50: continue
+                            elif orientation=="5_to_3":
+                                startB = int(r["medium2"])
+                                endB = chrom_to_len[chrB]
 
-                        # define the resulting df_sv_r
-                        df_sv_r = pd.DataFrame({"ChrA":[r["chrom1"]], "StartA":[startA], "EndA":[endA], "ChrB":[r["chrom2"]], "StartB":[startB], "EndB":[endB], "Copied":[copied]})
+                            else: raise ValueError("%s is not valid"%orientation) 
+                           
+                            # don't consider translocations at the border of the chromosomes
+                            if endA<50 or r["medium2"]<50 or (chrom_to_len[chrA]-endA)<50 or (chrom_to_len[chrB]-r["medium2"])<50: continue
+
+
+                            # define the resulting df_sv_r
+                            df_sv_r = pd.DataFrame({"ChrA":[chrA], "StartA":[startA], "EndA":[endA], "ChrB":[chrB], "StartB":[startB], "EndB":[endB], "Balanced":[True]})
+
+                            # define the chroms
+                            chroms_calculating_positions =  {chrA, chrB}
 
                         # get the affected positions of this svtype
-                        affected_positions = get_affected_positions_from_bed_df(get_affected_region_bed_for_SVdf(df_sv_r, svtype, {r["chrom1"], r["chrom2"]}, add_interval_bp=add_interval_bp, first_position_idx=0, translocations_type="breakpoint_pos", chr_to_len=chrom_to_len, insertions_type="only_one_chrB_breakpoint")[0])
-                    
+                        affected_positions = get_affected_positions_from_bed_df(get_affected_region_bed_for_SVdf(df_sv_r, svtype, chroms_calculating_positions, add_interval_bp=add_interval_bp, first_position_idx=1, translocations_type="breakpoint_pos", chr_to_len=chrom_to_len, insertions_type="only_one_chrB_breakpoint")[0])
+                        
                         # only keep if the already affected positions do not overlap this SV
                         if affected_positions.intersection(already_affected_positions)!=set(): continue
 
@@ -2068,15 +2105,46 @@ def get_SVs_arround_breakpoints(genome_file, df_bedpe, nvars, outdir, svtypes, r
                         already_affected_positions.update(affected_positions)
                         svtype_to_svDF[svtype] = svDF.append(df_sv_r)
 
-                        # break if you could get an insertion
-                        break 
+                    elif svtype=="insertions":  
 
-                else: raise ValueError("%s is not valid"%svtype)
+                        # go through different lengths. Until all of them or 
+                        for Iins in range(0, max_ninsertions):
 
-            # if all the svs have been created, exit
-            if already_nvars_svtypes==svtypes:
-                print_if_verbose("all svtypes found")
-                break
+                            # define randomly a length from the lengths_SVs
+                            length_ins = random.choice(lengths_SVs)
+
+                            # the insertion will be from medium1 - length_ins ----> medium2. The Copied will be a 50% possibility
+                            startA = int(r["medium1"] - length_ins)
+                            endA = int(r["medium1"])
+                            startB = int(r["medium2"])
+                            endB = int(r["medium2"] + length_ins)
+                            copied = (random.random()>=0.5)
+
+                            # don't consider insertions at the border of the chromosome
+                            if startA<50 or (chrom_to_len[r["chrom2"]]-endB)<50: continue
+
+                            # define the resulting df_sv_r
+                            df_sv_r = pd.DataFrame({"ChrA":[r["chrom1"]], "StartA":[startA], "EndA":[endA], "ChrB":[r["chrom2"]], "StartB":[startB], "EndB":[endB], "Copied":[copied]})
+
+                            # get the affected positions of this svtype
+                            affected_positions = get_affected_positions_from_bed_df(get_affected_region_bed_for_SVdf(df_sv_r, svtype, {r["chrom1"], r["chrom2"]}, add_interval_bp=add_interval_bp, first_position_idx=1, translocations_type="breakpoint_pos", chr_to_len=chrom_to_len, insertions_type="only_one_chrB_breakpoint")[0])
+                        
+                            # only keep if the already affected positions do not overlap this SV
+                            if affected_positions.intersection(already_affected_positions)!=set(): continue
+
+                            # keep
+                            already_affected_positions.update(affected_positions)
+                            svtype_to_svDF[svtype] = svDF.append(df_sv_r)
+
+                            # break if you could get an insertion
+                            break 
+
+                    else: raise ValueError("%s is not valid"%svtype)
+
+                # if all the svs have been created, exit
+                if already_nvars_svtypes==svtypes:
+                    print_if_verbose("all svtypes found")
+                    break
 
         ##################################################################
 
@@ -2178,7 +2246,8 @@ def simulate_SVs_in_genome(reference_genome, mitochondrial_chromosome, outdir, n
         else:
 
             # load the bedpe
-            df_bedpe = pd.read_csv(bedpe_breakpoints, sep="\t")
+            bedpe_fields = ["chrom1", "start1", "end1", "chrom2", "start2", "end2", "name", "score", "strand1", "strand2"]
+            df_bedpe = pd.read_csv(bedpe_breakpoints, sep="\t", header=-1, names=bedpe_fields)
 
             # define the translocations 
             get_SVs_arround_breakpoints(genome_file, df_bedpe, vars_to_simulate, random_sim_dir, svtypes, replace=replace)
@@ -6961,7 +7030,7 @@ def clean_perSVade_outdir(outdir):
 
     ###########################################
 
-def get_compatible_real_bedpe_breakpoints(close_shortReads_table, reference_genome, outdir, replace=False, threads=4, mitochondrial_chromosome="mito_C_glabrata_CBS138", job_array_mode="local", max_ncores_queue=768, time_perSVade_running="48:00:00", queue_jobs="bsc_ls", max_nvars=100, name_job_array="getRealSVs"):
+def get_compatible_real_bedpe_breakpoints(close_shortReads_table, reference_genome, outdir, replace=False, threads=4, mitochondrial_chromosome="mito_C_glabrata_CBS138", job_array_mode="local", max_ncores_queue=768, time_perSVade_running="48:00:00", queue_jobs="bsc_ls", max_nvars=100, name_job_array="getRealSVs", parameters_json_file=None):
 
     """Generates a file under outdir that has the stacked breakpoints arround which to generate SV calls
     realSV_calling_on can be reads or assembly"""
@@ -6977,10 +7046,6 @@ def get_compatible_real_bedpe_breakpoints(close_shortReads_table, reference_geno
 
     # initialize a list of cmds to run
     all_cmds = []
-
-    # initialize dicts that keep them all together
-    all_sampleID_to_svtype_to_file = {}
-    all_sampleID_to_dfGRIDSS = {}
 
     # define the name of the final file name
     final_file_name = "perSVade_finished_file.txt"
@@ -7013,6 +7078,7 @@ def get_compatible_real_bedpe_breakpoints(close_shortReads_table, reference_geno
 
             # add arguments depending on the pipeline
             if replace is True: cmd += " --replace"
+            if parameters_json_file is not None: cmd += " --parameters_json_file %s"%parameters_json_file
 
             # add the input
             all_keys_df = set(df_genomes.keys())
@@ -7047,14 +7113,19 @@ def get_compatible_real_bedpe_breakpoints(close_shortReads_table, reference_geno
             sys.exit(0)
 
     # get the 
-    needtointegrateallbedpefiles
+    bedpe_fields = ["chrom1", "start1", "end1", "chrom2", "start2", "end2", "ID", "score", "or1", "or2"]
+    df_bedpe = pd.DataFrame(columns=bedpe_fields)
 
-    # remove the bam files and reference files
+    # remove the bam files and reference files, while keeping the bedpe into a df
     print_if_verbose("cleaning files")
     for ID, row in df_genomes.iterrows():
 
         # run in the gridss and clove with the fast parameters
         outdir_gridssClove = "%s/shortReads_realVarsDiscovery_%s"%(all_realVars_dir,ID)
+
+        # keep the bedpe
+        bedpe_file = "%s/SVdetection_output/final_gridss_running/gridss_output.filt.bedpe"%(outdir_gridssClove)
+        df_bedpe = df_bedpe.append(pd.read_csv(bedpe_file, sep="\t", names=bedpe_fields, header=-1))
 
         for f in ["aligned_reads.bam.sorted", "aligned_reads.bam.sorted.bai", "reference_genome_dir"]:
             file = "%s/%s"%(outdir_gridssClove, f)
@@ -7067,7 +7138,14 @@ def get_compatible_real_bedpe_breakpoints(close_shortReads_table, reference_geno
         # remove the file that has the sample
         remove_file("%s/df_gridss_svtype_to_svfile_tuple_%s.py"%(all_realVars_dir,ID))
 
-    return ID_to_svtype_to_svDF
+    real_bedpe_breakpoints = "%s/integrated_breakpoints.bedpe"%outdir
+    df_bedpe = df_bedpe.drop_duplicates(subset=["chrom1", "start1", "end1", "chrom2", "start2", "end2", "or1", "or2"])
+    df_bedpe.to_csv(real_bedpe_breakpoints, sep="\t", header=False, index=False)
+
+    return real_bedpe_breakpoints
+
+
+
 
 def add1_unless_it_is_minus1(x):
 
@@ -7642,7 +7720,7 @@ def simulate_and_align_PairedReads_perWindow(df_windows, genome_interest, refere
         ######################################################
 
         ##### align the reads and retun the bam ######
-        run_bwa_mem(read1_fastqgz, read2_fastqgz, reference_genome, outdir, sim_bamfile, sim_sorted_bam, sim_index_bam, name_sample="simulations_reference_genome", threads=threads, replace=replace)
+        run_bwa_mem(read1_fastqgz, read2_fastqgz, reference_genome, outdir, sim_bamfile, sim_sorted_bam, sim_index_bam, name_sample="simulations_reference_genome", threads=threads, replace=replace, MarkDuplicates=False)
 
         # remove the fastq files
         print_if_verbose("deleting reads")
@@ -8339,6 +8417,7 @@ def makePlots_gridsss_benchmarking_oneGenome(df_benchmark, PlotsDir, plots={"his
         plt.close(fig)
 
     # a scatterplot correlating precision an recall
+    """
     if "scatter_PRvsRC" in plots:
 
         fig = plt.figure(figsize=(12, 4))
@@ -8355,6 +8434,9 @@ def makePlots_gridsss_benchmarking_oneGenome(df_benchmark, PlotsDir, plots={"his
         ax = plt.subplot(1, 3, 3)
         cmap = sns.cubehelix_palette(dark=.3, light=.8, as_cmap=True)
 
+        print(cmap)
+        print(df_benchmark)
+
         sns.scatterplot(x="recall", y="precision", data=df_benchmark, hue="Fvalue", palette=cmap, edgecolors=None, style="svtype", markers=svtype_to_marker)
         #sns.scatterplot(x="recall", y="precision", data=df_benchmark, hue="Fvalue", edgecolors=None, style="svtype", markers=svtype_to_marker)
 
@@ -8364,6 +8446,7 @@ def makePlots_gridsss_benchmarking_oneGenome(df_benchmark, PlotsDir, plots={"his
         fig.savefig(filename, bbox_inches='tight');
         #if is_cluster is False: plt.show()
         plt.close(fig)
+    """
 
     # a PRvsRC plot for each svtype
     if "scatter_PRvsRCa_eachSVtype" in plots:
@@ -8495,7 +8578,7 @@ def makePlots_gridsss_benchmarking_oneGenome(df_benchmark, PlotsDir, plots={"his
         #if is_cluster is False: plt.show()
         plt.close(fig)
 
-def benchmark_GridssClove_for_knownSV(sample_bam, reference_genome, know_SV_dict, outdir, range_filtering="theoretically_meaningful", expected_AF=1.0, replace=False, threads=4, median_insert_size=500, median_insert_size_sd=50, mitochondrial_chromosome="mito_C_glabrata_CBS138", run_in_parallel=False):
+def benchmark_GridssClove_for_knownSV(sample_bam, reference_genome, know_SV_dict, outdir, range_filtering="theoretically_meaningful", expected_AF=1.0, replace=False, threads=4, median_insert_size=500, median_insert_size_sd=50, mitochondrial_chromosome="mito_C_glabrata_CBS138", run_in_parallel=True):
 
     """Runs a benchmarking for several combinations of filters of a GridsssClove pipeline of a given bam file (sample_bam), writing files under outdir. The known SV are provided as a dictionary that maps each type of SV to a path where a table with the SVs are known .
 
@@ -8569,8 +8652,15 @@ def benchmark_GridssClove_for_knownSV(sample_bam, reference_genome, know_SV_dict
                 for Ichunk, chunk_inputs_benchmarking_pipeline in enumerate(chunks(inputs_benchmarking_pipeline, threads)):
                     print_if_verbose("working on chunk %i"%Ichunk)
 
+                    # redefine the threads, so that you have at least 4Gb of RAM per thread
+                    available_RAM = get_availableGbRAM()
+
+                    # define the maxiumum number of threads so that each thread has 4Gb of ram
+                    max_threads = max([1, int(available_RAM/4 - 1)]) 
+                    if threads>max_threads: threads =  max_threads 
+
                     # get the parallelized obtention of data
-                    print_if_verbose("getting benchmarking for each set of filters in parallel")
+                    print_if_verbose("getting benchmarking for each set of filters in parallel on %i threads"%threads)
                     with multiproc.Pool(threads) as pool:
                         all_benchmarking_dfs += pool.starmap(benchmark_bedpe_with_knownSVs, chunk_inputs_benchmarking_pipeline)
                         pool.close()
@@ -8720,6 +8810,9 @@ def plot_clustermap_with_annotation(df, row_colors_df, col_colors_df, filename, 
 
     # change the values of the df to floats
     df = df.applymap(float)
+
+    # change the col_cluster
+    if len(df.columns)==1: col_cluster = False
 
     # get the ordered xlabels and ylabels
     cm_labels = sns.clustermap(df, col_cluster=col_cluster, row_cluster=row_cluster, yticklabels=True, xticklabels=True)
@@ -9055,7 +9148,6 @@ def getPlots_filtering_accuracy_across_genomes_and_ploidies(df_cross_benchmark, 
                                         #title = "%s\n%s"%(string_title_train, string_title_test)
                                         title ="checking overfitting in SV calling"
 
-
                                         # get the dendrogram, either adjusting or not
                                         plot_clustermap_with_annotation(df_square, row_colors_df, col_colors_df, filename, title=title, col_cluster=col_cluster, row_cluster=row_cluster, colorbar_label=accuracy, adjust_position=False, legend=True, idxs_separator_pattern="||||", texts_to_strip={"L001"}, default_label_legend="control", df_annotations=df_annotations, cmap=sns.color_palette("RdBu_r", 50), ylabels_graphics_df=None, grid_lines=True)
     
@@ -9271,6 +9363,8 @@ def get_best_parameters_for_GridssClove_run(sorted_bam, reference_genome, outdir
     if set(simulation_ploidies)!={"haploid"}: 
         outdir_ref = "%s/simulation_reference_genome_%ibp_windows"%(outdir, window_l)
         simulated_reference_bam_file = simulate_and_align_PairedReads_perWindow(df_REFgenome_info, reference_genome, reference_genome, total_nread_pairs, read_length, outdir_ref, median_insert_size, median_insert_size_sd, replace=replace, threads=threads)
+
+    else: simulated_reference_bam_file = None
 
     ##############################################################################
 
@@ -9773,85 +9867,6 @@ def generate_jobarray_file_greasy(jobs_filename, walltime="48:00:00",  name="Job
     if sbatch is True: run_cmd("sbatch %s"%jobs_filename_run)
 
     # get info about the exit status: sacct -j <jobid> --format=JobID,JobName,MaxRSS,Elapsed
-
-
-
-def generate_jobarray_file_slurm(jobs_filename, stderr="./STDERR", stdout="./STDOUT", walltime="02:00:00",  name="JobArray", queue="bsc_ls", sbatch=False, ncores_per_task=1, rmstd=True, constraint="", number_tasks_to_run_at_once="all", email="mikischikora@gmail.com"):
-    
-    """ This function takes:
-        jobs_filename: a path to a file in which each line is a command that has to be executed in a sepparate cluster node
-        name: the name of the jobs array
-        stderr and stdout: paths to directories that will contains the STDERR and STDOUT files
-        walltime is the time in "dd-hh:mm:ss"
-        memory is the RAM: i.e.: 4G, 2M, 200K
-        ncores_per_task is the number of cores that each job gets
-        
-        name is the name prefix
-        queue can be "debug" or "bsc_ls", use bsc_queues to understand which works best
-        rmstd indicates if the previous std has to be removed
-        constraint is a list of constraints to pass to sbatch. For example “highmem” is useful for requesting more memory. You cannot submit a job requesting memory parameters, memory is automatically set for each asked cpu (2G/core by default, 8G/core for highmem)
-
-        number_tasks_to_run_at_once are the number of tasks in a job array to run at once
-        
-        It returns a jobs_filename.run file, which can be sbatch to the cluster directly if sbatch is True
-        This is run in the VarCall_CNV_env
-    """
-
-    def removeSTDfiles(stddir):
-        """ Will remove all files in stddir with name"""
-        for file in os.listdir(stddir):
-            if file.startswith(name): os.unlink("%s/%s"%(stddir, file))
-
-    # prepare the stderr and stdout
-    if not os.path.isdir(stderr): os.mkdir(stderr)
-    elif rmstd is True: removeSTDfiles(stderr)
-
-    if not os.path.isdir(stdout): os.mkdir(stdout)
-    elif rmstd is True: removeSTDfiles(stdout)
-    
-    # Get the number of jobs
-    n_jobs = len(open(jobs_filename, "r").readlines())
-
-    # if default, number_tasks_to_run_at_once is 0, which means that it will try to run all tasks at once
-    if number_tasks_to_run_at_once=="all": number_tasks_to_run_at_once = n_jobs
-
-    # define the number of nodes, consider that each node has 48 cpus, you need to request the number of nodes accordingly
-    nnodes = int((ncores_per_task/48)+1) # get the non decimal part of a float
-
-    # define the constraint only if it is necessary
-    if constraint!="": constraint_line = "#SBATCH --constraint=%s"%constraint
-    else: constraint_line = ""
-
-    # define arguments
-    arguments = ["#!/bin/sh", # the interpreter
-                 "#SBATCH --time=%s"%walltime, # several SBATCH misc commands
-                 "#SBATCH --qos=%s"%queue,
-                 "#SBATCH --job-name=%s"%name,
-                 "#SBATCH --cpus-per-task=%i"%ncores_per_task,
-                 "#SBATCH --error=%s/%s_%sA_%sa.err"%(stderr, name, "%", "%"), # the standard error
-                 "#SBATCH --output=%s/%s_%sA_%sa.out"%(stdout, name, "%", "%"), # the standard error
-                 "#SBATCH --get-user-env", # this is to maintain the environment
-                 "#SBATCH --workdir=.",
-                 "#SBATCH --array=1-%i%s%i"%(n_jobs, "%", number_tasks_to_run_at_once),
-                 #"#SBATCH --array=1-%i"%n_jobs,
-                 "#SBATCH --mail-type=all",
-                 "#SBATCH --mail-user=%s"%email,
-                 constraint_line,
-                 "",
-                 "echo 'sourcing conda to run pipeline...';",
-                 "echo 'running pipeline';",
-                 'srun $(head -n $SLURM_ARRAY_TASK_ID %s | tail -n 1)'%jobs_filename]
-
-
-    # define and write the run filename
-    jobs_filename_run = "%s.run"%jobs_filename
-    with open(jobs_filename_run, "w") as fd: fd.write("\n".join(arguments))
-    
-    # run in cluster if specified
-    if sbatch is True: out_state = os.system("sbatch %s"%jobs_filename_run); print_if_verbose("%s sbatch out state: %i"%(name, out_state))
-
-    # get info about the exit status: sacct -j <jobid> --format=JobID,JobName,MaxRSS,Elapsed
-
 
 def plot_accuracy_simulations_from_all_sampleID_to_dfBestAccuracy(all_sampleID_to_dfBestAccuracy, filename):
 
@@ -10369,7 +10384,7 @@ def plot_accuracy_of_parameters_on_test_samples(parameters_df, test_df, outdir, 
 
   
 
-def report_accuracy_realSVs(close_shortReads_table, reference_genome, outdir, real_svtype_to_file, SVs_compatible_to_insert_dir, threads=4, replace=False, n_simulated_genomes=2, mitochondrial_chromosome="mito_C_glabrata_CBS138", simulation_ploidies=["haploid", "diploid_homo", "diploid_hetero", "ref:2_var:1", "ref:3_var:1", "ref:4_var:1", "ref:5_var:1", "ref:9_var:1", "ref:19_var:1", "ref:99_var:1"], range_filtering_benchmark="theoretically_meaningful", nvars=100, job_array_mode="local", max_ncores_queue=48, time_perSVade_running="02:00:00", queue_jobs="debug", StopAfter_testAccuracy_perSVadeRunning=False, skip_cleaning_simulations_files_and_parameters=False, skip_cleaning_outdir=False, slurm_constraint=""):
+def report_accuracy_realSVs(close_shortReads_table, reference_genome, outdir, real_bedpe_breakpoints, threads=4, replace=False, n_simulated_genomes=2, mitochondrial_chromosome="mito_C_glabrata_CBS138", simulation_ploidies=["haploid", "diploid_homo", "diploid_hetero", "ref:2_var:1", "ref:3_var:1", "ref:4_var:1", "ref:5_var:1", "ref:9_var:1", "ref:19_var:1", "ref:99_var:1"], range_filtering_benchmark="theoretically_meaningful", nvars=100, job_array_mode="local", max_ncores_queue=48, time_perSVade_running="02:00:00", queue_jobs="debug", StopAfter_testAccuracy_perSVadeRunning=False, skip_cleaning_simulations_files_and_parameters=False, skip_cleaning_outdir=False, slurm_constraint="", parameters_json_file=None):
 
 
     """This function runs the SV pipeline for all the datasets in close_shortReads_table with the fastSV, optimisation based on uniform parameters and optimisation based on realSVs (specified in real_svtype_to_file). The latter is skipped if real_svtype_to_file is empty.
@@ -10377,7 +10392,7 @@ def report_accuracy_realSVs(close_shortReads_table, reference_genome, outdir, re
     First, it runs perSVade on all parameters without cleaning. At the end it cleans."""
 
     # this pipeline requires real data and close_shortReads_table that is not none
-    if len(real_svtype_to_file)==0: raise ValueError("You need real data if you want to test accuracy")
+    if real_bedpe_breakpoints is None: raise ValueError("You need real data if you want to test accuracy")
     if file_is_empty(close_shortReads_table): raise ValueError("You need real data reads if you want to test accuracy")
 
     # make the outdir
@@ -10410,7 +10425,7 @@ def report_accuracy_realSVs(close_shortReads_table, reference_genome, outdir, re
         print_if_verbose("There are %i remaining jobs"%n_remaining_jobs)
 
         # go through each run and configuration
-        for typeSimulations, svtype_to_svfile, fast_SVcalling in [("uniform", {}, False), ("realSVs", real_svtype_to_file, False), ("fast", {}, True)]:
+        for typeSimulations, bedpe_breakpoints, fast_SVcalling in [("uniform", None, False), ("realSVs", real_bedpe_breakpoints, False), ("fast", None, True)]:
 
             # define an outdir for this type of simulations
             outdir_typeSimulations = "%s/%s"%(outdir, typeSimulations); make_folder(outdir_typeSimulations)
@@ -10443,8 +10458,9 @@ def report_accuracy_realSVs(close_shortReads_table, reference_genome, outdir, re
                     # add arguments depending on the pipeline
                     if replace is True: cmd += " --replace"
                     if fast_SVcalling is True: cmd += " --fast_SVcalling"
-                    if len(svtype_to_svfile)>0: cmd += " --SVs_compatible_to_insert_dir %s"%SVs_compatible_to_insert_dir
+                    if bedpe_breakpoints is not None: cmd += " --real_bedpe_breakpoints %s"%bedpe_breakpoints
                     if printing_verbose_mode is True: cmd += " --verbose"
+                    if parameters_json_file is not None: cmd += " --parameters_json_file %s"%parameters_json_file
 
                     # if the running in slurm is false, just run the cmd
                     if job_array_mode=="local": run_cmd(cmd)
@@ -10620,9 +10636,6 @@ def report_accuracy_realSVs(close_shortReads_table, reference_genome, outdir, re
                 parameters_json_origin = "%s/final_gridss_running/perSVade_parameters.json"%runID_outdir
                 parameters_json_dest = "%s/parameters_%s_%s_%s.json"%(simulations_files_and_parameters_dir, typeSimulations, sampleID, runID)
                 if file_is_empty(parameters_json_dest): 
-
-
-                    print(parameters_json_origin, parameters_json_dest)
                     parameters_json_dest_tmp = "%s.tmp"%parameters_json_dest
                     run_cmd("cp %s %s"%(parameters_json_origin, parameters_json_dest_tmp))
                     os.rename(parameters_json_dest_tmp, parameters_json_dest)
@@ -10724,7 +10737,6 @@ def report_accuracy_realSVs(close_shortReads_table, reference_genome, outdir, re
 
             # go though each runID
             for runID in set(df_reads.runID):
-                print(typeSimulations, runID)
 
                 # define an outdir for this runID and clean
                 outdir_runID = "%s/%s/%s"%(outdir, typeSimulations, runID)
@@ -10968,7 +10980,12 @@ def get_bam_with_duplicatesMarkedSpark(bam, threads=4, replace=False):
             run_cmd("%s --java-options '-Xms%ig -Xmx%ig' MarkDuplicatesSpark -I %s -O %s --verbosity INFO --tmp-dir %s  --create-output-variant-index false --create-output-bam-splitting-index false --create-output-bam-index false > %s 2>&1"%(gatk, javaRamGb, javaRamGb, bam, bam_dupMarked_tmp, tmpdir, markduplicates_std))
 
         except: 
-            print_if_verbose("MarkDuplicatesSpark did not work on the current memory configuration. Trying with the normal MarkDuplicates")
+
+            # define the MarkDuplicatesSpark options
+            MarkDuplicatesSpark_log = "%s.MarkDuplicatesSpark_failed.log"%bam
+            os.rename(markduplicates_std, MarkDuplicatesSpark_log)
+
+            print_if_verbose("MarkDuplicatesSpark did not work on the current memory configuration. Trying with the normal MarkDuplicates. You can check the failed log of MarkDuplicatesSpark_failed in %s"%MarkDuplicatesSpark_log)
 
             # running with the traditional MarkDuplicates implementation
             bam_dupMarked_metrics = "%s.metrics.txt"%bam_dupMarked_tmp

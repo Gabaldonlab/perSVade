@@ -27,7 +27,7 @@ test_gff = "%s/reduced_annotation.gff"%testing_inputs_dir
 # load the functions (test if you can import python packages)
 import sv_functions as fun
 print("loading python packages worked successfully")
-#fun.printing_verbose_mode = True
+fun.printing_verbose_mode = False
 
 # define the testing inuts dir 
 testing_outputs_dir = "%s/testing_outputs"%test_dir # this is the normal place
@@ -126,13 +126,16 @@ test_fun.test_gridss_clove_pipeline(sorted_bam_svGenome, ref_genome, outdir_test
 outdir_testing_parameterOptimisation = "%s/testing_parameter_optimisation_pipeline"%(testing_outputs_dir)
 test_fun.test_parameter_optimisation_perSVade(sorted_bam_svGenome, ref_genome, outdir_testing_parameterOptimisation, replace=False)
 
-# after the test_SRAdb_query_downloading_and_readTrimming, you should test the 
+# test the integration of variants from previous sequencing data
+Cglabrata_genome = "%s/Candida_glabrata.fasta"%testing_inputs_dir
+Cglabrata_subsampled_reads_dir = "%s/Cglabrata_reads"%testing_inputs_dir
+Cglabrata_subsampled_perSVade_outdir = "%s/Cglabrata_reads_subsampled_perSVade_outdir"%testing_outputs_dir
+Cglabrata_repeats = "%s/Candida_glabrata.repeats.tab"%testing_inputs_dir
+relaxed_parms = "%s/perSVade_parameters_relaxed.json"%testing_inputs_dir
+real_bedpe_breakpoints = test_fun.test_realSVgeneration(Cglabrata_subsampled_reads_dir, Cglabrata_subsampled_perSVade_outdir, Cglabrata_repeats, Cglabrata_genome, relaxed_parms, replace=False)
 
-# generate a bam out of the 3 C. albicans chromosomes with 50 SVs.
-
-# run perSVade with default parameters on simulated C. albicans bam with real SVs determined
-
-ljhdakjdahkgda
+# test the parameter optimisation based on real_bedpe_breakpoints
+test_fun.test_parameter_optimisation_perSVade_real(Cglabrata_subsampled_reads_dir, Cglabrata_subsampled_perSVade_outdir, Cglabrata_repeats, Cglabrata_genome, real_bedpe_breakpoints, replace=False)
 
 ### TESTING THINGS THAT ARE DISPENSABLE ###
 
@@ -140,15 +143,11 @@ ljhdakjdahkgda
 outdir_SRAdb_query_downloading_and_readTrimming = "%s/testing_SRAdb_query_downloading_and_readTrimming_MERS"%testing_outputs_dir
 test_fun.test_SRAdb_query_downloading_and_readTrimming(outdir_SRAdb_query_downloading_and_readTrimming, MERS_genome, 1335626, replace=False)
 
+
 # test whether you can run greasy
 test_fun.test_greasy()
 
 ############################################
-
-
-test_integrationRealSVsIntooneBedpe
-
-test_realData_introduction_and_runningWithGoodParamteres
 
 print("\n\n---\nSUCCESS: perSVade was properly installed\n---\n\n")
 

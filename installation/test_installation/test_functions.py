@@ -24,7 +24,7 @@ import sv_functions as fun
 import multiprocessing as multiproc
 
 # change the verbosity
-fun.printing_verbose_mode = True
+#fun.printing_verbose_mode = True
 
 # define the threads
 threads = multiproc.cpu_count()
@@ -292,6 +292,9 @@ def test_gridss_clove_pipeline(sorted_bam, reference_genome, outdir, threads=thr
     print("you could run the gridss + clove pipeline succesfully")
 
 
+
+
+
 def test_parameter_optimisation_perSVade(sorted_bam, reference_genome, outdir, threads=threads, replace=False):
 
     """This pipeline will test the parameter optimisation features of perSVade into outdir. It is expected to work for C.glabrata"""
@@ -305,6 +308,58 @@ def test_parameter_optimisation_perSVade(sorted_bam, reference_genome, outdir, t
         fun.run_cmd(cmd)
 
     print("parameter optimisation worked successfully")
+
+
+def test_realSVgeneration(reads_dir, outdir, repeats, reference_genome, relaxed_parms, replace=False, threads=threads):
+
+    """This function takes a reads dir (from C. glabrata), generates a table that is passed to perSVade to generate the real variants. It returns the integrated bedpe"""
+
+
+    # define the real bedpe breakpoints
+    real_bedpe_breakpoints = "%s/findingRealSVs_providedCloseReads/integrated_breakpoints.bedpe"%outdir
+
+    if fun.file_is_empty(real_bedpe_breakpoints) or replace is True:
+
+        # define the close_shortReads_table
+        reads_dict = {"first100k": {"sampleID":"first100k", "runID":"first100k", "short_reads1":"sampled_readsR1_first100k.fq.gz", "short_reads2":"sampled_readsR2_first100k.fq.gz"},
+
+                      "last100k": {"sampleID":"last100k", "runID":"last100k", "short_reads1":"sampled_readsR1_last100k.fq.gz", "short_reads2":"sampled_readsR2_last100k.fq.gz"}}
+
+        reads_df = fun.pd.DataFrame(reads_dict).transpose()
+        for f in ["short_reads1", "short_reads2"]: reads_df[f] = reads_dir + "/" + reads_df[f]
+        fun.make_folder(outdir)
+        close_shortReads_table = "%s/subsampled_shortReads.tab"%outdir
+        reads_df.to_csv(close_shortReads_table, sep="\t", index=False, header=True)
+
+        # run persvade
+        cmd = "%s -r %s -thr %i -o %s -f1 skip -f2 skip --nvars 500 -mchr mito_C_glabrata_CBS138 --min_chromosome_len 10000 --StopAfter_obtentionOFcloseSVs --close_shortReads_table %s --previous_repeats_table %s --parameters_json_file %s"%(fun.perSVade_py, reference_genome, threads, outdir, close_shortReads_table, repeats, relaxed_parms)
+
+        if fun.printing_verbose_mode is True: cmd += " --verbose"
+        fun.run_cmd(cmd)
+
+    print("generation of real SVs worked. This also validates that the parameter json loading did work")
+
+    return real_bedpe_breakpoints
+
+
+def test_parameter_optimisation_perSVade_real(reads_dir, outdir, repeats, reference_genome, real_bedpe_breakpoints, replace=False, threads=threads):
+
+    """This function runs perSVade optimisation based on real SVs defined by real_bedpe_breakpoints."""
+
+    if fun.file_is_empty("%s/perSVade_finished_file.txt"%outdir) or replace is True:
+
+        # define the reads
+        reads1 = "%s/sampled_readsR1_first100k.fq.gz"%reads_dir
+        reads2 = "%s/sampled_readsR2_first100k.fq.gz"%reads_dir
+
+        # run persvade
+        cmd = "%s -r %s -thr %i -o %s -f1 %s -f2 %s --nvars 500 -mchr mito_C_glabrata_CBS138 --min_chromosome_len 10000 --real_bedpe_breakpoints %s --previous_repeats_table %s --simulation_ploidies haploid --range_filtering_benchmark large --nsimulations 1"%(fun.perSVade_py, reference_genome, threads, outdir, reads1, reads2, real_bedpe_breakpoints, repeats)
+
+
+        if fun.printing_verbose_mode is True: cmd += " --verbose"
+        fun.run_cmd(cmd)
+
+    print("the parameter optimisation based on real SVs worked")
 
 def test_greasy():
 
@@ -325,7 +380,7 @@ def test_greasy():
 
     except Exception as err:
 
-        print("\n\n---\nWARNING: greasy is not installed properly in your system. This means that setting '--job_array_mode greasy' will fail. You can set '--job_array_mode local' and run jobs sequentially and not in parallel. '--job_array_mode greasy' will only work on machines that use SLURM for managing jobs and greasy installed (and callable with a command like 'module load greasy && greasy <jobs_file>', and '<jobs_file>' is a file where each line corresponds to a command to be executed in a sepparate SLURM job) \n---\n\n")
+        print("\n\n---\nWARNING: greasy is not installed properly in your system. This means that setting '--job_array_mode greasy' will fail. You can set '--job_array_mode local' and run jobs sequentially and not in parallel. '--job_array_mode greasy' will only work on machines that use SLURM for managing jobs and greasy installed (and callable with a command like 'module load greasy && greasy <jobs_file>', and '<jobs_file>' is a file where each line corresponds to a command to be executed in a sepparate SLURM job). If you have a cluster environment without greasy, you can run in '--job_array_mode greasy' and manage the jobs on your own. \n---\n\n")
 
 
         print("---\nThis is the error:")
