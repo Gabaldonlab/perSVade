@@ -4326,3 +4326,80 @@ def get_coverage_list_relative_to_predictedFromTelomereAndGCcontent(df_cov, geno
 
     return final_list
 
+
+
+def generate_jobarray_file_slurm(jobs_filename, stderr="./STDERR", stdout="./STDOUT", walltime="02:00:00",  name="JobArray", queue="bsc_ls", sbatch=False, ncores_per_task=1, rmstd=True, constraint="", number_tasks_to_run_at_once="all", email="mikischikora@gmail.com"):
+    
+    """ This function takes:
+        jobs_filename: a path to a file in which each line is a command that has to be executed in a sepparate cluster node
+        name: the name of the jobs array
+        stderr and stdout: paths to directories that will contains the STDERR and STDOUT files
+        walltime is the time in "dd-hh:mm:ss"
+        memory is the RAM: i.e.: 4G, 2M, 200K
+        ncores_per_task is the number of cores that each job gets
+        
+        name is the name prefix
+        queue can be "debug" or "bsc_ls", use bsc_queues to understand which works best
+        rmstd indicates if the previous std has to be removed
+        constraint is a list of constraints to pass to sbatch. For example “highmem” is useful for requesting more memory. You cannot submit a job requesting memory parameters, memory is automatically set for each asked cpu (2G/core by default, 8G/core for highmem)
+
+        number_tasks_to_run_at_once are the number of tasks in a job array to run at once
+        
+        It returns a jobs_filename.run file, which can be sbatch to the cluster directly if sbatch is True
+        This is run in the VarCall_CNV_env
+    """
+
+    def removeSTDfiles(stddir):
+        """ Will remove all files in stddir with name"""
+        for file in os.listdir(stddir):
+            if file.startswith(name): os.unlink("%s/%s"%(stddir, file))
+
+    # prepare the stderr and stdout
+    if not os.path.isdir(stderr): os.mkdir(stderr)
+    elif rmstd is True: removeSTDfiles(stderr)
+
+    if not os.path.isdir(stdout): os.mkdir(stdout)
+    elif rmstd is True: removeSTDfiles(stdout)
+    
+    # Get the number of jobs
+    n_jobs = len(open(jobs_filename, "r").readlines())
+
+    # if default, number_tasks_to_run_at_once is 0, which means that it will try to run all tasks at once
+    if number_tasks_to_run_at_once=="all": number_tasks_to_run_at_once = n_jobs
+
+    # define the number of nodes, consider that each node has 48 cpus, you need to request the number of nodes accordingly
+    nnodes = int((ncores_per_task/48)+1) # get the non decimal part of a float
+
+    # define the constraint only if it is necessary
+    if constraint!="": constraint_line = "#SBATCH --constraint=%s"%constraint
+    else: constraint_line = ""
+
+    # define arguments
+    arguments = ["#!/bin/sh", # the interpreter
+                 "#SBATCH --time=%s"%walltime, # several SBATCH misc commands
+                 "#SBATCH --qos=%s"%queue,
+                 "#SBATCH --job-name=%s"%name,
+                 "#SBATCH --cpus-per-task=%i"%ncores_per_task,
+                 "#SBATCH --error=%s/%s_%sA_%sa.err"%(stderr, name, "%", "%"), # the standard error
+                 "#SBATCH --output=%s/%s_%sA_%sa.out"%(stdout, name, "%", "%"), # the standard error
+                 "#SBATCH --get-user-env", # this is to maintain the environment
+                 "#SBATCH --workdir=.",
+                 "#SBATCH --array=1-%i%s%i"%(n_jobs, "%", number_tasks_to_run_at_once),
+                 #"#SBATCH --array=1-%i"%n_jobs,
+                 "#SBATCH --mail-type=all",
+                 "#SBATCH --mail-user=%s"%email,
+                 constraint_line,
+                 "",
+                 "echo 'sourcing conda to run pipeline...';",
+                 "echo 'running pipeline';",
+                 'srun $(head -n $SLURM_ARRAY_TASK_ID %s | tail -n 1)'%jobs_filename]
+
+
+    # define and write the run filename
+    jobs_filename_run = "%s.run"%jobs_filename
+    with open(jobs_filename_run, "w") as fd: fd.write("\n".join(arguments))
+    
+    # run in cluster if specified
+    if sbatch is True: out_state = os.system("sbatch %s"%jobs_filename_run); print_if_verbose("%s sbatch out state: %i"%(name, out_state))
+
+    # get info about the exit status: sacct -j <jobid> --format=JobID,JobName,MaxRSS,Elapsed
