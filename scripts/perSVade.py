@@ -262,6 +262,10 @@ if opt.parameters_json_file is not None:
 	fun.default_max_rel_coverage_to_consider_del = max_rel_coverage_to_consider_del
 	fun.default_min_rel_coverage_to_consider_dup = min_rel_coverage_to_consider_dup
 
+
+# get the gff info
+if opt.gff is not None: correct_gff, gff_with_biotype = fun.get_correct_gff_and_gff_with_biotype(opt.gff, replace=opt.replace)
+
 # get the repeats table
 print("getting repeats")
 repeats_df, repeats_table_file = fun.get_repeat_maskerDF(opt.ref, threads=opt.threads, replace=opt.replace)
@@ -457,7 +461,7 @@ if opt.goldenSet_dir is not None:
 if opt.skip_SVcalling is False and not any([x=="skip" for x in {opt.fastq1, opt.fastq2}]):
 
     SVdetection_outdir = "%s/SVdetection_output"%opt.outdir
-    fun.run_GridssClove_optimising_parameters(sorted_bam, opt.ref, SVdetection_outdir, threads=opt.threads, replace=opt.replace, n_simulated_genomes=opt.nsimulations, mitochondrial_chromosome=opt.mitochondrial_chromosome, simulation_ploidies=simulation_ploidies, range_filtering_benchmark=opt.range_filtering_benchmark, nvars=opt.nvars, fast_SVcalling=opt.fast_SVcalling, real_bedpe_breakpoints=real_bedpe_breakpoints)
+    outdir_gridss_final = fun.run_GridssClove_optimising_parameters(sorted_bam, opt.ref, SVdetection_outdir, threads=opt.threads, replace=opt.replace, n_simulated_genomes=opt.nsimulations, mitochondrial_chromosome=opt.mitochondrial_chromosome, simulation_ploidies=simulation_ploidies, range_filtering_benchmark=opt.range_filtering_benchmark, nvars=opt.nvars, fast_SVcalling=opt.fast_SVcalling, real_bedpe_breakpoints=real_bedpe_breakpoints)
 
 
 print("structural variation analysis with perSVade finished")
@@ -465,6 +469,23 @@ print("structural variation analysis with perSVade finished")
 #####################################
 #####################################
 #####################################
+
+#####################################
+###### SV and CNV ANNOTATION ########
+#####################################
+
+if opt.gff is not None and opt.skip_SVcalling is False and not any([x=="skip" for x in {opt.fastq1, opt.fastq2}]):
+	
+	outdir_var_annotations = "%s/SVannotation_output"%opt.outdir
+	print("annotating SVs. The results will be in %s"%outdir_var_annotations)
+	fun.annotate_SVs_inHouse(opt.outdir, outdir_var_annotations, gff_with_biotype, sorted_bam, opt.ref, replace=opt.replace, threads=opt.threads, mitochondrial_chromosome=opt.mitochondrial_chromosome, mito_code=opt.mitochondrial_code, gDNA_code=opt.gDNA_code, ploidy=opt.ploidy)
+
+else: print("WARNING: Skipping SV annotation because -gff was not provided, --skip_SVcalling was provided or fastq1/fastq2 have 'skip'.")
+
+#####################################
+#####################################
+#####################################
+
 
 
 #####################################
@@ -496,6 +517,13 @@ if opt.run_smallVarsCNV:
 #####################################
 #####################################
 #####################################
+
+
+
+
+
+
+perSVadefinishedCorrectlyError
 
 # at the end you want to clean the outdir to keep only the essential files
 if opt.skip_cleaning_outdir is False: fun.clean_perSVade_outdir(opt.outdir)
