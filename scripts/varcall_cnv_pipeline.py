@@ -121,30 +121,8 @@ print("running small vars and CNV pipeline into %s"%opt.outdir)
 fun.run_cmd("echo 'This is a check of the environment in which the pipeline is running'; which bedtools")
 
 # correct the gff file, so that it doesn't have lines starting with # and also add biotype (important for ensembl VEP)
-if not opt.gff is None:
-    correct_gff = "%s_corrected.gff"%(opt.gff); correct_gff_tmp = "%s_corrected_tmp.gff"%(opt.gff)
-
-    if fun.file_is_empty(correct_gff) or opt.replace is True:
-        print("correcting gff")
-        correct_gff_cmd = "egrep -v '^#' %s > %s"%(opt.gff, correct_gff_tmp); fun.run_cmd(correct_gff_cmd)
-        os.rename(correct_gff_tmp, correct_gff)
-
-    # modify gff to add biotype
-    gff_with_biotype = "%s_with_biotype.gff"%correct_gff
-    if fun.file_is_empty(gff_with_biotype) or opt.replace is True:
-        print("adding biotype")
-
-        starting_lines = [line for line in open(correct_gff, "r") if line.startswith("#")]
-        df_gff3 = pd.read_csv(correct_gff, skiprows=list(range(len(starting_lines))), sep="\t", names=["chromosome", "source", "type_feature", "start", "end", "score", "strand", "phase", "attributes"])
-
-        def add_biotype(row):
-            if "biotype" not in row["attributes"] and "gene_biotype" not in row["attributes"]: row["attributes"] += ";biotype=%s"%row["type_feature"]
-            return row["attributes"]
-
-        # add biotype and save
-        df_gff3["attributes"] = df_gff3.apply(lambda row: add_biotype(row), axis=1)
-        df_gff3.to_csv(gff_with_biotype, sep="\t", index=False, header=False)
-
+if not opt.gff is None: correct_gff, gff_with_biotype = fun.get_correct_gff_and_gff_with_biotype(opt.gff, replace=opt.replace)
+  
 # First create some files that are important for any program
 
 # Create a reference dictionary
@@ -193,7 +171,7 @@ if opt.skip_cnv_analysis is False:
     gene_to_coverage_file_regions = "%s/gene_to_coverage_regions.tab"%cnv_outdir
 
     # go through each region of bed file
-    for bed, final_coverge_file in [(bed_file, gene_to_coverage_file), (bed_file_regions, gene_to_coverage_file_regions)]: fun.write_coverage_per_gene_mosdepth_and_parallel(sorted_bam, opt.ref, cnv_outdir, bed, final_coverge_file, replace=opt.replace)
+    for bed, final_coverge_file in [(bed_file, gene_to_coverage_file), (bed_file_regions, gene_to_coverage_file_regions)]: fun.write_coverage_per_gene_mosdepth_and_parallel(sorted_bam, opt.ref, cnv_outdir, bed, final_coverge_file, replace=opt.replace, threads=opt.threads)
 
  
     # write the integrated file

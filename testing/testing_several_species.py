@@ -117,8 +117,8 @@ species_Info = [("746128", "Aspergillus_fumigatus", 1, "CM016889.1"),
 species_Info = [("7227", "Drosophila_melanogaster", 2, "KJ947872.2", 30),
                 ("3702", "Arabidopsis_thaliana", 2, "BK010421.1,AP000423.1", 30)]
 """
-species_Info = [("3702", "Arabidopsis_thaliana", 2, "BK010421.1,AP000423.1", 30)]
-#species_Info = [("7227", "Drosophila_melanogaster", 2, "KJ947872.2", 30)]
+#species_Info = [("3702", "Arabidopsis_thaliana", 2, "BK010421.1,AP000423.1", 30)]
+species_Info = [("7227", "Drosophila_melanogaster", 2, "KJ947872.2", 30)]
 
 
 taxIDs_with_noON_overalpping = {"5476", "746128"}
@@ -326,10 +326,17 @@ python /gpfs/projects/bsc40/mschikora/scripts/perSVade/perSVade_repository/scrip
 
 # testing on Arabidopsis
 
-cd /gpfs/projects/bsc40/mschikora/scripts/perSVade/perSVade_repository/testing/outdirs_testing_severalSpecies/3702_Arabidopsis_thaliana/testing_Accuracy/uniform/sample2608267_ERR3514863
+cd /gpfs/projects/bsc40/mschikora/scripts/perSVade/perSVade_repository/testing/outdirs_testing_severalSpecies/3702_Arabidopsis_thaliana/testing_Accuracy/realSVs/sample59689_SRR7119536
 
+conda activate perSVade_env
 
-python /gpfs/projects/bsc40/mschikora/scripts/perSVade/perSVade_repository/scripts/perSVade.py -r /gpfs/projects/bsc40/mschikora/scripts/perSVade/perSVade_repository/testing/outdirs_testing_severalSpecies/3702_Arabidopsis_thaliana/reference_genome_dir/reference_genome.fasta --threads 48 --outdir /gpfs/projects/bsc40/mschikora/scripts/perSVade/perSVade_repository/testing/outdirs_testing_severalSpecies/3702_Arabidopsis_thaliana/testing_Accuracy/uniform/sample2608267_ERR3514863 --nvars 50 --nsimulations 2 --simulation_ploidies haploid,diploid_hetero --range_filtering_benchmark theoretically_meaningful --mitochondrial_chromosome BK010421.1,AP000423.1 -f1 /gpfs/projects/bsc40/mschikora/scripts/perSVade/perSVade_repository/testing/outdirs_testing_severalSpecies/3702_Arabidopsis_thaliana/findingRealSVs_automaticFindingOfCloseReads/getting_closeReads/reads/ERR3514863/ERR3514863_trimmed_reads_1.fastq.gz.30x.fastq.gz -f2 /gpfs/projects/bsc40/mschikora/scripts/perSVade/perSVade_repository/testing/outdirs_testing_severalSpecies/3702_Arabidopsis_thaliana/findingRealSVs_automaticFindingOfCloseReads/getting_closeReads/reads/ERR3514863/ERR3514863_trimmed_reads_2.fastq.gz.30x.fastq.gz --previous_repeats_table /gpfs/projects/bsc40/mschikora/scripts/perSVade/perSVade_repository/testing/outdirs_testing_severalSpecies/3702_Arabidopsis_thaliana/reference_genome_dir/reference_genome.fasta.repeats.tab --skip_cleaning_outdir --verbose &
+python /gpfs/projects/bsc40/mschikora/scripts/perSVade/perSVade_repository/scripts/perSVade.py -r /gpfs/projects/bsc40/mschikora/scripts/perSVade/perSVade_repository/testing/outdirs_testing_severalSpecies/3702_Arabidopsis_thaliana/reference_genome_dir/reference_genome.fasta --threads 48 --outdir /gpfs/projects/bsc40/mschikora/scripts/perSVade/perSVade_repository/testing/outdirs_testing_severalSpecies/3702_Arabidopsis_thaliana/testing_Accuracy/realSVs/sample59689_SRR7119536 --nvars 50 --nsimulations 1 --simulation_ploidies haploid,diploid_hetero --range_filtering_benchmark theoretically_meaningful --mitochondrial_chromosome BK010421.1,AP000423.1 -f1 /gpfs/projects/bsc40/mschikora/scripts/perSVade/perSVade_repository/testing/outdirs_testing_severalSpecies/3702_Arabidopsis_thaliana/findingRealSVs_automaticFindingOfCloseReads/getting_closeReads/reads/SRR7119536/SRR7119536_trimmed_reads_1.fastq.gz.30x.fastq.gz -f2 /gpfs/projects/bsc40/mschikora/scripts/perSVade/perSVade_repository/testing/outdirs_testing_severalSpecies/3702_Arabidopsis_thaliana/findingRealSVs_automaticFindingOfCloseReads/getting_closeReads/reads/SRR7119536/SRR7119536_trimmed_reads_2.fastq.gz.30x.fastq.gz --previous_repeats_table /gpfs/projects/bsc40/mschikora/scripts/perSVade/perSVade_repository/testing/outdirs_testing_severalSpecies/3702_Arabidopsis_thaliana/reference_genome_dir/reference_genome.fasta.repeats.tab --skip_cleaning_outdir --real_bedpe_breakpoints /gpfs/projects/bsc40/mschikora/scripts/perSVade/perSVade_repository/testing/outdirs_testing_severalSpecies/3702_Arabidopsis_thaliana/findingRealSVs_automaticFindingOfCloseReads/integrated_breakpoints.bedpe --verbose &
+
+# testing on Drosophila
+
+cd /gpfs/projects/bsc40/mschikora/scripts/perSVade/perSVade_repository/testing/outdirs_testing_severalSpecies/7227_Drosophila_melanogaster/testing_Accuracy/realSVs/sample7240_SRR6466705
+
+python /gpfs/projects/bsc40/mschikora/scripts/perSVade/perSVade_repository/scripts/perSVade.py -r /gpfs/projects/bsc40/mschikora/scripts/perSVade/perSVade_repository/testing/outdirs_testing_severalSpecies/7227_Drosophila_melanogaster/reference_genome_dir/reference_genome.fasta --threads 48 --outdir /gpfs/projects/bsc40/mschikora/scripts/perSVade/perSVade_repository/testing/outdirs_testing_severalSpecies/7227_Drosophila_melanogaster/testing_Accuracy/realSVs/sample7240_SRR6466705 --nvars 50 --nsimulations 1 --simulation_ploidies haploid --range_filtering_benchmark theoretically_meaningful --mitochondrial_chromosome KJ947872.2 -f1 /gpfs/projects/bsc40/mschikora/scripts/perSVade/perSVade_repository/testing/outdirs_testing_severalSpecies/7227_Drosophila_melanogaster/findingRealSVs_automaticFindingOfCloseReads/getting_closeReads/reads/SRR6466705/SRR6466705_trimmed_reads_1.fastq.gz.30x.fastq.gz -f2 /gpfs/projects/bsc40/mschikora/scripts/perSVade/perSVade_repository/testing/outdirs_testing_severalSpecies/7227_Drosophila_melanogaster/findingRealSVs_automaticFindingOfCloseReads/getting_closeReads/reads/SRR6466705/SRR6466705_trimmed_reads_2.fastq.gz.30x.fastq.gz --previous_repeats_table /gpfs/projects/bsc40/mschikora/scripts/perSVade/perSVade_repository/testing/outdirs_testing_severalSpecies/7227_Drosophila_melanogaster/reference_genome_dir/reference_genome.fasta.repeats.tab --skip_cleaning_outdir --real_bedpe_breakpoints /gpfs/projects/bsc40/mschikora/scripts/perSVade/perSVade_repository/testing/outdirs_testing_severalSpecies/7227_Drosophila_melanogaster/findingRealSVs_automaticFindingOfCloseReads/integrated_breakpoints.bedpe --verbose &
 
 
 """

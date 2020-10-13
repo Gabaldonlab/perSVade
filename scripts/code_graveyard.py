@@ -25,6 +25,7 @@ get_tandemDuplications_file_in_target_regions(regions_without_SV_bed, sizes, tan
 
 ####################################
 
+bbmap_reformat_sh = "%s/bin/reformat.sh"%EnvDir
 
 def get_tandemDuplications_file_in_target_regions(target_regions_bed, sizes, tanDup_file, max_n_copies=5):
 
@@ -4403,3 +4404,889 @@ def generate_jobarray_file_slurm(jobs_filename, stderr="./STDERR", stdout="./STD
     if sbatch is True: out_state = os.system("sbatch %s"%jobs_filename_run); print_if_verbose("%s sbatch out state: %i"%(name, out_state))
 
     # get info about the exit status: sacct -j <jobid> --format=JobID,JobName,MaxRSS,Elapsed
+
+
+
+def generate_tables_of_SV_between_genomes_gridssClove(query_genome, reference_genome, replace=False, threads=4, coverage=30, insert_size=500, read_lengths=[kb*1000 for kb in [0.3, 0.5, 1, 1.5, 2, 2.5]], error_rate=0.0, gridss_min_af=0.25):
+
+    """Takes a bam file with aligned reads or genomes and generates calls, returning a dict that maps variation type to variants
+    - aligner can be minimap2 or ngmlr.
+
+    [0.5, 0.7, 0.9, 1]
+
+    """
+
+
+    # first run svim under the outdir of the aligned reads
+    working_dir = "%s/findingSVlongReadsSimulation_ouptut_%s_against_%s"%(get_dir(query_genome), get_file(query_genome), get_file(reference_genome))
+    print_if_verbose("generating svtables into %s"%working_dir)
+    if replace is True: delete_folder(working_dir); 
+    make_folder(working_dir)
+
+    ########## SIMULATE LONG READS AS IF THEY WERE PAIRED. UNIFORM #############
+
+    # define the output
+    ID = ("%ix_i%i_rl%s"%(coverage, insert_size, "-".join([get_int_or_float_as_text(x/1000) for x in read_lengths])))
+    
+    all_reads_1 = "%s/uniformSim_%s_all_reads1.fasta"%(working_dir, ID)
+    all_reads_2 = "%s/uniformSim_%s_all_reads2.fasta"%(working_dir, ID)
+
+    all_reads_1_fqgz = "%s/uniformSim_%s_all_reads1.fq.gz"%(working_dir, ID)
+    all_reads_2_fqgz = "%s/uniformSim_%s_all_reads2.fq.gz"%(working_dir, ID)
+
+    if any([file_is_empty(x) for x in [all_reads_1_fqgz, all_reads_2_fqgz]]) or replace is True:
+        print_if_verbose("simulating long paired reads")
+
+        # first simulate reads in parallel for each chromosome, as if they were paired
+        inputs_fn = [(chr_obj, coverage, insert_size, read_lengths) for chr_obj in SeqIO.parse(query_genome, "fasta")]
+
+        with multiproc.Pool(multiproc.cpu_count()) as pool:
+            all_reads_list_tuples = pool.starmap(simulate_pairedEndReads_per_chromosome_uniform, inputs_fn)
+            pool.close()
+
+        #all_reads_list_tuples = list(map(lambda x: simulate_pairedEndReads_per_chromosome_uniform(x[0], x[1], x[2]), inputs_fn))
+        reads_objects_1 = make_flat_listOflists([r[0] for r in all_reads_list_tuples])
+        reads_objects_2 = make_flat_listOflists([r[1] for r in all_reads_list_tuples])
+        print_if_verbose("There are %i reads"%len(reads_objects_1))
+
+        # get the reads writen
+        print_if_verbose("writing reads")
+        all_reads_1_tmp = "%s.tmp"%all_reads_1; all_reads_2_tmp = "%s.tmp"%all_reads_2
+
+        SeqIO.write(reads_objects_1, all_reads_1, "fasta")
+        SeqIO.write(reads_objects_2, all_reads_2, "fasta")
+
+        # get them as fastq gzipped
+        all_reads_1_fqgz = convert_fasta_to_fqgz(all_reads_1, replace=replace)
+        all_reads_2_fqgz = convert_fasta_to_fqgz(all_reads_2, replace=replace)
+
+    # run bwa mem
+    bamfile = "%s/uniformSim_%s_aligned_reads.bam"%(working_dir, ID)
+    sorted_bam = "%s.sorted"%bamfile
+    index_bam = "%s.bai"%sorted_bam
+
+    run_bwa_mem(all_reads_1_fqgz, all_reads_2_fqgz, reference_genome, working_dir, bamfile, sorted_bam, index_bam, name_sample="uniformSim_%s"%ID, threads=threads, replace=replace)
+
+    # plot the coverage across genome
+    plot_coverage_across_genome_pairedEndReads(sorted_bam, reference_genome, replace=replace)
+
+    ############################################################################
+    
+    # define the gridss filters according to the freq, which is related to the expected ploidy
+    gridss_filters_dict = default_filtersDict_gridss
+    gridss_filters_dict["min_af"] = gridss_min_af
+    print_if_verbose("Filtering out when any AF is below %.3f"%(gridss_filters_dict["min_af"]))
+
+    # define the median coverage per region
+    outdir_coverage_calculation = "%s/coverage_per_regions"%working_dir; make_folder(outdir_coverage_calculation)
+    coverage_df =  pd.read_csv(generate_coverage_per_window_file_parallel(reference_genome, outdir_coverage_calculation, sorted_bam, windows_file="none", replace=replace), sep="\t")
+    median_coverage = np.median(coverage_df.mediancov_1)
+    print_if_verbose("The median coverage is %i"%median_coverage)
+
+    # run the gridss and clove pipeline with high-confidence parameters
+    gridss_outdir = "%s/%s_gridss_outdir"%(working_dir, ID)
+    SV_dict, df_gridss =  run_gridssClove_given_filters(sorted_bam, reference_genome, gridss_outdir, median_coverage, replace=replace, threads=threads, median_insert_size=insert_size, gridss_filters_dict=gridss_filters_dict, replace_FromGridssRun=False) # DEBUG. The replace_FromGridssRun in True would be debugging is to replace from the GRIDSS run step
+
+    # remove all the chromosomal bam files and coverage measurements
+    for file in os.listdir(working_dir):
+        filepath = "%s/%s"%(working_dir, file)
+
+        if filepath.startswith("%s."%sorted_bam) and filepath!=index_bam and filepath!="%s.coverage_per_window.tab"%sorted_bam: remove_file(filepath)
+
+    return SV_dict, df_gridss
+
+
+def plot_report_accuracy_simulations(df_benchmarking, filename):
+
+    """Plots the accuracy of each type of SVcalling on simulations. There will be one subplot for each precision/recall/Fvalue and ploidy combination. The rows will be for ploidies and the cols for accuracy measurements."""
+
+    df_benchmarking_long = pd.DataFrame()
+
+    accuracy_fields = ["precision", "recall", "Fvalue"]
+    nonAccuracy_fields = [c for c in df_benchmarking.columns if c not in accuracy_fields]
+
+    # convert to a long format
+    for f in accuracy_fields:
+
+        df = df_benchmarking[nonAccuracy_fields + [f]].rename(columns={f : "accuracy"})
+        df["type_ac"] = f
+        df_benchmarking_long = df_benchmarking_long.append(df)
+
+    # define the palette
+    palette = {"uniform":"navy", "realSVs":"red", "fastSV_on_uniform":"cyan", "fastSV_on_realSVs":"magenta"}
+
+
+    # change the svtype name
+    svtype_to_shortSVtype = {"deletions":"del", "tandemDuplications":"tan", "insertions":"ins", "translocations":"tra", "inversions":"inv", "integrated":"all"}
+    df_benchmarking_long["svtype"] = df_benchmarking_long.svtype.apply(lambda x: svtype_to_shortSVtype[x])
+
+    g = sns.catplot(x="svtype", y="accuracy", hue="typeParameterOptimisation", col="type_ac", row="ploidy", data=df_benchmarking_long,kind="bar", height=2, aspect=2, ci="sd", palette=palette)
+
+    g.set(ylim=(0.5, 1))
+
+    g.savefig(filename, bbox_inches='tight')
+
+def report_accuracy_simulations(sorted_bam, reference_genome, outdir, real_svtype_to_file, threads=4, replace=False, n_simulated_genomes=2, mitochondrial_chromosome="mito_C_glabrata_CBS138", simulation_ploidies=["haploid", "diploid_homo", "diploid_hetero", "ref:2_var:1", "ref:3_var:1", "ref:4_var:1", "ref:5_var:1", "ref:9_var:1", "ref:19_var:1", "ref:99_var:1"], range_filtering_benchmark="theoretically_meaningful", nvars=100):
+
+    """This function runs tests the accuracy on uniform simulations and those indicated by real_svtype_to_file. It reports the accuracy of the parameter optimisation on each of these simulations, as well as how the fast method works for each of the different simulation types. """
+
+    # test that there is real data
+    if len(real_svtype_to_file)==0: raise ValueError("You need real data if you want to test accuracy")
+
+    # make the outdir
+    make_folder(outdir)
+
+    print_if_verbose("Testing accuracy of simulations")
+
+    # calculate the insert size statistics
+    median_insert_size, median_insert_size_sd  = get_insert_size_distribution(sorted_bam, replace=replace, threads=threads)
+
+    # define a file that will contain the benchmarking
+    df_benchmarking_file = "%s/df_benchmarking.tab"%outdir
+
+    if file_is_empty(df_benchmarking_file) or replace is True:
+
+        # initialize a df that will contain the accuracy of each simulation type. The fields will be genomeID, ploidy, svtype, typeParameterOptimisation (this can be uniform, realSVs, fastSV_on_uniform or fastSV_on_realSVs), Fvalue, precision and recall
+        df_benchmarking_fields = ["genomeID", "ploidy", "svtype", "typeParameterOptimisation", "Fvalue", "precision", "recall"]
+        df_benchmarking = pd.DataFrame(columns=df_benchmarking_fields)
+
+        # go through each simulation type
+        for typeSimulations, svtype_to_svfile in [("uniform", {}), ("realSVs", real_svtype_to_file)]:
+            print_if_verbose(typeSimulations)
+
+            # define the parameter optimisation dir
+            parameter_optimisation_dir = "%s/parameter_optimisation_%s"%(outdir, typeSimulations); make_folder(parameter_optimisation_dir)
+
+            # get the accuracy of these types of simulations, as well as the best parameters
+            gridss_blacklisted_regions, gridss_maxcoverage, gridss_filters_dict, max_rel_coverage_to_consider_del, min_rel_coverage_to_consider_dup, df_cross_benchmark_best = get_best_parameters_for_GridssClove_run(sorted_bam, reference_genome, parameter_optimisation_dir, threads=threads, replace=replace, n_simulated_genomes=n_simulated_genomes, mitochondrial_chromosome=mitochondrial_chromosome, simulation_ploidies=simulation_ploidies, range_filtering_benchmark=range_filtering_benchmark, nvars=nvars, real_svtype_to_file=svtype_to_svfile, median_insert_size=median_insert_size, median_insert_size_sd=median_insert_size_sd)
+
+            # add to the df the simulations paramteres
+            df_cross_benchmark_best["typeParameterOptimisation"] = typeSimulations
+            df_cross_benchmark_best = df_cross_benchmark_best.rename(columns={"test_genomeID": "genomeID", "test_ploidy":"ploidy"})
+            df_benchmarking = df_benchmarking.append(df_cross_benchmark_best[df_benchmarking_fields])
+
+            # go through each simulation and ploidy and run the fastSV calling on it. This will be fast by putting the vcf file under the 
+            for simulation_ID in range(1, n_simulated_genomes+1):
+                print_if_verbose(simulation_ID)
+
+                # define the genome ID
+                genomeID = "simulation_%i"%(simulation_ID)
+
+                # define the known SVs
+                knownSV_dict = {svtype : "%s/simulation_%i/final_simulated_SVs/%s.tab"%(parameter_optimisation_dir, simulation_ID, svtype) for svtype in {"insertions", "translocations", "deletions", "tandemDuplications", "inversions"}}
+
+                # go through each of the target ploidies and generate the resulting bam files:
+                for ploidy in simulation_ploidies:
+
+                    # define the vcf outdir
+                    benchmarking_dir = "%s/simulation_%i/benchmark_GridssClove_%s/benchmark_max%ix_ignoreRegions%s"%(parameter_optimisation_dir, simulation_ID, ploidy, gridss_maxcoverage, gridss_blacklisted_regions!="")
+                    gridss_vcf = "%s/gridss_output.vcf.withSimpleEventType.vcf"%benchmarking_dir
+                    print_if_verbose("working on %s"%ploidy)
+
+                    # define the outdir
+                    outdir_fastCalling = "%s/fastSVcalling_%s_simulation_%i_ploidy_%s"%(outdir, typeSimulations, simulation_ID, ploidy); make_folder(outdir_fastCalling)
+
+                    # define the sorted bam
+                    sorted_bam_fastSV = "%s/aligned_reads.sorted.bam"%benchmarking_dir
+
+                    # debug
+                    if any([file_is_empty(x) for x in [sorted_bam_fastSV, gridss_vcf]]): raise ValueError("Some files do not exist")
+
+                    # get the fast calling (without repeating)
+                    sv_dict, df_gridss = run_GridssClove_optimising_parameters(sorted_bam_fastSV, reference_genome, outdir_fastCalling, threads=threads, replace=replace, mitochondrial_chromosome=mitochondrial_chromosome, fast_SVcalling=True, gridss_VCFoutput=gridss_vcf)
+
+                    # define the benchmarking accuracy
+                    fileprefix = "%s/benchmarking"%outdir_fastCalling
+                    df_benchmark_fastSVcalling = benchmark_processedSVs_against_knownSVs_inHouse(sv_dict, knownSV_dict, fileprefix, replace=replace, add_integrated_benchmarking=True)
+
+                    # add fields
+                    df_benchmark_fastSVcalling["genomeID"] = genomeID
+                    df_benchmark_fastSVcalling["ploidy"] = ploidy
+                    df_benchmark_fastSVcalling["typeParameterOptimisation"] = "fastSV_on_%s"%typeSimulations
+
+                    # keep
+                    df_benchmarking = df_benchmarking.append(df_benchmark_fastSVcalling[df_benchmarking_fields])
+
+
+        # save
+        df_benchmarking.to_csv(df_benchmarking_file, sep="\t", header=True, index=False)
+
+    else: df_benchmarking = pd.read_csv(df_benchmarking_file, sep="\t")
+
+
+    # make plots to report the accuracy of each simulation type. 
+    filename = "%s/accuracy_on_simulations.pdf"%outdir
+    plot_report_accuracy_simulations(df_benchmarking, filename)
+
+
+
+def plot_coverage_across_genome_pairedEndReads(sorted_bam, reference_genome, threads=4, replace=False):
+
+    """Takes a sorted_bam and plots the coverage for windows of the genome"""
+
+    print_if_verbose("plotting coverage across genome")
+
+    # get coverage df  
+    calculate_coverage_dir = "%s.calculating_windowcoverage"%sorted_bam; make_folder(calculate_coverage_dir)
+    coverage_df = pd.read_csv(generate_coverage_per_window_file_parallel(reference_genome, calculate_coverage_dir, sorted_bam, replace=replace, threads=threads), "\t")
+    all_chromosomes = sorted(set(coverage_df["#chrom"]))
+
+    # plot, for each chromosome, the coverage
+    fig = plt.figure(figsize=(6*len(all_chromosomes), 8)); I=1
+    for yfield in ["mediancov_1", "percentcovered_1"]:
+        for chromosome in all_chromosomes:
+
+            ax = plt.subplot(2, len(all_chromosomes), I); I+=1
+            df_c = coverage_df[coverage_df["#chrom"]==chromosome]
+            sns.lineplot(x="start", y=yfield, data=df_c)
+
+            ax.set_title(chromosome)
+
+
+    #fig.tight_layout()  # otherwise the right y-label is slightly 
+    filename="%s.coverage.pdf"%(sorted_bam)
+    fig.savefig(filename, bbox_inches='tight');
+    #if is_cluster is False: plt.show()
+    plt.close(fig)
+
+
+
+
+
+def get_availableGbRAM_withFiles():
+
+    """This function returns a float with the available memory in your system"""
+
+    # define the memory available on several ways
+
+    # check if meminfo exists
+    try: 
+        if len(open("/proc/meminfo", "r").readlines())>0:
+            meminfo_exists = True
+        else: meminfo_exists = False
+    except: meminfo_exists = False
+
+    # slurm cluster environment
+    if "SLURM_MEM_PER_CPU" in os.environ: 
+
+        # the available memory is the number of CPUs x the number of mem per CPU
+        mem_per_cpu = int(os.environ["SLURM_MEM_PER_CPU"])/1000 # the variable is in Mb
+        ncpus = int(os.environ["SLURM_CPUS_PER_TASK"])
+        available_mem = mem_per_cpu*ncpus
+
+    # the /proc/meminfo file
+    elif meminfo_exists:
+
+        lines_availableMem = [float(l.split()[1])/1000000 for l in open("/proc/meminfo", "r").readlines() if l.startswith("MemAvailable:") and l.strip().endswith("kB")]
+
+        if len(lines_availableMem)!=1: raise ValueError("there are more than one correct lines when calculating the memory consumption.")
+
+        available_mem = lines_availableMem[0]
+
+    else: raise ValueError("The available memory cannot be determined")
+
+    return available_mem
+
+
+
+def get_bed_df_not_overlapping_with_SVs(all_regions_bed_df, svtypes, svtype_to_svfile, bed_regions_prefix, distance_between_SVs=1000):
+
+    """This function takes a bed df where all the regions of a genomes. It goes through a set of svs and returns the bed were there are regions where there are no SVs (at least by distance_between_SVs). It writes files under outdir"""
+
+    # write the all regions
+    all_regions_bed = "%s_all_regions.bed"%bed_regions_prefix
+    all_regions_bed_df.to_csv(all_regions_bed, sep="\t", index=False, header=False)
+
+    # define the interesting chromosomes
+    interesting_chromosomes = set(all_regions_bed_df.chromosome)    
+
+    # initialize a df with all the regions with SVs
+    regions_with_SV_bed_df = pd.DataFrame(columns=["chromosome", "start", "end"])
+
+    # intialize a dict that has the number of SVs
+    svtype_to_nSVs = {svtype : 0 for svtype in svtypes}
+
+    # go through each svtype and add regions to regions_with_SV_bed_df
+    for svtype in svtypes:
+
+        # whenever the svtype is in svtype_to_svfile it has to be added to regions_with_SV_bed_df
+        if svtype in svtype_to_svfile: 
+
+            regions_with_SV_bed_svtype_df, nSVs = get_affected_region_bed_for_SVdf(svtype_to_svfile[svtype], svtype, interesting_chromosomes, add_interval_bp=distance_between_SVs)
+
+            # keep the number of SVs
+            svtype_to_nSVs[svtype] += nSVs
+
+            # append the bed regions
+            regions_with_SV_bed_df = regions_with_SV_bed_df.append(regions_with_SV_bed_svtype_df, sort=True)
+
+    # write the bed with the regions with SV
+    regions_with_SV_bed = "%s_sv_regions.bed"%bed_regions_prefix
+    regions_with_SV_bed_df[["chromosome", "start", "end"]].to_csv(regions_with_SV_bed, sep="\t", index=False, header=False)
+
+    # get the regions in all_regions_bed that are not in regions_with_SV_bed
+    regions_without_SV_bed = "%s_noSV_regions.bed"%bed_regions_prefix
+    regions_without_SV_bed_stderr = "%s.generating.stderr"%regions_without_SV_bed
+    print_if_verbose("generating regions_without_SV_bed. The stderr can be found in %s"%regions_without_SV_bed_stderr)
+    run_cmd("%s subtract -a %s -b %s > %s 2>%s"%(bedtools, all_regions_bed, regions_with_SV_bed, regions_without_SV_bed, regions_without_SV_bed_stderr))
+    remove_file(regions_without_SV_bed_stderr)
+
+    return regions_without_SV_bed, svtype_to_nSVs
+
+
+def get_bed_df_not_overlapping_with_translocations_allChromARM(target_regions_bed, translocations_file, outdir, chr_to_len):
+
+    """This function takes a bed file with target regions and subtracts the regions of the translocations file that are affected. It returns this bed file where translocations can be placed"""
+
+    # get the interesting regions
+    target_regions_df = pd.read_csv(target_regions_bed, sep="\t", header=None, names=["chromosome", "start", "end"])
+    interesting_chromosomes = set(target_regions_df.chromosome)
+
+    # get the bed df from the translocations
+    regions_with_tra_bed_df, nSVs = get_affected_region_bed_for_SVdf(translocations_file, "translocations", interesting_chromosomes, first_position_idx=1, translocations_type="whole_chromosomes", chr_to_len=chr_to_len)
+
+    # write the bed with the regions with SV
+    regions_with_tra_bed = "%s/regions_with_translocations_whole_arms.bed"%outdir
+    regions_with_tra_bed_df[["chromosome", "start", "end"]].to_csv(regions_with_tra_bed, sep="\t", index=False, header=False)
+
+    # get the regions in all_regions_bed that are not in regions_with_SV_bed
+    regions_without_tra_bed = "%s/noTRA_regions.bed"%outdir
+
+    bed_non_overlapping_stderr = "%s.generating.stderr"%regions_without_tra_bed
+    print_if_verbose("Getting regions without translocations. The stderr is in %s"%bed_non_overlapping_stderr)
+    run_cmd("%s subtract -a %s -b %s > %s 2>%s"%(bedtools, target_regions_bed, regions_with_tra_bed, regions_without_tra_bed, bed_non_overlapping_stderr))
+    remove_file(bed_non_overlapping_stderr)
+
+    return regions_without_tra_bed
+
+
+        
+def check_consistency_of_svtype_to_svDF(svtype_to_svDF, all_chromosomes, chr_to_len):
+
+    """Checks whether any of the breakpoints overlap with the others and reports those vars that do"""
+ 
+    print_if_verbose("checking consistency of svtype to svDF")
+    df_bed_allRegions = pd.DataFrame()
+
+    # go through each df
+    for svtype, svDF in svtype_to_svDF.items():
+
+        if type(svDF)==str: svDF = pd.read_csv(svDF, sep="\t")
+
+        svDF = svDF.set_index("ID", drop=False)
+
+        for varID, sv_series in svDF.iterrows():
+
+            # define series as df
+            sv_series_df = pd.DataFrame({0 : sv_series}).transpose()
+
+            # get the bed of this var
+            sv_bed, nSVs = get_affected_region_bed_for_SVdf(sv_series_df, svtype, all_chromosomes, chr_to_len=chr_to_len, translocations_type="breakpoint_pos", first_position_idx=1, add_interval_bp=0) # the interval should be 0 because we want to keep only true overlaps 
+            sv_bed["varID"] = varID
+            sv_bed["svtype"] = svtype
+
+            # get if there is any overlap with df_bed_allRegions
+            regions_overlapping = df_bed_allRegions.apply(lambda rprevious: any(sv_bed.apply(lambda rnew: get_is_overlapping_query_vs_target_region(rprevious, rnew), axis=1)), axis=1)
+
+            # if there is any region matching with the previous, continue, if not, keep
+            if any(regions_overlapping): 
+
+                # raise error if they do not come both from simulation or if any of the vars comes from a translocation
+                if not (all(svDF.loc[{varID}, "ID"].apply(lambda x: "_sim_" in x)) and "_sim_" in varID) or "translocation" in varID or any(svDF.loc[{varID}, "ID"].apply(lambda x: "translocation" in x)):
+
+                    print_if_verbose(regions_overlapping)
+
+                    print_if_verbose("%s has these overlapping regions:\n"%varID, df_bed_allRegions[regions_overlapping])
+                    print_if_verbose("The actual var is \n", svDF.loc[varID, svtype_to_fieldsDict[svtype]["all_fields"]],"\n")
+                    
+                    raise ValueError("there are overlapping regions where they should not")
+
+            # add the bed to the regions matching
+            df_bed_allRegions = df_bed_allRegions.append(sv_bed)
+
+
+
+
+
+
+def get_translocations_randomly_placed_in_target_regions(target_regions_bed, translocations_file, chr_to_len, nvars=100, only_5_to_3=False):
+
+    """Writes nvars randomly placed translocations in target_regions_bed, and writes them to translocations_file. It will draw as maximum number of translocations as possbile. Half of them will be inverted and half in the same orientation. All of them are balanced."""
+
+    print_if_verbose("getting randomly inserted translocations")
+
+    # get the bed into a df
+    target_regions_df = pd.read_csv(target_regions_bed, sep="\t", names=["chromosome", "start", "end"], header=None).drop_duplicates()
+    target_regions_df.index = list(range(len(target_regions_df)))
+
+    # add the breakpoint region in the middle
+    target_regions_df["bp_pos"] = (target_regions_df.start + (target_regions_df.end-target_regions_df.start)/2).apply(int)
+
+    # initialize a dict that will be used for the tra df
+    varID_to_colName_to_value = {}
+
+    # keep simulating translocations until you have nvars
+    nvars_simulated = 0
+
+    while nvars_simulated<nvars:
+
+        # if the target df has less than 2 vars with a different chromosome, drop
+        if len(set(target_regions_df.chromosome))<2: break
+
+        # pick a regionA
+        all_regions = list(target_regions_df.index)
+        regionA = target_regions_df.loc[random.choice(all_regions)]
+
+        # get the regions from different chromosomes
+        target_regions_df_B = target_regions_df[target_regions_df.chromosome!=regionA["chromosome"]]
+        all_regions_B = list(target_regions_df_B.index)
+        regionB = target_regions_df_B.loc[random.choice(all_regions_B)]
+
+        # get the dict for this tra
+        tra_dict = {"ChrA":regionA["chromosome"], "StartA":1, "EndA":regionA["bp_pos"], "ChrB":regionB["chromosome"], "Balanced":True}
+
+        # define if inverted or not, which defines the orientation of chrB
+        if only_5_to_3 is True: is_inverted = False
+        else: 
+            # is_inverted = bool(random.randrange(0, 2)) 50% each
+            is_inverted = random.uniform(0, 1)>=0.8 # 80% inverted translocations
+
+        if is_inverted is True: 
+            tra_dict["StartB"] = regionB["bp_pos"]
+            tra_dict["EndB"] = chr_to_len[regionB["chromosome"]]
+
+        else:
+            tra_dict["StartB"] = 1
+            tra_dict["EndB"] = regionB["bp_pos"]
+
+        # add the 
+        varID_to_colName_to_value[nvars_simulated] = tra_dict
+
+        # delete both regions from the possibilities
+        target_regions_df = target_regions_df.drop(regionA.name)
+        target_regions_df = target_regions_df.drop(regionB.name)
+
+        # update the number of simulated
+        nvars_simulated+=1
+
+    # get df
+    tra_df = pd.DataFrame(varID_to_colName_to_value).transpose()[["ChrA", "StartA", "EndA", "ChrB", "StartB", "EndB", "Balanced"]]
+    tra_df["Name"] = ["translocation_%i"%(I+1) for I in range(len(tra_df))]
+    tra_df["ID"] = tra_df["Name"]
+
+    print_if_verbose("writing %s"%translocations_file)
+    tra_df.to_csv(translocations_file, sep="\t")
+
+
+def get_simpleSVtype_from_bedpeRow(r):
+
+    """gets the clove notation from a bedpe row"""
+
+    if r["chrom1"]==r["chrom2"]: 
+
+        if r["strand1"]=="+" and r["strand2"]=="+": return "INV1"
+        if r["strand1"]=="-" and r["strand2"]=="-": return "INV2"
+        if r["strand1"]=="+" and r["strand2"]=="-": return "DEL"
+        if r["strand1"]=="-" and r["strand2"]=="+": return "TAN"
+
+    if r["chrom1"]!=r["chrom2"]: 
+
+        if r["strand1"]=="+" and r["strand2"]=="+": return "INVTX1"
+        if r["strand1"]=="-" and r["strand2"]=="-": return "INVTX2"
+        if r["strand1"]=="+" and r["strand2"]=="-": return "ITX1"
+        if r["strand1"]=="-" and r["strand2"]=="+": return "ITX2"
+
+    raise ValueError("It is impossible to establish the clove sig")
+
+
+def target_svDFseries_overlaps_bed_df(svDFseries, df_bed, svtype, first_position_idx, translocations_type, chr_to_len):
+
+    """Returns whether a series of an svDF overlaps any of the regions in df_bed"""
+
+    # get the interesting chromosomes
+    interesting_chromosomes = set(chr_to_len)
+
+    # get svDFseries as df
+    svDF = pd.DataFrame({0: svDFseries}).transpose()
+
+    # get the bed
+    sv_bed = get_affected_region_bed_for_SVdf(svDF, svtype, interesting_chromosomes, first_position_idx=first_position_idx, translocations_type=translocations_type, chr_to_len=chr_to_len)[0]
+
+    # get if there is any overlap
+    regions_overlapping = df_bed.apply(lambda rprevious: any(sv_bed.apply(lambda rnew: get_is_overlapping_query_vs_target_region(rprevious, rnew), axis=1)), axis=1)
+
+    return any(regions_overlapping)
+
+def get_int_or_float_as_text(number):
+
+    """Formats numbers"""
+
+    if int(number)==float(number): return "%i"%number
+    else: 
+        float_parts = ("%.1f"%number).split(".")
+
+        if float_parts[0]=="0": return ".%s"%float_parts[1]
+        else: return "%.1f"%number
+
+
+
+def convert_fasta_to_fqgz(fasta_file, replace=False, remove_fasta=True):
+
+    """Takes a fasta file and converts it to fq"""
+
+
+    # define fastq name
+    prefix = fasta_file.rstrip(".fasta").rstrip(".fa")
+    fastqgz = "%s.fq.gz"%prefix
+    fastqgz_tmp = "%s.tmp.fq.gz"%prefix
+
+    # convert into fastq and gzip
+    if file_is_empty(fastqgz) or replace is True:
+        print_if_verbose("generating %s"%fastqgz)
+
+        # convert
+        reformatting_std = "%s.generating.std"%fastqgz_tmp
+        print_if_verbose("running reformat. The std is in %s"%reformatting_std)
+        run_cmd("%s in=%s out=%s qfake=50 overwrite=true > %s 2>&1"%(bbmap_reformat_sh, fasta_file, fastqgz_tmp, reformatting_std))
+
+        # remove the fasta
+        if remove_fasta is True: os.unlink(fasta_file)
+
+        remove_file(reformatting_std)
+        os.rename(fastqgz_tmp, fastqgz)
+
+    return fastqgz
+
+
+
+def simulate_pairedEndReads_per_chromosome_uniform(chr_obj, coverage, insert_size, read_lengths, max_fraction_chromosome=0.1):
+
+    """This function takes a chromosome object (SeqRecord) and it generates reads that are as long as read_lengths, in a window that increases. It returns a list of objects, each of which has a chromosomeID_readID"""
+
+    # define a function that takes a start, a length and an insert size and returns formated reads
+    def get_paired_reads_list(chr_obj, startRead, len_read, insert_size, extraID):
+
+        # define the end of the read
+        endRead = startRead + len_read
+
+        # define the coordinates of the pair
+        startPair = endRead + insert_size
+        endPair = startPair + len_read
+
+        if endRead>len_chromosome or endPair>len_chromosome: raise ValueError("The calculation of read ends was not correct")
+
+        # define ID of the read
+        ID = "%s_readStart%i_%s"%(chr_obj.id, startRead, extraID)
+
+        # keep the read and the pair
+        read = chr_obj[startRead:endRead]
+        read.id = "%s/1"%ID; read.name = ""; read.description = ""
+
+        pair = chr_obj[startPair:endPair].reverse_complement()
+        pair.id = "%s/2"%ID; pair.name = ""; pair.description = ""
+
+        return [read, pair]
+
+    # define overall metrics
+    len_chromosome = len(chr_obj)
+    read_lengths = [int(x) for x in sorted(read_lengths) if x<=int(len_chromosome*max_fraction_chromosome)]
+    per_readLength_coverage = int((coverage/len(read_lengths))/2) + 1  # coverage that has to be achieved by each length of reads
+
+    # initialize the reads
+    reads_1 = []
+    reads_2 = []
+
+    # go through each read_length
+    for len_read in read_lengths:
+
+        # define the size of the increasing window that has to be reached to generate the per_readLength_coverage
+        len_window_increment = int(len_read/per_readLength_coverage)
+
+        # debug 
+        if len_read<len_window_increment: raise ValueError("the read length has to be longer that the window increment")
+
+        # go through each window, considering the pair
+        startRead = 0
+        while (startRead + 2*len_read + insert_size)<len_chromosome:
+
+            # get the read pairs
+            reads = get_paired_reads_list(chr_obj, startRead, len_read, insert_size, extraID="readLen%i_intrachromosomal_read"%len_read)
+            reads_1.append(reads[0])
+            reads_2.append(reads[1])
+
+            # increment for the next window
+            startRead += len_window_increment
+
+        # add some reads at the end and the start
+        for I in range(per_readLength_coverage):
+
+            # get the reads for the first read
+            reads = get_paired_reads_list(chr_obj, 0, len_read, insert_size, extraID="readLen%i_firstRead%i"%(len_read, I))
+            reads_1.append(reads[0])
+            reads_2.append(reads[1])
+
+            # define coordinates of the last read
+            start_lastRead = len_chromosome - (2*len_read + insert_size)
+
+            # keep 
+            reads = get_paired_reads_list(chr_obj, start_lastRead, len_read, insert_size, extraID="readLen%i_lastRead%i"%(len_read, I))
+            reads_1.append(reads[0])
+            reads_2.append(reads[1])
+
+
+
+    return (reads_1, reads_2)
+
+
+
+
+def leftTrimVariant(pos, ref, alt, onlyOneBp=True):
+
+    """Takes a variant with a position, ref and alt alleles and returns the trimmed to the left. onlyOneBp means that it will only trim one basepair. Fo some reason this is how the vcflib and gatk normalisations have the trims. """
+
+    # get the lengths
+    len_ref = len(ref); len_alt = len(alt)
+
+    # those that start with the same base can be trimmed
+    if ref[0]==alt[0]:
+
+        len_overlap = 0
+        # go through each position and keep how long is the overlap on the left
+        if onlyOneBp is True: rangelength = 1 # only the first bp
+        else: rangelength = min([len_ref, len_alt]) # all
+
+        for i in range(rangelength):
+            if ref[i]==alt[i]: len_overlap+=1
+            else: break
+
+        # define the modified position, which increments depending on the length of the overlap
+        mod_pos = pos + len_overlap
+
+        # define the ref
+        if len_overlap==len_ref: mod_ref = "-"
+        else: mod_ref = ref[len_overlap:]
+
+        # define the alt the same way
+        if len_overlap==len_alt: mod_alt = "-"
+        else: mod_alt = alt[len_overlap:]
+
+    else: mod_pos, mod_ref, mod_alt = pos, ref, alt # the same
+
+    return mod_pos, mod_ref, mod_alt
+
+
+def load_vcf_intoDF_GettingFreq_AndFilter(vcf_file):
+    
+    """Takes a vcf and loads it into a pandas dataframe. It assumes that it is a vcf with only one sample, at the end. It returns the allele frequency of all the representations of the variants. At least those that have been tested for the VEP output. These are important filters:
+    
+    # for all
+    DP (from DATA, one for all alleles)
+    QUAL (one for all)
+
+    # specific from freebayes
+    SAF (from INFO, one for each alleles)
+    SAR (from INFO, one for each alleles)
+    RPR (from INFO, one for each allele)
+    RPL (from INFO, one for each allele)
+
+    # specific from HC:
+    QD (from INFO)
+    MQ (from INFO)
+    FS (from INFO)
+    MQRankSum (from INFO)
+    ReadPosRankSum (from INFO)
+
+    """
+
+    # get the df (avoid NA as a default NaN)
+
+    df = pd.read_csv(vcf_file, skiprows=list(range(len([line for line in open(vcf_file, "r", encoding='utf-8', errors='ignore') if line.startswith("##")]))), sep="\t", na_values=vcf_strings_as_NaNs, keep_default_na=False)
+
+    # set the index to be a tuple of (chromosome, location, ref, alt)
+    df["CHROM_POS_REF_ALT"] = [tuple(x) for x in df[["#CHROM", "POS", "REF", "ALT"]].values]; df = df.set_index("CHROM_POS_REF_ALT")
+
+    # add a colum that will result from the merging of FORMAT and the last column (which are the values of FORMAT)
+    data_colname = list(df.keys())[-1]
+    df["METADATA"] = [dict(zip(x[0].split(":"), x[1].split(":"))) for x in df[["FORMAT", data_colname]].values]
+    features = df.iloc[0].METADATA.keys()
+
+    # add as columns all the fetaures
+    for feature in features: 
+
+        # go through each data record
+        data = []
+        for rec in df.METADATA:
+
+            if feature in rec: data.append(rec[feature])
+            else: data.append("")
+        df[feature] = data
+
+    ##### ADD INFO COLS #####
+
+    interesting_INFO_filters = {"SAF", "SAR", "RPR", "RPL", "QD", "MQ", "FS", "MQRankSum", "ReadPosRankSum"}
+    df["INFO_dict"] = df.INFO.apply(lambda x: {item.split("=")[0] : item.split("=")[1].split(",") for item in x.split(";") if item.split("=")[0] in interesting_INFO_filters})
+
+    def get_INFOfilt(r, INFO_filt):
+        
+        if INFO_filt in set(r["INFO_dict"].keys()): return r["INFO_dict"][INFO_filt]
+        else: return [np.nan]*len(r["ALT"].split(","))
+
+    for INFO_filt in interesting_INFO_filters: df["INFO_%s_list"%INFO_filt] = df.apply(lambda r: get_INFOfilt(r, INFO_filt), axis=1)
+
+    #########################
+
+
+    # a function that avoids nans
+    def returnNonNAN(float_val):
+        if pd.isna(float_val): return 0.0000001
+        else: return float_val 
+
+    # calculate the real allelle frequency
+    def calculate_altAllele_freq(x):
+
+        """Takes AD and returns a tuple with the alternagtive alleles frequencies"""
+        alleles_reads = [int(nr) for nr in x.split(",")]
+        sum_alleles = sum(alleles_reads)
+
+        return [returnNonNAN(np.divide(altAlleleReads, sum_alleles)) for altAlleleReads in alleles_reads[1:]]
+
+    df["alternative_allelle_frequencies"] = df.AD.apply(calculate_altAllele_freq)
+
+    # get the frequencies into a dictionary
+    print_if_verbose("calculating features for multialleles")
+
+    # define the in
+
+    def get_dicts_metadata(row):
+
+        """Takes a row of df and returns a dictionary that contains var_to_frequency, var_to_filter and var_to_GT for the variant of the row, split by ",", and the left-trimmed one. It also returns a dict mapping each var to the filters that are important. 
+        """
+
+        # initialize dicts
+        var_to_frequency = {} 
+        var_to_filter = {}
+        var_to_GT = {}
+        var_to_filters = {} # these are some potentially interesting filters, where each allele gets one
+
+        # get the tuple var
+        var = row.name
+        chrom, pos, ref, alt = var
+
+        # get all alternative alleles
+        alt_alleles = alt.split(",")
+
+        # get all the alternative frequencies
+        altAllele_to_freq = dict(zip(alt_alleles, row["alternative_allelle_frequencies"]))
+        INFOfilt_to_altAllele_to_val = {INFOfilt : dict(zip(alt_alleles , row["INFO_%s_list"%INFOfilt])) for INFOfilt in interesting_INFO_filters}
+
+        # map them to freqs and tags
+        for real_alt, freq in altAllele_to_freq.items(): 
+
+            # add the interesting filters from the INFO field, QUAL and DP
+            filters_str = ";".join(["%s=%s"%(INFOfilt, INFOfilt_to_altAllele_to_val[INFOfilt][real_alt]) for INFOfilt in interesting_INFO_filters] + ["QUAL=%s"%row["QUAL"], "DP=%i"%int(row["DP"])])
+         
+            # first the direct representation of the variant
+            var_to_frequency[(chrom, pos, ref, real_alt)] = freq
+            var_to_filter[(chrom, pos, ref, real_alt)] = row["FILTER"]
+            var_to_GT[(chrom, pos, ref, real_alt)] = str(row["GT"])
+            var_to_filters[(chrom, pos, ref, real_alt)] = filters_str
+
+            # now the left-most trimmed
+            mod_pos, mod_ref, mod_alt = leftTrimVariant(pos, ref, real_alt)
+
+            # keep if changed
+            if (mod_pos, mod_ref, mod_alt)!=(pos, ref, real_alt): 
+                untrimmed_var = (chrom, pos, ref, real_alt)
+
+                var_to_frequency[(chrom, mod_pos, mod_ref, mod_alt)] = var_to_frequency[untrimmed_var]
+                var_to_filter[(chrom, mod_pos, mod_ref, mod_alt)] = var_to_filter[untrimmed_var]
+                var_to_GT[(chrom, mod_pos, mod_ref, mod_alt)] = var_to_GT[untrimmed_var]
+                var_to_filters[(chrom, mod_pos, mod_ref, mod_alt)] = var_to_filters[untrimmed_var]
+
+        return {"var_to_frequency":var_to_frequency, "var_to_filter":var_to_filter, "var_to_GT":var_to_GT, "var_to_filters":var_to_filters}
+
+    series_dicts = df.apply(get_dicts_metadata, axis=1)
+
+    # get the union of all dicts
+    print_if_verbose("Geting final dicts")
+    var_to_frequency = dict(j for i in series_dicts.apply(lambda d: d["var_to_frequency"]) for j in i.items())
+    var_to_filter = dict(j for i in series_dicts.apply(lambda d: d["var_to_filter"]) for j in i.items())
+    var_to_GT = dict(j for i in series_dicts.apply(lambda d: d["var_to_GT"]) for j in i.items())
+    var_to_filters = dict(j for i in series_dicts.apply(lambda d: d["var_to_filters"]) for j in i.items())
+
+    # get only the columns that you want to keep the real vcf
+    return df[["#CHROM", "POS", "ID", "REF", "ALT", "QUAL", "FILTER", "INFO", "FORMAT",  data_colname]], var_to_frequency, var_to_filter, var_to_GT, var_to_filters
+
+
+
+
+def load_vep_table_intoDF(vep_filename):
+
+    """Takes the tabular output of ensembl vep and returns a table where the index is (chr, pos, ref, alt)"""
+
+    # load normal df
+    vep_df = pd.read_csv(vep_filename, sep="\t", na_values=vcf_strings_as_NaNs, keep_default_na=False)
+
+    # keep the orignial uploaded variation
+    vep_df["#Uploaded_variation_original"] = vep_df["#Uploaded_variation"]
+
+    # change the uploaded variation so that it includes only the allele position
+    vep_df["#Uploaded_variation"] = vep_df["#Uploaded_variation"].apply(lambda x: x.split("/")[0]) + "/" + vep_df.Allele
+
+    # add the index of the alternative allele which corresponds to this var. For example, if the gt is 1|1|1, and this var has a 1, it will mean that it is the gt of the middle.
+    print_if_verbose("geting GT index")
+    vep_df["GT_index"] = vep_df[["#Uploaded_variation_original", "Allele"]].apply(lambda r: [Iallele+1 for Iallele, alt in enumerate(r["#Uploaded_variation_original"].split("/")[1:]) if r["Allele"]==alt][0], axis=1)
+
+    #/home/mschikora/samba/Cglabrata_antifungals/VarCall/VarCallOutdirs/RUN1_EF1620_7F_ANIFLZ_VarCallresults/freebayes_ploidy1_out/output.filt.norm_vcflib.vcf_annotated.tab
+
+    def get_idx_from_row(row):
+
+        """Thakes a row of vep_df and returns the index"""
+
+        chrom = row["Location"].split(":")[0]
+        pos_str = row["#Uploaded_variation"].split("_")[-2]
+        ref = row["#Uploaded_variation"].split("_")[-1].split("/")[0]
+        pos = int(pos_str)
+        alt = row["Allele"]
+
+        return (chrom, pos, ref, alt)
+
+    vep_df.index = vep_df.apply(get_idx_from_row, axis=1)
+    vep_df["chromosome"] = [x[0] for x in vep_df.index] 
+    vep_df["position"] = [x[1] for x in vep_df.index]
+    vep_df["ref"] = [x[2] for x in vep_df.index]
+    vep_df["alt"] = [x[3] for x in vep_df.index]
+
+    # check that the index and uploaded var are the same
+    if len(set(vep_df.index))!=len(set(vep_df["#Uploaded_variation"])): raise ValueError("each chrom/pos/ref/alt combination does not match the uploaded variation")
+
+    return vep_df
+
+
+
+def get_coverage_for_reads(reads1, reads2, reference_genome, outdir, threads=4, replace=False):
+
+    """This function runs the coverage calculation for sets of reads """
+
+    # get the trimmed reads
+    trimmed_reads1, trimmed_reads2 = run_trimmomatic(reads1, reads2, replace=replace, threads=threads)
+
+    # get the aligned reads
+    bamfile = "%s/aligned_reads.bam"%outdir
+    sorted_bam = "%s.sorted"%bamfile
+    index_bam = "%s.bai"%sorted_bam
+
+    run_bwa_mem(trimmed_reads1, trimmed_reads2, reference_genome, outdir, bamfile, sorted_bam, index_bam, "nameSample", threads=threads, replace=replace)
+      
+    # define the parallel running of mosdepth 
+    if threads==1: run_in_parallel=False
+    else: run_in_parallel = True
+
+    # get the coverage df
+    coverage_df =  pd.read_csv(generate_coverage_per_window_file_parallel(reference_genome, outdir, sorted_bam, windows_file="none", replace=replace, run_in_parallel=True, threads=threads), sep="\t")
+
+    # define stats
+    mean_coverage = np.mean(coverage_df.mediancov_1)
+    fraction_genome_covered = np.mean(coverage_df.percentcovered_1)/100
+
+    return mean_coverage, fraction_genome_covered
