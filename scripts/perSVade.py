@@ -128,6 +128,10 @@ parser.add_argument("--max_coverage_sra_reads", dest="max_coverage_sra_reads", d
 # min chromosome name
 parser.add_argument("--min_chromosome_len", dest="min_chromosome_len", default=100000, type=int, help="The minimum length to consider chromosomes from the provided fasta for calculating the window length.")
 
+# coverage CNV
+parser.add_argument("--min_coverage_duplication", dest="min_coverage_duplication", default="auto", help="The minimum rel. coverage to call a duplicated region. If set to auto, it will be calculated as 1 + (ploidy*0.8)")
+parser.add_argument("--max_coverage_deletion", dest="max_coverage_deletion", default="auto", help="The maximum rel. coverage to call a deleted region. If set to auto, it will be calculated as 1 - (ploidy*0.99)")
+
 # small VarCall and CNV args
 parser.add_argument("--run_smallVarsCNV", dest="run_smallVarsCNV", action="store_true", default=False, help="Will call small variants and CNV.")
 parser.add_argument("-gff", "--gff-file", dest="gff", default=None, help="path to the GFF3 annotation of the reference genome. Make sure that the IDs are completely unique for each 'gene' tag. This is necessary for both the CNV analysis (it will look at genes there) and the annotation of the variants.")
@@ -475,10 +479,17 @@ print("structural variation analysis with perSVade finished")
 #####################################
 
 if opt.gff is not None and opt.skip_SVcalling is False and not any([x=="skip" for x in {opt.fastq1, opt.fastq2}]):
+
+	# get parameters
+	if opt.min_coverage_duplication=="auto": min_coverage_duplication = 1 + (opt.ploidy*0.8) 
+	else: min_coverage_duplication = float(opt.min_coverage_duplication)
+	
+	if opt.max_coverage_deletion=="auto": max_coverage_deletion = 1 - (opt.ploidy*0.99) 
+	else: max_coverage_deletion = float(opt.max_coverage_deletion)
 	
 	outdir_var_annotations = "%s/SVannotation_output"%opt.outdir
 	print("annotating SVs. The results will be in %s"%outdir_var_annotations)
-	fun.annotate_SVs_inHouse(opt.outdir, outdir_var_annotations, gff_with_biotype, sorted_bam, opt.ref, replace=opt.replace, threads=opt.threads, mitochondrial_chromosome=opt.mitochondrial_chromosome, mito_code=opt.mitochondrial_code, gDNA_code=opt.gDNA_code, ploidy=opt.ploidy)
+	fun.annotate_SVs_inHouse(opt.outdir, outdir_var_annotations, gff_with_biotype, sorted_bam, opt.ref, replace=opt.replace, threads=opt.threads, mitochondrial_chromosome=opt.mitochondrial_chromosome, mito_code=opt.mitochondrial_code, gDNA_code=opt.gDNA_code, max_coverage_deletion=max_coverage_deletion, min_coverage_duplication=min_coverage_duplication)
 
 else: print("WARNING: Skipping SV annotation because -gff was not provided, --skip_SVcalling was provided or fastq1/fastq2 have 'skip'.")
 
