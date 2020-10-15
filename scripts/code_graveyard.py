@@ -5290,3 +5290,152 @@ def get_coverage_for_reads(reads1, reads2, reference_genome, outdir, threads=4, 
     fraction_genome_covered = np.mean(coverage_df.percentcovered_1)/100
 
     return mean_coverage, fraction_genome_covered
+
+
+
+def get_distanceToTelomere_chromosome_GCcontent_to_coverage_fn(df_coverage_train, genome, outdir, mitochondrial_chromosome="mito_C_glabrata_CBS138", replace=False):
+
+    """This function takes a training df_coverage (with windows of a genome) and returns a lambda function that takes GC content, chromosome and  distance to the telomere and returns coverage according to the model.
+
+    This function is edited so that it will not consider the effect of the distance"""
+    print_if_verbose("getting coverage-predictor function")
+
+    # rename the training df
+    df = df_coverage_train.rename(columns={"#chrom":"chromosome", "mediancov_1":"coverage"})
+
+    # add the distance to the telomere
+    chr_to_len = get_chr_to_len(genome)
+    df["middle_position"] = (df.start + (df.end - df.start)/2).apply(int)
+    df["distance_to_telomere"] = df.apply(lambda r: min([r["middle_position"], chr_to_len[r["chromosome"]]-r["middle_position"]]), axis=1)
+
+    # add the gc content
+    gcontent_outfile = "%s/GCcontent.py"%outdir
+    df = get_df_with_GCcontent(df, genome, gcontent_outfile, replace=replace)
+
+    # define the set of each type of chromosomes
+    all_chromosomes = set(df.chromosome)
+    if mitochondrial_chromosome!="no_mitochondria": mtDNA_chromosomes = set(mitochondrial_chromosome.split(","))
+    else: mtDNA_chromosomes = set()
+    gDNA_chromosomes = all_chromosomes.difference(mtDNA_chromosomes)
+
+    # load the genome
+    chr_to_len = get_chr_to_len(genome)
+    good_chroms = {chrom for chrom, l in chr_to_len.items() if l>=window_l}
+    print_if_verbose("there are %i/%i chromsomes above window_l. These will be used to train the GC-content model"%(len(good_chroms), len(chr_to_len)))
+
+    ######## find the coeficients for each chromosome #########
+
+    # map each chromosome to the coefs of the quadratic fit that explains coverage form the distance to the telomere and also the coefs of the GC content explaining the resiudal of this fit
+    chrom_to_coefType_to_coefs = {}
+
+    # define the relative coverage of each window of this genome
+    median_coverage = np.median(df[(df.coverage>0)  & (df.coverage<10)].coverage)
+    df["relative_coverage"] = df.coverage / median_coverage
+
+    # plot the coverage-per-non-0-window distribution
+    outfile = "%s/coverage_distribution.pdf"%(outdir)
+    if file_is_empty(outfile) or replace is True:
+
+        fig = plt.figure(figsize=(7, 7))
+        ax = sns.distplot(df[df.coverage>0].coverage, rug=True)
+
+        ax.set_ylabel("n windows")
+        ax.set_xlabel("coverage")
+        fig.savefig(outfile, bbox_inches="tight")
+
+    # define the correct regions for modelling. THey have a reasonable coverage
+    df_correct = df[(df.relative_coverage<=10) & (df.relative_coverage>0.1) & (df.chromosome.isin(good_chroms))]
+
+    # if the filtering is useless, use all the df. This is a way to skip the modelling.
+    if len(df_correct)==0: raise ValueError("There should be some regions for coverage modelling")
+
+    # add the distance to the telomere
+    df_correct["coverage_from_dist_to_telomere"] = median_coverage
+
+    # get the residual variation in coverage
+    df_correct["residualCoverage_from_dist_to_telomere"] = df_correct.coverage - df_correct.coverage_from_dist_to_telomere
+
+    # get a quadratic fit that predicts coverage from GC content
+    coefs_GCcontent = poly.polyfit(df_correct.GCcontent, df_correct.residualCoverage_from_dist_to_telomere, 2)
+    df_correct["residualCoverage_from_dist_to_telomere_from_GC_content"] = poly.polyval(df_correct.GCcontent, coefs_GCcontent)
+
+    df_correct["coverage_from_dist_to_telomere_and_GC_content"] = df_correct["coverage_from_dist_to_telomere"] + df_correct["residualCoverage_from_dist_to_telomere_from_GC_content"]
+
+    # get the rsquare of the model
+    r2 = r2_score(df_correct.coverage, df_correct.coverage_from_dist_to_telomere_and_GC_content)
+    print_if_verbose("The rsquare is %.3f"%(r2))
+
+    # keep coefs
+    no_model_coefs =  [median_coverage, 0, 0]
+    all_chroms = set(chr_to_len)
+    for chrom in all_chroms: chrom_to_coefType_to_coefs[chrom] = {"dist_telomere":no_model_coefs, "GCcontent":coefs_GCcontent}
+
+    # plot
+    outfile = "%s/coverage_modelling.pdf"%(outdir)
+
+    if file_is_empty(outfile) or replace is True:
+
+        # define the chroms to plot
+        chroms_plot = sorted(good_chroms)
+        print_if_verbose("plotting coverage modelling for %i chroms"%len(chroms_plot))
+
+        # plot the coverage for each of the chromosomes
+        fig = plt.figure(figsize=(7, len(chroms_plot)*5))
+
+        for I, chrom in enumerate(chroms_plot):
+
+            # initialize a subplot, where each row is one chromosome
+            ax = plt.subplot(len(chroms_plot), 1, I+1)
+
+            # get df of this chrom
+            df_c = df_correct[df_correct.chromosome==chrom]
+
+            # make a line plot for the real coverage
+            plt.scatter(df_c.start, df_c.coverage, marker="o", color="gray", label="data")
+
+            # make a line for the prediction from the distance to the telomere
+            plt.plot(df_c.start, df_c.coverage_from_dist_to_telomere, linestyle="-", color="blue", label="pred_dist_telomere")
+
+            # make a line for the prediction for both
+            plt.plot(df_c.start, df_c.coverage_from_dist_to_telomere_and_GC_content, linestyle="-", color="red", label="pred_dist_and_gc_content")
+
+            # add a line with the distance to the telomere
+            #plt.plot(df_c.start, df_c.distance_to_telomere, linestyle="-", color="green", label="dist_telomere")
+
+            ax.legend()
+            ax.set_ylabel("coverage")
+            ax.set_xlabel("position (bp)")
+            ax.set_title(chrom)
+
+        # save
+        fig.savefig(outfile, bbox_inches="tight")
+
+    ###############################################################
+
+    # define the function that takes a tuple of (distToTelomere, chromosome and GCcontent) and returns the predicted relative coverage
+    final_function = (lambda dist_telomere, chrom, GCcontent:  # this is suposed to be the tuple
+
+                        (poly.polyval([dist_telomere], chrom_to_coefType_to_coefs[chrom]["dist_telomere"]) + # from the dist to tel
+                        poly.polyval([GCcontent], chrom_to_coefType_to_coefs[chrom]["GCcontent"]))[0] # residual predicted from GC
+
+                     )
+
+    # check that it works
+    df_correct["cov_predicted_from_final_lambda"] = df_correct.apply(lambda r: final_function(r["distance_to_telomere"], r["chromosome"], r["GCcontent"]), axis=1)
+
+    if any(((df_correct["coverage_from_dist_to_telomere_and_GC_content"]-df_correct["cov_predicted_from_final_lambda"]).apply(abs))>0.01): raise ValueError("error in lambda function generation for coverage")
+
+      
+    return final_function
+
+
+
+
+
+# add fake insertion # debug
+df_insertions = pd.read_csv("/home/mschikora/samba/scripts/perSVade/perSVade_repository/testing/outdirs_testing_severalSpecies/5478_Candida_glabrata/testing_Accuracy/realSVs/M12_ANI/SVdetection_output/parameter_optimisation/simulation_1/final_simulated_SVs/insertions.tab", sep="\t")
+df_insertions["ID"] = "gridss1bf_41o" # this is a fake of the subsampled C. glabrata sample
+df_insertions.to_csv("~/Desktop/random_insertions.tab", sep="\t")
+svtype_to_svfile["insertions"] = "~/Desktop/random_insertions.tab"
+
+
