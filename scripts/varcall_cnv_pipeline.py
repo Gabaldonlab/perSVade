@@ -432,21 +432,6 @@ else:
         # get into df
         df_vep = pd.read_csv(annotated_vcf, sep="\t")
 
-        # check that the relationship between the VEP Uploaded_var and merged_vcf_all is 1:1
-        uploaded_variation = set(df_vep["#Uploaded_variation"])
-        all_variants = set(fun.get_df_and_header_from_vcf(merged_vcf_all)[0]["ID"])
-
-        if len(uploaded_variation.difference(all_variants))>0: raise ValueError("There are some uploaded variations that can't be found in all_variants")
-
-        # deinfe the unnanotated vars as those that are not in the VEP output and are also not missing 
-        missing_vars = all_variants.difference(uploaded_variation)
-        unnanotated_vars = {v for v in missing_vars if v.split("/")[-1]!="*"}
-
-        if len(unnanotated_vars)>0: 
-            print("WARNING: There are some variants that have not been annotated with VEP:\n%s\n (%i/%i in total)"%("\n".join(unnanotated_vars), len(unnanotated_vars), len(all_variants)))
-
-        # raise ValueError if there are more than 10% of unannotated vars
-        if len(unnanotated_vars)/len(all_variants)>0.1: raise ValueError("There are more than 10 perecent of unannotated variants by VEP")
 
         # get variant annotation table
         print("generating variant annotation table")

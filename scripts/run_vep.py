@@ -151,7 +151,7 @@ vep_df = pd.read_csv(outfile_vep_raw, sep="\t", header=len([x for x in open(outf
 vep_df["Consequence"] = vep_df.apply(fun.get_corrected_Consequence_for_vep_r, axis=1)
 
 # define the expected vars
-all_expected_consequences = {'stop_gained', 'intron_variant', 'upstream_gene_variant', '5_prime_UTR_variant', 'inframe_insertion', 'synonymous_variant', 'non_coding_transcript_exon_variant', 'intergenic_variant', 'protein_altering_variant', 'coding_sequence_variant', 'downstream_gene_variant', '3_prime_UTR_variant', 'missense_variant', 'splice_region_variant', 'splice_acceptor_variant', 'inframe_deletion', 'stop_lost', 'non_coding_transcript_variant', 'start_retained_variant', 'frameshift_variant', 'stop_retained_variant', 'start_lost', 'incomplete_terminal_codon_variant', 'splice_donor_variant'}
+all_expected_consequences = {'stop_gained', 'intron_variant', 'upstream_gene_variant', '5_prime_UTR_variant', 'inframe_insertion', 'synonymous_variant', 'non_coding_transcript_exon_variant', 'intergenic_variant', 'protein_altering_variant', 'coding_sequence_variant', 'downstream_gene_variant', '3_prime_UTR_variant', 'missense_variant', 'splice_region_variant', 'splice_acceptor_variant', 'inframe_deletion', 'stop_lost', 'non_coding_transcript_variant', 'start_retained_variant', 'frameshift_variant', 'stop_retained_variant', 'start_lost', 'incomplete_terminal_codon_variant', 'splice_donor_variant', 'upstream_gene_variant_BND', '5_prime_UTR_variant_BND', 'transcript_amplification', 'transcript_ablation', 'feature_elongation', 'coding_sequence_variant_BND', 'downstream_gene_variant_BND', 'feature_truncation'}
 
 # check that all the found consequences are in the expected ones
 all_found_consequences = set.union(*vep_df.Consequence.apply(lambda x: set(x.split(","))))
@@ -166,6 +166,8 @@ mitochondrial_chromosomes_set = set(opt.mitochondrial_chromosome.split(","))
 
 # define the types of variants that are affected by the genetic code
 genCode_affected_vars = {'stop_retained_variant', 'inframe_deletion', 'inframe_insertion', 'frameshift_variant', 'synonymous_variant', 'missense_variant', 'stop_gained', 'stop_lost', 'protein_altering_variant'}
+
+
 
 # define the idxs of each type of genes
 typeGenes_to_idx = {"mito": vep_df.apply(lambda row: row["Location"].split(":")[0] in mitochondrial_chromosomes_set and len(set(row["Consequence"].split(",")).intersection(genCode_affected_vars))>0, axis=1),
@@ -197,8 +199,34 @@ for typeGenes, idx_affected_rows in typeGenes_to_idx.items():
     # keep
     all_df = all_df.append(affected_df)
 
-# write to the same as infile
+
+#### CHECK THAT ALL THE VARIANTS HAVE BEEN ANNOTATED ####
+
+# check that the relationship between the VEP Uploaded_var and merged_vcf_all is 1:1
+uploaded_variation = set(all_df["#Uploaded_variation"])
+all_variants = set(fun.get_df_and_header_from_vcf(opt.input_vcf)[0]["ID"])
+
+if len(uploaded_variation.difference(all_variants))>0: raise ValueError("There are some uploaded variations that can't be found in all_variants")
+
+# deinfe the unnanotated vars as those that are not in the VEP output and are also not missing 
+missing_vars = all_variants.difference(uploaded_variation)
+unnanotated_vars = {v for v in missing_vars if v.split("/")[-1]!="*"}
+
+if len(unnanotated_vars)>0: 
+    print("WARNING: There are some variants that have not been annotated with VEP:\n%s\n (%i/%i in total)"%("\n".join(unnanotated_vars), len(unnanotated_vars), len(all_variants)))
+
+# raise ValueError if there are more than 10% of unannotated vars
+n_all_vars = len(all_variants)
+n_unnanotated_vars = len(unnanotated_vars)
+if n_unnanotated_vars/n_all_vars>0.1: raise ValueError("There are more than 10 perecent of unannotated variants by VEP")
+
+########################################################
+
+print("%i/%i vars were annotated, and all of them have IDs matching the input vcf"%(n_all_vars-n_unnanotated_vars, n_all_vars))
+
+# write to the same as outfile
 all_df.to_csv(opt.outfile, sep="\t", index=False, header=True)
+
 
 
 #############################################

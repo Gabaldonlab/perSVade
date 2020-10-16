@@ -480,17 +480,42 @@ print("structural variation analysis with perSVade finished")
 
 if opt.gff is not None and opt.skip_SVcalling is False and not any([x=="skip" for x in {opt.fastq1, opt.fastq2}]):
 
-	# get parameters
-	if opt.min_coverage_duplication=="auto": min_coverage_duplication = 1 + (opt.ploidy*0.8) 
-	else: min_coverage_duplication = float(opt.min_coverage_duplication)
-	
-	if opt.max_coverage_deletion=="auto": max_coverage_deletion = 1 - (opt.ploidy*0.99) 
-	else: max_coverage_deletion = float(opt.max_coverage_deletion)
-	
-	outdir_var_annotations = "%s/SVannotation_output"%opt.outdir
-	print("annotating SVs. The results will be in %s"%outdir_var_annotations)
-	fun.annotate_SVs_inHouse(opt.outdir, outdir_var_annotations, gff_with_biotype, sorted_bam, opt.ref, replace=opt.replace, threads=opt.threads, mitochondrial_chromosome=opt.mitochondrial_chromosome, mito_code=opt.mitochondrial_code, gDNA_code=opt.gDNA_code, max_coverage_deletion=max_coverage_deletion, min_coverage_duplication=min_coverage_duplication)
+	#### get CNV parameters ####
 
+	# get the default parameters
+	if opt.min_coverage_duplication=="auto" or opt.max_coverage_deletion=="auto":
+
+		auto_min_coverage_duplication, auto_max_coverage_deletion = fun.get_automatic_coverage_thresholds(opt.outdir, opt.fast_SVcalling, opt.ploidy, opt.nsimulations, simulation_ploidies)
+
+		n_simulated_genomes=opt.nsimulations, mitochondrial_chromosome=opt.mitochondrial_chromosome, simulation_ploidies=simulation_ploidies
+
+	# set real vars
+	if opt.min_coverage_duplication=="auto": min_coverage_duplication = auto_min_coverage_duplication
+	else: min_coverage_duplication = float(opt.min_coverage_duplication)
+		
+	if opt.max_coverage_deletion=="auto": max_coverage_deletion = auto_max_coverage_deletion
+	else: max_coverage_deletion = float(opt.max_coverage_deletion)
+
+	############################
+
+
+	# get the variant calling 
+	outdir_var_calling = "%s/SVcalling_output"%opt.outdir
+	print("getting all SVs into one VCF. Regions with a cov>%.3f will be treated as DUP, and regions with cov <%.3f will be treated as DEL"%(min_coverage_duplication, max_coverage_deletion))
+
+	kadhkadhjda
+
+	SV_CNV_vcf = fun.get_vcf_all_SVs_and_CNV(opt.outdir, outdir_var_calling, sorted_bam, opt.ref, replace=opt.replace, threads=opt.threads, mitochondrial_chromosome=opt.mitochondrial_chromosome, mito_code=opt.mitochondrial_code, gDNA_code=opt.gDNA_code, max_coverage_deletion=max_coverage_deletion, min_coverage_duplication=min_coverage_duplication)
+
+	# get variant annotation
+	print("annotating SV, CNV variants with VEP")
+	SV_CNV_vcf_annotated = fun.annotate_SVs_inHouse(SV_CNV_vcf, gff_with_biotype, opt.ref, replace=opt.replace, threads=opt.threads, mitochondrial_chromosome=opt.mitochondrial_chromosome, mito_code=opt.mitochondrial_code, gDNA_code=opt.gDNA_code)
+
+	print("annotated SV vcf can be found in %s"%SV_CNV_vcf_annotated)
+
+	adljdaladjk
+
+	
 else: print("WARNING: Skipping SV annotation because -gff was not provided, --skip_SVcalling was provided or fastq1/fastq2 have 'skip'.")
 
 #####################################

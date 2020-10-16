@@ -2864,7 +2864,7 @@ def get_distanceToTelomere_chromosome_GCcontent_to_coverage_fn(df_coverage_train
             if chr_to_len[chrom]<window_l: bad_chroms.add(chrom)
 
         # define the training set for the modelling
-        df_correct = df_g[(df_g.relative_coverage<=4) & (df_g.relative_coverage>0.1) & ~(df_g.chromosome.isin(duplicated_chroms)) & ~(df_g.chromosome.isin(bad_chroms))]
+        df_correct = df_g[(df_g.relative_coverage<=5) & (df_g.relative_coverage>0.05) & ~(df_g.chromosome.isin(duplicated_chroms)) & ~(df_g.chromosome.isin(bad_chroms))]
 
         # if the filtering is useless, use all the df. This is a way to skip the modelling.
         if len(df_correct)==0: df_correct = df_g[~(df_g.chromosome.isin(bad_chroms))]
@@ -2888,18 +2888,22 @@ def get_distanceToTelomere_chromosome_GCcontent_to_coverage_fn(df_coverage_train
 
         ### calculate the r2 based on all windows ###
 
-        # get the coverage measured
-        df_g["coverage_from_dist_to_telomere"] = poly.polyval(df_g.distance_to_telomere, coefs_dist_to_telomere)
-        df_g["residualCoverage_from_dist_to_telomere"] = df_g.coverage - df_g.coverage_from_dist_to_telomere
-        df_g["residualCoverage_from_dist_to_telomere_from_GC_content"] = poly.polyval(df_g.GCcontent, coefs_GCcontent)
-        df_g["coverage_from_dist_to_telomere_and_GC_content"] = df_g["coverage_from_dist_to_telomere"] + df_g["residualCoverage_from_dist_to_telomere_from_GC_content"]
+        # get r2
+        r2 = r2_score(df_correct.coverage, df_correct.coverage_from_dist_to_telomere_and_GC_content)
+        fraction_windows_considered = len(df_correct)/len(df_g)
 
-        # get the rsquare of the model
-        r2 = r2_score(df_g.coverage, df_g.coverage_from_dist_to_telomere_and_GC_content)
-        print_if_verbose("The rsquare for %s is %.3f"%(type_genome, r2))
+        # get the pval of the coverage not being a normal distriburion
+        if len(df_g)>10:
+
+            pvalNormDist_rel_coverage = get_pvalue_is_normal_distribution(df_g.relative_coverage)
+            print(pvalNormDist_rel_coverage)
+
+        else: pvalNormDist_rel_coverage = 1
+
+        print_if_verbose("The rsquare for %s is %.3f. %.3f pct of the windows are included. The p of not being a normal distribution is %.6f"%(type_genome, r2, fraction_windows_considered*100, pvalNormDist_rel_coverage))
 
         # change coefs so that there is no modelling if the fit is bad
-        if r2<0.3 or pd.isna(r2):
+        if r2<0.2 or pd.isna(r2) or fraction_windows_considered<0.5 or pvalNormDist_rel_coverage>0.05:
             print_if_verbose("not modelling coverage per window")
             coefs_dist_to_telomere = [expected_coverage_per_bp, 0, 0]
             coefs_GCcontent = [0, 0, 0]
@@ -5904,7 +5908,7 @@ def get_IDstring_for_svDF_r(r, svtype):
 
     elif svtype=="translocations":
 
-        ID = "TRA|%s:%i-%i|%s:%i-%i"%(r["ChrA"], r["StartA"], r["EndA"], r["ChrB"], r["StartB"], r["EndB"])
+        ID = "TRA|%s:%i-%i<>%s:%i-%i"%(r["ChrA"], r["StartA"], r["EndA"], r["ChrB"], r["StartB"], r["EndB"])
 
     else: 
         print(r)
@@ -5959,12 +5963,15 @@ def format_svDF(svDF, svtype="unknown", interesting_chromosomes="all", sampleNam
     # get the worst filter tag
     svDF["all_FILTERs"] =  svDF.bends_metadata_dict.apply(lambda x: ",".join(set.union(*[set.union(*[set(bend_info["FILTER"].split(";")) for bend_info in list_breakend_info]) for list_breakend_info in x.values()])))
 
+    # get the breakpoint IDs
+    svDF["BREAKPOINTIDs"] = svDF.bends_metadata_dict.apply(lambda x: ",".join(sorted(x.keys())))
+
     # add ID 
     svDF["IDstring"] = svDF.apply(lambda r: get_IDstring_for_svDF_r(r, svtype), axis=1)
 
     return svDF
 
-def get_sampleID_to_svtype_to_svDF_filtered(sampleID_to_svtype_to_file, sampleID_to_dfGRIDSS, sampleID_to_parentIDs={}, breakend_info_to_keep=['#CHROM', 'POS', 'other_coordinates', 'allele_frequency', 'allele_frequency_SmallEvent', 'real_AF', 'FILTER', 'inserted_sequence', 'has_poly16GC', 'length_inexactHomology', 'length_microHomology', 'QUAL', 'overlaps_repeats']):
+def get_sampleID_to_svtype_to_svDF_filtered(sampleID_to_svtype_to_file, sampleID_to_dfGRIDSS, sampleID_to_parentIDs={}, breakend_info_to_keep=['#CHROM', 'POS', 'other_coordinates', 'allele_frequency', 'allele_frequency_SmallEvent', 'real_AF', 'FILTER', 'inserted_sequence', 'has_poly16GC', 'length_inexactHomology', 'length_microHomology', 'QUAL', 'overlaps_repeats', 'REF']):
 
     """This function takes a dictionary that maps sampleIDs to svtpes and the corresponding files (the ones returned in the SV-calling pipeline) and the corresponding gridss dataframes, returning a sampleID_to_svtype_to_svDF, after removal of the variants that are in sampleID_to_parentIDs. The idea is that if any breakend is shared between the sample and any of the parents it is removed and so does any sv that relies on this breakend. Other arguments:
 
@@ -5995,6 +6002,9 @@ def get_sampleID_to_svtype_to_svDF_filtered(sampleID_to_svtype_to_file, sampleID
 
         # add the eventID, as formated in the SVdict
         df_gridss["eventID"] = df_gridss.INFO_EVENT.apply(lambda x: x+"o")
+
+        # add the breakpoint ID
+        df_gridss["BREAKPOINTID"] = df_gridss.eventID
 
         # define the events that are already in the parents
         all_breakpoints = set(df_gridss["eventID"]).union({""})
@@ -6218,7 +6228,8 @@ def get_svtype_to_svfile_and_df_gridss_from_perSVade_outdir(perSVade_outdir, ref
 
     # define the paths
     outdir = "%s/SVdetection_output/final_gridss_running"%perSVade_outdir
-    gridss_vcf = "%s/gridss_output.raw.vcf"%outdir
+    gridss_vcf = "%s/gridss_output.raw.vcf"%outdir # raw
+    #gridss_vcf = "%s/gridss_output.filt.vcf"%outdir # filt
 
     # this means that it is a cleaned dir
     if not file_is_empty(gridss_vcf):
@@ -6230,7 +6241,8 @@ def get_svtype_to_svfile_and_df_gridss_from_perSVade_outdir(perSVade_outdir, ref
     else: 
 
         # assume that it is a not cleaned dir
-        gridss_vcf = "%s/gridss_output.vcf.withSimpleEventType.vcf"%outdir
+        gridss_vcf = "%s/gridss_output.vcf.withSimpleEventType.vcf"%outdir # raw
+        #gridss_vcf = "%s/gridss_output.vcf.withSimpleEventType.vcf.filtered_default.vcf"%outdir # filtered
         svtype_to_svfile = {file.split(".structural_variants.")[1].split(".")[0] : "%s/%s"%(outdir, file) for file in os.listdir(outdir) if ".structural_variants." in file}
 
     # get the df gridss
@@ -7703,7 +7715,7 @@ def benchmark_bedpe_with_knownSVs(bedpe, know_SV_dict, reference_genome, sorted_
         df_TAN = df_clove[df_clove.SVTYPE=="TAN"]
 
         # define the minimum min_min_rel_coverage_to_consider_dup
-        min_min_rel_coverage_to_consider_dup = expected_AF*1.7
+        min_min_rel_coverage_to_consider_dup = 1 + expected_AF*0.6
 
         # go through different TAN ranges that define true TAN
         min_rel_coverage_to_consider_dup_l = [0.0, 0.4, 0.5, 1.0, 1.5, 1.8, 2.0, 2.5, 3.5]
@@ -9034,83 +9046,85 @@ def run_GridssClove_optimising_parameters(sorted_bam, reference_genome, outdir, 
     # make the outdir
     make_folder(outdir)
 
-    # initialize the start time
-    pipeline_start_time = time.time()
-
-    ###### CALCULATE GENERAL PARMS ######
-
-    # clean the reference genome windows files
-    clean_reference_genome_windows_files(reference_genome)
-
-    # calculate the insert size
-    median_insert_size, median_insert_size_sd  = get_insert_size_distribution(sorted_bam, replace=replace, threads=threads)
-    print_if_verbose("The median insert size is %i, with an absolute deviation of %i"%(median_insert_size, median_insert_size_sd))
-
-    #####################################
-
-    ###### GET PARAMETERS ######
-
-    # get the default running and filtering parameters
-    if fast_SVcalling is False:
-        print_if_verbose("getting optimised parameters")
-
-        parameter_optimisation_dir = "%s/parameter_optimisation"%outdir; make_folder(parameter_optimisation_dir)
-
-        gridss_blacklisted_regions, gridss_maxcoverage, gridss_filters_dict, max_rel_coverage_to_consider_del, min_rel_coverage_to_consider_dup, df_cross_benchmark_best = get_best_parameters_for_GridssClove_run(sorted_bam, reference_genome, parameter_optimisation_dir, threads=threads, replace=replace, n_simulated_genomes=n_simulated_genomes, mitochondrial_chromosome=mitochondrial_chromosome, simulation_ploidies=simulation_ploidies, range_filtering_benchmark=range_filtering_benchmark, nvars=nvars, real_bedpe_breakpoints=real_bedpe_breakpoints, median_insert_size=median_insert_size, median_insert_size_sd=median_insert_size_sd)
-
-    # get the parameters from an optimisation
-    else: 
-        print_if_verbose("running with default un-optimised parameters")
-
-        # get the default parameters 
-        gridss_blacklisted_regions = default_gridss_blacklisted_regions
-        gridss_maxcoverage = default_gridss_maxcoverage
-        gridss_filters_dict = default_filtersDict_gridss
-        max_rel_coverage_to_consider_del = default_max_rel_coverage_to_consider_del
-        min_rel_coverage_to_consider_dup = default_min_rel_coverage_to_consider_dup
-
-    ###########################
-
-    ###### FINAL GRIDSS-CLOVE RUNNING ######
-
-    # define the final outdir 
+    # define final dirs
     outdir_gridss_final = "%s/final_gridss_running"%outdir; make_folder(outdir_gridss_final)
-
-    # write the parameters of the running
-    json_file = "%s/perSVade_parameters.json"%outdir_gridss_final
-    write_gridss_parameters_as_json(gridss_blacklisted_regions, gridss_maxcoverage, gridss_filters_dict, max_rel_coverage_to_consider_del, min_rel_coverage_to_consider_dup, json_file, replace=replace)
-
-    # define the final vcf dir
-    final_gridss_vcf = "%s/output_gridss.vcf"%outdir_gridss_final
-
-    # if there is a provided gridss_VCFoutput, softlink it to the outdir_gridss_final
-    if not file_is_empty(gridss_VCFoutput) and file_is_empty(final_gridss_vcf): soft_link_files(gridss_VCFoutput, final_gridss_vcf)
-
-    # define the median coverage across window_l windows of the genome
-    coverage_df =  pd.read_csv(generate_coverage_per_window_file_parallel(reference_genome, outdir_gridss_final, sorted_bam, windows_file="none", replace=replace, threads=threads), sep="\t")
-    median_coverage = get_median_coverage(coverage_df, mitochondrial_chromosome)
-    print_if_verbose("The median coverage is %i"%median_coverage)
-
-    # run the pipeline
-    print_if_verbose("running final gridss with parameters...")
-    final_sv_dict, df_gridss = run_gridssClove_given_filters(sorted_bam, reference_genome, outdir_gridss_final, median_coverage, replace=replace, threads=threads, gridss_blacklisted_regions=gridss_blacklisted_regions, gridss_VCFoutput=final_gridss_vcf, gridss_maxcoverage=gridss_maxcoverage, median_insert_size=median_insert_size, median_insert_size_sd=median_insert_size_sd, gridss_filters_dict=gridss_filters_dict, run_in_parallel=True, max_rel_coverage_to_consider_del=max_rel_coverage_to_consider_del, min_rel_coverage_to_consider_dup=min_rel_coverage_to_consider_dup, replace_FromGridssRun=replace)
-
-    ########################################
-
-    ##### PIPELINE ENDING OPERATIONS ##### 
-
-    # at the end, remove all the mosdepth and windows files under the reference
-    clean_reference_genome_windows_files(reference_genome)
-    
-    print_if_verbose("GRIDSS pipeline finished correctly")
-
-    print_if_verbose("--- the gridss pipeline optimising parameters took %s seconds in %i cores ---"%(time.time() - pipeline_start_time, threads))
-
-    # generate a file that indicates whether the gridss run is finished
     final_file = "%s/gridssClove_finished.txt"%outdir
-    open(final_file, "w").write("gridssClove_finished finished...")
 
-    ######################################
+    if file_is_empty(final_file) or replace is True:
+
+        # initialize the start time
+        pipeline_start_time = time.time()
+
+        ###### CALCULATE GENERAL PARMS ######
+
+        # clean the reference genome windows files
+        clean_reference_genome_windows_files(reference_genome)
+
+        # calculate the insert size
+        median_insert_size, median_insert_size_sd  = get_insert_size_distribution(sorted_bam, replace=replace, threads=threads)
+        print_if_verbose("The median insert size is %i, with an absolute deviation of %i"%(median_insert_size, median_insert_size_sd))
+
+        #####################################
+
+        ###### GET PARAMETERS ######
+
+        # get the default running and filtering parameters
+        if fast_SVcalling is False:
+            print_if_verbose("getting optimised parameters")
+
+            parameter_optimisation_dir = "%s/parameter_optimisation"%outdir; make_folder(parameter_optimisation_dir)
+
+            gridss_blacklisted_regions, gridss_maxcoverage, gridss_filters_dict, max_rel_coverage_to_consider_del, min_rel_coverage_to_consider_dup, df_cross_benchmark_best = get_best_parameters_for_GridssClove_run(sorted_bam, reference_genome, parameter_optimisation_dir, threads=threads, replace=replace, n_simulated_genomes=n_simulated_genomes, mitochondrial_chromosome=mitochondrial_chromosome, simulation_ploidies=simulation_ploidies, range_filtering_benchmark=range_filtering_benchmark, nvars=nvars, real_bedpe_breakpoints=real_bedpe_breakpoints, median_insert_size=median_insert_size, median_insert_size_sd=median_insert_size_sd)
+
+        # get the parameters from an optimisation
+        else: 
+            print_if_verbose("running with default un-optimised parameters")
+
+            # get the default parameters 
+            gridss_blacklisted_regions = default_gridss_blacklisted_regions
+            gridss_maxcoverage = default_gridss_maxcoverage
+            gridss_filters_dict = default_filtersDict_gridss
+            max_rel_coverage_to_consider_del = default_max_rel_coverage_to_consider_del
+            min_rel_coverage_to_consider_dup = default_min_rel_coverage_to_consider_dup
+
+        ###########################
+
+        ###### FINAL GRIDSS-CLOVE RUNNING ######    
+
+        # write the parameters of the running
+        json_file = "%s/perSVade_parameters.json"%outdir_gridss_final
+        write_gridss_parameters_as_json(gridss_blacklisted_regions, gridss_maxcoverage, gridss_filters_dict, max_rel_coverage_to_consider_del, min_rel_coverage_to_consider_dup, json_file, replace=replace)
+
+        # define the final vcf dir
+        final_gridss_vcf = "%s/output_gridss.vcf"%outdir_gridss_final
+
+        # if there is a provided gridss_VCFoutput, softlink it to the outdir_gridss_final
+        if not file_is_empty(gridss_VCFoutput) and file_is_empty(final_gridss_vcf): soft_link_files(gridss_VCFoutput, final_gridss_vcf)
+
+        # define the median coverage across window_l windows of the genome
+        coverage_df =  pd.read_csv(generate_coverage_per_window_file_parallel(reference_genome, outdir_gridss_final, sorted_bam, windows_file="none", replace=replace, threads=threads), sep="\t")
+        median_coverage = get_median_coverage(coverage_df, mitochondrial_chromosome)
+        print_if_verbose("The median coverage is %i"%median_coverage)
+
+        # run the pipeline
+        print_if_verbose("running final gridss with parameters...")
+        final_sv_dict, df_gridss = run_gridssClove_given_filters(sorted_bam, reference_genome, outdir_gridss_final, median_coverage, replace=replace, threads=threads, gridss_blacklisted_regions=gridss_blacklisted_regions, gridss_VCFoutput=final_gridss_vcf, gridss_maxcoverage=gridss_maxcoverage, median_insert_size=median_insert_size, median_insert_size_sd=median_insert_size_sd, gridss_filters_dict=gridss_filters_dict, run_in_parallel=True, max_rel_coverage_to_consider_del=max_rel_coverage_to_consider_del, min_rel_coverage_to_consider_dup=min_rel_coverage_to_consider_dup, replace_FromGridssRun=replace)
+
+        ########################################
+
+        ##### PIPELINE ENDING OPERATIONS ##### 
+
+        # at the end, remove all the mosdepth and windows files under the reference
+        clean_reference_genome_windows_files(reference_genome)
+        
+        print_if_verbose("GRIDSS pipeline finished correctly")
+
+        print_if_verbose("--- the gridss pipeline optimising parameters took %s seconds in %i cores ---"%(time.time() - pipeline_start_time, threads))
+
+        # generate a file that indicates whether the gridss run is finished
+        open(final_file, "w").write("gridssClove_finished finished...")
+
+        ######################################
 
     return outdir_gridss_final
 
@@ -12330,9 +12344,93 @@ def get_vcf_df_from_remaining_r(r, gridss_fields):
 
     return df_vcf
 
+
+def get_INFO_vcf_with_breakendMetadata(r, svDF, breakend_fields):
+
+    """Takes a row of a df_vcf and returns the INFO that includes extra breakpoint metadata"""
+
+    # go through each bpID
+    if r["ALT"]=="<BND>":
+
+        # get the corresponding event
+        bends_metadata_dict = svDF.loc[r["ID"]]["bends_metadata_dict"]
+
+        # calculate the distance between this breakend and the defined ones
+        bpID_Ibend_to_distance_to_r = {}
+        for bpID, bendDicts in bends_metadata_dict.items():
+            for Ibend, bendDict in enumerate(bendDicts):
+
+                # get the distance
+                if bendDict["#CHROM"]==r["#CHROM"]: 
+
+                    bpID_Ibend_to_distance_to_r[(bpID, Ibend)] = abs(bendDict["POS"]-r["POS"])
+
+        # best breakend
+        closest_bpID_Ibend = [k for k, v in sorted(bpID_Ibend_to_distance_to_r.items(), key=(lambda item: item[1]))][0]
+
+        closest_bpID, Ibend = closest_bpID_Ibend
+        bendDict = bends_metadata_dict[closest_bpID][Ibend]
+        if bendDict["#CHROM"]!=r["#CHROM"]: raise ValueError("something went wrong with the bend calculation")
+
+        # print the difference
+        #print(r["POS"]-bendDict["POS"])
+
+        # get the info with adds
+        INFO = "%s;%s"%(r["INFO"], ";".join(["%s=%s"%(f, bendDict[f]) for f in breakend_fields]))
+
+        return  INFO
+        
+    else: return r["INFO"]
+
+def get_vcf_df_withInsertedSequence_from_svDF(svDF, gridss_fields, breakend_fields):
+
+    """Takes a df with the svDF and retuns it with current_vcf_fields = ["#CHROM", "POS", "ID", "REF", "ALT", , "INFO"] and gridss_fields in the INFO. SVTYPE is set to BND"""
+
+    # initialize
+    dict_all = {}
+    Ir = 0
+
+    for ID, r in svDF.iterrows():
+
+        # initialize INFO
+        backbone_info = "SVTYPE=insertionBND;" + ";".join(["%s=%s"%(f, r[f]) for f in gridss_fields]) 
+
+        # go through each BPdict
+        for bpID, bendDict_list in r["bends_metadata_dict"].items():
+
+            # go through each breakend
+            for bendDict in bendDict_list:
+
+                # define the info
+                INFO = "%s;%s"%(backbone_info, ";".join(["%s=%s"%(f, bendDict[f]) for f in breakend_fields]))
+
+                # redefine ALT
+                REF = bendDict["REF"]
+                ALT = bendDict["inserted_sequence"]
+                if len(ALT)==0 and len(REF)==0: continue
+                elif ALT==REF: continue
+                elif len(ALT)==0 and len(REF)>0: ALT = "-"
+
+                # define fields of each insertion
+                dict_all[Ir] = {"#CHROM":bendDict["#CHROM"],
+                                "POS":bendDict["POS"],
+                                "ID":ID,
+                                "REF":REF,
+                                "ALT":ALT,
+                                "INFO":INFO}
+
+                Ir += 1
+
+    # get as dict
+    df_vcf_insertions = pd.DataFrame(dict_all).transpose()
+
+    return df_vcf_insertions
+
 def get_vcf_df_for_svDF(svDF, svtype, reference_genome):
 
     """This function takes an SVdf and rewrites it as a vcf, so that it can be loaded to clove"""
+
+    
 
     # add the filters of gridss
     """
@@ -12343,11 +12441,15 @@ def get_vcf_df_for_svDF(svDF, svtype, reference_genome):
         gridss_fields.append(gfield)
     """
 
-    gridss_fields = ['estimate_AF_min', 'estimate_AF_max', 'estimate_AF_mean', 'bpIDs', 'QUAL_min', 'QUAL_max', 'QUAL_mean', 'all_FILTERs']
+
+    # add to svDF
+    svDF = cp.deepcopy(svDF)
+    svDF["BPS_TYPE"] = "GRIDSS-CLOVE"
+
+    gridss_fields = ['estimate_AF_min', 'estimate_AF_max', 'estimate_AF_mean', 'bpIDs', 'QUAL_min', 'QUAL_max', 'QUAL_mean', 'all_FILTERs', 'BPS_TYPE']
 
     # set the floats to only 3 decimals
     for f in ['estimate_AF_min', 'estimate_AF_max', 'estimate_AF_mean', 'QUAL_min', 'QUAL_max', 'QUAL_mean']: svDF[f] = svDF[f].apply(lambda x: "%.3f"%x)
-
 
     # initialize thd df_vcf
     vcf_fields = ["#CHROM", "POS", "ID", "REF", "ALT", "QUAL", "FILTER", "INFO", "FORMAT"]
@@ -12401,10 +12503,22 @@ def get_vcf_df_for_svDF(svDF, svtype, reference_genome):
 
     else: raise ValueError("%s is not valid"%svtype) 
 
+    # add the REF 
+    df_vcf["REF"] = "."
 
+    # deifine the breakend_fields to add to the vcf
+    breakend_fields = ['allele_frequency', 'allele_frequency_SmallEvent', 'real_AF', 'FILTER', 'has_poly16GC', 'length_inexactHomology', 'length_microHomology', 'QUAL', 'overlaps_repeats', 'BREAKPOINTID']
+
+    # add the inserted sequences
+    svDF = svDF.set_index("IDstring", drop=False)
+    current_vcf_fields = ["#CHROM", "POS", "ID", "REF", "ALT", "INFO"]
+    df_vcf = df_vcf[current_vcf_fields].append(get_vcf_df_withInsertedSequence_from_svDF(svDF, gridss_fields, breakend_fields)[current_vcf_fields])
+
+    # add breakpoint metadata to breakend-like elements
+    df_vcf["INFO"] = df_vcf.apply(lambda r: get_INFO_vcf_with_breakendMetadata(r, svDF, breakend_fields), axis=1)
 
     # add general thingd
-    df_vcf["REF"] = "."
+    
     df_vcf["FORMAT"] = "."
     df_vcf["QUAL"] = "."
     df_vcf["FILTER"] = "."
@@ -12535,20 +12649,48 @@ def get_summary_statistics_series_df_subwindows(df):
     if type(df)!=pd.core.frame.DataFrame: raise ValueError("df is not a df")
 
     # get the data, the relative coverage
-    data = df.relative_coverage.values
+    relative_coverage = df.relative_coverage
+    position = df.start
 
     # get CIs
-    mean_CI = get_confidence_interval_bootsrap(data, np.mean)
-    median_CI = get_confidence_interval_bootsrap(data, np.median)
+    mean_CI = get_confidence_interval_bootsrap(relative_coverage, np.mean)
+    median_CI = get_confidence_interval_bootsrap(relative_coverage, np.median)
+
+    # get correlations, depending on if there is something to correlate
+    if len(set(position))==1 or len(set(relative_coverage))==1:
+
+        spearman_r = 0
+        spearman_p = 1
+        pearson_r = 0
+        pearson_p = 1
+
+    else:
+        
+        spearman_r, spearman_p = stats.spearmanr(position, relative_coverage, nan_policy="raise")
+        pearson_r, pearson_p = stats.pearsonr(position, relative_coverage)
+
+        spearman_r = abs(spearman_r)
+        pearson_r = abs(pearson_r)
+
+    # debug
+    if pd.isna(pearson_r) or pd.isna(spearman_r): 
+
+        print(pearson_r, spearman_r)
+        print(df[["start", "relative_coverage"]])
+        raise ValueError("correlations should not be NaN")
 
     # return the series
-    data_dict = {"mean_rel_coverage" : np.mean(data),
-                 "median_rel_coverage" : np.median(data),
+    data_dict = {"mean_rel_coverage" : np.mean(relative_coverage),
+                 "median_rel_coverage" : np.median(relative_coverage),
                  "mean95CI_lower_rel_coverage" : mean_CI[0],
                  "mean95CI_higher_rel_coverage" : mean_CI[1],
                  "median95CI_lower_rel_coverage" : median_CI[0],
                  "median95CI_higher_rel_coverage" : median_CI[1],
-                 "pvalNormDist_rel_coverage" : get_pvalue_is_normal_distribution(data)}
+                 "abs_spearman_r" : spearman_r,
+                 "abs_pearson_r" : pearson_r,
+                 "spearman_p" : spearman_p,
+                 "pearson_p" : pearson_p}
+    # "pvalNormDist_rel_coverage" : get_pvalue_is_normal_distribution(data)
 
     return pd.Series(data_dict)
 
@@ -12572,7 +12714,12 @@ def get_coverage_df_windows_with_within_windows_statistics(df_windows, outdir, s
 
     print_if_verbose("merging with subwindows")
     df_subwindows = df_subwindows.merge(df_subwindows_coverage, on=["chromosome", "start", "end"], how="left")
-    if len(df_subwindows)!=initial_len_subwindows or any(pd.isna(df_subwindows.mediancov_1)): raise ValueError("something went wrong with the subwindows coverage calculation")
+    if len(df_subwindows)!=initial_len_subwindows or any(pd.isna(df_subwindows.mediancov_1)): 
+        print(df_subwindows)
+        print(initial_len_subwindows)
+        print(df_subwindows.mediancov_1)
+        print(any(pd.isna(df_subwindows.mediancov_1)))
+        raise ValueError("something went wrong with the subwindows coverage calculation")
 
     # add the relative coverage
     print_if_verbose("calculating relative_coverage")
@@ -12651,7 +12798,7 @@ def is_overlapping_other_SVs_CNVdf_r(r, df_CNV_all):
     # ask if there is any overlapping any of the SVs
     return any((df_CNV_test.start<=r["start"]) & (df_CNV_test.end>=r["end"]))
 
-def get_CNV_calling_with_coverageBased_added(svtype_to_svDF, df_vcf, outdir, gff, sorted_bam, reference_genome, df_clove, replace=False, threads=4, mitochondrial_chromosome="mito_C_glabrata_CBS138", max_coverage_deletion=0.01, min_coverage_duplication=1.8, min_sv_size=50):
+def get_CNV_calling_with_coverageBased_added(svtype_to_svDF, df_vcf, outdir, sorted_bam, reference_genome, df_clove, replace=False, threads=4, mitochondrial_chromosome="mito_C_glabrata_CBS138", max_coverage_deletion=0.01, min_coverage_duplication=1.8, min_sv_size=50):
 
     """This function gets a df_vcf with calls of CNV (<DUP> or <DEL>) based on coverage. It generates a bed with the query regions, which include genes and any region that is surrounded by breakpoints (this also includes whole chromosomes). Each region will """
 
@@ -12747,6 +12894,9 @@ def get_CNV_calling_with_coverageBased_added(svtype_to_svDF, df_vcf, outdir, gff
             total_n_regions = len(query_df)
             print_if_verbose("There are %i regions to test CNV for"%(total_n_regions))
 
+            # debug 
+            #query_df = query_df.iloc[0:100]
+
             ############################################
 
             ######### GET THE REGIONS UNDER CNV #########
@@ -12765,22 +12915,24 @@ def get_CNV_calling_with_coverageBased_added(svtype_to_svDF, df_vcf, outdir, gff
             query_df = get_coverage_df_windows_with_within_windows_statistics(query_df, outdir, sorted_bam, reference_genome, median_coverage, replace=replace, threads=threads)
 
             # add boolean tags
-            query_df["is_NormDist_rel_coverage"] = query_df.pvalNormDist_rel_coverage<0.05
+
+            # the notFlat coverage is indicated by spearman r and pearson r
+            query_df["notFlatCoverage"] = ((query_df.spearman_p<0.05) | (query_df.pearson_p<0.05)) & (query_df.abs_pearson_r>=0.2) & (query_df.abs_spearman_r>=0.2)
+
             query_df["is_duplication"] = (query_df.mean95CI_lower_rel_coverage_relative>=min_coverage_duplication) & (query_df.median95CI_lower_rel_coverage_relative>=min_coverage_duplication) & (query_df.mean95CI_lower_rel_coverage>=min_coverage_duplication) & (query_df.median95CI_lower_rel_coverage>=min_coverage_duplication)
+            
             query_df["is_deletion"] = (query_df.mean95CI_higher_rel_coverage_relative<=max_coverage_deletion) & (query_df.median95CI_higher_rel_coverage_relative<=max_coverage_deletion) & (query_df.mean95CI_higher_rel_coverage<=max_coverage_deletion) & (query_df.median95CI_higher_rel_coverage<=max_coverage_deletion)
 
             # prints
-            print_if_verbose("There are %i/%i regions with the subwindows coverage with a normal distribution"%(sum(query_df.is_NormDist_rel_coverage), len(query_df)))
             print_if_verbose("There are %i/%i regions with signs of duplication"%(sum(query_df.is_duplication), len(query_df)))
             print_if_verbose("There are %i/%i regions with signs of deletion"%(sum(query_df.is_deletion), len(query_df)))
 
             # save
-            df_CNV = query_df[(query_df.is_NormDist_rel_coverage) & ((query_df.is_duplication) | (query_df.is_deletion))]
+            df_CNV = query_df[~(query_df.notFlatCoverage) & ((query_df.is_duplication) | (query_df.is_deletion))]
+
             raw_cnv_file_tmp = "%s.tmp"%raw_cnv_file
             df_CNV.to_csv(raw_cnv_file_tmp, sep="\t", index=False, header=True)
             os.rename(raw_cnv_file_tmp, raw_cnv_file)
-
-            stophereforDrosophilarunning
 
             #################################################
 
@@ -12819,7 +12971,7 @@ def get_CNV_calling_with_coverageBased_added(svtype_to_svDF, df_vcf, outdir, gff
 
         # define fields
         vcf_fields = ["#CHROM", "POS", "ID", "REF", "ALT", "QUAL", "FILTER", "INFO", "FORMAT"]
-        data_fields = ["chromosome", "start", "end", "ID", "SVTYPE", "INFO", "median95CI_lower_rel_coverage", "median95CI_higher_rel_coverage", "median95CI_lower_rel_coverage_relative", "median95CI_higher_rel_coverage_relative"]
+        data_fields = ["chromosome", "start", "end", "ID", "SVTYPE", "INFO", "median95CI_lower_rel_coverage", "median95CI_higher_rel_coverage", "median95CI_lower_rel_coverage_relative", "median95CI_higher_rel_coverage_relative", "abs_spearman_r", "abs_pearson_r", "spearman_p", "pearson_p"]
 
         # get the coverage calculation for the input vcf TAN,DUP,DEL
         df_vcf_forCNV  = df_vcf_forCNV.set_index("ID", drop=False)
@@ -12845,7 +12997,7 @@ def get_CNV_calling_with_coverageBased_added(svtype_to_svDF, df_vcf, outdir, gff
         df_vcf_final = df_CNV[data_fields].append(df_vcf_forCNV[data_fields])
 
         # add the INFO
-        df_vcf_final["INFO"] = df_vcf_final.apply(lambda r: "%s;RELCOVERAGE=%.4f,%.4f;RELCOVERAGE_NEIGHBOR=%.4f,%.4f"%(r["INFO"], r["median95CI_lower_rel_coverage"], r["median95CI_higher_rel_coverage"], r["median95CI_lower_rel_coverage_relative"], r["median95CI_higher_rel_coverage_relative"]), axis=1)
+        df_vcf_final["INFO"] = df_vcf_final.apply(lambda r: "%s;RELCOVERAGE=%.4f,%.4f;RELCOVERAGE_NEIGHBOR=%.4f,%.4f;REGION_ABS_SPEARMANR=%.4f;REGION_ABS_PEARSONR=%.4f;REGION_SPEARMANP=%.4f;REGION_PEARSONP=%.4f"%(r["INFO"], r["median95CI_lower_rel_coverage"], r["median95CI_higher_rel_coverage"], r["median95CI_lower_rel_coverage_relative"], r["median95CI_higher_rel_coverage_relative"], r["abs_spearman_r"], r["abs_pearson_r"], r["spearman_p"], r["pearson_p"]), axis=1)
 
         # add the ALT
         df_vcf_final["ALT"] = "<" + df_vcf_final.SVTYPE + ">"
@@ -12877,9 +13029,42 @@ def get_CNV_calling_with_coverageBased_added(svtype_to_svDF, df_vcf, outdir, gff
 
     return  df_vcf_final
 
-def annotate_SVs_inHouse(perSVade_outdir, outdir, gff, sorted_bam, reference_genome, replace=False, threads=4, mitochondrial_chromosome="mito_C_glabrata_CBS138", mito_code=3, gDNA_code=1, max_coverage_deletion=0.01, min_coverage_duplication=1.8):
 
-    """This function generates a SV_variant_calling.vcf and SV_variant_annotation.tab files, similar to the small variant versions. Where the called vars can be SVs, CNVs and whole-chromosome duplications"""
+def get_correct_POS_in1based(r):
+
+    """Takes a row of df_vcf SV calling and returns the 1- based position. Only the ACTG ones will not be considered"""
+
+    if r["ALT"] in {"<TDUP>", "<DUP>", "<DEL>", "<BND>"}: return (r["POS"]+1)
+    elif r["INFO"].startswith("SVTYPE=insertionBND"): return r["POS"]
+    else: 
+        print(r)
+        raise ValueError("r is not properly formatted")
+
+
+def get_correctID_and_INFO_df_vcf_SV_CNV(r):
+
+    """Takes a row of df_vcf and returns the ID and the INFO"""
+
+    # new info
+    newINFO = "%s;variantID=%s"%(r["INFO"], r["ID"])
+
+
+    # new ID depends on the type of variant
+    if r["ALT"] in {"<TDUP>", "<DUP>", "<DEL>"}: extraID = "CNV"
+    elif r["ALT"]=="<BND>": extraID = "BND-%s-%i"%(r["#CHROM"], r["POS"])
+    elif r["INFO"].startswith("SVTYPE=insertionBND"): extraID = "insertion-%s-%i"%(r["#CHROM"], r["POS"])
+    else: raise ValueError("r is not properly formatted")
+
+    # get the new ID
+    type_var, other_ID = r["ID"].split("|")
+    newID = "%s|%s|%s"%(type_var, extraID, other_ID)
+
+    return pd.Series({"ID" : newID, "INFO" : newINFO})
+
+def get_vcf_all_SVs_and_CNV(perSVade_outdir, outdir, sorted_bam, reference_genome, replace=False, threads=4, mitochondrial_chromosome="mito_C_glabrata_CBS138", mito_code=3, gDNA_code=1, max_coverage_deletion=0.01, min_coverage_duplication=1.8):
+
+
+    """This function generates a vcf that has all the variants and CNV"""
 
     # make the folder
     make_folder(outdir)
@@ -12889,7 +13074,7 @@ def annotate_SVs_inHouse(perSVade_outdir, outdir, gff, sorted_bam, reference_gen
     outdir_gridss_final = "%s/SVdetection_output/final_gridss_running"%perSVade_outdir
 
     # get the svDF metadata
-    svtype_to_svDF = get_sampleID_to_svtype_to_svDF_filtered({"x":svtype_to_svfile}, {"x":df_gridss}, sampleID_to_parentIDs={}, breakend_info_to_keep=['#CHROM', 'POS', 'other_coordinates', 'allele_frequency', 'allele_frequency_SmallEvent', 'real_AF', 'FILTER', 'inserted_sequence', 'has_poly16GC', 'length_inexactHomology', 'length_microHomology', 'QUAL', 'overlaps_repeats'])["x"]
+    svtype_to_svDF = get_sampleID_to_svtype_to_svDF_filtered({"x":svtype_to_svfile}, {"x":df_gridss}, sampleID_to_parentIDs={}, breakend_info_to_keep=['#CHROM', 'POS', 'other_coordinates', 'allele_frequency', 'allele_frequency_SmallEvent', 'real_AF', 'FILTER', 'inserted_sequence', 'has_poly16GC', 'length_inexactHomology', 'length_microHomology', 'QUAL', 'overlaps_repeats', 'REF', 'BREAKPOINTID'])["x"]
 
     # get the clove output
     outfile_clove = "%s/gridss_output.vcf.withSimpleEventType.vcf.filtered_default.vcf.bedpe.raw.bedpe.clove.vcf"%outdir_gridss_final
@@ -12900,80 +13085,136 @@ def annotate_SVs_inHouse(perSVade_outdir, outdir, gff, sorted_bam, reference_gen
 
     # get a vcf with the coverage-based calling
     outdir_CNV = "%s/calculating_CNVcoverage"%outdir
-    df_vcf = get_CNV_calling_with_coverageBased_added(svtype_to_svDF, df_vcf, outdir_CNV, gff, sorted_bam, reference_genome, df_clove, replace=replace, threads=threads, mitochondrial_chromosome=mitochondrial_chromosome, max_coverage_deletion=max_coverage_deletion, min_coverage_duplication=min_coverage_duplication)
+    df_vcf = get_CNV_calling_with_coverageBased_added(svtype_to_svDF, df_vcf, outdir_CNV, sorted_bam, reference_genome, df_clove, replace=replace, threads=threads, mitochondrial_chromosome=mitochondrial_chromosome, max_coverage_deletion=max_coverage_deletion, min_coverage_duplication=min_coverage_duplication)
+
+    # add a tag to the ID, that makes it unique
+    df_vcf[["ID", "INFO"]] = df_vcf.apply(get_correctID_and_INFO_df_vcf_SV_CNV, axis=1)
+
+    # check that all IDs are unique
+    if len(df_vcf)!=len(set(df_vcf.ID)): raise ValueError("IDs are not unique")
+
+    # add the POS and END that are correct, these should be 1-based. Note that they wont match the ID
+    df_vcf["POS"] = df_vcf.apply(get_correct_POS_in1based, axis=1)
+
 
     # write vcf
-    vcf_SVcalling = "%s/SV_variant_calling.vcf"%outdir
+    vcf_SVcalling = "%s/SV_and_CNV_variant_calling.vcf"%outdir
     vcf_lines = df_vcf.to_csv(sep="\t", header=False, index=False)
     header_lines = "\n".join([l.strip() for l in open(outfile_clove, "r").readlines() if l.startswith("#CHROM") or l.startswith("##fileformat")])
     open(vcf_SVcalling, "w").write(header_lines + "\n" + vcf_lines)
+
+    return vcf_SVcalling
     
+
+def clean_vep_output_files(run_vep_outfile):
+
+    """Takes the --outfile passed to run_vep and cleans it"""
+
+    outdir = get_dir(run_vep_outfile)
+    for f in os.listdir(outdir):
+        path = "%s/%s"%(outdir, f)
+        if path.startswith(run_vep_outfile): remove_file(path)
+
+def annotate_SVs_inHouse(vcf_SVcalling, gff, reference_genome, replace=False, threads=4, mitochondrial_chromosome="mito_C_glabrata_CBS138", mito_code=3, gDNA_code=1):
+
+    """This function annotates the variants from vcf_SVcalling"""
+
     # run vep
-    SV_variant_annotation_file = "%s/SV_variant_annotation.tab"%outdir
-    print(print(SV_variant_annotation_file))
-    run_cmd("%s --input_vcf %s --outfile %s --ref %s --gff %s --mitochondrial_chromosome %s --mito_code %i --gDNA_code %i"%(run_vep, vcf_SVcalling, SV_variant_annotation_file, reference_genome, gff, mitochondrial_chromosome, mito_code, gDNA_code))
+    annotated_vcf = "%s_annotated_VEP.tab"%vcf_SVcalling
+    annotated_vcf_tmp = "%s.tmp"%annotated_vcf
+
+    if file_is_empty(annotated_vcf) or replace is True:
+
+        # clea
+        clean_vep_output_files(annotated_vcf_tmp)
+
+        # run vep
+        run_cmd("%s --input_vcf %s --outfile %s --ref %s --gff %s --mitochondrial_chromosome %s --mito_code %i --gDNA_code %i"%(run_vep, vcf_SVcalling, annotated_vcf_tmp, reference_genome, gff, mitochondrial_chromosome, mito_code, gDNA_code))
+
+        # rename the files (also the warnings and summary)
+        os.rename("%s.raw.tbl.tmp_summary.html"%annotated_vcf_tmp, "%s.raw.tbl.tmp_summary.html"%annotated_vcf)
+        os.rename(annotated_vcf_tmp, annotated_vcf)
+
+    clean_vep_output_files(annotated_vcf_tmp)
+
+    return annotated_vcf
+
+
+
+def get_automatic_coverage_thresholds(outdir_perSVade, fast_SVcalling, ploidy, nsimulations, simulation_ploidies):
+
+    """This function takes the outdir of perSVade and the fastSV calling, calculates the coverage for all the simulations and defines the optimum coverage thresholds for CNV detection"""
+
+
+    # for fast svcalling, it just depends on the ploidy
+    if fast_SVcalling is True:
+
+        min_coverage_duplication = 1 + (ploidy*0.6) 
+        max_coverage_deletion = 1 - (ploidy*0.99)
+
+    # else find something that is optimised with all the simulations performed. The idea is to check several breakpoints and take the one with the maximum Fvalue
+    else:
+
+        # initialize df_CNV, which will contain one region for each 
+        df_CNV = pd.DataFrame()
+
+        # define outdir optimisation
+        outdir_optimisation = "%s/SVdetection_output/parameter_optimisation"%outdir_perSVade
+
+        # go throigh each simulation (these are technical replicates of the pipeline)
+        for simulation_ID in range(1, nsimulations+1):
+
+            # get an outdir where all the simulations of this ID will be stored
+            simulation_outdir = "%s/simulation_%i"%(outdir_optimisation, simulation_ID)
+
+            # define all bams
+            bams = [f for f in os.listdir(simulation_outdir) if f.startswith("aligned_reads") and f.endswith(".sorted")]
+
+            # go through each of the target ploidies and generate the resulting bam files:
+            for ploidy in simulation_ploidies:
+
+                # define the simulation bam
+                if ploidy=="haploid": possible_bams = [b for b in bams if len(b.split("."))==3]
+                else: possible_bams = [b for b in bams if ploidy in b]
+                if len(possible_bams)!=1: raise ValueError("error in bam obtention")
+                sorted_bam = "%s/%s"%(simulation_outdir, possible_bams[0])
+
+                # load several regions dfs
+                outdir_vars = "%s/final_simulated_SVs"%simulation_outdir
+                df_TAN = pd.read_csv("%s/tandemDuplications.tab"%outdir_vars, sep="\t")
+                df_DEL = pd.read_csv("%s/deletions.tab"%outdir_vars, sep="\t")
+                df_INV = pd.read_csv("%s/inversions.tab"%outdir_vars, sep="\t")
+                df_INS = pd.read_csv("%s/insertions.tab"%outdir_vars, sep="\t").rename(columns={"ChrA":"Chr", "StartA":"Start", "EndA":"End"})[["Chr", "Start", "End", "Copied"]]
+
+                adkgdahkadg
+
+                # get SVTYPE
+                #df_TAN = []
+                #for df in [df_TAN, ]
 
 
 
 
-    print(SV_variant_annotation_file)
-    kudagdag
 
-    kagdkadgh
-
-    # get all the breakpoints
-    bedpe = "%s/gridss_output.vcf.withSimpleEventType.vcf.filtered_default.vcf.bedpe"%outdir_gridss_final
-    bedpe_df = pd.read_csv(bedpe, sep="\t")
+                print(simulation_outdir)
 
 
+                dakjdjkha
+                # define the final sorted bam depending on the ploidy (which also includes populations)
+                ploidy_merged_bam = get_merged_bamfile_for_ploidy(variant_bamfile=simulation_bam_file, reference_bamfile=simulated_reference_bam_file, ploidy=ploidy, replace=replace, threads=threads)
 
-    print(df_clove)
+        run_GridssClove_optimising_parameters
 
-    hkdagdajhgd
-
-    print(all_breakpoints_df)
-
-    df = svtype_to_svDF["deletions"]
-    print(df, df.keys(), df.bends_metadata_dict.iloc[0])
-
-
-    print(svtype_to_svDF)
-
-    dadkdah
+        # get the coverage calculation for the input vcf TAN,DUP,DEL
+        df_vcf_forCNV  = df_vcf_forCNV.set_index("ID", drop=False)
+        bed_windows_prefix = "%s/calculating_cov_neighbors_SV-based_vcf"%outdir
+        df_vcf_forCNV = get_df_with_coverage_per_windows_relative_to_neighbor_regions(df_vcf_forCNV, bed_windows_prefix, reference_genome, sorted_bam, df_clove, median_coverage, replace=replace, run_in_parallel=True, delete_bams=False, threads=threads)
+        df_vcf_forCNV = get_coverage_df_windows_with_within_windows_statistics(df_vcf_forCNV, outdir, sorted_bam, reference_genome, median_coverage, replace=replace, threads=threads)
 
 
-
-    # get breakpoint locations
-    get_breakpoint_positions_df_in_svDF
-    get_breakpoint_positions_df_in_svDF
+        kjhadkhjdag
 
 
-    #print(svtype_to_svfile)
-
-    #dlkjhjd
-
-    # make the folder
-    delete_folder(outdir)
-    make_folder(outdir)
-
-    # define the clove output and run vep
-    clove_output = "%s/gridss_output.vcf.withSimpleEventType.vcf.filtered_default.vcf.bedpe.raw.bedpe.clove.vcf"%outdir_gridss_final
-    clove_output_annotated = "%s/clove_output_annotated.tab"%outdir
-
-    run_cmd("%s --input_vcf %s --outfile %s --ref %s --gff %s --mitochondrial_chromosome %s --mito_code %i --gDNA_code %i"%(run_vep, clove_output, clove_output_annotated, reference_genome, gff, mitochondrial_chromosome, mito_code, gDNA_code))
-
-    print(outdir_gridss_final)
-
-    ddaaaaaa
-    parser.add_argument("--input_vcf", dest="input_vcf", required=True, type=str, help="The input vcf file.")
-    parser.add_argument("--outfile", dest="outfile", required=True, type=str, help="The outfile")
-    parser.add_argument("--ref", dest="ref", required=True, type=str, help="The reference genome")
-    parser.add_argument("--gff", dest="gff", required=True, type=str, help="The gff file")
-    parser.add_argument("--mitochondrial_chromosome", dest="mitochondrial_chromosome", required=True, type=str, help="The name of mitochondrial chromosomes,  which can be comma sepparated if there are more than 1.")
-    parser.add_argument("--mito_code", dest="mito_code", required=False, default=3, type=int, help="The code of translation of ncbi of mitochondrial proteins. Fungal mitochondrial by default.")
-    parser.add_argument("--gDNA_code", dest="gDNA_code", required=False, default=1, type=int, help="The code of translation of ncbi of nuclear genes. Standard by default. C. albicans has 12")
-
-
-
+    return min_coverage_duplication, max_coverage_deletion
 
 

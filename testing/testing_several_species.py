@@ -315,6 +315,12 @@ source ~/.bash_profile
 run_interactive_session_debug
 conda activate perSVade_env
 
+# drosophila files
+/gpfs/projects/bsc40/mschikora/scripts/perSVade/perSVade_repository/testing/outdirs_testing_severalSpecies/7227_Drosophila_melanogaster/testing_Accuracy
+
+# arabidposis files
+/gpfs/projects/bsc40/mschikora/scripts/perSVade/perSVade_repository/testing/outdirs_testing_severalSpecies/3702_Arabidopsis_thaliana/testing_Accuracy
+
 # testing on Arabidopsis
 
 cd /gpfs/projects/bsc40/mschikora/scripts/perSVade/perSVade_repository/testing/outdirs_testing_severalSpecies/3702_Arabidopsis_thaliana/testing_Accuracy/realSVs/sample59689_SRR7119536
