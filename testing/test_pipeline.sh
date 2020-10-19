@@ -56,3 +56,5 @@ python $pipeline -r $refgenome -o $outdir -p 1 -f1 $reads1 -f2 $reads2 -mchr mit
 
 # This pipeline can be run with
 #sbatch --qos=debug --time=02:00:00 --job-name=testing_perSVade --cpus-per-task=48 --error=/gpfs/projects/bsc40/mschikora/scripts/perSVade/perSVade_repository/testing/testing_perSVade_benchmark_stderr.txt --output=/gpfs/projects/bsc40/mschikora/scripts/perSVade/perSVade_repository/testing/testing_perSVade_benchmark_stdout.txt --workdir=.  --get-user-env test_pipeline.sh
+
+

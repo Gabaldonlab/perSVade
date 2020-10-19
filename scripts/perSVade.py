@@ -129,8 +129,10 @@ parser.add_argument("--max_coverage_sra_reads", dest="max_coverage_sra_reads", d
 parser.add_argument("--min_chromosome_len", dest="min_chromosome_len", default=100000, type=int, help="The minimum length to consider chromosomes from the provided fasta for calculating the window length.")
 
 # coverage CNV
-parser.add_argument("--min_coverage_duplication", dest="min_coverage_duplication", default="auto", help="The minimum rel. coverage to call a duplicated region. If set to auto, it will be calculated as 1 + (ploidy*0.8)")
-parser.add_argument("--max_coverage_deletion", dest="max_coverage_deletion", default="auto", help="The maximum rel. coverage to call a deleted region. If set to auto, it will be calculated as 1 - (ploidy*0.99)")
+parser.add_argument("--min_coverage_duplication", dest="min_coverage_duplication", default="auto", help="The minimum rel. coverage to call a duplicated region. If set to auto, it will be calculated from optimisation")
+parser.add_argument("--max_coverage_deletion", dest="max_coverage_deletion", default="auto", help="The maximum rel. coverage to call a deleted region. If set to auto, it will be calculated from optimisation")
+parser.add_argument("--min_r_pearson_noFlatRegions", dest="min_r_pearson_noFlatRegions", default="auto", help="The minimum pearson correlation that there should be between position and coverage in a region for being considered as a duplication.")
+parser.add_argument("--min_r_spearman_noFlatRegions", dest="min_r_spearman_noFlatRegions", default="auto", help="The minimum spearman correlation that there should be between position and coverage in a region for being considered as a duplication.")
 
 # small VarCall and CNV args
 parser.add_argument("--run_smallVarsCNV", dest="run_smallVarsCNV", action="store_true", default=False, help="Will call small variants and CNV.")
@@ -483,11 +485,11 @@ if opt.gff is not None and opt.skip_SVcalling is False and not any([x=="skip" fo
 	#### get CNV parameters ####
 
 	# get the default parameters
-	if opt.min_coverage_duplication=="auto" or opt.max_coverage_deletion=="auto":
+	if opt.min_coverage_duplication=="auto" or opt.max_coverage_deletion=="auto" or opt.min_r_pearson_noFlatRegions=="auto" or opt.min_r_spearman_noFlatRegions=="auto":
 
-		auto_min_coverage_duplication, auto_max_coverage_deletion = fun.get_automatic_coverage_thresholds(opt.outdir, opt.fast_SVcalling, opt.ploidy, opt.nsimulations, simulation_ploidies)
 
-		n_simulated_genomes=opt.nsimulations, mitochondrial_chromosome=opt.mitochondrial_chromosome, simulation_ploidies=simulation_ploidies
+		auto_min_coverage_duplication, auto_max_coverage_deletion, auto_min_r_pearson_noFlatRegions, auto_min_r_spearman_noFlatRegions = fun.get_automatic_coverage_thresholds(opt.outdir, opt.fast_SVcalling, opt.ploidy, opt.nsimulations, simulation_ploidies, opt.mitochondrial_chromosome, opt.ref, threads=opt.threads, replace=opt.replace)
+
 
 	# set real vars
 	if opt.min_coverage_duplication=="auto": min_coverage_duplication = auto_min_coverage_duplication
@@ -496,16 +498,22 @@ if opt.gff is not None and opt.skip_SVcalling is False and not any([x=="skip" fo
 	if opt.max_coverage_deletion=="auto": max_coverage_deletion = auto_max_coverage_deletion
 	else: max_coverage_deletion = float(opt.max_coverage_deletion)
 
+	if opt.min_r_pearson_noFlatRegions=="auto": min_r_pearson_noFlatRegions = auto_min_r_pearson_noFlatRegions
+	else: min_r_pearson_noFlatRegions = float(opt.min_r_pearson_noFlatRegions)
+		
+	if opt.min_r_spearman_noFlatRegions=="auto": min_r_spearman_noFlatRegions = auto_min_r_spearman_noFlatRegions
+	else: min_r_spearman_noFlatRegions = float(opt.min_r_spearman_noFlatRegions)
+
 	############################
 
 
 	# get the variant calling 
 	outdir_var_calling = "%s/SVcalling_output"%opt.outdir
-	print("getting all SVs into one VCF. Regions with a cov>%.3f will be treated as DUP, and regions with cov <%.3f will be treated as DEL"%(min_coverage_duplication, max_coverage_deletion))
+	print("getting all SVs into one VCF. Regions with a cov>%.3f will be treated as DUP, and regions with cov <%.3f will be treated as DEL. Regions with a correlation between position and coverage >%.3f (pearson) and >%.3f (spearman) will not be considered as CNV, as they may be related to the smiley-face effect."%(min_coverage_duplication, max_coverage_deletion, min_r_pearson_noFlatRegions, min_r_spearman_noFlatRegions))
 
 	kadhkadhjda
 
-	SV_CNV_vcf = fun.get_vcf_all_SVs_and_CNV(opt.outdir, outdir_var_calling, sorted_bam, opt.ref, replace=opt.replace, threads=opt.threads, mitochondrial_chromosome=opt.mitochondrial_chromosome, mito_code=opt.mitochondrial_code, gDNA_code=opt.gDNA_code, max_coverage_deletion=max_coverage_deletion, min_coverage_duplication=min_coverage_duplication)
+	SV_CNV_vcf = fun.get_vcf_all_SVs_and_CNV(opt.outdir, outdir_var_calling, sorted_bam, opt.ref, replace=opt.replace, threads=opt.threads, mitochondrial_chromosome=opt.mitochondrial_chromosome, mito_code=opt.mitochondrial_code, gDNA_code=opt.gDNA_code, max_coverage_deletion=max_coverage_deletion, min_coverage_duplication=min_coverage_duplication, min_r_pearson_noFlatRegions=min_r_pearson_noFlatRegions, min_r_spearman_noFlatRegions=min_r_spearman_noFlatRegions)
 
 	# get variant annotation
 	print("annotating SV, CNV variants with VEP")
