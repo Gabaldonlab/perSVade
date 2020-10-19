@@ -117,8 +117,8 @@ species_Info = [("746128", "Aspergillus_fumigatus", 1, "CM016889.1"),
 species_Info = [("7227", "Drosophila_melanogaster", 2, "KJ947872.2", 30),
                 ("3702", "Arabidopsis_thaliana", 2, "BK010421.1,AP000423.1", 30)]
 """
-species_Info = [("3702", "Arabidopsis_thaliana", 2, "BK010421.1,AP000423.1", 30)]
-#species_Info = [("7227", "Drosophila_melanogaster", 2, "KJ947872.2", 30)]
+#species_Info = [("3702", "Arabidopsis_thaliana", 2, "BK010421.1,AP000423.1", 30)]
+species_Info = [("7227", "Drosophila_melanogaster", 2, "KJ947872.2", 30)]
 
 
 taxIDs_with_noON_overalpping = {"5476", "746128"}
@@ -281,7 +281,7 @@ for taxID, spName, ploidy, mitochondrial_chromosome, max_coverage_sra_reads in s
         cmd = "%s --ref %s --threads %i -o %s --target_taxID %s --n_close_samples 3 --nruns_per_sample 3 -f1 skip -f2 skip --mitochondrial_chromosome %s --gff %s --goldenSet_dir %s --skip_SVcalling --verbose"%(perSVade_py, genome, threads, outdir_perSVade, taxID, mitochondrial_chromosome, gff, goldenSet_dir)
 
     # add options depending on the machine
-    if run_in_cluster is True: cmd += " --job_array_mode greasy --queue_jobs bsc_ls --max_ncores_queue 480 --time_read_obtention 48:00:00 --time_perSVade_running 48:00:00"
+    if run_in_cluster is True: cmd += " --job_array_mode greasy --queue_jobs bsc_ls --max_ncores_queue 144 --time_read_obtention 48:00:00 --time_perSVade_running 48:00:00"
 
     else: cmd += " --job_array_mode local"
 
