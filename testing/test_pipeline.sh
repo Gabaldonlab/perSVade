@@ -44,7 +44,7 @@ taxID=5478
 #####################
 
 # test the running of the SV calling
-python $pipeline -r $refgenome -o $outdir -p 1 -f1 $reads1 -f2 $reads2 -mchr mito_C_glabrata_CBS138 --threads $threads -gff $gff --verbose --previous_repeats_table $previous_repeats_table --skip_cleaning_outdir --nvars 10 --nsimulations 1 --simulation_ploidies haploid
+python $pipeline -r $refgenome -o $outdir -p 1 -f1 $reads1 -f2 $reads2 -mchr mito_C_glabrata_CBS138 --threads $threads -gff $gff --verbose --previous_repeats_table $previous_repeats_table --nvars 15 --nsimulations 2 --simulation_ploidies haploid --skip_cleaning_outdir --visualization_results
 # --fast_SVcalling
 
 # test VarCall pipeline
