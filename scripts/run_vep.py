@@ -151,7 +151,9 @@ vep_df = pd.read_csv(outfile_vep_raw, sep="\t", header=len([x for x in open(outf
 vep_df["Consequence"] = vep_df.apply(fun.get_corrected_Consequence_for_vep_r, axis=1)
 
 # define the expected vars
-all_expected_consequences = {'stop_gained', 'intron_variant', 'upstream_gene_variant', '5_prime_UTR_variant', 'inframe_insertion', 'synonymous_variant', 'non_coding_transcript_exon_variant', 'intergenic_variant', 'protein_altering_variant', 'coding_sequence_variant', 'downstream_gene_variant', '3_prime_UTR_variant', 'missense_variant', 'splice_region_variant', 'splice_acceptor_variant', 'inframe_deletion', 'stop_lost', 'non_coding_transcript_variant', 'start_retained_variant', 'frameshift_variant', 'stop_retained_variant', 'start_lost', 'incomplete_terminal_codon_variant', 'splice_donor_variant', 'upstream_gene_variant_BND', '5_prime_UTR_variant_BND', 'transcript_amplification', 'transcript_ablation', 'feature_elongation', 'coding_sequence_variant_BND', 'downstream_gene_variant_BND', 'feature_truncation'}
+all_expected_consequences = {'stop_gained', 'intron_variant', 'upstream_gene_variant', '5_prime_UTR_variant', 'inframe_insertion', 'synonymous_variant', 'non_coding_transcript_exon_variant', 'intergenic_variant', 'protein_altering_variant', 'coding_sequence_variant', 'downstream_gene_variant', '3_prime_UTR_variant', 'missense_variant', 'splice_region_variant', 'splice_acceptor_variant', 'inframe_deletion', 'stop_lost', 'non_coding_transcript_variant', 'start_retained_variant', 'frameshift_variant', 'stop_retained_variant', 'start_lost', 'incomplete_terminal_codon_variant', 'splice_donor_variant', 'transcript_amplification', 'transcript_ablation', 'feature_elongation', 'feature_truncation'}
+
+all_expected_consequences = all_expected_consequences.union({"%s_BND"%cons for cons in all_expected_consequences})
 
 # check that all the found consequences are in the expected ones
 all_found_consequences = set.union(*vep_df.Consequence.apply(lambda x: set(x.split(","))))

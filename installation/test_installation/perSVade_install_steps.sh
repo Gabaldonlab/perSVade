@@ -18,6 +18,7 @@ conda config --add channels biocore &&
 conda config --add channels bioconda &&
 conda config --add channels etetoolkit &&
 conda config --add channels r &&
+conda config --add channels plotly &&
 
 # install packages that should be loaded 
 conda install -y pandas=0.24.2 &&
@@ -73,6 +74,12 @@ conda install -c conda-forge -y r-emdbook=1.3.12 &&
 conda install -c bioconda -y bioconductor-rtracklayer=1.48.0 &&
 conda install -c conda-forge -y r-r.utils=2.9.2 &&
 conda install -c bioconda -y bioconductor-structuralvariantannotation=1.4.0;
+
+
+# add plotly
+conda install -c -y plotly plotly=2.7.0
+
+
 
 
 # the environment can be exported as:

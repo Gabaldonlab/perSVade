@@ -35,6 +35,7 @@ picard_exec = "%s/bin/picard"%EnvDir
 
 # scripts that are installed under this software
 varcall_cnv_pipeline = "%s/varcall_cnv_pipeline.py"%CWD
+perSVade_genome_browser = "%s/perSVade_genome_browser.py"%CWD
 
 #######
 
@@ -150,6 +151,10 @@ parser.add_argument("--generate_alternative_genome", dest="generate_alternative_
 parser.add_argument("--skip_cnv_analysis", dest="skip_cnv_analysis", default=False, action="store_true", help="Don't perform the cnv analysis")
 
 
+# visualization
+parser.add_argument("--visualization_results", dest="visualization_results", default=False, action="store_true", help="Visualize the results")
+
+
 parser.add_argument("--pooled_sequencing", dest="pooled_sequencing", action="store_true", default=False, help="It is a pooled sequencing run, which means that the small variant calling is not done based on ploidy. If you are also running SV calling, check that the simulation_ploidies, resemble a population,")
 
 # verbosity
@@ -260,13 +265,13 @@ fun.printing_verbose_mode = opt.verbose
 # change the default parameters if specified
 if opt.parameters_json_file is not None:
 
-	gridss_blacklisted_regions, gridss_maxcoverage, gridss_filters_dict, max_rel_coverage_to_consider_del, min_rel_coverage_to_consider_dup = fun.get_parameters_from_json(opt.parameters_json_file)
+    gridss_blacklisted_regions, gridss_maxcoverage, gridss_filters_dict, max_rel_coverage_to_consider_del, min_rel_coverage_to_consider_dup = fun.get_parameters_from_json(opt.parameters_json_file)
 
-	fun.default_filtersDict_gridss = gridss_filters_dict
-	fun.default_gridss_blacklisted_regions = gridss_blacklisted_regions
-	fun.default_gridss_maxcoverage = gridss_maxcoverage
-	fun.default_max_rel_coverage_to_consider_del = max_rel_coverage_to_consider_del
-	fun.default_min_rel_coverage_to_consider_dup = min_rel_coverage_to_consider_dup
+    fun.default_filtersDict_gridss = gridss_filters_dict
+    fun.default_gridss_blacklisted_regions = gridss_blacklisted_regions
+    fun.default_gridss_maxcoverage = gridss_maxcoverage
+    fun.default_max_rel_coverage_to_consider_del = max_rel_coverage_to_consider_del
+    fun.default_min_rel_coverage_to_consider_dup = min_rel_coverage_to_consider_dup
 
 
 # get the gff info
@@ -480,57 +485,51 @@ print("structural variation analysis with perSVade finished")
 ###### SV and CNV ANNOTATION ########
 #####################################
 
-if opt.gff is not None and opt.skip_SVcalling is False and not any([x=="skip" for x in {opt.fastq1, opt.fastq2}]):
+if opt.skip_SVcalling is False and not any([x=="skip" for x in {opt.fastq1, opt.fastq2}]):
 
-	#### get CNV parameters ####
+    #### get CNV parameters ####
 
-	# get the default parameters
-	if opt.min_coverage_duplication=="auto" or opt.max_coverage_deletion=="auto" or opt.min_r_pearson_noFlatRegions=="auto" or opt.min_r_spearman_noFlatRegions=="auto":
+    # get the default parameters
+    if opt.min_coverage_duplication=="auto" or opt.max_coverage_deletion=="auto" or opt.min_r_pearson_noFlatRegions=="auto" or opt.min_r_spearman_noFlatRegions=="auto":
 
-
-		auto_min_coverage_duplication, auto_max_coverage_deletion, auto_min_r_pearson_noFlatRegions, auto_min_r_spearman_noFlatRegions = fun.get_automatic_coverage_thresholds(opt.outdir, opt.fast_SVcalling, opt.ploidy, opt.nsimulations, simulation_ploidies, opt.mitochondrial_chromosome, opt.ref, threads=opt.threads, replace=opt.replace)
-
-
-	# set real vars
-	if opt.min_coverage_duplication=="auto": min_coverage_duplication = auto_min_coverage_duplication
-	else: min_coverage_duplication = float(opt.min_coverage_duplication)
-		
-	if opt.max_coverage_deletion=="auto": max_coverage_deletion = auto_max_coverage_deletion
-	else: max_coverage_deletion = float(opt.max_coverage_deletion)
-
-	if opt.min_r_pearson_noFlatRegions=="auto": min_r_pearson_noFlatRegions = auto_min_r_pearson_noFlatRegions
-	else: min_r_pearson_noFlatRegions = float(opt.min_r_pearson_noFlatRegions)
-		
-	if opt.min_r_spearman_noFlatRegions=="auto": min_r_spearman_noFlatRegions = auto_min_r_spearman_noFlatRegions
-	else: min_r_spearman_noFlatRegions = float(opt.min_r_spearman_noFlatRegions)
-
-	############################
+        auto_min_coverage_duplication, auto_max_coverage_deletion, auto_min_r_pearson_noFlatRegions, auto_min_r_spearman_noFlatRegions = fun.get_automatic_coverage_thresholds(opt.outdir, opt.fast_SVcalling, opt.ploidy, opt.nsimulations, simulation_ploidies, opt.mitochondrial_chromosome, opt.ref, threads=opt.threads, replace=opt.replace)
 
 
-	# get the variant calling 
-	outdir_var_calling = "%s/SVcalling_output"%opt.outdir
-	print("getting all SVs into one VCF. Regions with a cov>%.3f will be treated as DUP, and regions with cov <%.3f will be treated as DEL. Regions with a correlation between position and coverage >%.3f (pearson) and >%.3f (spearman) will not be considered as CNV, as they may be related to the smiley-face effect."%(min_coverage_duplication, max_coverage_deletion, min_r_pearson_noFlatRegions, min_r_spearman_noFlatRegions))
+    # set real vars
+    if opt.min_coverage_duplication=="auto": min_coverage_duplication = auto_min_coverage_duplication
+    else: min_coverage_duplication = float(opt.min_coverage_duplication)
+        
+    if opt.max_coverage_deletion=="auto": max_coverage_deletion = auto_max_coverage_deletion
+    else: max_coverage_deletion = float(opt.max_coverage_deletion)
 
-	kadhkadhjda
+    if opt.min_r_pearson_noFlatRegions=="auto": min_r_pearson_noFlatRegions = auto_min_r_pearson_noFlatRegions
+    else: min_r_pearson_noFlatRegions = float(opt.min_r_pearson_noFlatRegions)
+        
+    if opt.min_r_spearman_noFlatRegions=="auto": min_r_spearman_noFlatRegions = auto_min_r_spearman_noFlatRegions
+    else: min_r_spearman_noFlatRegions = float(opt.min_r_spearman_noFlatRegions)
 
-	SV_CNV_vcf = fun.get_vcf_all_SVs_and_CNV(opt.outdir, outdir_var_calling, sorted_bam, opt.ref, replace=opt.replace, threads=opt.threads, mitochondrial_chromosome=opt.mitochondrial_chromosome, mito_code=opt.mitochondrial_code, gDNA_code=opt.gDNA_code, max_coverage_deletion=max_coverage_deletion, min_coverage_duplication=min_coverage_duplication, min_r_pearson_noFlatRegions=min_r_pearson_noFlatRegions, min_r_spearman_noFlatRegions=min_r_spearman_noFlatRegions)
+    ############################
 
-	# get variant annotation
-	print("annotating SV, CNV variants with VEP")
-	SV_CNV_vcf_annotated = fun.annotate_SVs_inHouse(SV_CNV_vcf, gff_with_biotype, opt.ref, replace=opt.replace, threads=opt.threads, mitochondrial_chromosome=opt.mitochondrial_chromosome, mito_code=opt.mitochondrial_code, gDNA_code=opt.gDNA_code)
+    # get the variant calling 
+    outdir_var_calling = "%s/SVcalling_output"%opt.outdir
+    print("getting all SVs into one VCF. Regions with a cov>%.3f will be treated as DUP, and regions with cov <%.3f will be treated as DEL. Regions with a correlation between position and coverage >%.3f (pearson) and >%.3f (spearman) will not be considered as CNV, as they may be related to the smiley-face effect."%(min_coverage_duplication, max_coverage_deletion, min_r_pearson_noFlatRegions, min_r_spearman_noFlatRegions))
 
-	print("annotated SV vcf can be found in %s"%SV_CNV_vcf_annotated)
+    SV_CNV_vcf = fun.get_vcf_all_SVs_and_CNV(opt.outdir, outdir_var_calling, sorted_bam, opt.ref, replace=opt.replace, threads=opt.threads, mitochondrial_chromosome=opt.mitochondrial_chromosome, mito_code=opt.mitochondrial_code, gDNA_code=opt.gDNA_code, max_coverage_deletion=max_coverage_deletion, min_coverage_duplication=min_coverage_duplication, min_r_pearson_noFlatRegions=min_r_pearson_noFlatRegions, min_r_spearman_noFlatRegions=min_r_spearman_noFlatRegions)
 
-	adljdaladjk
+    # get variant annotation
+    if opt.gff is not None:
 
-	
+        print("annotating SV, CNV variants with VEP")
+        SV_CNV_vcf_annotated = fun.annotate_SVs_inHouse(SV_CNV_vcf, gff_with_biotype, opt.ref, replace=opt.replace, threads=opt.threads, mitochondrial_chromosome=opt.mitochondrial_chromosome, mito_code=opt.mitochondrial_code, gDNA_code=opt.gDNA_code)
+
+        print("annotated SV vcf can be found in %s"%SV_CNV_vcf_annotated)
+
+    
 else: print("WARNING: Skipping SV annotation because -gff was not provided, --skip_SVcalling was provided or fastq1/fastq2 have 'skip'.")
 
 #####################################
 #####################################
 #####################################
-
-
 
 #####################################
 ###### SMALL VARS AND CNV ###########
@@ -558,9 +557,55 @@ if opt.run_smallVarsCNV:
     # run
     if __name__ == '__main__': fun.run_cmd(varcall_cmd)
 
+    # define the small variants vcf
+    if opt.ploidy==1: small_vars_vcf = "%s/variants_atLeast1PASS_ploidy%i.vcf"%(outdir_varcall, opt.ploidy)
+    else: small_vars_vcf = "%s/variants_atLeast1PASS_ploidy%i.withMultiAlt.vcf"%(outdir_varcall, opt.ploidy)
+
+    # define the variant annotation
+    small_vars_var_annotation = "%s/variant_annotation_ploidy%i.tab"%(outdir_varcall, opt.ploidy)
+
+
 #####################################
 #####################################
 #####################################
+
+
+#####################################
+##### VARIANTS VISUALIZATION ########
+#####################################
+
+if (opt.skip_SVcalling is False or run_smallVarsCNV is True) and not any([x=="skip" for x in {opt.fastq1, opt.fastq2}]) and opt.visualization_results is True and opt.gff is not None:
+
+    # visualize the results with the browser
+
+    # create a table with the data to visualize the browser for this sample. This will include many things
+    dict_data = {"sorted_bam":sorted_bam, "sampleID":name_sample}
+    if opt.skip_SVcalling is False: 
+        dict_data["SV_CNV_vcf"] = SV_CNV_vcf
+        dict_data["SV_CNV_var_annotation"] = SV_CNV_vcf_annotated
+
+    if opt.run_smallVarsCNV is True: 
+        dict_data["smallVars_vcf"] = small_vars_vcf
+        dict_data["smallVars_var_annotation"] = small_vars_var_annotation
+
+    # make df
+    df_visualization = pd.DataFrame({0:dict_data}).transpose()
+
+    # save to file
+    outdir_visualization = "%s/variant_visualization"%opt.outdir; fun.make_folder(outdir_visualization)
+    visualization_file = "%s/visualization_data.tab"%outdir_visualization
+    df_visualization.to_csv(visualization_file, sep="\t", index=False, header=True)
+
+    # get the visualization cmd
+    cmd_visualization = "%s --input_data %s --outdir %s --reference_genome %s --gff %s --threads %i"%(perSVade_genome_browser, visualization_file, outdir_visualization, opt.ref, opt.gff, opt.threads)
+    if opt.replace is True: cmd_visualization += " --replace"
+
+    fun.run_cmd(cmd_visualization)
+
+#####################################
+#####################################
+#####################################
+
 
 # at the end you want to clean the outdir to keep only the essential files
 if opt.skip_cleaning_outdir is False: fun.clean_perSVade_outdir(opt.outdir)
