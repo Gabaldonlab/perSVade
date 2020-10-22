@@ -69,7 +69,7 @@ conda install -c conda-forge -y r-base=4.0.2 &&
 #   libdeflate                                 1.2-h516909a_1 --> 1.0-h14c3975_1
 
 conda install -c bioconda -y bioconductor-rsvsim=1.28 &&
-conda install -c conda-forge -y r-argparser=0.4 &&
+conda install -c conda-forge -y r-argparser=0.4 && # at some point this gave problems
 conda install -c conda-forge -y r-emdbook=1.3.12 &&
 conda install -c bioconda -y bioconductor-rtracklayer=1.48.0 &&
 conda install -c conda-forge -y r-r.utils=2.9.2 &&
@@ -77,7 +77,25 @@ conda install -c bioconda -y bioconductor-structuralvariantannotation=1.4.0;
 
 
 # add plotly
-conda install -c -y plotly plotly=2.7.0
+conda install -y -c plotly plotly=2.7.0 &&
+
+conda install -y -c conda-forge cufflinks-py=0.13.0
+
+
+# The following NEW packages will be INSTALLED:
+
+#   colorlover         conda-forge/noarch::colorlover-0.3.0-py_0
+#   cufflinks-py       conda-forge/noarch::cufflinks-py-0.13.0-py_1
+
+# The following packages will be UPDATED:
+
+#   certifi                anaconda::certifi-2020.6.20-py36_0 --> conda-forge::certifi-2020.6.20-py36h9880bd3_2
+#   openssl               anaconda::openssl-1.1.1g-h7b6447c_0 --> conda-forge::openssl-1.1.1h-h516909a_0
+
+# The following packages will be SUPERSEDED by a higher-priority channel:
+
+#   ca-certificates     anaconda::ca-certificates-2020.7.22-0 --> conda-forge::ca-certificates-2020.6.20-hecda079_0
+
 
 
 

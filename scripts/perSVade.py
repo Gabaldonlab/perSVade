@@ -597,7 +597,7 @@ if (opt.skip_SVcalling is False or run_smallVarsCNV is True) and not any([x=="sk
     df_visualization.to_csv(visualization_file, sep="\t", index=False, header=True)
 
     # get the visualization cmd
-    cmd_visualization = "%s --input_data %s --outdir %s --reference_genome %s --gff %s --threads %i"%(perSVade_genome_browser, visualization_file, outdir_visualization, opt.ref, opt.gff, opt.threads)
+    cmd_visualization = "%s --input_data %s --outdir %s --reference_genome %s --gff %s --threads %i --only_affected_genes"%(perSVade_genome_browser, visualization_file, outdir_visualization, opt.ref, opt.gff, opt.threads)
     if opt.replace is True: cmd_visualization += " --replace"
 
     fun.run_cmd(cmd_visualization)
