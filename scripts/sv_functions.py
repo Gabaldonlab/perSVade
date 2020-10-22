@@ -12476,6 +12476,7 @@ def get_vcf_df_for_svDF(svDF, svtype, reference_genome):
     """
 
 
+
     # add to svDF
     svDF = cp.deepcopy(svDF)
     svDF["BPS_TYPE"] = "GRIDSS-CLOVE"
@@ -13154,6 +13155,28 @@ def get_correctID_and_INFO_df_vcf_SV_CNV(r):
 
     return pd.Series({"ID" : newID, "INFO" : newINFO})
 
+
+def get_correct_INFO_withEND_in1based(r, chr_to_len):
+
+    """Adds +1 to INFO_END"""
+
+    # get the INFO_ENDstring
+    INFO_ENDstring = [x for x in r["INFO"].split(";") if x.startswith("END=")]
+    if len(INFO_ENDstring)==0: return r["INFO"]
+    elif len(INFO_ENDstring)==1:
+
+        # get the string
+        INFO_ENDstring = INFO_ENDstring[0]
+
+        # get the string with end summed with 1
+        end = int(INFO_ENDstring.split("=")[1])
+        if end!=chr_to_len[r["#CHROM"]]: end+=1
+        new_INFO_ENDstring = "END=%i"%end
+
+        return r["INFO"].replace(INFO_ENDstring, new_INFO_ENDstring)
+
+    else: raise ValueError("your vcf is not properly formatted")
+
 def get_vcf_all_SVs_and_CNV(perSVade_outdir, outdir, sorted_bam, reference_genome, replace=False, threads=4, mitochondrial_chromosome="mito_C_glabrata_CBS138", mito_code=3, gDNA_code=1, max_coverage_deletion=0.01, min_coverage_duplication=1.8, min_r_pearson_noFlatRegions=0.2, min_r_spearman_noFlatRegions=0.2):
 
 
@@ -13195,6 +13218,9 @@ def get_vcf_all_SVs_and_CNV(perSVade_outdir, outdir, sorted_bam, reference_genom
         # add the POS and END that are correct, these should be 1-based. Note that they wont match the ID
         df_vcf["POS"] = df_vcf.apply(get_correct_POS_in1based, axis=1)
 
+        # add to the END + 1
+        chr_to_len = get_chr_to_len(reference_genome)
+        df_vcf["INFO"] = df_vcf.apply(lambda r: get_correct_INFO_withEND_in1based(r, chr_to_len), axis=1)
 
         # write vcf
         vcf_SVcalling_tmp = "%s.tmp"%vcf_SVcalling

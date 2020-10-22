@@ -39,7 +39,7 @@ from argparse import RawTextHelpFormatter
 description = """
 Takes a table with the paths to several genome variation analyses. It generates an .html file with the genome browser. These are the accepted fields in --input_data table, which determine which type of data will be drawn:
 
-    - sorted_bam (mandatory): the path to the sorted bam. This is useful to draw coverage. A file called <sorted_bam>.coverage_to_window.tab will be created as a cache for multiple runs.
+    - sorted_bam: the path to the sorted bam. This is useful to draw coverage.
     - sampleID (mandatory)
     - SV_CNV_vcf: a vcf containing SV and CNV info from perSVade.
     - SV_CNV_var_annotation. The annotation with VEP of SV_CNV_vcf
@@ -63,7 +63,10 @@ parser.add_argument("--sample_group_labels", dest="sample_group_labels", default
 
 parser.add_argument("-thr", "--threads", dest="threads", default=16, type=int, help="Number of threads, Default: 16")
 parser.add_argument("--replace", dest="replace", action="store_true", help="Replace existing files")
-parser.add_argument("--skip_coverage", dest="skip_coverage", action="store_true", help="Skip the representation of coverage")
+parser.add_argument("--only_affected_genes", dest="only_affected_genes", action="store_true", help="add only the affected genes in the browser")
+parser.add_argument("--vcf_fields_onHover", dest="vcf_fields_onHover", default="all", type=str, help="A comma-sepparated string of the interesting fields of the vcf to show. If you want fields from the 'INFO', set them as 'INFO_<field>'.")
+
+
 
 opt = parser.parse_args()
 
@@ -96,18 +99,20 @@ fun.soft_link_files(opt.reference_genome, new_reference_genome)
 opt.reference_genome = new_reference_genome
 
 # get the sorted bams
-sample_ID_to_newSortedBam = {}
-for I, r in df.iterrows():
-    new_sorted_bam = "%s/%s_aligned_reads_sorted.bam"%(data_dir, r["sampleID"])
-    new_sorted_bai = "%s/%s_aligned_reads_sorted.bam.bai"%(data_dir, r["sampleID"])
+if "sorted_bam" in df.keys():
 
-    fun.soft_link_files(r["sorted_bam"], new_sorted_bam)
-    fun.soft_link_files("%s.bai"%r["sorted_bam"], new_sorted_bai)
+    sample_ID_to_newSortedBam = {}
+    for I, r in df.iterrows():
+        new_sorted_bam = "%s/%s_aligned_reads_sorted.bam"%(data_dir, r["sampleID"])
+        new_sorted_bai = "%s/%s_aligned_reads_sorted.bam.bai"%(data_dir, r["sampleID"])
 
-    # keep
-    sample_ID_to_newSortedBam[r["sampleID"]] = new_sorted_bam
+        fun.soft_link_files(r["sorted_bam"], new_sorted_bam)
+        fun.soft_link_files("%s.bai"%r["sorted_bam"], new_sorted_bai)
 
-df["sorted_bam"] = df.sampleID.apply(lambda x: sample_ID_to_newSortedBam[x])
+        # keep
+        sample_ID_to_newSortedBam[r["sampleID"]] = new_sorted_bam
+
+    df["sorted_bam"] = df.sampleID.apply(lambda x: sample_ID_to_newSortedBam[x])
 
 #################################################
 
@@ -115,7 +120,7 @@ df["sorted_bam"] = df.sampleID.apply(lambda x: sample_ID_to_newSortedBam[x])
 # add the bgcolor as a random palette if not there
 if "bgcolor" not in df.keys(): 
 
-    sample_to_color, palette_sample = gfun.get_value_to_color(set(df.sampleID), palette="tab10", type_color="hex")
+    sample_to_color, palette_sample = gfun.get_value_to_color(set(df.sampleID), palette="hls", type_color="hex")
     df["bgcolor"] = df.sampleID.apply(lambda x: sample_to_color[x])
 
 # get the bgcolor as a list
@@ -160,9 +165,31 @@ if len(missing_genes)>0: raise ValueError("%s are missing genes"%missing_genes)
 
 ######################################################
 
+######## if there is only one sample, add another as blank ########
+"""
+if len(df)==1:
+
+    data_dict = {k : df[k].iloc[0] for k in df.keys()}
+    data_dict["sampleID"] = "blank_to_skip"
+    data_dict["bgcolor"] = ["red"]*len(data_dict["bgcolor"])
+    df = df.append(pd.DataFrame({0:data_dict}).transpose())
+
+"""
+
+###################################################################
+
+
+# define the samples_colors_df
+sample_group_labels = opt.sample_group_labels.split(",")
+samples_colors_df = pd.DataFrame({sample_label : {sampleID : bgcolor[I] for sampleID, bgcolor in dict(df.set_index("sampleID")["bgcolor"]).items()} for I, sample_label in enumerate(sample_group_labels)})[sample_group_labels]
+
+# define the vcf_fields_onHover
+if opt.vcf_fields_onHover!="all": opt.vcf_fields_onHover = set(opt.vcf_fields_onHover.split(","))
+
+
 # get the browser
 filename = "%s/genome_variation_browser.html"%opt.outdir
-gfun.get_genome_variation_browser(df, target_regions, target_genes, df_gff, filename, data_dir, opt.reference_genome, threads=opt.threads, sample_group_labels=opt.sample_group_labels.split(","), skip_coverage=opt.skip_coverage)
+gfun.get_genome_variation_browser(df, samples_colors_df, target_regions, target_genes, df_gff, filename, data_dir, opt.reference_genome, threads=opt.threads, sample_group_labels=opt.sample_group_labels.split(","), only_affected_genes=opt.only_affected_genes, vcf_fields_onHover=opt.vcf_fields_onHover)
 print("genome variation browser was written into %s"%filename)
 
 
