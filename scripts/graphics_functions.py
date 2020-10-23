@@ -169,12 +169,10 @@ def get_integrated_vars_df(df, cache_dir, target_regions, target_genes):
 
     """Takes the df with the data and returns an integrated dataframe with small_vars, small_vars_annot, SV_CNV, SV_CNV_annot. It will discard any variants that don't overlap target_regions and are not related to target_genes"""
 
-    # skip the blanks
-    df = df[df.sampleID!="blank_to_skip"]
 
     ######## GET INTEGRATED DFS ########
 
-    # define a prefix for these samples
+    # define a prefix for these samples    
     file_prefix = "%s/%s"%(cache_dir, "-".join(df.sampleID))
 
     # define files
@@ -688,15 +686,15 @@ def get_list_clusters_from_dict(key_to_setVals):
 
     return list_clusters
 
-def get_clusters_overlapping_vars_allGenome(df_sample):
+def get_clusters_overlapping_vars_allGenome(df_sample, type_cluster="overlapping_any"):
 
     """This function takes a df_plot for one sample and returns the list of IDs that are clustered"""
 
     # keep
     df_sample = cp.deepcopy(df_sample)
 
-    # add a start and an end
-    df_sample[["start", "end"]] = df_sample.x.apply(get_start_and_end_df_sample_r)
+    # add a start and an end, if not there
+    if "start" not in df_sample.keys() and "end" not in df_sample.keys(): df_sample[["start", "end"]] = df_sample.x.apply(get_start_and_end_df_sample_r)
 
     # map each ID to the overlapping IDs
     ID_to_overlappingIDs = {}
@@ -705,13 +703,27 @@ def get_clusters_overlapping_vars_allGenome(df_sample):
     for qStart, qEnd, qID in df_sample[["start", "end", "ID"]].values:
 
         # find overlapping SVs
-        overlappingIDs = set(df_sample[((df_sample.start>=qStart) & (df_sample.end<=qEnd)) | 
-                                       ((df_sample.start<=qStart) & (df_sample.end>=qStart)) |  
-                                       ((df_sample.start<=qEnd) & (df_sample.end>qEnd))]["ID"])
+        if type_cluster=="overlapping_any":
+
+            # get IDs that are somehow overlapping
+            overlappingIDs = set(df_sample[((df_sample.start>=qStart) & (df_sample.end<=qEnd)) | 
+                                           ((df_sample.start<=qStart) & (df_sample.end>=qStart)) |  
+                                           ((df_sample.start<=qEnd) & (df_sample.end>qEnd))]["ID"])
+
+
+        elif type_cluster=="overlapping_but_not_under_query":
+
+
+            # gets the IDs that are overlapping, but not included under query
+            idx_ov = (((df_sample.start<=qStart) & (df_sample.end>=qStart) & (df_sample.end<=qEnd)) |
+                      ((df_sample.start<=qEnd) & (df_sample.end>=qEnd) & (df_sample.start>=qStart)))
+
+
+            overlappingIDs = set(df_sample[idx_ov]["ID"])
+
 
         # if there are overlaps add them to the cluster_list with itself
         ID_to_overlappingIDs[qID] =  overlappingIDs
-
 
     # initialize clusters list
     list_clusters = get_list_clusters_from_dict(ID_to_overlappingIDs)
@@ -832,12 +844,283 @@ def add_SV_CNV_to_fig(fig, SV_CNV, chrom_to_Xoffset, vcf_fields_onHover, sampleI
 
         fig.append_trace(line, fig_location[0], fig_location[1])
 
-def get_genome_variation_browser(df_data, samples_colors_df, target_regions, target_genes, gff_df, filename, cache_dir, reference_genome, threads=4, sample_group_labels=["default_group"], title="SVbrowser", chrName_to_shortName={}, geneID_to_name={}, fraction_y_domain_by_gene_browser=0.5, min_cov=0, max_cov=2, center_cov=1, only_affected_genes=False, interesting_features="all", vcf_fields_onHover="all"):
+
+def get_df_windows_draw_coverage(SV_CNV, chrom_to_Xoffset, reference_genome, threads):
+
+    """This function selects a set of regions for which we should draw coverage.  Those arrownd breakpoints, covering the START-END variants or whole chromosomes.
+
+    This function already merges the clustered regions and splits each of them into slices of 20. The final df can be measured for coverage."""
+
+    ############# GET WINDOWS COVERAGE #############
+
+    # define objs
+    SV_CNV = cp.deepcopy(SV_CNV)
+    windows_fields = ["chromosome", "start", "end"]
+
+    # get chrom len
+    chrom_to_len = fun.get_chr_to_len(reference_genome)
+
+    # initialize with the chromosomal regions (0-based)
+    df_windows_chroms = pd.DataFrame({chrom : {"chromosome":chrom, "start":0, "end":chrom_to_len[chrom]} for chrom in chrom_to_Xoffset}).transpose()
+
+    # get a df winows of the SVs (0-based)
+    SV_CNV_END = SV_CNV[~pd.isna(SV_CNV.INFO_END)]
+    SV_CNV_noEND = SV_CNV[pd.isna(SV_CNV.INFO_END)]
+    SV_CNV_noEND["INFO_END"] = SV_CNV_noEND.POS + 1
+    SV_CNV_all = SV_CNV_END.append(SV_CNV_noEND)
+
+    df_windows_SVs = SV_CNV_all[["#CHROM", "POS", "INFO_END"]].rename(columns={"#CHROM":"chromosome", "POS":"start", "INFO_END":"end"})
+    df_windows_SVs["start"] -= 1
+
+    # set to ints
+    for f in ["start", "end"]: df_windows_SVs[f] = df_windows_SVs[f].apply(int)
+
+    # map each chromosome to the positions that are breakpoints
+    chrom_to_bpPositions = dict(df_windows_SVs.groupby("chromosome").apply(lambda df_c: set(df_c.start).union(df_c.end)))
+
+    # map each chromosome to the max pos
+    chrom_to_maxPos = {chrom : length-1 for chrom, length in chrom_to_len.items()}
+
+    # init dict
+    final_df_windows_SVs = pd.DataFrame()
+
+    # get a df_windows of the df_windows_SVs +- 5' and 3' regions
+    for region in ["5", "3"]: 
+
+        # get a df with the regions
+        df_region = df_windows_SVs.apply(lambda r: fun.get_target_region_row(r, region, chrom_to_bpPositions[r["chromosome"]], chrom_to_maxPos[r["chromosome"]], max_relative_len_neighbors=1), axis=1)
+
+        final_df_windows_SVs = final_df_windows_SVs.append(df_region[windows_fields])
+
+
+    # add the target
+    final_df_windows_SVs = final_df_windows_SVs.append(df_windows_SVs[windows_fields])
+    if len(final_df_windows_SVs)!=(len(df_windows_SVs)*3): raise ValueError("something went wrong with the neighbors calculus ")
+
+    # keep all
+    df_windows = df_windows_chroms[windows_fields].append(final_df_windows_SVs[windows_fields]).drop_duplicates()
+    df_windows.index = list(range(0, len(df_windows)))
+    df_windows["ID"] = df_windows.index
+
+
+    #######################################################
+
+    ######## MERGE REDUNDANT WINDOWS ########
+
+    # skip this
+    df_windows_NR = df_windows
+
+    """
+
+    # init
+    df_windows_NR = pd.DataFrame()
+
+    # go through each chromosome adding windows
+    for chrom in chrom_to_Xoffset:
+
+        # get df 
+        df_c = df_windows[df_windows.chromosome==chrom]
+
+        # get the clusters
+        list_clusters = get_clusters_overlapping_vars_allGenome(df_c, type_cluster="overlapping_but_not_under_query")
+
+        # get the new window_c, with the chromosome metrged
+        new_df_c = pd.DataFrame({Ic : {"chromosome":chrom, "start":min(df_c.loc[cluster, "start"]), "end":max(df_c.loc[cluster, "end"])} for Ic, cluster in enumerate(list_clusters)}).transpose()
+
+        # keep
+        df_windows_NR = df_windows_NR.append(new_df_c[windows_fields])
+
+
+    df_windows_NR.index = list(range(0, len(df_windows_NR)))
+    df_windows_NR["ID"] = df_windows_NR.index
+
+    """
+
+    #########################################
+
+    # get the subwindows
+    df_windows_final = fun.get_df_subwindows_from_df_windows(df_windows_NR, n_subwindows=20)
+    df_windows_final = df_windows_final.drop_duplicates(subset=["chromosome", "start", "end"])
+
+    return df_windows_final
+
+def get_relative_coverage_to_bg(r):
+
+    """Takes a row of the df_s and returns the coverage relative to the bg"""
+
+    if r["relative_coverage"]==0.0 and r["relative_coverage_bg"]==0.0: return 1.0
+    else: return r["relative_coverage"] / r["relative_coverage_bg"]
+
+def get_df_coverage_with_coverage_relative_to_bg(df_coverage, sampleID_to_backgroundSamples):
+
+    """Takes a df coverage and returns it with an added col: relative_coverage_to_bg"""
+
+  
+    # define the samples
+    all_samples = set(df_coverage.sampleID)
+
+    # get as index
+    df_coverage["window_ID"] = df_coverage.chromosome + "_" + df_coverage.start.apply(str) + "_" + df_coverage.end.apply(str)
+    df_coverage = df_coverage.set_index("window_ID")
+
+    # init the df_coverage final
+    df_coverage_final = pd.DataFrame()
+
+    # add the coverage relative to the 'compare samples'
+    for sampleID in all_samples:
+
+        # get the df
+        df_s = df_coverage[df_coverage.sampleID==sampleID]
+
+        # check that the idx is unique
+        if len(df_s)!=len(set(df_s.index)): raise ValueError("idx should be unique")
+
+        # get the other samples
+        if sampleID in sampleID_to_backgroundSamples: bg_samples = sampleID_to_backgroundSamples[sampleID]
+        else: bg_samples = all_samples.difference({sampleID})
+
+        # if empty, set them all
+        if len(all_samples)==1: bg_samples = all_samples
+
+        # get a df with the relative coverage of each of the regions
+        df_bg = df_s[["chromosome"]]
+        for bg_sample in bg_samples: df_bg[bg_sample] = df_coverage[df_coverage.sampleID==bg_sample].loc[df_bg.index]["relative_coverage"]
+        df_bg.pop("chromosome")
+
+        # check
+        if list(df_bg.index)!=list(df_s.index): raise ValueError("error in df_s preparation")
+
+        # keep the coverage relative
+        df_s["relative_coverage_bg"] = df_bg.apply(np.median, axis=1)
+        df_s["relative_coverage_to_bg"] = df_s.apply(get_relative_coverage_to_bg, axis=1)
+
+        # check 
+        if any(pd.isna(df_s.relative_coverage_to_bg)): raise ValueError("there are nans in coverage")
+
+        # keep
+        df_coverage_final = df_coverage_final.append(df_s)
+
+    return df_coverage_final
+
+
+def get_coverage_y_plot_for_df_coverage_r(r, rel_cov_f, sampleID_to_ylevel, coverage_offset, min_cov, max_cov):
+
+    """This function gets the actual position in the plot of a coverage window r"""
+
+    # get the relative coverage
+    rel_cov = r[rel_cov_f]
+
+    # get the min_y and max_y
+    min_y = sampleID_to_ylevel[r["sampleID"]] + coverage_offset[0]
+    max_y = sampleID_to_ylevel[r["sampleID"]] + coverage_offset[1]
+
+    # get the ypos in the relative space
+    relative_value = min([abs(rel_cov-min_cov)/abs(max_cov-min_cov), 1])
+    ypos = min_y + relative_value*(abs(max_y-min_y))
+
+    return ypos
+
+def add_coverage_to_fig(df_data, fig, SV_CNV, chrom_to_Xoffset, sampleID_to_ylevel, coverage_offset, threads, replace, reference_genome, cache_dir, mitochondrial_chromosome, sampleID_to_backgroundSamples, min_cov, max_cov, center_cov, fig_location=(1,2)):
+
+    """This function adds a coverage trace for each sampleID into fig."""
+
+    ######### GET COVERAGE FOR EACH WINDOW IN EACH SAMPLE #########
+    
+    # define the file
+    coverage_all_file = "%s/coverage_df_%s.tab"%(cache_dir, "-".join(df_data.sampleID))
+
+    if fun.file_is_empty(coverage_all_file) or replace is True:
+
+        fun.print_if_verbose("getting coverage calculated")
+
+        # define the regions for which to draw coverage (these are the non-redundant, fragmented regions)
+        df_windows = get_df_windows_draw_coverage(SV_CNV, chrom_to_Xoffset, reference_genome, threads) 
+
+        # write them as a bed
+        windows_bed = "%s/subwindows.bed"%cache_dir
+        df_windows[["chromosome", "start", "end"]].to_csv(windows_bed, sep="\t", header=True, index=False)
+
+        # check that all the start is before end
+        if any(df_windows.end<=df_windows.start): 
+            print(df_windows)
+            print(df_windows[df_windows.end<=df_windows.start])
+            raise ValueError("there should not be any start, end")
+
+        # init coverage
+        df_coverage = pd.DataFrame()
+
+        # go through each sample
+        for sampleID, r_data in df_data.iterrows():
+
+            # get the coverage-per-window
+            df_s = fun.get_coverage_per_window_df_without_repeating(reference_genome, r_data["sorted_bam"], windows_bed, replace=replace, run_in_parallel=True, delete_bams=True, threads=threads)
+
+
+            # add the sample ID
+            df_s["sampleID"] = sampleID
+
+            # add
+            df_coverage = df_coverage.append(df_s)
+
+
+        # add the type of data
+        chr_to_len = fun.get_chr_to_len(reference_genome)
+        df_coverage["chromosome_length"] = df_coverage.chromosome.apply(lambda c: chr_to_len[c])
+        df_coverage["fraction_chrom_covered"] = df_coverage.length / df_coverage.chromosome_length
+        fractionCovBool_to_typeRegion = {True:"chromosome_fraction", False:"region"}
+        df_coverage["type_region"] = (df_coverage.fraction_chrom_covered>=0.04).apply(lambda f: fractionCovBool_to_typeRegion[f])
+
+        # write
+        fun.save_df_as_tab(df_coverage, coverage_all_file)
+
+    # load 
+    df_coverage = fun.get_tab_as_df_or_empty_df(coverage_all_file)
+
+    ####################################################################
+
+    # add the relative coverage
+    median_coverage = fun.get_median_coverage(df_coverage[df_coverage.type_region=="chromosome_fraction"], mitochondrial_chromosome)
+    df_coverage["relative_coverage"] = df_coverage.mediancov_1 / median_coverage
+
+    # get the coverage relative to the background samples
+    df_coverage = get_df_coverage_with_coverage_relative_to_bg(df_coverage, sampleID_to_backgroundSamples)
+
+
+    ######### GET THE FIGURE DATA #########
+
+    # add the medium position, where the points will be drawn
+    df_coverage["medium_pos"] = (df_coverage.start + (df_coverage.length/2)).apply(int)
+
+    # add the plot x position, depending on chrom_to_Xoffset
+    df_coverage["plot_xpos"] = df_coverage.chromosome.apply(lambda x: chrom_to_Xoffset[x]) + df_coverage.medium_pos 
+
+    # go through each type of data to plot
+    for field, color in [("relative_coverage", "blue"), ("relative_coverage_to_bg", "red")]: 
+
+        # add the real ypos
+        df_coverage["plot_ypos"] = df_coverage.apply(lambda r: get_coverage_y_plot_for_df_coverage_r(r, field, sampleID_to_ylevel, coverage_offset, min_cov, max_cov), axis=1)
+
+
+        # define vals
+        x = df_coverage.plot_xpos
+        y = df_coverage.plot_ypos
+        hover = df_coverage[field].apply(str)
+
+        # add line of the feat
+        line = go.Scatter(x=x, y=y, showlegend=True, mode="markers", opacity=1.0, hoveron="points+fills", name=field, text=hover, marker=dict(symbol="circle", color=color)) 
+
+        fig.append_trace(line, fig_location[0], fig_location[1])
+
+
+    ####################################
+
+def get_genome_variation_browser(df_data, samples_colors_df, target_regions, target_genes, gff_df, filename, cache_dir, reference_genome, threads=4, sample_group_labels=["default_group"], title="SVbrowser", chrName_to_shortName={}, geneID_to_name={}, fraction_y_domain_by_gene_browser=0.5, min_cov=0, max_cov=2, center_cov=1, only_affected_genes=False, interesting_features="all", vcf_fields_onHover="all", replace=False, mitochondrial_chromosome="mito_C_glabrata_CBS138", sampleID_to_backgroundSamples={}):
 
     """This function will draw a genome variation browser for each sample in df_data (each row). Some clarifications:
 
     -interesting_features can be a set of the interesting features in the gff, or 'all'.
-    -interesting_vcf_fields are the fields from the vcf to be included. It can be a set or all. If you want fields from INFO, they should be provided as 'INFO_<field>'"""
+    -interesting_vcf_fields are the fields from the vcf to be included. It can be a set or all. If you want fields from INFO, they should be provided as 'INFO_<field>'.
+    -sampleID_to_backgroundSamples is a dict that maps each sample ID to the samples the coverage should be compared against. For those samples in which it is empty, all the other samples will be considered."""
 
     # get index integrated
     df_data = df_data.set_index("sampleID", drop=False)
@@ -911,7 +1194,6 @@ def get_genome_variation_browser(df_data, samples_colors_df, target_regions, tar
     background_df = pd.DataFrame({x : {s : samples_colors_df.loc[{s}, lastCol].iloc[0] for s in samples_colors_df.index} for x in [0, end_lastChr] }).loc[samples_colors_df.index]
     fig.append_trace(get_Labels_heatmapObject_rows(background_df, opacity=0.15, numeric_ticks=True), 1, 2)
 
-
     # draw a line sepparating each data visualization cathegory
     all_y_grid = set.union(*[set(x) for x in [small_vars_offset, SV_offset, coverage_offset] if x is not None])
     for sampleID, ylevel in sampleID_to_ylevel.items():
@@ -924,17 +1206,16 @@ def get_genome_variation_browser(df_data, samples_colors_df, target_regions, tar
 
             fig.append_trace(line, 1, 2)
 
-
-
     # add the small vars
     if plot_small_vars: thishastobedeveloped
 
+    # add the coverage
+    if plot_coverage: add_coverage_to_fig(df_data, fig, SV_CNV, chrom_to_Xoffset, sampleID_to_ylevel, coverage_offset, threads, replace, reference_genome, cache_dir, mitochondrial_chromosome, sampleID_to_backgroundSamples, min_cov, max_cov, center_cov, fig_location=(1,2))
+  
     # add the structural vars
     if plot_SV: add_SV_CNV_to_fig(fig, SV_CNV, chrom_to_Xoffset, vcf_fields_onHover, sampleID_to_ylevel, SV_offset, fig_location=(1,2))
 
-    # add the coverage
-    #if plot_coverage: thishastobedeveloped
-  
+
 
 
     #####################################

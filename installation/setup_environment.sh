@@ -23,6 +23,8 @@ echo 'export PATH=$PATH:<path_to_install_Ninja>/NINJA-0.95-cluster_only/NINJA'
 echo '---'
 echo 'You should check that a <path_to_install_Ninja>/NINJA-0.95-cluster_only/NINJA/Ninja binary was created. This is enough for running perSVade'
 
+# you may have to check that MAFFT is unset
+
 # copy the Ninja binary under the conda environment 
 ninja_binary=$(which Ninja)
 new_ninja_binary=$env_path/bin/Ninja
