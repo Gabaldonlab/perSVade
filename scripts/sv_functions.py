@@ -448,18 +448,66 @@ def run_cmd(cmd):
     out_stat = os.system(cmd_to_run) 
     if out_stat!=0: raise ValueError("\n%s\n did not finish correctly. Out status: %i"%(cmd, out_stat))
 
+
+def get_weigthed_median(df, field, weight_field, type_algorithm="fast"):
+
+    """This functon takes a df with a field. It returns the median weighted by weight_field (which should be a number, not a fraction)"""
+
+    # set to int
+    df[weight_field] = df[weight_field].apply(int)
+
+    # check
+    if max(df[weight_field])==1 or min(df[weight_field])<0: raise ValueError("this function can't be applied here")
+
+    # unefficient calc
+    if type_algorithm=="long":
+
+        # get an array by weight
+        weighted_array = make_flat_listOflists(df.apply(lambda r: [r[field]]*r[weight_field], axis=1))
+        
+        # get the median
+        median = np.median(weighted_array)
+       
+    elif type_algorithm=="fast":
+
+        # get the algorithm from SO
+        df_sorted = df.sort_values(field)
+        cumsum = df_sorted[weight_field].cumsum()
+        cutoff = df_sorted[weight_field].sum() / 2.
+        median = df_sorted[cumsum >= cutoff][field].iloc[0]
+
+    else: raise ValueError("%s is not valid"%type_algorithm)
+
+    return median
+
+
 def get_median_coverage(coverage_df, mitochondrial_chromosome):
 
-    """This function takes a coverage df and calculates the median for those non-0 coverage windows"""
+    """This function takes a coverage df and calculates the median for those non-0 coverage windows. It will return the median coverage weighted by length """
+
+    # keep
+    coverage_df = cp.deepcopy(coverage_df)
 
     # define the chrom field
     if "#chrom" in coverage_df.keys(): chrom_f = "#chrom"
     elif "chromosome" in coverage_df.keys(): chrom_f = "chromosome"
 
-    # get the nuclear and not 0 idx
-    idx = (~coverage_df[chrom_f].isin(mitochondrial_chromosome.split(","))) & (coverage_df["mediancov_1"]>0)
+    # define the set
+    mitochondrial_chromosomes = mitochondrial_chromosome.split(",")
 
-    return np.median(coverage_df[idx].mediancov_1);
+    # get the nuclear and not 0 idx
+    if set(coverage_df[chrom_f])==mitochondrial_chromosomes: idx = (coverage_df["mediancov_1"]>0)
+    else: idx = (~coverage_df[chrom_f].isin(mitochondrial_chromosomes)) & (coverage_df["mediancov_1"]>0)
+
+    df = coverage_df[idx]
+
+    # get the len
+    df["length"] = df.end - df.start
+
+    # get the median wwighted by len
+    median = get_weigthed_median(df, "mediancov_1", "length", type_algorithm="fast")
+
+    return median
 
 def run_bcftools_latest(kwargs):
 
@@ -4641,6 +4689,9 @@ def get_last_reads_fastqgz_file(file, nreads=100):
 
             print_if_verbose("These are the wrong reads:", last_reads)
             raise ValueError("There are some incorrect reads in %s"%file)
+
+    # change the reads 
+    if last_reads[0].endswith("/1") or last_reads[0].endswith("/2"): last_reads = ["/".join(r.split("/")[0:-1]) for r in last_reads]
 
     return last_reads
 
@@ -11867,7 +11918,8 @@ def run_perSVade_severalSamples(paths_df, cwd, common_args, time_greasy="48:00:0
         outdir = "%s/%s_VarCallresults"%(VarCallOutdirs, sampleID); make_folder(outdir)
 
         # define the files that shoud be not empty in order not to run this code
-        success_files = ["%s/smallVars_CNV_output/variant_annotation_ploidy%i.tab"%(outdir, ploidy)]
+        #success_files = ["%s/smallVars_CNV_output/variant_annotation_ploidy%i.tab"%(outdir, ploidy)]
+        success_files = ["%s/perSVade_finished_file.txt"%(outdir)]
                    
         # define the cmd          
         cmd = "%s -f1 %s -f2 %s -o %s --ploidy %i %s"%(perSVade_py, reads1, reads2, outdir, ploidy, common_args)
@@ -11897,6 +11949,8 @@ def run_perSVade_severalSamples(paths_df, cwd, common_args, time_greasy="48:00:0
         return False
 
     print_if_verbose("Integrating all variants and CNV into one......")
+
+    checkthathteintegrationmakessense
 
     ###### INTEGRATE VARIANT CALLING ######
 
@@ -12059,7 +12113,7 @@ def run_repeat_modeller(reference_genome, threads=4, replace=False):
         print_if_verbose("Running repeat modeller in %s on %i jobs"%(outdir, njobs))
 
         #raise ValueError("This has to be fixed!!!!")
-        cmd = "export PERL5LIB=%s && cd %s && %s -database %s -pa %i -LTRStruct -debug"%(repeatmoder_dir, outdir, repeat_modeller, name_database, njobs)
+        cmd = "export PERL5LIB=%s && unset MAFFT_BINARIES && cd %s && %s -database %s -pa %i -LTRStruct -debug"%(repeatmoder_dir, outdir, repeat_modeller, name_database, njobs)
 
         # add the location were eveything is installed and run
         repeatmodeler_std = "%s/repeatmodeler.std"%outdir
@@ -12729,6 +12783,27 @@ def get_summary_statistics_series_df_subwindows(df):
 
     return pd.Series(data_dict)
 
+
+def get_df_subwindows_from_df_windows(df_windows, n_subwindows=20):
+
+    """Takes a df_windows and returns an equivalent one with subwindows of n_subwindows"""
+
+    # get df
+    rows_iterator = [r for I,r in df_windows.iterrows()]
+    df_subwindows = pd.concat(map(lambda r: get_df_subwindows_window_r(r, n_subwindows=n_subwindows), rows_iterator))
+
+    # get only those where the start!=end
+    df_subwindows = df_subwindows[df_subwindows.start!=df_subwindows.end]
+
+    # check
+    if any(df_subwindows.end<=df_subwindows.start): 
+        print(df_subwindows)
+        print(df_subwindows[df_subwindows.end<=df_subwindows.start])
+        raise ValueError("df_subwindows: start should be < end")
+
+    return df_subwindows
+
+
 def get_coverage_df_windows_with_within_windows_statistics(df_windows, outdir, sorted_bam, reference_genome, median_coverage, replace=False, threads=4):
 
     """This function takes a df with windows and returns a similar df with the coverage of n_subwindows calculated """
@@ -12738,8 +12813,7 @@ def get_coverage_df_windows_with_within_windows_statistics(df_windows, outdir, s
     if len(df_windows)!=len(initial_IDs): raise ValueError("The ID should be unique")
 
     # build a df with windows, where each window comes from dividing 
-    rows_iterator = [r for I,r in df_windows.iterrows()]
-    df_subwindows = pd.concat(map(get_df_subwindows_window_r, rows_iterator))
+    df_subwindows = get_df_subwindows_from_df_windows(df_windows, n_subwindows=20)
     initial_len_subwindows = len(df_subwindows)
 
     # get the  coverage of the subwindows
