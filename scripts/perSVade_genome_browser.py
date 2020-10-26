@@ -155,9 +155,9 @@ if len(missing_genes)>0: raise ValueError("%s are missing genes"%missing_genes)
 sample_group_labels = opt.sample_group_labels.split(",")
 samples_colors_df = pd.DataFrame({sample_label : {sampleID : bgcolor[I] for sampleID, bgcolor in dict(df.set_index("sampleID")["bgcolor"]).items()} for I, sample_label in enumerate(sample_group_labels)})[sample_group_labels]
 
-# define the vcf_fields_onHover
+# define the vcf_fields_onHover (by default it will only display certain fields)
 if opt.vcf_fields_onHover!="all": opt.vcf_fields_onHover = set(opt.vcf_fields_onHover.split(","))
-
+else: opt.vcf_fields_onHover = {"#CHROM", "POS", "INFO_BREAKEND_overlaps_repeats", "INFO_BREAKEND_real_AF", "INFO_BREAKENDIDs", "INFO_BREAKEND_coordinates", "INFO_BREAKEND_FILTER"}
 
 # get the browser
 filename = "%s/genome_variation_browser.html"%opt.outdir
@@ -168,7 +168,12 @@ print("genome variation browser was written into %s"%filename)
 
 
 
+"""
+these are the sv_cnv .vcf all INFO tags
 
+{'INFO_QUAL', 'INFO_len_inserted_sequence_min', 'INFO_any_overlaps_repeats', 'INFO_bpIDs', 'INFO_best_FILTER', '#CHROM', 'INFO_length_inexactHomology_mean', 'POS', 'INFO_END', 'INFO_length_event_mean', 'INFO_BREAKEND_overlaps_repeats', 'INFO_SVTYPE', 'INFO_length_microHomology_max', 'INFO_BREAKEND_allele_frequency_SmallEvent', 'INFO_FILTER', 'INFO_allele_frequency_SmallEvent_mean', 'INFO_RELCOVERAGE_NEIGHBOR', 'INFO_length_event_max', 'INFO_allele_frequency', 'INFO_allele_frequency_max', 'INFO_BREAKPOINTIDs', 'INFO_worse_FILTER', 'INFO_real_AF_min', 'INFO_length_inexactHomology_min', 'INFO_QUAL_min', 'INFO_real_AF_max', 'INFO_len_inserted_sequence_max', 'INFO_QUAL_mean', 'INFO_allele_frequency_mean', 'INFO_length_event_min', 'INFO_length_inexactHomology', 'INFO_BREAKEND_QUAL', 'INFO_length_microHomology_mean', 'INFO_RELCOVERAGE', 'INFO_has_poly16GC', 'INFO_BREAKEND_FILTER', 'INFO_REGION_SPEARMANP', 'INFO_length_microHomology', 'ALT', 'INFO_real_AF_mean', 'INFO_length_inexactHomology_max', 'INFO_BREAKEND_length_microHomology', 'INFO_all_FILTERs', 'INFO_allele_frequency_min', 'INFO_BREAKEND_length_inexactHomology', 'INFO_allele_frequency_SmallEvent_max', 'INFO_REGION_PEARSONP', 'ID', 'INFO_BREAKEND_has_poly16GC', 'INFO_REGION_ABS_PEARSONR', 'INFO_BREAKEND_coordinates', 'INFO_REGION_ABS_SPEARMANR', 'INFO_length_microHomology_min', 'INFO_BREAKEND_real_AF', 'INFO_overlaps_repeats', 'INFO_allele_frequency_SmallEvent', 'INFO_allele_frequency_SmallEvent_min', 'INFO_BREAKEND_len_inserted_sequence', 'INFO_BREAKEND_allele_frequency', 'INFO_BREAKEND_length_event', 'INFO_real_AF', 'INFO_len_inserted_sequence_mean', 'INFO_BREAKENDIDs', 'INFO_BPS_TYPE', 'INFO_variantID', 'INFO_BREAKPOINTID', 'INFO_QUAL_max'}
+
+"""
 
 
 

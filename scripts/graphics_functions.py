@@ -543,7 +543,7 @@ def get_plot_data_SV_CNV_r(r, vcf_fields_onHover, chrom_to_Xoffset):
         symbol = "circle"
         name = "coverageDUP_highConf"
 
-    elif IDsvtype=="coverageDUP" and r["INFO_BPS_TYPE"] in {"InferredBPs", "oneRealBP"}: 
+    elif IDsvtype=="coverageDUP" and r["INFO_BPS_TYPE"] in {"FilteredOutBPs", "oneRealBP"}: 
         x = [r["POS"], r["INFO_END"]]
         color = "cyan"
         symbol = "square"
@@ -557,7 +557,7 @@ def get_plot_data_SV_CNV_r(r, vcf_fields_onHover, chrom_to_Xoffset):
         name = "coverageDEL_highConf"
 
 
-    elif IDsvtype=="coverageDEL" and r["INFO_BPS_TYPE"] in {"InferredBPs", "oneRealBP"}: 
+    elif IDsvtype=="coverageDEL" and r["INFO_BPS_TYPE"] in {"FilteredOutBPs", "oneRealBP"}: 
         x = [r["POS"], r["INFO_END"]]
         color = "magenta"
         symbol = "square"
@@ -643,48 +643,6 @@ def get_start_and_end_df_sample_r(xlist):
 
 
 
-def get_list_clusters_from_dict(key_to_setVals):
-
-    """Takes a dictionary mapping strings to strings and returns a list of sets, each of them having uniquely clusters of connected data"""
-
-    # initialize a list_clusters
-    list_clusters = []
-
-    # initialize a list of mapped regions
-    list_partial_clusters = [cp.deepcopy({key}.union(setVals)) for key, setVals in key_to_setVals.items()]
-
-    # go through each element in dict
-    for all_items in list_partial_clusters:
-
-        # if there is any overlap with any of the clusters, add it there
-        cluster_found = False
-        for cluster in list_clusters:
-            if len(cluster.intersection(all_items))>0: 
-                cluster.update(all_items)
-                cluster_found = True
-                break
-
-        # else initialize with all elements of this cluster
-        if cluster_found is False: list_clusters.append(all_items)
-
-    # make sure that all clusters are nonoverlapping with each other
-    for I in range(len(list_clusters)):
-        for J in range(I+1, len(list_clusters)):
-
-            if I==J: raise ValueError("We don't want to compare the same I and J")
-
-            # define clusters
-            clusterI = list_clusters[I]
-            clusterJ = list_clusters[J]
-
-            if len(clusterI.intersection(clusterJ))!=0: 
-                pass
-                #print(I, clusterI, "\n", J, clusterJ)
-                #raise ValueError("There are some overlapping clusters")
-                #print("There are some overlapping clusters")
-
-
-    return list_clusters
 
 def get_clusters_overlapping_vars_allGenome(df_sample, type_cluster="overlapping_any"):
 
@@ -726,7 +684,7 @@ def get_clusters_overlapping_vars_allGenome(df_sample, type_cluster="overlapping
         ID_to_overlappingIDs[qID] =  overlappingIDs
 
     # initialize clusters list
-    list_clusters = get_list_clusters_from_dict(ID_to_overlappingIDs)
+    list_clusters = fun.get_list_clusters_from_dict(ID_to_overlappingIDs)
 
     # check
     all_SVs = set(df_sample.ID)
@@ -845,6 +803,60 @@ def add_SV_CNV_to_fig(fig, SV_CNV, chrom_to_Xoffset, vcf_fields_onHover, sampleI
         fig.append_trace(line, fig_location[0], fig_location[1])
 
 
+def get_closest_3region_bendPOS(r, SV_CNV):
+
+    """Takes a row of a SV_CNV df and returns the location of the nearest BP 3'"""
+
+
+    # get a df with the options
+    df_options = SV_CNV[(SV_CNV["#CHROM"]==r["#CHROM"]) & (SV_CNV["POS"]>r["POS"])]
+
+    if len(df_options)==0: return r["POS"] + 1
+    else: return fun.find_nearest(df_options.POS, r["POS"])
+
+def get_closest_5region_bendPOS(r, SV_CNV):
+
+    """Takes a row of a SV_CNV df and returns the location of the nearest BP 5'"""
+
+
+    # get a df with the options
+    df_options = SV_CNV[(SV_CNV["#CHROM"]==r["#CHROM"]) & (SV_CNV["POS"]<r["POS"])]
+
+    if len(df_options)==0: return r["POS"]
+    else: return fun.find_nearest(df_options.POS, r["POS"])
+
+def get_list_clusters_overlapping_df_windows(df_windows):
+
+    """Takes a df_windows with chromosome, start, and end, where the ID is the index. It returns a list of sets, each set containing IDs of CNVs that overlap by >=80% and are from the same type """
+
+    # init dict
+    ID_to_overlappingIDs = {}
+
+    # define the fields for comparison
+    equal_fields = ["chromosome"]
+    approximate_fields = ["start", "end"]
+    chromField_to_posFields = {"chromosome":{"start": "start", "end": "end"}}
+
+    # go through each variant
+    for ID, r in df_windows.iterrows(): 
+
+        # define the overlapping df
+        df_overlapping = df_windows[(df_windows.apply(lambda r_cnv: fun.get_is_matching_predicted_and_known_rows(r, r_cnv, equal_fields, approximate_fields, chromField_to_posFields, tol_bp=1000000000000, pct_overlap=0.8), axis=1))]
+
+        # keep IDs
+        ID_to_overlappingIDs[ID] = set(df_overlapping.index)
+
+    # initialize clusters list
+    list_clusters = fun.get_list_clusters_from_dict(ID_to_overlappingIDs)
+
+    # check
+    all_IDs = set(df_windows.index)
+    all_IDs_in_cluster = set.union(*list_clusters)
+    if all_IDs!=all_IDs_in_cluster: raise ValueError("all IDs should be in clusters")
+  
+    return list_clusters
+
+
 def get_df_windows_draw_coverage(SV_CNV, chrom_to_Xoffset, reference_genome, threads):
 
     """This function selects a set of regions for which we should draw coverage.  Those arrownd breakpoints, covering the START-END variants or whole chromosomes.
@@ -866,7 +878,8 @@ def get_df_windows_draw_coverage(SV_CNV, chrom_to_Xoffset, reference_genome, thr
     # get a df winows of the SVs (0-based)
     SV_CNV_END = SV_CNV[~pd.isna(SV_CNV.INFO_END)]
     SV_CNV_noEND = SV_CNV[pd.isna(SV_CNV.INFO_END)]
-    SV_CNV_noEND["INFO_END"] = SV_CNV_noEND.POS + 1
+    SV_CNV_noEND["INFO_END"] = SV_CNV_noEND.apply(lambda r: get_closest_3region_bendPOS(r, SV_CNV), axis=1)
+    SV_CNV_noEND["POS"] = SV_CNV_noEND.apply(lambda r: get_closest_5region_bendPOS(r, SV_CNV), axis=1)
     SV_CNV_all = SV_CNV_END.append(SV_CNV_noEND)
 
     df_windows_SVs = SV_CNV_all[["#CHROM", "POS", "INFO_END"]].rename(columns={"#CHROM":"chromosome", "POS":"start", "INFO_END":"end"})
@@ -908,9 +921,7 @@ def get_df_windows_draw_coverage(SV_CNV, chrom_to_Xoffset, reference_genome, thr
     ######## MERGE REDUNDANT WINDOWS ########
 
     # skip this
-    df_windows_NR = df_windows
-
-    """
+    #df_windows_NR = df_windows
 
     # init
     df_windows_NR = pd.DataFrame()
@@ -922,7 +933,7 @@ def get_df_windows_draw_coverage(SV_CNV, chrom_to_Xoffset, reference_genome, thr
         df_c = df_windows[df_windows.chromosome==chrom]
 
         # get the clusters
-        list_clusters = get_clusters_overlapping_vars_allGenome(df_c, type_cluster="overlapping_but_not_under_query")
+        list_clusters = get_list_clusters_overlapping_df_windows(df_c)
 
         # get the new window_c, with the chromosome metrged
         new_df_c = pd.DataFrame({Ic : {"chromosome":chrom, "start":min(df_c.loc[cluster, "start"]), "end":max(df_c.loc[cluster, "end"])} for Ic, cluster in enumerate(list_clusters)}).transpose()
@@ -934,12 +945,10 @@ def get_df_windows_draw_coverage(SV_CNV, chrom_to_Xoffset, reference_genome, thr
     df_windows_NR.index = list(range(0, len(df_windows_NR)))
     df_windows_NR["ID"] = df_windows_NR.index
 
-    """
-
     #########################################
 
     # get the subwindows
-    df_windows_final = fun.get_df_subwindows_from_df_windows(df_windows_NR, n_subwindows=20)
+    df_windows_final = fun.get_df_subwindows_from_df_windows(df_windows_NR, n_subwindows=10)
     df_windows_final = df_windows_final.drop_duplicates(subset=["chromosome", "start", "end"])
 
     return df_windows_final
@@ -1100,14 +1109,27 @@ def add_coverage_to_fig(df_data, fig, SV_CNV, chrom_to_Xoffset, sampleID_to_ylev
         # add the real ypos
         df_coverage["plot_ypos"] = df_coverage.apply(lambda r: get_coverage_y_plot_for_df_coverage_r(r, field, sampleID_to_ylevel, coverage_offset, min_cov, max_cov), axis=1)
 
+        # init data
+        all_x = []
+        all_y = []
+        all_hovers = []
 
-        # define vals
-        x = df_coverage.plot_xpos
-        y = df_coverage.plot_ypos
-        hover = df_coverage[field].apply(str)
+        # go through each sample and chromosome
+        for sampleID in set(df_coverage.sampleID):
+            for chrom in set(df_coverage.chromosome):
+
+                # get data
+                df_region = df_coverage[(df_coverage.sampleID==sampleID) & (df_coverage.chromosome==chrom)].sort_values(by=["plot_xpos"])
+
+                # add to lists with nones
+                all_x += list(df_region.plot_xpos) + [None]
+                all_y += list(df_region.plot_ypos) + [None]
+                all_hovers += list(df_region[field].apply(lambda x: "%.2f"%x)) + [None]
 
         # add line of the feat
-        line = go.Scatter(x=x, y=y, showlegend=True, mode="markers", opacity=1.0, hoveron="points+fills", name=field, text=hover, marker=dict(symbol="circle", color=color)) 
+        #line = go.Scatter(x=x, y=y, showlegend=True, mode="markers", opacity=1.0, hoveron="points+fills", name=field, text=hover, marker=dict(symbol="circle", color=color, size=4)) 
+
+        line = go.Scatter(x=all_x, y=all_y, showlegend=True, mode="lines+markers", opacity=1.0, hoveron="points+fills", name=field, text=all_hovers, line=dict(color=color, width=1), marker=dict(symbol="circle", color=color, size=3)) 
 
         fig.append_trace(line, fig_location[0], fig_location[1])
 
@@ -1119,7 +1141,7 @@ def get_genome_variation_browser(df_data, samples_colors_df, target_regions, tar
     """This function will draw a genome variation browser for each sample in df_data (each row). Some clarifications:
 
     -interesting_features can be a set of the interesting features in the gff, or 'all'.
-    -interesting_vcf_fields are the fields from the vcf to be included. It can be a set or all. If you want fields from INFO, they should be provided as 'INFO_<field>'.
+    -vcf_fields_onHover are the fields from the vcf to be included. It can be a set or all. If you want fields from INFO, they should be provided as 'INFO_<field>'.
     -sampleID_to_backgroundSamples is a dict that maps each sample ID to the samples the coverage should be compared against. For those samples in which it is empty, all the other samples will be considered."""
 
     # get index integrated

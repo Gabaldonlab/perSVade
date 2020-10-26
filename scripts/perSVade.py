@@ -52,6 +52,10 @@ parser.add_argument("-o", "--outdir", dest="outdir", action="store", required=Tr
 parser.add_argument("--replace", dest="replace", action="store_true", help="Replace existing files")
 parser.add_argument("-p", "--ploidy", dest="ploidy", default=1, type=int, help="Ploidy, can be 1 or 2")
 
+
+# replace CNV_calling
+parser.add_argument("--replace_SV_CNVcalling", dest="replace_SV_CNVcalling", action="store_true", help="Replace everything related to the SV and CNV calling.")
+
 # different modules to be executed
 parser.add_argument("--testSVgen_from_DefaulReads", dest="testSVgen_from_DefaulReads", default=False, action="store_true", help="This indicates whether to generate a report of how the generation of SV works with the default parameters on random simulations")
 
@@ -94,8 +98,8 @@ parser.add_argument("--testAccuracy", dest="testAccuracy", action="store_true", 
 
 # simulation parameter args
 parser.add_argument("--nvars", dest="nvars", default=50, type=int, help="Number of variants to simulate for each SVtype.")
-parser.add_argument("--nsimulations", dest="nsimulations", default=2, type=int, help="The number of 'replicate' simulations that will be produced.")
-parser.add_argument("--simulation_ploidies", dest="simulation_ploidies", type=str, default="haploid,diploid_hetero", help='A comma-sepparated string of the ploidies to simulate for parameter optimisation. It can have any of "haploid", "diploid_homo", "diploid_hetero", "ref:2_var:1", "ref:3_var:1", "ref:4_var:1", "ref:5_var:1", "ref:9_var:1", "ref:19_var:1", "ref:99_var:1" ')
+parser.add_argument("--nsimulations", dest="nsimulations", default=3, type=int, help="The number of 'replicate' simulations that will be produced.")
+parser.add_argument("--simulation_ploidies", dest="simulation_ploidies", type=str, default="auto", help='A comma-sepparated string of the ploidies to simulate for parameter optimisation. It can have any of "haploid", "diploid_homo", "diploid_hetero", "ref:2_var:1", "ref:3_var:1", "ref:4_var:1", "ref:5_var:1", "ref:9_var:1", "ref:19_var:1", "ref:99_var:1" . By default it will be inferred from the ploidy. For example, if you are running on ploidy=2, it will optimise for diploid_hetero and diploid_homo.')
 parser.add_argument("--range_filtering_benchmark", dest="range_filtering_benchmark", type=str, default="theoretically_meaningful", help='The range of parameters that should be tested in the SV optimisation pipeline. It can be any of large, medium, small, theoretically_meaningful or single.')
 
 # alignment args
@@ -155,7 +159,7 @@ parser.add_argument("--skip_cnv_analysis", dest="skip_cnv_analysis", default=Fal
 parser.add_argument("--visualization_results", dest="visualization_results", default=False, action="store_true", help="Visualize the results")
 
 
-parser.add_argument("--pooled_sequencing", dest="pooled_sequencing", action="store_true", default=False, help="It is a pooled sequencing run, which means that the small variant calling is not done based on ploidy. If you are also running SV calling, check that the simulation_ploidies, resemble a population,")
+parser.add_argument("--pooled_sequencing", dest="pooled_sequencing", action="store_true", default=False, help="It is a pooled sequencing run, which means that the small variant calling is not done based on ploidy. If you are also running SV calling, you will run parameters optimisation on a sample that has 1-10 pooling.")
 
 # verbosity
 parser.add_argument("--verbose", dest="verbose", action="store_true", default=False, help="Whether to print a verbose output. This is important if there are any errors in the run.")
@@ -245,11 +249,18 @@ if opt.StopAfter_genomeObtention is True:
 
 #### define misc args ####
 
-# warn if you are running pooled_sequencing
-if opt.pooled_sequencing is True: print("WARNING: If you are running SV calling, make sure that the pooled sequencing simulation is consistent with these simulated ploidies: %s. For example, you may want to optimise to detect pools of 1/100 of SVs."%(opt.simulation_ploidies))
+# get the simulation ploidies
+if opt.simulation_ploidies!="auto": simulation_ploidies = opt.simulation_ploidies.split(",")
 
-# the simulation ploidies as a list
-simulation_ploidies = opt.simulation_ploidies.split(",")
+else: 
+
+    # for pooled seq it takes simulated on 1 in 10
+    if opt.pooled_sequencing is True: simulation_ploidies = ["diploid_homo", "ref:9_var:1"]
+    elif opt.ploidy==1: simulation_ploidies = ["haploid"]
+    else: simulation_ploidies = ["diploid_homo", "ref:%i_var:1"%(opt.ploidy-1)]
+
+# set a specific calling for pooled sequencing
+if opt.pooled_sequencing is True: print("WARNING: Running on pooled sequencing.  These are the simulated ploidies for the SV calling parameter optimisation:", simulation_ploidies)
 
 # the window length for all operations
 valid_chrom_lens = [len_seq for chrom, len_seq  in fun.get_chr_to_len(opt.ref).items() if chrom not in opt.mitochondrial_chromosome.split(",") and len_seq>=opt.min_chromosome_len]
@@ -487,6 +498,9 @@ print("structural variation analysis with perSVade finished")
 
 if opt.skip_SVcalling is False and not any([x=="skip" for x in {opt.fastq1, opt.fastq2}]):
 
+    # delete key files if replace_SV_CNVcalling
+    if opt.replace_SV_CNVcalling is True: fun.remove_files_SV_CNVcalling(opt.outdir)
+
     #### get CNV parameters ####
 
     # get the default parameters
@@ -514,7 +528,9 @@ if opt.skip_SVcalling is False and not any([x=="skip" for x in {opt.fastq1, opt.
     outdir_var_calling = "%s/SVcalling_output"%opt.outdir
     print("getting all SVs into one VCF. Regions with a cov>%.3f will be treated as DUP, and regions with cov <%.3f will be treated as DEL. Regions with a correlation between position and coverage >%.3f (pearson) and >%.3f (spearman) will not be considered as CNV, as they may be related to the smiley-face effect."%(min_coverage_duplication, max_coverage_deletion, min_r_pearson_noFlatRegions, min_r_spearman_noFlatRegions))
 
-    SV_CNV_vcf = fun.get_vcf_all_SVs_and_CNV(opt.outdir, outdir_var_calling, sorted_bam, opt.ref, replace=opt.replace, threads=opt.threads, mitochondrial_chromosome=opt.mitochondrial_chromosome, mito_code=opt.mitochondrial_code, gDNA_code=opt.gDNA_code, max_coverage_deletion=max_coverage_deletion, min_coverage_duplication=min_coverage_duplication, min_r_pearson_noFlatRegions=min_r_pearson_noFlatRegions, min_r_spearman_noFlatRegions=min_r_spearman_noFlatRegions)
+    SV_CNV_vcf = fun.get_vcf_all_SVs_and_CNV(opt.outdir, outdir_var_calling, sorted_bam, opt.ref, opt.ploidy, replace=opt.replace, threads=opt.threads, mitochondrial_chromosome=opt.mitochondrial_chromosome, mito_code=opt.mitochondrial_code, gDNA_code=opt.gDNA_code, max_coverage_deletion=max_coverage_deletion, min_coverage_duplication=min_coverage_duplication, min_r_pearson_noFlatRegions=min_r_pearson_noFlatRegions, min_r_spearman_noFlatRegions=min_r_spearman_noFlatRegions)
+
+    print("the SV and CNV calling vcf can be found in %s"%SV_CNV_vcf)
 
     # get variant annotation
     if opt.gff is not None:
@@ -523,13 +539,15 @@ if opt.skip_SVcalling is False and not any([x=="skip" for x in {opt.fastq1, opt.
         SV_CNV_vcf_annotated = fun.annotate_SVs_inHouse(SV_CNV_vcf, gff_with_biotype, opt.ref, replace=opt.replace, threads=opt.threads, mitochondrial_chromosome=opt.mitochondrial_chromosome, mito_code=opt.mitochondrial_code, gDNA_code=opt.gDNA_code)
 
         print("annotated SV vcf can be found in %s"%SV_CNV_vcf_annotated)
-
     
 else: print("WARNING: Skipping SV annotation because -gff was not provided, --skip_SVcalling was provided or fastq1/fastq2 have 'skip'.")
 
 #####################################
 #####################################
 #####################################
+
+# stop after the generation of SV and CNV calls
+
 
 #####################################
 ###### SMALL VARS AND CNV ###########
@@ -606,6 +624,8 @@ if (opt.skip_SVcalling is False or run_smallVarsCNV is True) and not any([x=="sk
 #####################################
 #####################################
 
+
+jhgasdhjgdahjdagad
 
 # at the end you want to clean the outdir to keep only the essential files
 if opt.skip_cleaning_outdir is False: fun.clean_perSVade_outdir(opt.outdir)
