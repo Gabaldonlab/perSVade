@@ -249,6 +249,8 @@ for taxID, spName, ploidy, mitochondrial_chromosome, max_coverage_sra_reads in s
 
         ####### delete the folders that did not complete in any of the previous runs ######
 
+        """
+
         for typeSim in ["fast", "uniform", "realSVs"]:
             outdir_testAccuracy = "%s/testing_Accuracy/%s"%(outdir_perSVade, typeSim)
             if not os.path.isdir(outdir_testAccuracy): continue
@@ -259,6 +261,8 @@ for taxID, spName, ploidy, mitochondrial_chromosome, max_coverage_sra_reads in s
 
                     print("deleting %s"%outdir_f)
                     fun.delete_folder(outdir_f)
+
+        """
 
         ####################################################################################
 
