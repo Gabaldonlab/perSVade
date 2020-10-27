@@ -1976,6 +1976,97 @@ def get_SVs_arround_breakpoints(genome_file, df_bedpe, nvars, outdir, svtypes, r
             svDF["Name"] = svDF.ID
             svDF[svtype_to_fieldsDict[svtype]["all_fields"] + ["Name"]].to_csv("%s/%s.tab"%(outdir, svtype), sep="\t", index=False, header=True)
 
+
+def get_random_df_bedpe(n_BPs, reference_genome, replace=False):
+
+    """This function generates random bBPs breakpoints for a reference genome, and returns a bedpe with the reference genome"""
+
+    print_if_verbose("getting random df_bedpe")
+
+    ###### GET GENOME WINDOWS INTO DF ######
+
+    # index the genome
+    index_genome(reference_genome, replace=replace)
+
+    # get df_windows of 1000 bp
+    window_size = 1000
+    windows_file = "%s.windows%ibp.bed"%(reference_genome, window_size)
+    windows_file_stderr = "%s.generating.stderr"%windows_file
+
+    if file_is_empty(windows_file) or replace is True:
+
+        windows_file_tmp = "%s.tmp"%windows_file
+
+        print_if_verbose("generating windows_file. The stderr is in %s"%windows_file_stderr)
+        run_cmd("%s makewindows -g %s.fai -w %i > %s 2>%s"%(bedtools, reference_genome, window_size, windows_file_tmp, windows_file_stderr))
+        remove_file(windows_file_stderr)
+
+        os.rename(windows_file_tmp, windows_file)
+
+    # get df, the index is already unique
+    df_windows = pd.read_csv(windows_file, sep="\t", header=None, names=["chromosome", "start", "end"])
+    df_windows["pos"] = (df_windows.start + (df_windows.end - df_windows.start)/2).apply(int)
+
+    ##########################################
+
+    ######## generate random breakpoints ########
+
+    print_if_verbose("placing random breakpoints")
+
+    # reshuffle df. This will ensure that the selection is random
+    df_windows = df_windows.sample(frac=1)[["chromosome", "pos"]]
+
+    # initialize dict
+    data_dict = {}; Ibp = 0
+
+    # define all bpIDs
+    all_BPids = np.array(df_windows.index)
+
+    # map bools to strand
+    bool_to_strand = {True:"+", False:"-"}
+
+    # iterate through each window, randomly
+    for Ileft in all_BPids:
+
+        # break if you already have enough BPs
+        if len(data_dict)>=n_BPs: break
+
+        # iterate through the downstream windows
+        for Iright in all_BPids[all_BPids>Ileft]:
+
+            # break if you already have enough BPs
+            if len(data_dict)>=n_BPs: break
+
+            # define the positions
+            r1 = df_windows.loc[Ileft]
+            r2 = df_windows.loc[Iright]
+
+            # add the dict
+            data_dict[Ibp] = {"chrom1" : r1["chromosome"], 
+                              "start1" : r1["pos"],
+                              "end1" : r1["pos"]+5,
+
+                              "chrom2" : r2["chromosome"], 
+                              "start2" : r2["pos"],
+                              "end2" : r2["pos"]+5,
+
+                              "name": "bp_%i"%Ibp,
+                              "score": 1000,
+
+                              "strand1": bool_to_strand[random.uniform(0, 1)>=0.8],
+                              "strand2": bool_to_strand[random.uniform(0, 1)>=0.8]}
+
+
+            Ibp += 1
+
+    # get df
+    bedpe_fields = ["chrom1", "start1", "end1", "chrom2", "start2", "end2", "name", "score", "strand1", "strand2"]
+    df_bedpe = pd.DataFrame(data_dict).transpose()[bedpe_fields]
+
+    #############################################
+
+    return df_bedpe  
+
 def simulate_SVs_in_genome(reference_genome, mitochondrial_chromosome, outdir, nvars=200, replace=False, svtypes={"insertions", "deletions", "inversions", "translocations", "tandemDuplications", "translocations"}, bedpe_breakpoints=None):
 
     """This function generates nvars into the reference genome splitting by gDNA and mtDNA with files written under outdir"""
@@ -1984,6 +2075,8 @@ def simulate_SVs_in_genome(reference_genome, mitochondrial_chromosome, outdir, n
 
     # initialize a df that will contain the randomly-simulated vars
     final_svtype_to_svDF = {svtype : pd.DataFrame() for svtype in svtypes}
+
+
 
     # define the different types of chromosomes. Note that the mtDNA chromosomes will be simulated appart
     all_chromosomes = {s.id for s in SeqIO.parse(reference_genome, "fasta")}
@@ -2015,7 +2108,27 @@ def simulate_SVs_in_genome(reference_genome, mitochondrial_chromosome, outdir, n
         # simulate random SVs into regions without previous SVs 
         random_sim_dir = "%s/random_SVs"%genome_outdir
 
-        # define a bed file with all the regions
+       
+        # define a a bedpe df randomly distributed
+        if bedpe_breakpoints is None:
+
+            # debug
+            if "Drosophila" in random_sim_dir:
+
+                # define the expected SV types
+                expected_svtypes = {"insertions", "deletions", "inversions", "tandemDuplications", "translocations", "translocations"}.intersection(svtypes)
+
+                # if there is only one, get the expecyed SVtypes
+                if len(chroms)==1: expected_svtypes = {s for s in expected_svtypes if s!="translocations"}
+
+                n_BPs = vars_to_simulate * len(expected_svtypes) * 5
+                df_bedpe = get_random_df_bedpe(n_BPs, genome_file, replace=replace)
+
+                print(df_bedpe)
+
+                adkjhdkhjda
+
+
         if bedpe_breakpoints is None:
             print_if_verbose("simulating randomly distributed SVs")
 
@@ -2033,6 +2146,9 @@ def simulate_SVs_in_genome(reference_genome, mitochondrial_chromosome, outdir, n
             # if there is only one, get the expecyed SVtypes
             if len(chroms)==1: expected_svtypes = {s for s in expected_svtypes if s!="translocations"}
 
+            # define the expected_files
+            expected_files = {"%s/%s.tab"%(random_sim_dir, svtype) for svtype in expected_svtypes}
+
             # add to cmd        
             svtype_to_arg = {"insertions":"number_Ins", "deletions":"number_Del", "inversions":"number_Inv", "tandemDuplications":"number_Dup", "translocations":"number_Tra"}
             for svtype in expected_svtypes: randomSV_cmd += " --%s %i"%(svtype_to_arg[svtype], vars_to_simulate)
@@ -2040,8 +2156,13 @@ def simulate_SVs_in_genome(reference_genome, mitochondrial_chromosome, outdir, n
             # define the finalisation file
             random_sims_performed_file = "%s/random_sims_performed.txt"%random_sim_dir
 
+            # remove the file if all the expected svtypes are empty
+            if any([file_is_empty(f) for f in expected_files]):
+                print_if_verbose("none of the files were performed")
+                remove_file(random_sims_performed_file)
+
             # run the cmd if necessary
-            if file_is_empty(random_sims_performed_file) or replace is True:
+            if any([file_is_empty(f) for f in expected_files]) or replace is True:
                 print_if_verbose("generating random SVs")
 
                 # make and delete the folder
@@ -2053,6 +2174,10 @@ def simulate_SVs_in_genome(reference_genome, mitochondrial_chromosome, outdir, n
                 print_if_verbose("getting random SVs. The std is in %s"%std_rearranging_genome)
                 if std_rearranging_genome!="stdout": run_cmd("%s > %s 2>&1"%(randomSV_cmd, std_rearranging_genome))
                 else: run_cmd(randomSV_cmd)
+
+                # check that everything went fine
+                if any([file_is_empty(f) for f in expected_files]): raise ValueError("none of the SVs were simulated")
+
                 remove_file(std_rearranging_genome)
 
                 # edit the insertions 
@@ -2432,96 +2557,112 @@ def load_single_sample_VCF(path):
 
     """Loads a vcf with a single sample into a df."""
 
-    # load the df
-    df = pd.read_csv(path, sep="\t", header = len([l for l in open(path, "r") if l.startswith("##")]))
+    vcf_df_file = "%s.vcf_df.py"%path
 
-    # change the name of the last column, which is the actual sample data
-    df = df.rename(columns={df.keys()[-1]: "DATA"})
+    if file_is_empty(vcf_df_file):
 
-    # get the filter as set and filter
-    df["FILTER_set"] = df.FILTER.apply(lambda x: set(x.split(";")))
-    #df = df[df.FILTER_set.apply(lambda x: len(x.intersection(interesting_filterTAGs))>0)]
+        print_if_verbose("running load_single_sample_VCF")
 
-    # check that there
+        # load the df
+        df = pd.read_csv(path, sep="\t", header = len([l for l in open(path, "r") if l.startswith("##")]))
 
-    ### INFO COLUMN ####
+        # change the name of the last column, which is the actual sample data
+        df = df.rename(columns={df.keys()[-1]: "DATA"})
 
-    def get_real_value(string):
+        # get the filter as set and filter
+        df["FILTER_set"] = df.FILTER.apply(lambda x: set(x.split(";")))
+        #df = df[df.FILTER_set.apply(lambda x: len(x.intersection(interesting_filterTAGs))>0)]
 
-        try: return ast.literal_eval(string)
-        except: return string
+        # check that there
 
-    def get_dict_fromRow(row):
+        ### INFO COLUMN ####
 
-        # get as a list, considering to put appart whatever has an "="
-        list_row = row.split(";")
-        rows_with_equal = [x.split("=") for x in list_row if "=" in x]
-        rows_without_equal = [x for x in list_row if "=" not in x]
+        def get_real_value(string):
 
-        # add the values with an "=" to the dictionary
-        final_dict = {"INFO_%s"%x[0] : get_real_value(x[1]) for x in rows_with_equal}
+            try: return ast.literal_eval(string)
+            except: return string
 
-        # add the others collapsed
-        final_dict["INFO_misc"] = ";".join(rows_without_equal)
+        def get_dict_fromRow(row):
 
-        return final_dict
+            # get as a list, considering to put appart whatever has an "="
+            list_row = row.split(";")
+            rows_with_equal = [x.split("=") for x in list_row if "=" in x]
+            rows_without_equal = [x for x in list_row if "=" not in x]
 
-    # add a column that has a dictionary with the info fields
-    df["INFO_as_dict"] = df.INFO.apply(get_dict_fromRow)
-    all_INFO_fields = sorted(list(set.union(*df.INFO_as_dict.apply(lambda x: set(x)))))
+            # add the values with an "=" to the dictionary
+            final_dict = {"INFO_%s"%x[0] : get_real_value(x[1]) for x in rows_with_equal}
 
-    # add them as sepparated columns
-    def get_from_dict_orNaN(value, dictionary):
+            # add the others collapsed
+            final_dict["INFO_misc"] = ";".join(rows_without_equal)
 
-        if value in dictionary: return dictionary[value]
-        else: return np.nan
+            return final_dict
 
-    for f in all_INFO_fields: df[f] = df.INFO_as_dict.apply(lambda d: get_from_dict_orNaN(f, d))
-    df.pop("INFO_as_dict")
+        print_if_verbose("getting INFO as dict")
 
-    #########################
+        # add a column that has a dictionary with the info fields
+        df["INFO_as_dict"] = df.INFO.apply(get_dict_fromRow)
+        all_INFO_fields = sorted(list(set.union(*df.INFO_as_dict.apply(lambda x: set(x)))))
 
-    ### FORMAT COLUMN ###
+        # add them as sepparated columns
+        def get_from_dict_orNaN(value, dictionary):
 
-    # check that there is only one format
-    all_formats = set(df.FORMAT)
-    if len(all_formats)!=1: raise ValueError("There should be only one format in the FORMAT file")
+            if value in dictionary: return dictionary[value]
+            else: return np.nan
 
-    # get as dictionary
-    format_list = next(iter(all_formats)).split(":")
+        for f in all_INFO_fields: df[f] = df.INFO_as_dict.apply(lambda d: get_from_dict_orNaN(f, d))
+        df.pop("INFO_as_dict")
 
-    def getINTorFLOATdictionary(data):
+        #########################
 
-        # get dictionary
-        dictionary = dict(zip(format_list, data.split(":")))
+        ### FORMAT COLUMN ###
 
-        # change the type
-        final_dict = {}
-        for k, v in dictionary.items():
+        # check that there is only one format
+        all_formats = set(df.FORMAT)
+        if len(all_formats)!=1: raise ValueError("There should be only one format in the FORMAT file")
 
-            if v==".": final_dict[k] = "."
-            elif "/" in v or "," in v: final_dict[k] = v
-            elif "." in v: final_dict[k] = float(v)
-            else: final_dict[k] = int(v)
+        # get as dictionary
+        format_list = next(iter(all_formats)).split(":")
 
-        return final_dict
+        def getINTorFLOATdictionary(data):
 
-    df["FORMAT_as_dict"] = df.DATA.apply(getINTorFLOATdictionary)
+            # get dictionary
+            dictionary = dict(zip(format_list, data.split(":")))
 
-    # get as independent fields
-    for f in sorted(format_list): df["DATA_%s"%f] = df.FORMAT_as_dict.apply(lambda d: d[f])
-    df.pop("FORMAT_as_dict")
+            # change the type
+            final_dict = {}
+            for k, v in dictionary.items():
 
-    #########################
+                if v==".": final_dict[k] = "."
+                elif "/" in v or "," in v: final_dict[k] = v
+                elif "." in v: final_dict[k] = float(v)
+                else: final_dict[k] = int(v)
 
-    # calculate allele frequencies (if AD is provided)
-    if "DATA_AD" in df.keys():
+            return final_dict
 
-        df["allele_freqs"] = df.apply(lambda r: [int(reads_allele)/r["DATA_DP"] for reads_allele in r["DATA_AD"].split(",")], axis=1)
+        df["FORMAT_as_dict"] = df.DATA.apply(getINTorFLOATdictionary)
 
-        # assign a boolean whether it is heterozygius
-        df["is_heterozygous_coverage"] = df.allele_freqs.apply(lambda x: any([freq>=0.25 and freq<=0.75 for freq in x]))
-        df["is_heterozygous_GT"] = df.DATA_GT.apply(lambda x: len(set(x.split("/")))>1)
+        # get as independent fields
+        for f in sorted(format_list): df["DATA_%s"%f] = df.FORMAT_as_dict.apply(lambda d: d[f])
+        df.pop("FORMAT_as_dict")
+
+        #########################
+
+        # calculate allele frequencies (if AD is provided)
+        if "DATA_AD" in df.keys():
+
+            df["allele_freqs"] = df.apply(lambda r: [int(reads_allele)/r["DATA_DP"] for reads_allele in r["DATA_AD"].split(",")], axis=1)
+
+            # assign a boolean whether it is heterozygius
+            df["is_heterozygous_coverage"] = df.allele_freqs.apply(lambda x: any([freq>=0.25 and freq<=0.75 for freq in x]))
+            df["is_heterozygous_GT"] = df.DATA_GT.apply(lambda x: len(set(x.split("/")))>1)
+
+        print_if_verbose("load_single_sample_VCF ran")
+
+        # save
+        save_object(df, vcf_df_file)
+
+    # load
+    df = load_object(vcf_df_file)
 
     return df
 
@@ -3564,7 +3705,7 @@ def write_clove_df_into_bedORbedpe_files_like_RSVSim(df_clove, fileprefix, refer
 
     only balanced translocations are considered.
 
-    Thesse are the SVTYPE fields:
+    Thesse are the SVTYPE fields that are easily classifiable
 
     DEL "Deletion"
     TAN "Tandem Duplication"
@@ -3572,13 +3713,18 @@ def write_clove_df_into_bedORbedpe_files_like_RSVSim(df_clove, fileprefix, refer
     INS "Insertion" 
     DUP "Complex Duplication"
     TRA "Complex Translocation"
-    ##ALT=<ID=CIV,Description="Complex Inversion">
-    ##ALT=<ID=CVT,Description="Complex Inverted Translocation">
-    ##ALT=<ID=CVD,Description="Complex Inverted Duplication">
+    ##ALT=<ID=CIV,Description="Complex Inversion">    
     ##ALT=<ID=CIT,Description="Complex Interchromosomal Translocation">
     ##ALT=<ID=CID,Description="Complex Interchromosomal Duplication">
-    ##ALT=<ID=IVT,Description="Complex Inverted Interchromosomal Translocation">
     ##ALT=<ID=IVD,Description="Complex Inverted Interchromosomal Duplication">
+
+    These are the ones set to remaining:
+
+    ##ALT=<ID=CVT,Description="Complex Inverted Translocation"> This is within the same chromosome. CHR2:START-END is cut, inverted and inserted into CHROM:POS
+
+    ##ALT=<ID=CVD,Description="Complex Inverted Duplication"> This is within the same chromosome. CHR2:START-END is duplicated, inverted and inserted into CHROM:POS
+
+    ##ALT=<ID=IVT,Description="Complex Inverted Interchromosomal Translocation"> CHR2:START-END is duplicated, inverted and inserted into CHROM:POS
 
     define_insertions_based_on_coverage indicates whether to filter the insertions based on coverage. If so, it will set as copied insertions those that have a coverage above 
 
@@ -3807,7 +3953,6 @@ def merge_coverage_per_window_files_in_one(bamfile, bam_sufix=".coverage_per_win
     for f in files_prefix: 
         if f!=integrated_file: remove_file(f)
 
-
 def run_gridssClove_given_filters(sorted_bam, reference_genome, working_dir, median_coverage, replace=True, threads=4, gridss_blacklisted_regions="", gridss_VCFoutput="", gridss_maxcoverage=50000, median_insert_size=250, median_insert_size_sd=0, gridss_filters_dict=default_filtersDict_gridss, tol_bp=50, run_in_parallel=True, max_rel_coverage_to_consider_del=0.2, min_rel_coverage_to_consider_dup=1.8, replace_FromGridssRun=False, define_insertions_based_on_coverage=False):
 
     """This function runs gridss and clove with provided filtering and parameters. This can be run at the end of a parameter optimisation process. It returns a dict mapping each SV to a table, and a df with the gridss.
@@ -3872,6 +4017,11 @@ def run_gridssClove_given_filters(sorted_bam, reference_genome, working_dir, med
     raw_bedpe_file = "%s.raw.bedpe"%bedpe_with_adds
     bedpe_fields = ["chrom1", "start1", "end1", "chrom2", "start2", "end2", "name", "score", "strand1", "strand2"]
     df_bedpe = pd.read_csv(bedpe_with_adds, sep="\t")[bedpe_fields]
+
+    # change the name to be always finishing with 'o', and not 'h'
+    df_bedpe["name"] = df_bedpe.name.apply(lambda x: x[0:-1]+"o")
+
+    # write
     df_bedpe.to_csv(raw_bedpe_file, sep="\t", header=False, index=False)
     print_if_verbose("there are %i breakpoints"%len(df_bedpe))
 
@@ -5989,6 +6139,11 @@ def get_IDstring_for_svDF_r(r, svtype):
 
             ID = "%slike|%s:%i-%s:%i"%(r["SVTYPE"], r["#CHROM"], r["POS"], r["CHR2"], r["END"])
 
+        elif r["SVTYPE"] in {"CVT", "CVD", "IVT"}:
+
+            # these are all SVs that are understood but not among the generally classified events. They imply one region copied or translocated into another
+            ID = "%s|%s:%i-%i|%s:%i"%(r["SVTYPE"], r["CHR2"], r["START"], r["END"], r["#CHROM"], r["POS"])
+
         else: raise ValueError("%s is not considered"%r["SVTYPE"])
 
     elif svtype in {"tandemDuplications", "deletions", "inversions"}:
@@ -6336,6 +6491,7 @@ def get_svtype_to_svfile_and_df_gridss_from_perSVade_outdir(perSVade_outdir, ref
         svtype_to_svfile = {file.split(".structural_variants.")[1].split(".")[0] : "%s/%s"%(outdir, file) for file in os.listdir(outdir) if ".structural_variants." in file}
 
     # get the df gridss
+    print_if_verbose("loading df_gridss")
     df_gridss = add_info_to_gridssDF(load_single_sample_VCF(gridss_vcf), reference_genome)
 
     # keep only the ones that exist
@@ -6696,6 +6852,19 @@ def get_insert_size_distribution(sorted_bam, replace=False, threads=4):
     return (int(float(df["MEDIAN_INSERT_SIZE"])), int(float(df["MEDIAN_ABSOLUTE_DEVIATION"])))
 
 
+
+def index_genome(genome, replace=False):
+
+    """Takes a fasta and generates a <genome>.fai file"""
+
+    # index the genome of interest if not already done
+    if file_is_empty("%s.fai"%genome) or replace is True: 
+
+        faidx_std = "%s.indexing.std"%genome
+        print_if_verbose("running faidx. The std is in %s"%faidx_std)
+        run_cmd("%s faidx %s > %s 2>&1"%(samtools, genome, faidx_std))
+        remove_file(faidx_std)
+
 def get_windows_infoDF_with_predictedFromFeatures_coverage(genome, distToTel_chrom_GC_to_coverage_fn, expected_coverage_per_bp, replace=False, threads=4, make_plots=True):
 
     """This function gets a genome and returns a df for windows of the genome and the relative coverage predicted from distToTel_chrom_GC_to_coverage_fn"""
@@ -6706,12 +6875,7 @@ def get_windows_infoDF_with_predictedFromFeatures_coverage(genome, distToTel_chr
         print_if_verbose("getting relCov predicted from feats")
 
         # index the genome of interest if not already done
-        if file_is_empty("%s.fai"%genome) or replace is True: 
-
-            faidx_std = "%s.indexing.std"%genome
-            print_if_verbose("running faidx. The std is in %s"%faidx_std)
-            run_cmd("%s faidx %s > %s 2>&1"%(samtools, genome, faidx_std))
-            remove_file(faidx_std)
+        index_genome(genome, replace=replace)
 
         ##### get the windows df ####
 
@@ -7735,6 +7899,10 @@ def benchmark_bedpe_with_knownSVs(bedpe, know_SV_dict, reference_genome, sorted_
         # initialize benchmark_df
         df_benchmark_all = pd.DataFrame()
 
+        # define boundaries of the coverage parameters
+        max_max_rel_coverage_to_consider_del = 1.1 - expected_AF  
+        min_min_rel_coverage_to_consider_dup = 1 + expected_AF*0.6
+
         ##### BENCHMARK INSERTIONS, INVERSIONS and TRANSLOCATIONS ##########
         
         # get files in a way that it is similar to RSVSim, only for complex variants
@@ -7750,8 +7918,8 @@ def benchmark_bedpe_with_knownSVs(bedpe, know_SV_dict, reference_genome, sorted_
         df_benchmark_all = df_benchmark_all.append(df_benchmark_InsInvTra, sort=True)
 
         # add fields that are necessary to compare with the TANDEL df
-        df_benchmark_all["clove_max_rel_coverage_to_consider_del"] = [-1]*len(df_benchmark_all)
-        df_benchmark_all["clove_min_rel_coverage_to_consider_dup"] = [-1]*len(df_benchmark_all)
+        df_benchmark_all["clove_max_rel_coverage_to_consider_del"] = [max_max_rel_coverage_to_consider_del]*len(df_benchmark_all)
+        df_benchmark_all["clove_min_rel_coverage_to_consider_dup"] = [min_min_rel_coverage_to_consider_dup]*len(df_benchmark_all)
 
 
         #########################################################################
@@ -7763,9 +7931,6 @@ def benchmark_bedpe_with_knownSVs(bedpe, know_SV_dict, reference_genome, sorted_
 
         # get df
         df_DEL = df_clove[df_clove.SVTYPE=="DEL"]
-
-        # define the maximum max_rel_coverage_to_consider_del_l
-        max_max_rel_coverage_to_consider_del = 1.1 - expected_AF     
 
         # go through different deletion ranges that define true deletion
         max_rel_coverage_to_consider_del_l = [0.0, 0.0001, 0.001, 0.01, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.5, 0.6, 0.7, 0.9, 1.0]
@@ -7793,7 +7958,7 @@ def benchmark_bedpe_with_knownSVs(bedpe, know_SV_dict, reference_genome, sorted_
             df_benchmark = benchmark_processedSVs_against_knownSVs_inHouse(svtype_to_predsvfile, know_SV_dict_DEL, fileprefix, replace=replace, add_integrated_benchmarking=False)
 
             df_benchmark["clove_max_rel_coverage_to_consider_del"] = [max_rel_coverage_to_consider_del]*len(df_benchmark)
-            df_benchmark["clove_min_rel_coverage_to_consider_dup"] = [-1]*len(df_benchmark)
+            df_benchmark["clove_min_rel_coverage_to_consider_dup"] = [min_min_rel_coverage_to_consider_dup]*len(df_benchmark)
 
             # keep
             df_benchmark_TANDEL = df_benchmark_TANDEL.append(df_benchmark, sort=True)
@@ -7804,10 +7969,7 @@ def benchmark_bedpe_with_knownSVs(bedpe, know_SV_dict, reference_genome, sorted_
 
         # get df
         df_TAN = df_clove[df_clove.SVTYPE=="TAN"]
-
-        # define the minimum min_min_rel_coverage_to_consider_dup
-        min_min_rel_coverage_to_consider_dup = 1 + expected_AF*0.6
-
+        
         # go through different TAN ranges that define true TAN
         min_rel_coverage_to_consider_dup_l = [0.0, 0.4, 0.5, 1.0, 1.5, 1.8, 2.0, 2.5, 3.5]
         min_rel_coverage_to_consider_dup_l = [x for x in min_rel_coverage_to_consider_dup_l if x>=min_min_rel_coverage_to_consider_dup]
@@ -7832,7 +7994,7 @@ def benchmark_bedpe_with_knownSVs(bedpe, know_SV_dict, reference_genome, sorted_
             know_SV_dict_TAN = {svtype : know_SV_dict[svtype] for svtype in {"tandemDuplications"} if svtype in know_SV_dict}
 
             df_benchmark = benchmark_processedSVs_against_knownSVs_inHouse(svtype_to_predsvfile, know_SV_dict_TAN, fileprefix, replace=replace, add_integrated_benchmarking=False)
-            df_benchmark["clove_max_rel_coverage_to_consider_del"] = [-1]*len(df_benchmark)
+            df_benchmark["clove_max_rel_coverage_to_consider_del"] = [max_max_rel_coverage_to_consider_del]*len(df_benchmark)
             df_benchmark["clove_min_rel_coverage_to_consider_dup"] = [min_rel_coverage_to_consider_dup]*len(df_benchmark)
 
             # keep
@@ -8593,8 +8755,6 @@ def getPlots_filtering_accuracy_across_genomes_and_ploidies(df_cross_benchmark, 
     #col_cluster_list = [False, True]
     col_cluster_list = [True]
 
-    # map each accuracy 
-
     # go through each combination
     for interesting_train_plodies in interesting_train_plodies_list:
         for interesting_train_genomeIDs in interesting_train_genomeIDs_list:
@@ -8604,9 +8764,7 @@ def getPlots_filtering_accuracy_across_genomes_and_ploidies(df_cross_benchmark, 
                         for interesting_test_svtypes in interesting_test_svtypes_list:        
 
                             # get the filtered df
-                            df = df_cross_benchmark[(df_cross_benchmark.train_ploidy.isin(interesting_train_plodies)) & (df_cross_benchmark.train_genomeID.isin(interesting_train_genomeIDs)) & (df_cross_benchmark.train_svtype.isin(interesting_train_svtypes)) & (df_cross_benchmark.test_ploidy.isin(interesting_test_plodies)) & (df_cross_benchmark.test_genomeID.isin(interesting_test_genomeIDs)) & (df_cross_benchmark.test_svtype.isin(interesting_test_svtypes)) & (df_cross_benchmark.nevents>=10)]
-
-                            # add a simulation tag
+                            df = df_cross_benchmark[(df_cross_benchmark.train_ploidy.isin(interesting_train_plodies)) & (df_cross_benchmark.train_genomeID.isin(interesting_train_genomeIDs)) & (df_cross_benchmark.train_svtype.isin(interesting_train_svtypes)) & (df_cross_benchmark.test_ploidy.isin(interesting_test_plodies)) & (df_cross_benchmark.test_genomeID.isin(interesting_test_genomeIDs)) & (df_cross_benchmark.test_svtype.isin(interesting_test_svtypes)) & (df_cross_benchmark.nevents>=5)]
 
                             # add the train and test indices
                             df["train_idx"] = (df.train_simName + "||||" + df.train_simType + "||||" + df.train_ploidy + "||||" + df.train_svtype)
@@ -8709,8 +8867,6 @@ def getPlots_filtering_accuracy_across_genomes_and_ploidies(df_cross_benchmark, 
 
                                         # get the dendrogram, either adjusting or not
                                         plot_clustermap_with_annotation(df_square, row_colors_df, col_colors_df, filename, title=title, col_cluster=col_cluster, row_cluster=row_cluster, colorbar_label=accuracy, adjust_position=False, legend=True, idxs_separator_pattern="||||", texts_to_strip={"L001"}, default_label_legend="control", df_annotations=df_annotations, cmap=sns.color_palette("RdBu_r", 50), ylabels_graphics_df=None, grid_lines=True)
-    
-
     # return the best_train_idx
     return dict(zip(["simName", "simType", "ploidy", "svtype"], best_train_idx.split("||||")))
 
@@ -9113,7 +9269,7 @@ def get_parameters_from_json(json_file):
 
     return gridss_blacklisted_regions, gridss_maxcoverage, gridss_filters_dict, max_rel_coverage_to_consider_del, min_rel_coverage_to_consider_dup
 
-def run_GridssClove_optimising_parameters(sorted_bam, reference_genome, outdir, threads=4, replace=False, n_simulated_genomes=2, mitochondrial_chromosome="mito_C_glabrata_CBS138", simulation_ploidies=["haploid", "diploid_homo", "diploid_hetero", "ref:2_var:1", "ref:3_var:1", "ref:4_var:1", "ref:5_var:1", "ref:9_var:1", "ref:19_var:1", "ref:99_var:1"], range_filtering_benchmark="theoretically_meaningful", nvars=100, fast_SVcalling=False, real_bedpe_breakpoints=None, gridss_VCFoutput=""):
+def run_GridssClove_optimising_parameters(sorted_bam, reference_genome, outdir, threads=4, replace=False, n_simulated_genomes=2, mitochondrial_chromosome="mito_C_glabrata_CBS138", simulation_ploidies=["haploid", "diploid_homo", "diploid_hetero", "ref:2_var:1", "ref:3_var:1", "ref:4_var:1", "ref:5_var:1", "ref:9_var:1", "ref:19_var:1", "ref:99_var:1"], range_filtering_benchmark="theoretically_meaningful", nvars=100, fast_SVcalling=False, real_bedpe_breakpoints=None, gridss_VCFoutput="", replace_FromGridssRun_final_perSVade_run=False):
 
     """
     Takes some aligned reads and runs the GridssPipeline optimising the parameters of GRIDSS filtering. These are the different parameters of the function:
@@ -9141,7 +9297,7 @@ def run_GridssClove_optimising_parameters(sorted_bam, reference_genome, outdir, 
     outdir_gridss_final = "%s/final_gridss_running"%outdir; make_folder(outdir_gridss_final)
     final_file = "%s/gridssClove_finished.txt"%outdir
 
-    if file_is_empty(final_file) or replace is True:
+    if file_is_empty(final_file) or replace is True or replace_FromGridssRun_final_perSVade_run is True:
 
         # initialize the start time
         pipeline_start_time = time.time()
@@ -9199,7 +9355,9 @@ def run_GridssClove_optimising_parameters(sorted_bam, reference_genome, outdir, 
 
         # run the pipeline
         print_if_verbose("running final gridss with parameters...")
-        final_sv_dict, df_gridss = run_gridssClove_given_filters(sorted_bam, reference_genome, outdir_gridss_final, median_coverage, replace=replace, threads=threads, gridss_blacklisted_regions=gridss_blacklisted_regions, gridss_VCFoutput=final_gridss_vcf, gridss_maxcoverage=gridss_maxcoverage, median_insert_size=median_insert_size, median_insert_size_sd=median_insert_size_sd, gridss_filters_dict=gridss_filters_dict, run_in_parallel=True, max_rel_coverage_to_consider_del=max_rel_coverage_to_consider_del, min_rel_coverage_to_consider_dup=min_rel_coverage_to_consider_dup, replace_FromGridssRun=replace)
+        final_sv_dict, df_gridss = run_gridssClove_given_filters(sorted_bam, reference_genome, outdir_gridss_final, median_coverage, replace=replace, threads=threads, gridss_blacklisted_regions=gridss_blacklisted_regions, gridss_VCFoutput=final_gridss_vcf, gridss_maxcoverage=gridss_maxcoverage, median_insert_size=median_insert_size, median_insert_size_sd=median_insert_size_sd, gridss_filters_dict=gridss_filters_dict, run_in_parallel=True, max_rel_coverage_to_consider_del=max_rel_coverage_to_consider_del, min_rel_coverage_to_consider_dup=min_rel_coverage_to_consider_dup, replace_FromGridssRun=replace_FromGridssRun_final_perSVade_run)
+
+        # not debug: replace_FromGridssRun=replace
 
         ########################################
 
@@ -9826,7 +9984,7 @@ def plot_accuracy_of_parameters_on_test_samples(parameters_df, test_df, outdir, 
 
   
 
-def report_accuracy_realSVs(close_shortReads_table, reference_genome, outdir, real_bedpe_breakpoints, threads=4, replace=False, n_simulated_genomes=2, mitochondrial_chromosome="mito_C_glabrata_CBS138", simulation_ploidies=["haploid", "diploid_homo", "diploid_hetero", "ref:2_var:1", "ref:3_var:1", "ref:4_var:1", "ref:5_var:1", "ref:9_var:1", "ref:19_var:1", "ref:99_var:1"], range_filtering_benchmark="theoretically_meaningful", nvars=100, job_array_mode="local", max_ncores_queue=48, time_perSVade_running="02:00:00", queue_jobs="debug", StopAfter_testAccuracy_perSVadeRunning=False, skip_cleaning_simulations_files_and_parameters=False, skip_cleaning_outdir=False, slurm_constraint="", parameters_json_file=None, gff=None):
+def report_accuracy_realSVs(close_shortReads_table, reference_genome, outdir, real_bedpe_breakpoints, threads=4, replace=False, n_simulated_genomes=2, mitochondrial_chromosome="mito_C_glabrata_CBS138", simulation_ploidies=["haploid", "diploid_homo", "diploid_hetero", "ref:2_var:1", "ref:3_var:1", "ref:4_var:1", "ref:5_var:1", "ref:9_var:1", "ref:19_var:1", "ref:99_var:1"], range_filtering_benchmark="theoretically_meaningful", nvars=100, job_array_mode="local", max_ncores_queue=48, time_perSVade_running="02:00:00", queue_jobs="debug", StopAfter_testAccuracy_perSVadeRunning=False, skip_cleaning_simulations_files_and_parameters=False, skip_cleaning_outdir=False, slurm_constraint="", parameters_json_file=None, gff=None, replace_FromGridssRun_final_perSVade_run=False):
 
 
     """This function runs the SV pipeline for all the datasets in close_shortReads_table with the fastSV, optimisation based on uniform parameters and optimisation based on realSVs (specified in real_svtype_to_file). The latter is skipped if real_svtype_to_file is empty.
@@ -9909,6 +10067,7 @@ def report_accuracy_realSVs(close_shortReads_table, reference_genome, outdir, re
                     if printing_verbose_mode is True: cmd += " --verbose"
                     if parameters_json_file is not None: cmd += " --parameters_json_file %s"%parameters_json_file
                     if gff is not None: cmd += " --gff %s"%gff
+                    if replace_FromGridssRun_final_perSVade_run is True: cmd += " --replace_FromGridssRun_final_perSVade_run"
 
                     # if the running in slurm is false, just run the cmd
                     if job_array_mode=="local": run_cmd(cmd)
@@ -9968,6 +10127,9 @@ def report_accuracy_realSVs(close_shortReads_table, reference_genome, outdir, re
     if StopAfter_testAccuracy_perSVadeRunning is True: 
         print_if_verbose("You already ran all the configurations of perSVade. Stopping after the running of perSVade on testAccuracy")
         sys.exit(0)
+
+
+    thisneedstoberefactored_and_simplified
 
     print_if_verbose("getting the plots about accuracy")
     # map each runID to the IDs of the same sample 
@@ -12400,6 +12562,31 @@ def get_vcf_df_from_remaining_r(r, gridss_fields):
         # add infoq
         df_vcf["INFO"] = "SVTYPE=BND;%s"%(backbone_info)
 
+    # events with breakpoints
+    elif r["SVTYPE"] in {"CVT", "IVT"}:
+
+        # get one BND for each breakend
+        df1 =  pd.DataFrame({0 : {"#CHROM":r["#CHROM"], "POS":r["POS"], "ALT":"<BND>"}}).transpose()
+        df2 =  pd.DataFrame({1 : {"#CHROM":r["CHR2"], "POS":r["START"], "ALT":"<BND>"}}).transpose()
+        df3 =  pd.DataFrame({2 : {"#CHROM":r["CHR2"], "POS":r["END"], "ALT":"<BND>"}}).transpose()
+
+        df_vcf = df1.append(df2).append(df3)
+
+        # add info
+        df_vcf["INFO"] = "SVTYPE=BND;%s"%(backbone_info)
+
+    # events with 1 breakend and 1 dup event
+    elif r["SVTYPE"]=="CVD":
+
+        # get the duplicated region
+        df_dup = pd.DataFrame({0 : {"#CHROM":r["CHR2"], "POS":r["START"], "ALT":"<DUP>", "INFO":"SVTYPE=DUP;END=%i;%s"%(r["END"], backbone_info)}}).transpose()
+
+        # get the breakpoint region
+        df_bnd = pd.DataFrame({1 : {"#CHROM":r["#CHROM"], "POS":r["POS"], "ALT":"<BND>", "INFO":"SVTYPE=BND;%s"%(backbone_info)}}).transpose()
+
+        # keep
+        df_vcf = df_dup.append(df_bnd)
+
     else: 
         print(r)
         raise ValueError("%s has not been considered"%r["SVTYPE"])
@@ -13598,11 +13785,17 @@ def get_vcf_all_SVs_and_CNV(perSVade_outdir, outdir, sorted_bam, reference_genom
         outdir_gridss_final = "%s/SVdetection_output/final_gridss_running"%perSVade_outdir
 
         # get the svDF metadata
+        print_if_verbose("getting the svtype_to_svDF")
         svtype_to_svDF = get_sampleID_to_svtype_to_svDF_filtered({"x":svtype_to_svfile}, {"x":df_gridss}, sampleID_to_parentIDs={}, breakend_info_to_keep=['#CHROM', 'POS', 'other_coordinates', 'allele_frequency', 'allele_frequency_SmallEvent', 'real_AF', 'FILTER', 'inserted_sequence', 'has_poly16GC', 'length_inexactHomology', 'length_microHomology', 'QUAL', 'overlaps_repeats', 'REF', 'BREAKPOINTID'])["x"]
+
+        print_if_verbose("svtype_to_svDF got")
 
         # get the clove output
         outfile_clove = "%s/gridss_output.vcf.withSimpleEventType.vcf.filtered_default.vcf.bedpe.raw.bedpe.clove.vcf"%outdir_gridss_final
         df_clove = get_clove_output(outfile_clove)
+
+        # change the ID so that it ends with a o
+        df_clove["ID"] = df_clove.ID.apply(lambda x: "+".join([y[0:-1]+"o" for y in re.split("\+|\-", x)]))
      
         # get a vcf df, that comes from all vcfs
         df_vcf = pd.concat([get_vcf_df_for_svDF(svDF, svtype, reference_genome, df_gridss) for svtype, svDF in svtype_to_svDF.items() if svtype in {"tandemDuplications", "deletions", "inversions", "translocations", "insertions", "remaining"}])
@@ -13699,8 +13892,6 @@ def check_that_cloveIDs_are_in_gridss_df(df_clove, df_gridss):
     if len(missing_IDs)>0: raise ValueError("%s can't be found in df_gridss"%missing_IDs)
 
     print_if_verbose("all clove IDs are in df_gridss")
-
-
 
 def get_df_clove_from_sorted_bam(sorted_bam, outdir, parameters_jsonfile, reference_genome, mitochondrial_chromosome, replace, threads):
 

@@ -6150,3 +6150,157 @@ def get_df_windows_arround_pos_r(r, chrom_to_len, min_sv_size):
 
 
     return pd.DataFrame(data_dict).transpose()
+
+
+
+def simulate_SVs_in_genome(reference_genome, mitochondrial_chromosome, outdir, nvars=200, replace=False, svtypes={"insertions", "deletions", "inversions", "translocations", "tandemDuplications", "translocations"}, bedpe_breakpoints=None):
+
+    """This function generates nvars into the reference genome splitting by gDNA and mtDNA with files written under outdir"""
+
+    print_if_verbose("generating simulations")
+
+    # initialize a df that will contain the randomly-simulated vars
+    final_svtype_to_svDF = {svtype : pd.DataFrame() for svtype in svtypes}
+
+
+
+    # define the different types of chromosomes. Note that the mtDNA chromosomes will be simulated appart
+    all_chromosomes = {s.id for s in SeqIO.parse(reference_genome, "fasta")}
+    if mitochondrial_chromosome!="no_mitochondria": mtDNA_chromosomes = set(mitochondrial_chromosome.split(","))
+    else: mtDNA_chromosomes = set()
+    gDNA_chromosomes = all_chromosomes.difference(mtDNA_chromosomes)
+
+    # map the chromosome to the length
+    chrom_to_len = {s.id : len(s.seq) for s in SeqIO.parse(reference_genome, "fasta")}
+
+    # go through each of the mtDNA and gDNA
+    for type_genome, chroms in [("mtDNA", mtDNA_chromosomes), ("gDNA", gDNA_chromosomes)]:
+        print_if_verbose(type_genome)
+
+        # if there are chroms just continue
+        if len(chroms)==0: continue
+
+        # if the genome is mtDNA you shoudl simulate less vars
+        if type_genome=="gDNA": vars_to_simulate = nvars
+        else: vars_to_simulate = int(nvars*0.05) + 1
+
+        # define the outdir
+        genome_outdir = "%s/simulation_%s"%(outdir, type_genome); make_folder(genome_outdir)
+
+        # get the genome 
+        genome_file = "%s/genome.fasta"%genome_outdir
+        SeqIO.write([c for c in SeqIO.parse(reference_genome, "fasta") if c.id in chroms], genome_file, "fasta")
+
+        # simulate random SVs into regions without previous SVs 
+        random_sim_dir = "%s/random_SVs"%genome_outdir
+
+        # define a bed file with all the regions
+        if bedpe_breakpoints is None:
+            print_if_verbose("simulating randomly distributed SVs")
+
+            # define the len_shortest_chr
+            len_shortest_chr = min([lenChrom for lenChrom in chrom_to_len.values() if lenChrom>=window_l])
+
+            #### GET THE RANDOM INS,INV,DEL,TRA ####
+
+            # initialize the cmd
+            randomSV_cmd = "%s --input_genome %s --outdir %s --len_shortest_chr %i"%(create_random_simulatedSVgenome_R, genome_file, random_sim_dir,  len_shortest_chr) 
+
+            # add the numbers of SVs depending on if it is random or not
+            expected_svtypes = {"insertions", "deletions", "inversions", "tandemDuplications", "translocations", "translocations"}.intersection(svtypes)
+
+            # if there is only one, get the expecyed SVtypes
+            if len(chroms)==1: expected_svtypes = {s for s in expected_svtypes if s!="translocations"}
+
+            # define the expected_files
+            expected_files = {"%s/%s.tab"%(random_sim_dir, svtype) for svtype in expected_svtypes}
+
+            # add to cmd        
+            svtype_to_arg = {"insertions":"number_Ins", "deletions":"number_Del", "inversions":"number_Inv", "tandemDuplications":"number_Dup", "translocations":"number_Tra"}
+            for svtype in expected_svtypes: randomSV_cmd += " --%s %i"%(svtype_to_arg[svtype], vars_to_simulate)
+
+            # define the finalisation file
+            random_sims_performed_file = "%s/random_sims_performed.txt"%random_sim_dir
+
+            # remove the file if all the expected svtypes are empty
+            if any([file_is_empty(f) for f in expected_files]):
+                print_if_verbose("none of the files were performed")
+                remove_file(random_sims_performed_file)
+
+            # run the cmd if necessary
+            if any([file_is_empty(f) for f in expected_files]) or replace is True:
+                print_if_verbose("generating random SVs")
+
+                # make and delete the folder
+                delete_folder(random_sim_dir); make_folder(random_sim_dir)
+
+                # run the random simulation
+                std_rearranging_genome = "%s/simulation_std.txt"%random_sim_dir
+                #std_rearranging_genome = "stdout"
+                print_if_verbose("getting random SVs. The std is in %s"%std_rearranging_genome)
+                if std_rearranging_genome!="stdout": run_cmd("%s > %s 2>&1"%(randomSV_cmd, std_rearranging_genome))
+                else: run_cmd(randomSV_cmd)
+
+                # check that everything went fine
+                if any([file_is_empty(f) for f in expected_files]): raise ValueError("none of the SVs were simulated")
+
+                remove_file(std_rearranging_genome)
+
+                # edit the insertions 
+                insertions_file = "%s/insertions.tab"%random_sim_dir
+                if not file_is_empty(insertions_file): rewrite_insertions_uniformizedFormat_simulateSV(insertions_file)
+
+                open(random_sims_performed_file, "w").write("random simulations performed")          
+
+            ########################################
+
+        ##### GET THE RANDOM TAN,DEL,INV,INS,TRA ARROUND PROVIDED BREAKPOINTS #####
+        else:
+
+            # load the bedpe
+            bedpe_fields = ["chrom1", "start1", "end1", "chrom2", "start2", "end2", "name", "score", "strand1", "strand2"]
+            df_bedpe = pd.read_csv(bedpe_breakpoints, sep="\t", header=-1, names=bedpe_fields)
+
+            # define the translocations 
+            get_SVs_arround_breakpoints(genome_file, df_bedpe, vars_to_simulate, random_sim_dir, svtypes, replace=replace)
+
+        #######################################################################
+
+        ######### KEEP VARS #########
+       
+        for svtype in final_svtype_to_svDF.keys():
+            svDF = final_svtype_to_svDF[svtype]
+
+            # skip translocations of 1 chromosome
+            if len(chroms)==1 and svtype=="translocations": continue
+
+            # get the new sv
+            file = "%s/%s.tab"%(random_sim_dir, svtype)
+            new_svDF = pd.read_csv(file, sep="\t")
+            new_svDF = new_svDF[[c for c in new_svDF.keys() if "BpSeq" not in c]]
+
+            # add the name
+            new_svDF["ID"] = new_svDF.Name + "_sim_%s"%type_genome
+
+            # append 
+            final_svtype_to_svDF[svtype] = svDF.append(new_svDF, sort=True)
+
+        ##############################
+
+    ##### REARRANGE THE GENOME WITH THE CALCULATED VARS #####
+
+    # define the final outdirs
+    final_simulated_SVs_dir = "%s/final_simulated_SVs"%(outdir); 
+    final_rearranged_genome = "%s/rearranged_genome.fasta"%final_simulated_SVs_dir
+    final_rearranged_genome_finalFile = "%s.performed"%(final_rearranged_genome)
+
+    # insert the predicted  
+    generate_rearranged_genome_from_svtype_to_svDF(reference_genome, final_svtype_to_svDF, final_simulated_SVs_dir, replace=replace)
+
+    # get the final svtype
+    final_svtype_to_svfile = {svtype : "%s/%s.tab"%(final_simulated_SVs_dir, svtype) for svtype in svtypes}
+
+    return final_svtype_to_svfile, final_rearranged_genome
+
+    ############################################################
+

@@ -536,6 +536,8 @@ def get_plot_data_SV_CNV_r(r, vcf_fields_onHover, chrom_to_Xoffset):
 
     # depending on several combinations plot one thing or the other
 
+    needtoadapt_to_eachTypeOFVariant
+
     # inferred by coverage 
     if IDsvtype=="coverageDUP" and r["INFO_BPS_TYPE"] in {"RealBPs", "wholeChrom"}: 
         x = [r["POS"], r["INFO_END"]]
@@ -570,11 +572,18 @@ def get_plot_data_SV_CNV_r(r, vcf_fields_onHover, chrom_to_Xoffset):
         symbol = "circle"
         name = "tandem duplications"
 
-    elif IDsvtype=="DUP" and r["INFO_SVTYPE"]=="DUP": 
+    elif IDsvtype=="INS" and r["INFO_SVTYPE"]=="DUP": 
         x = [r["POS"], r["INFO_END"]]
         color = "navy"
         symbol = "circle"
         name = "copy-paste insertions"
+
+    elif IDsvtype=="CVD" and r["INFO_SVTYPE"]=="DUP": 
+        x = [r["POS"], r["INFO_END"]]
+        color = "green"
+        symbol = "circle"
+        name = "complex inverted duplications"
+
 
     elif IDsvtype=="DEL" and r["INFO_SVTYPE"]=="DEL": 
         x = [r["POS"], r["INFO_END"]]
@@ -594,18 +603,34 @@ def get_plot_data_SV_CNV_r(r, vcf_fields_onHover, chrom_to_Xoffset):
         symbol = "cross"
         name = "unclassified SVs insertions"
 
-    elif not IDsvtype.endswith("like") and r["INFO_SVTYPE"]=="BND": 
+    elif not IDsvtype.endswith("like"):
+
+        # define an X for all
         x = [r["POS"]]
-        color = "black"
-        symbol = "x"
-        name = "classified SVs BND"
+
+        needtoworkhere
+
+        # all the classified BND go into the same name 
+        if r["INFO_SVTYPE"]=="BND": 
+            symbol = "x"
+            name = "classified SVs BND"
+            color = "black"
+
+        elif r["INFO_SVTYPE"]=="insertionBND": 
+
+            pass
+            youshouldworkonthis
+
+            x = [r["POS"]]
+            color = "black"
+            symbol = "cross"
+            name = "classified SVs insertions"
 
 
-    elif not IDsvtype.endswith("like") and r["INFO_SVTYPE"]=="insertionBND": 
-        x = [r["POS"]]
-        color = "black"
-        symbol = "cross"
-        name = "classified SVs insertions"
+
+
+
+
 
     else:
         print(r["ID"])
