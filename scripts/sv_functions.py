@@ -34,11 +34,10 @@ from sklearn import linear_model
 import time
 from sklearn.metrics import r2_score
 from collections import Counter, defaultdict
-import inspect
 import collections
+from ete3 import Tree, NCBITaxa
 from shutil import copyfile
 #import igraph
-from ete3 import Tree, NCBITaxa
 import urllib
 from subprocess import STDOUT, check_output
 import subprocess
@@ -51,7 +50,6 @@ from matplotlib.collections import PatchCollection
 import scipy.stats as stats
 import psutil
 from sklearn.utils import resample
-
 
 #### UNIVERSAL FUNCTIONS ####
 
@@ -80,6 +78,8 @@ def get_date_and_time():
 # packages to remove (potentially)
 #import psutil
 #from statsmodels.stats import multitest
+# import inspect
+
 
 # chnage the errirs ti report
 warnings.simplefilter(action='ignore', category=pd.core.common.SettingWithCopyWarning) # avoid the slicing warning
@@ -1768,9 +1768,9 @@ def get_SVs_arround_breakpoints(genome_file, df_bedpe, nvars, outdir, svtypes, r
         df_bedpe.index = list(range(0, len(df_bedpe)))
 
         # set the max_n_breakpoints, 
-        max_n_breakpoints = nvars*30
+        max_n_breakpoints = nvars*3000
         if len(df_bedpe)>max_n_breakpoints: 
-    
+        
             """
             # setting half of them to be interchromosomal
             half_max_n_breakpoints = int(max_n_breakpoints/2)
@@ -1782,8 +1782,9 @@ def get_SVs_arround_breakpoints(genome_file, df_bedpe, nvars, outdir, svtypes, r
             df_bedpe = df_bedpe_dif_chrom.append(df_bedpe_same_chrom)
             df_bedpe.index = list(range(0, len(df_bedpe)))
             """
-
+            
             df_bedpe = df_bedpe.iloc[0:max_n_breakpoints]
+
 
         if len(df_bedpe)>0:
 
@@ -1806,6 +1807,9 @@ def get_SVs_arround_breakpoints(genome_file, df_bedpe, nvars, outdir, svtypes, r
             # define the legths of the variants
             lengths_SVs = list(df_bedpe[(~pd.isna(df_bedpe.length)) & (df_bedpe.length>=50)].length)
             random.shuffle(lengths_SVs)
+
+            # if empty, pick a fixed lenght
+            if len(lengths_SVs)==0: lengths_SVs = [1000]
 
             # already_affected_positions contains a set of "chrom_pos" with the already affected positions. It will be updated with each new variant
             already_affected_positions = set()
@@ -1976,96 +1980,20 @@ def get_SVs_arround_breakpoints(genome_file, df_bedpe, nvars, outdir, svtypes, r
             svDF["Name"] = svDF.ID
             svDF[svtype_to_fieldsDict[svtype]["all_fields"] + ["Name"]].to_csv("%s/%s.tab"%(outdir, svtype), sep="\t", index=False, header=True)
 
+def get_subset_genome_as_fasta(input_genome, output_genome, chroms, replace=False):
 
-def get_random_df_bedpe(n_BPs, reference_genome, replace=False):
+    """Takes an input genome and keeps only the chroms, writing to output_genome"""
 
-    """This function generates random bBPs breakpoints for a reference genome, and returns a bedpe with the reference genome"""
+    if file_is_empty(output_genome) or replace is True:
 
-    print_if_verbose("getting random df_bedpe")
+        # define all seqs
+        all_chroms = [seq for seq in SeqIO.parse(input_genome, "fasta") if seq.id in chroms]
 
-    ###### GET GENOME WINDOWS INTO DF ######
+        # write
+        output_genome_tmp = "%s.tmp"%output_genome
+        SeqIO.write(all_chroms, output_genome_tmp, "fasta")
+        os.rename(output_genome_tmp, output_genome)
 
-    # index the genome
-    index_genome(reference_genome, replace=replace)
-
-    # get df_windows of 1000 bp
-    window_size = 1000
-    windows_file = "%s.windows%ibp.bed"%(reference_genome, window_size)
-    windows_file_stderr = "%s.generating.stderr"%windows_file
-
-    if file_is_empty(windows_file) or replace is True:
-
-        windows_file_tmp = "%s.tmp"%windows_file
-
-        print_if_verbose("generating windows_file. The stderr is in %s"%windows_file_stderr)
-        run_cmd("%s makewindows -g %s.fai -w %i > %s 2>%s"%(bedtools, reference_genome, window_size, windows_file_tmp, windows_file_stderr))
-        remove_file(windows_file_stderr)
-
-        os.rename(windows_file_tmp, windows_file)
-
-    # get df, the index is already unique
-    df_windows = pd.read_csv(windows_file, sep="\t", header=None, names=["chromosome", "start", "end"])
-    df_windows["pos"] = (df_windows.start + (df_windows.end - df_windows.start)/2).apply(int)
-
-    ##########################################
-
-    ######## generate random breakpoints ########
-
-    print_if_verbose("placing random breakpoints")
-
-    # reshuffle df. This will ensure that the selection is random
-    df_windows = df_windows.sample(frac=1)[["chromosome", "pos"]]
-
-    # initialize dict
-    data_dict = {}; Ibp = 0
-
-    # define all bpIDs
-    all_BPids = np.array(df_windows.index)
-
-    # map bools to strand
-    bool_to_strand = {True:"+", False:"-"}
-
-    # iterate through each window, randomly
-    for Ileft in all_BPids:
-
-        # break if you already have enough BPs
-        if len(data_dict)>=n_BPs: break
-
-        # iterate through the downstream windows
-        for Iright in all_BPids[all_BPids>Ileft]:
-
-            # break if you already have enough BPs
-            if len(data_dict)>=n_BPs: break
-
-            # define the positions
-            r1 = df_windows.loc[Ileft]
-            r2 = df_windows.loc[Iright]
-
-            # add the dict
-            data_dict[Ibp] = {"chrom1" : r1["chromosome"], 
-                              "start1" : r1["pos"],
-                              "end1" : r1["pos"]+5,
-
-                              "chrom2" : r2["chromosome"], 
-                              "start2" : r2["pos"],
-                              "end2" : r2["pos"]+5,
-
-                              "name": "bp_%i"%Ibp,
-                              "score": 1000,
-
-                              "strand1": bool_to_strand[random.uniform(0, 1)>=0.8],
-                              "strand2": bool_to_strand[random.uniform(0, 1)>=0.8]}
-
-
-            Ibp += 1
-
-    # get df
-    bedpe_fields = ["chrom1", "start1", "end1", "chrom2", "start2", "end2", "name", "score", "strand1", "strand2"]
-    df_bedpe = pd.DataFrame(data_dict).transpose()[bedpe_fields]
-
-    #############################################
-
-    return df_bedpe  
 
 def simulate_SVs_in_genome(reference_genome, mitochondrial_chromosome, outdir, nvars=200, replace=False, svtypes={"insertions", "deletions", "inversions", "translocations", "tandemDuplications", "translocations"}, bedpe_breakpoints=None):
 
@@ -2075,8 +2003,6 @@ def simulate_SVs_in_genome(reference_genome, mitochondrial_chromosome, outdir, n
 
     # initialize a df that will contain the randomly-simulated vars
     final_svtype_to_svDF = {svtype : pd.DataFrame() for svtype in svtypes}
-
-
 
     # define the different types of chromosomes. Note that the mtDNA chromosomes will be simulated appart
     all_chromosomes = {s.id for s in SeqIO.parse(reference_genome, "fasta")}
@@ -2108,43 +2034,31 @@ def simulate_SVs_in_genome(reference_genome, mitochondrial_chromosome, outdir, n
         # simulate random SVs into regions without previous SVs 
         random_sim_dir = "%s/random_SVs"%genome_outdir
 
-       
-        # define a a bedpe df randomly distributed
-        if bedpe_breakpoints is None:
+        # define the chromosomes above window length
+        chroms_above_window_l = {chrom for chrom in chroms if chrom_to_len[chrom]>=window_l}
+        if len(chroms_above_window_l)==0: chroms_above_window_l = chroms
 
-            # debug
-            if "Drosophila" in random_sim_dir:
-
-                # define the expected SV types
-                expected_svtypes = {"insertions", "deletions", "inversions", "tandemDuplications", "translocations", "translocations"}.intersection(svtypes)
-
-                # if there is only one, get the expecyed SVtypes
-                if len(chroms)==1: expected_svtypes = {s for s in expected_svtypes if s!="translocations"}
-
-                n_BPs = vars_to_simulate * len(expected_svtypes) * 5
-                df_bedpe = get_random_df_bedpe(n_BPs, genome_file, replace=replace)
-
-                print(df_bedpe)
-
-                adkjhdkhjda
-
-
+        # define a bed file with all the regions
         if bedpe_breakpoints is None:
             print_if_verbose("simulating randomly distributed SVs")
+         
+            # get a genome with the desired chromosomes
+            genome_file_correctChroms = "%s.correct_chromosomes.fasta"%genome_file
+            get_subset_genome_as_fasta(genome_file, genome_file_correctChroms, chroms_above_window_l, replace=replace)
 
-            # define the len_shortest_chr
-            len_shortest_chr = min([lenChrom for lenChrom in chrom_to_len.values() if lenChrom>=window_l])
+            # define the length of the shortest chromosome
+            len_shortest_chr = min([chrom_to_len[c] for c in chroms_above_window_l])
 
             #### GET THE RANDOM INS,INV,DEL,TRA ####
 
             # initialize the cmd
-            randomSV_cmd = "%s --input_genome %s --outdir %s --len_shortest_chr %i"%(create_random_simulatedSVgenome_R, genome_file, random_sim_dir,  len_shortest_chr) 
+            randomSV_cmd = "%s --input_genome %s --outdir %s --len_shortest_chr %i"%(create_random_simulatedSVgenome_R, genome_file_correctChroms, random_sim_dir,  len_shortest_chr) 
 
             # add the numbers of SVs depending on if it is random or not
             expected_svtypes = {"insertions", "deletions", "inversions", "tandemDuplications", "translocations", "translocations"}.intersection(svtypes)
 
             # if there is only one, get the expecyed SVtypes
-            if len(chroms)==1: expected_svtypes = {s for s in expected_svtypes if s!="translocations"}
+            if len(chroms_above_window_l)==1: expected_svtypes = {s for s in expected_svtypes if s!="translocations"}
 
             # define the expected_files
             expected_files = {"%s/%s.tab"%(random_sim_dir, svtype) for svtype in expected_svtypes}
@@ -2162,7 +2076,7 @@ def simulate_SVs_in_genome(reference_genome, mitochondrial_chromosome, outdir, n
                 remove_file(random_sims_performed_file)
 
             # run the cmd if necessary
-            if any([file_is_empty(f) for f in expected_files]) or replace is True:
+            if file_is_empty(random_sims_performed_file) or replace is True:
                 print_if_verbose("generating random SVs")
 
                 # make and delete the folder
@@ -2205,8 +2119,8 @@ def simulate_SVs_in_genome(reference_genome, mitochondrial_chromosome, outdir, n
         for svtype in final_svtype_to_svDF.keys():
             svDF = final_svtype_to_svDF[svtype]
 
-            # skip translocations of 1 chromosome
-            if len(chroms)==1 and svtype=="translocations": continue
+            # skip translocations if they where not feasible
+            if svtype=="translocations" and file_is_empty("%s/%s.tab"%(random_sim_dir, svtype)): continue
 
             # get the new sv
             file = "%s/%s.tab"%(random_sim_dir, svtype)
@@ -5526,7 +5440,7 @@ def downsample_close_shortReads_table(close_shortReads_table, close_shortReads_t
 
 
 
-def get_close_shortReads_table_close_to_taxID(target_taxID, reference_genome, outdir, ploidy, n_close_samples=3, nruns_per_sample=3, replace=False, threads=4, min_fraction_reads_mapped=0.1, coverage_subset_reads=0.1, min_coverage=30, job_array_mode="local", StopAfter_sampleIndexingFromSRA=False, queue_jobs="debug", max_ncores_queue=768, time_read_obtention="02:00:00", StopAfterPrefecth_of_reads=False, get_lowest_coverage_possible=False, max_coverage_sra_reads=10000000000000000):
+def get_close_shortReads_table_close_to_taxID(target_taxID, reference_genome, outdir, ploidy, n_close_samples=3, nruns_per_sample=3, replace=False, threads=4, min_fraction_reads_mapped=0.1, coverage_subset_reads=0.1, min_coverage=30, job_array_mode="local", StopAfter_sampleIndexingFromSRA=False, StopAfterPrefecth_of_reads=False, get_lowest_coverage_possible=False, max_coverage_sra_reads=10000000000000000):
 
     """
     This function takes a taxID and returns the close_shortReads_table that is required to do optimisation of parameters
@@ -5626,18 +5540,18 @@ def get_close_shortReads_table_close_to_taxID(target_taxID, reference_genome, ou
                 for cmd in all_cmds: run_cmd(cmd)
 
             # if you are in a greasy environment
-            elif job_array_mode=="greasy": 
+            elif job_array_mode=="job_array": 
 
                 read_downloading_dir = "%s/read_downloading_files"%outdir; make_folder(read_downloading_dir)
-                print_if_verbose("Submitting %i downloading reads jobs to greasy. All files will be stored in %s"%(len(all_cmds), read_downloading_dir))
+                print_if_verbose("Submitting %i downloading reads jobs to a job_array. All files will be stored in %s"%(len(all_cmds), read_downloading_dir))
 
                 jobs_filename = "%s/jobs.getting_SRAdatasets"%read_downloading_dir
                 open(jobs_filename, "w").write("\n".join(all_cmds))
 
-                generate_jobarray_file_greasy(jobs_filename, walltime=time_read_obtention,  name="getting_SRAdatasets", queue=queue_jobs, sbatch=True, ncores_per_task=threads, number_tasks_to_run_at_once="all", max_ncores_queue=max_ncores_queue)
+                generate_jobarray_file(jobs_filename, "gettingCloseShortReads")
 
                 # exit before it starts
-                print_if_verbose("You need to wait until the read obtention is is finsihed")
+                print_if_verbose("You need to run all the jobs from %s"%jobs_filename)
                 sys.exit(0)
 
             else: raise ValueError("%s is not valid"%job_array_mode)
@@ -6688,7 +6602,7 @@ def clean_perSVade_outdir(outdir):
 
     ###########################################
 
-def get_compatible_real_bedpe_breakpoints(close_shortReads_table, reference_genome, outdir, replace=False, threads=4, mitochondrial_chromosome="mito_C_glabrata_CBS138", job_array_mode="local", max_ncores_queue=768, time_perSVade_running="48:00:00", queue_jobs="bsc_ls", max_nvars=100, name_job_array="getRealSVs", parameters_json_file=None):
+def get_compatible_real_bedpe_breakpoints(close_shortReads_table, reference_genome, outdir, replace=False, threads=4, mitochondrial_chromosome="mito_C_glabrata_CBS138", job_array_mode="local", max_nvars=100, parameters_json_file=None):
 
     """Generates a file under outdir that has the stacked breakpoints arround which to generate SV calls
     realSV_calling_on can be reads or assembly"""
@@ -6751,21 +6665,21 @@ def get_compatible_real_bedpe_breakpoints(close_shortReads_table, reference_geno
 
             # if the running in slurm is false, just run the cmd
             if job_array_mode=="local": run_cmd(cmd)
-            elif job_array_mode=="greasy": 
+            elif job_array_mode=="job_array": 
                 all_cmds.append(cmd)
                 continue
 
             else: raise ValueError("%s is not valid"%job_array_mode)
 
     # if yoy are running on slurm, get it in a job array
-    if job_array_mode=="greasy": 
+    if job_array_mode=="job_array": 
 
         if len(all_cmds)>0: 
             print_if_verbose("submitting %i jobs to the cluster for the real data. The files can be monitored from %s"%(len(all_cmds), all_realVars_dir))
             jobs_filename = "%s/jobs.getting_realSVs"%all_realVars_dir
             open(jobs_filename, "w").write("\n".join(all_cmds))
 
-            generate_jobarray_file_greasy(jobs_filename, walltime=time_perSVade_running,  name=name_job_array, queue=queue_jobs, sbatch=True, ncores_per_task=threads, constraint="", number_tasks_to_run_at_once="all", max_ncores_queue=max_ncores_queue )
+            generate_jobarray_file(jobs_filename, "compatibleRealBedpeObtention")
 
             print_if_verbose("Exiting... You have to wait until all the jobs in testRealSVs are done. Wait until the jobs are done and rerun this pipeline to continue")
             sys.exit(0)
@@ -9378,23 +9292,10 @@ def run_GridssClove_optimising_parameters(sorted_bam, reference_genome, outdir, 
     return outdir_gridss_final
 
 
-def generate_jobarray_file_greasy(jobs_filename, walltime="48:00:00",  name="JobArray", queue="bsc_ls", sbatch=False, ncores_per_task=1, constraint="", email="miquel.schikora@bsc.es", number_tasks_to_run_at_once="all", max_ncores_queue=768):
+def generate_jobarray_file(jobs_filename, name):
     
-    """ This function takes:
-        jobs_filename: a path to a file in which each line is a command that has to be executed as an independent job
-        name: the name of the jobs array
-        walltime is the time in "dd-hh:mm:ss". It is the sum of job times
-        ncores_per_task is the number of cores that each job gets
-        
-        name is the name prefix
-        queue can be "debug" or "bsc_ls", use bsc_queues to understand which works best
-        rmstd indicates if the previous std has to be removed
-        constraint is a list of constraints to pass to sbatch. For example “highmem” is useful for requesting more memory. You cannot submit a job requesting memory parameters, memory is automatically set for each asked cpu (2G/core by default, 8G/core for highmem)
-
-        number_tasks_to_run_at_once are the number of tasks in a job array to run at once
-        
-        It returns a jobs_filename.run file, which can be sbatch to the cluster directly if sbatch is True
-        This is run in the VarCall_CNV_env
+    """ 
+    This function takes a jobs filename and replaces it creating the necessary STD files. These will be set to be run in a cluster environment
     """
 
     # define the stddir
@@ -9404,17 +9305,7 @@ def generate_jobarray_file_greasy(jobs_filename, walltime="48:00:00",  name="Job
     # remove all previous files from stddir that start with the same name
     for file in os.listdir(stddir): 
         if file.startswith(name): remove_file("%s/%s"%(stddir, file))
-    
-    # Get the number of jobs
-    n_jobs = len(open(jobs_filename, "r").readlines())
-
-    # if default, number_tasks_to_run_at_once is all, which means that it will try to run all tasks at once
-    if number_tasks_to_run_at_once=="all": number_tasks_to_run_at_once = min([int(max_ncores_queue/ncores_per_task), n_jobs])
-
-    # define the constraint only if it is necessary
-    if constraint!="": constraint_line = "#SBATCH --constraint=%s"%constraint
-    else: constraint_line = ""
-
+ 
     # remove previous rst files
     name_jobs_filename = get_file(jobs_filename)
     for file in os.listdir(get_dir(jobs_filename)): 
@@ -9427,46 +9318,9 @@ def generate_jobarray_file_greasy(jobs_filename, walltime="48:00:00",  name="Job
     jobs_filename_lines = ["%s > %s.%i.out 2>&1"%(l.strip(), std_perJob_prefix, I+1) for I, l in enumerate(open(jobs_filename, "r").readlines())]
     open(jobs_filename, "w").write("\n".join(jobs_filename_lines))
 
-    # define the environment activating parms
-    #"echo 'sourcing conda to run pipeline...';",
-    #SOURCE_CONDA_CMD,
-    #CONDA_ACTIVATING_CMD,
+    print("You need to successfully run all jobs in %s to continue"%jobs_filename)
 
-    # "#SBATCH --mail-type=all",
-    # "#SBATCH --mail-user=%s"%email,
-
-    # define the std files
-    greasy_logfile = "%s/%s_greasy.log"%(stddir, name)
-    stderr_file = "%s/%s_stderr.txt"%(stddir, name)
-    stdout_file = "%s/%s_stdout.txt"%(stddir, name)
-
-    # define arguments
-    arguments = ["#!/bin/sh", # the interpreter
-                 "#SBATCH --time=%s"%walltime, # several SBATCH misc commands
-                 "#SBATCH --qos=%s"%queue,
-                 "#SBATCH --job-name=%s"%name,
-                 "#SBATCH --cpus-per-task=%i"%ncores_per_task,
-                 "#SBATCH --error=%s"%(stderr_file), # the standard error
-                 "#SBATCH --output=%s"%(stdout_file), # the standard output
-                 "#SBATCH --get-user-env", # this is to maintain the environment
-                 "#SBATCH --workdir=%s"%outdir,
-                 "#SBATCH --ntasks=%i"%number_tasks_to_run_at_once,
-                 constraint_line,
-                 "",
-                 "module load greasy",
-                 "export GREASY_LOGFILE=%s;"%(greasy_logfile),
-                 "echo 'running pipeline';",
-                 "greasy %s"%jobs_filename]
-
-
-    # define and write the run filename
-    jobs_filename_run = "%s.run"%jobs_filename
-    with open(jobs_filename_run, "w") as fd: fd.write("\n".join(arguments))
-    
-    # run in cluster if specified
-    if sbatch is True: run_cmd("sbatch %s"%jobs_filename_run)
-
-    # get info about the exit status: sacct -j <jobid> --format=JobID,JobName,MaxRSS,Elapsed
+   
 
 def plot_accuracy_simulations_from_all_sampleID_to_dfBestAccuracy(all_sampleID_to_dfBestAccuracy, filename):
 
@@ -9984,7 +9838,7 @@ def plot_accuracy_of_parameters_on_test_samples(parameters_df, test_df, outdir, 
 
   
 
-def report_accuracy_realSVs(close_shortReads_table, reference_genome, outdir, real_bedpe_breakpoints, threads=4, replace=False, n_simulated_genomes=2, mitochondrial_chromosome="mito_C_glabrata_CBS138", simulation_ploidies=["haploid", "diploid_homo", "diploid_hetero", "ref:2_var:1", "ref:3_var:1", "ref:4_var:1", "ref:5_var:1", "ref:9_var:1", "ref:19_var:1", "ref:99_var:1"], range_filtering_benchmark="theoretically_meaningful", nvars=100, job_array_mode="local", max_ncores_queue=48, time_perSVade_running="02:00:00", queue_jobs="debug", StopAfter_testAccuracy_perSVadeRunning=False, skip_cleaning_simulations_files_and_parameters=False, skip_cleaning_outdir=False, slurm_constraint="", parameters_json_file=None, gff=None, replace_FromGridssRun_final_perSVade_run=False):
+def report_accuracy_realSVs(close_shortReads_table, reference_genome, outdir, real_bedpe_breakpoints, threads=4, replace=False, n_simulated_genomes=2, mitochondrial_chromosome="mito_C_glabrata_CBS138", simulation_ploidies=["haploid", "diploid_homo", "diploid_hetero", "ref:2_var:1", "ref:3_var:1", "ref:4_var:1", "ref:5_var:1", "ref:9_var:1", "ref:19_var:1", "ref:99_var:1"], range_filtering_benchmark="theoretically_meaningful", nvars=100, job_array_mode="local", StopAfter_testAccuracy_perSVadeRunning=False, skip_cleaning_simulations_files_and_parameters=False, skip_cleaning_outdir=False, parameters_json_file=None, gff=None, replace_FromGridssRun_final_perSVade_run=False):
 
 
     """This function runs the SV pipeline for all the datasets in close_shortReads_table with the fastSV, optimisation based on uniform parameters and optimisation based on realSVs (specified in real_svtype_to_file). The latter is skipped if real_svtype_to_file is empty.
@@ -10071,7 +9925,7 @@ def report_accuracy_realSVs(close_shortReads_table, reference_genome, outdir, re
 
                     # if the running in slurm is false, just run the cmd
                     if job_array_mode=="local": run_cmd(cmd)
-                    elif job_array_mode=="greasy": 
+                    elif job_array_mode=="job_array": 
                         all_cmds.append(cmd)
                         continue
 
@@ -10091,14 +9945,14 @@ def report_accuracy_realSVs(close_shortReads_table, reference_genome, outdir, re
                 if typeSimulations!="fast": all_sampleID_to_dfBestAccuracy[ID] = pd.read_csv("%s/SVdetection_output/parameter_optimisation/benchmarking_all_filters_for_all_genomes_and_ploidies/df_cross_benchmark_best.tab"%outdir_runID, sep="\t")
 
         # if you are not running on slurm, just execute one cmd after the other
-        if job_array_mode=="greasy":
+        if job_array_mode=="job_array":
 
             if len(all_cmds)>0: 
                 print_if_verbose("submitting %i jobs to the cluster for testing accuracy of perSVade on several combinations of parameters. The files of the submission are in %s"%(len(all_cmds), outdir))
                 jobs_filename = "%s/jobs.testingRealDataAccuracy"%outdir
                 open(jobs_filename, "w").write("\n".join(all_cmds))
 
-                generate_jobarray_file_greasy(jobs_filename, walltime=time_perSVade_running,  name="testAccuracy", queue=queue_jobs, sbatch=True, ncores_per_task=threads, constraint=slurm_constraint, number_tasks_to_run_at_once="all", max_ncores_queue=max_ncores_queue )
+                generate_jobarray_file(jobs_filename, "accuracyRealSVs")
 
                 print_if_verbose("You have to wait under all the jobs in testRealSVs are done")
                 sys.exit(0)
@@ -10418,7 +10272,7 @@ def get_short_and_long_reads_sameBioSample(outdir, taxID, reference_genome, repl
     return wgs_run, ONT_run
 
 
-def report_accuracy_golden_set(goldenSet_dir, outdir, reference_genome, real_svtype_to_file, threads=4, replace=False, n_simulated_genomes=2, mitochondrial_chromosome="mito_C_glabrata_CBS138", simulation_ploidies=["haploid", "diploid_homo", "diploid_hetero", "ref:2_var:1", "ref:3_var:1", "ref:4_var:1", "ref:5_var:1", "ref:9_var:1", "ref:19_var:1", "ref:99_var:1"], range_filtering_benchmark="theoretically_meaningful", nvars=100, job_array_mode="local", time_read_obtention="02:00:00", time_perSVade_running="48:00:00", queue_jobs="debug", StopAfterPrefecth_of_reads=False, StopAfter_sampleIndexingFromSRA=False, max_ncores_queue=768, target_taxID=None, min_coverage=30):
+def report_accuracy_golden_set(goldenSet_dir, outdir, reference_genome, real_svtype_to_file, threads=4, replace=False, n_simulated_genomes=2, mitochondrial_chromosome="mito_C_glabrata_CBS138", simulation_ploidies=["haploid", "diploid_homo", "diploid_hetero", "ref:2_var:1", "ref:3_var:1", "ref:4_var:1", "ref:5_var:1", "ref:9_var:1", "ref:19_var:1", "ref:99_var:1"], range_filtering_benchmark="theoretically_meaningful", nvars=100, job_array_mode="local", StopAfterPrefecth_of_reads=False, StopAfter_sampleIndexingFromSRA=False, target_taxID=None, min_coverage=30):
 
     """This function takes a directory that has the golden set vars and generates plots reporting the accuracy. If auto, it will find them in the SRA and write them under outdir."""
 
@@ -12006,202 +11860,6 @@ def report_variant_calling_statistics(df, variantCallingStats_tablePrefix, progr
         df_stats = pd.DataFrame(stats_dict)
         print_if_verbose("\n", df_stats)
         df_stats.to_csv("%s_%s.tab"%(variantCallingStats_tablePrefix, type_filter), sep="\t")
-
-
-def run_perSVade_severalSamples(paths_df, cwd, common_args, time_greasy="48:00:00", threads=4, sampleID_to_parentIDs={}, samples_to_run=set(), repeat=False, mn_queue="bsc_ls", job_array_mode="greasy", max_ncores_queue=48, ploidy=1, variant_calling_fields=["#Uploaded_variation", "QUAL", "fb_DP", "fb_MQM", "fb_MQMR", "fb_PQA", "fb_PQR", "fb_QA", "fb_QR", "fb_fractionReadsCov", "fb_readsCovVar"]):
-
- 
-    """
-    This function inputs a paths_df, which contains an index as 0-N rows and columns "reads", "sampleID", "readID"  and runs the perSVade pipeline without repeating steps (unless indicated). pths_df can also be a tab-sepparated file were there are this 3 fields. The trimmed_reads_dir has to be the full path to the .fastq file. The sampleID has to be the unique sample identifier and the readID has to be R1 or R2 for paired-end sequencing. The p
-
-    - cwd is the current working directory, where files will be written
-    - repeat is a boolean that indicates whether to repeat all the steps of this function
-    - threads are the number of cores per task allocated. In mn, you can use 48 cores per node. It has not been tested whether more cores can be used per task
-    - samples_to_run is a set of samples for which we want to run all the pipeline
-    - time_greasy is the time greasy gets in DD:HH:MM
-    - mn_queue is the queue were you want to throw the pipeline. You can use "bsc_queues" to see which you have. debug is a faster one, but you can only specify 2h 
-    - job_array_mode can be 'greasy' or 'local'. If local each job will be run after the other
-    - sampleID_to_parentIDs is a dictionary that maps each sampleID to the parent sampleIDs (a set), in a way that there will be a col called parentIDs_with_var, which is a string of ||-joined parent IDs where the variant is also found
-    - common_args is a string with all the perSVade args except the reads. The arguments added will be -o, -f1, -f2
-    - max_ncores_queue is the total number of cores that will be assigned to the job.
-    - ploidy is the ploidy with which to run the varcall
-    - variant_calling_fields are the fields in variant_calling_ploidy<N>.tab to keep in the concatenated data
-    """
-
-    print_if_verbose("Running VarCall pipeline...")
-
-    # if it is a path
-    if type(paths_df)==str: paths_df = pd.read_csv(paths_df, sep="\t")
-
-    # create files that are necessary
-    VarCallOutdirs = "%s/VarCallOutdirs"%cwd; make_folder(VarCallOutdirs)
-    
-    # define the samples_to_run
-    if len(samples_to_run)==0: samples_to_run = set(paths_df.sampleID)
-
-    # get the info of all the reads and samples
-    all_cmds = []
-
-    for sampleID in samples_to_run:
-
-        # define the df for this sample
-        df = paths_df[paths_df.sampleID==sampleID]
-        df1 = df[df.readID=="R1"]
-        df2 = df[df.readID=="R2"]
-
-        # define the reads of interest and keep
-        reads1 = df1.reads.values[0]
-        reads2 = df2.reads.values[0]
-
-        # create an outdir
-        outdir = "%s/%s_VarCallresults"%(VarCallOutdirs, sampleID); make_folder(outdir)
-
-        # define the files that shoud be not empty in order not to run this code
-        #success_files = ["%s/smallVars_CNV_output/variant_annotation_ploidy%i.tab"%(outdir, ploidy)]
-        success_files = ["%s/perSVade_finished_file.txt"%(outdir)]
-                   
-        # define the cmd          
-        cmd = "%s -f1 %s -f2 %s -o %s --ploidy %i %s"%(perSVade_py, reads1, reads2, outdir, ploidy, common_args)
-
-        # add cmd if necessary
-        if any([file_is_empty(x) for x in success_files]) or repeat is True: all_cmds.append(cmd)
-
-    # submit to cluster or return True
-    if len(all_cmds)>0:
-
-        if job_array_mode=="local":
-
-            for Icmd, cmd in enumerate(all_cmds):
-                print_if_verbose("running cmd %i/%i"%(Icmd+1, len(all_cmds)))
-                run_cmd(cmd)
-
-        elif job_array_mode=="greasy":
-
-            print_if_verbose("Submitting %i jobs to cluster ..."%len(all_cmds))
-            jobs_filename = "%s/jobs.run_SNPs_CNV"%cwd
-            open(jobs_filename, "w").write("\n".join(all_cmds))
-
-            generate_jobarray_file_greasy(jobs_filename, walltime=time_greasy,  name="perSVade_many_samples", queue=mn_queue, sbatch=True, ncores_per_task=threads, constraint="", number_tasks_to_run_at_once="all", max_ncores_queue=max_ncores_queue )
-
-        else: raise ValueError("%s is not a valid job_array_mode"%job_array_mode)
-
-        return False
-
-    print_if_verbose("Integrating all variants and CNV into one......")
-
-    checkthathteintegrationmakessense
-
-    ###### INTEGRATE VARIANT CALLING ######
-
-    # define the file
-    variant_calling_df_file = "%s/integrated_variant_calling_ploidy%i.tab"%(cwd, ploidy)
-
-    if file_is_empty(variant_calling_df_file) or repeat is True:
-        print_if_verbose("generating integrated vars")
-
-        # define the columns related to variant_calling_fields
-        df_example = pd.read_csv("%s/%s_VarCallresults/smallVars_CNV_output/variant_calling_ploidy%i.tab"%(VarCallOutdirs, next(iter(samples_to_run)), ploidy), sep="\t")
-        variant_calling_colNames = ",".join([str(I+1) for I, field in enumerate(df_example.keys()) if field in variant_calling_fields])
-
-        del df_example
-
-        # initialize df
-        df_variant_calling = pd.DataFrame()
-
-
-        for Is, sampleID in enumerate(samples_to_run):
-            print_if_verbose("%i/%i: %s"%(Is+1, len(samples_to_run), sampleID))
-
-            # get the partial file
-            target_varcall_file = "%s/%s_VarCallresults/smallVars_CNV_output/variant_calling_ploidy%i.tab"%(VarCallOutdirs, sampleID, ploidy)
-            partial_varcall_file = "%s/partial_variant_calling.tab"%cwd
-
-            cutting_cols_stderr = "%s.generating.stderr"%partial_varcall_file
-            print_if_verbose("getting the important cols. The stderr is in %s"%cutting_cols_stderr)
-            run_cmd("cut -f%s %s > %s 2>%s"%(variant_calling_colNames, target_varcall_file, partial_varcall_file, cutting_cols_stderr))
-            remove_file(cutting_cols_stderr)
-
-            # load df
-            df = pd.read_csv(partial_varcall_file, sep="\t")[variant_calling_fields]
-            remove_file(partial_varcall_file)
-
-            # append the sample ID 
-            df["sampleID"] = sampleID
-
-            # keep
-            df_variant_calling = df_variant_calling.append(df)
-
-            # print the size
-            print_if_verbose("Size of df_variant_calling: %.2f MB"%(sys.getsizeof(df_variant_calling)/1000000))
-
-        # save
-        variant_calling_df_file_tmp = "%s.tmp"%variant_calling_df_file
-        df_variant_calling.to_csv(variant_calling_df_file_tmp, sep="\t", header=True, index=False)
-        os.rename(variant_calling_df_file_tmp, variant_calling_df_file)
-
-    else: variant_calling_df = pd.read_csv(variant_calling_df_file, sep="\t")
-
-
-    ######################################
-
-    ###### INTEGRATE VARIANT ANNOTATION ######
-
-    # define the file
-    variant_annotation_df_file = "%s/integrated_variant_annotation_ploidy%i.tab"%(cwd, ploidy)
-
-    if file_is_empty(variant_annotation_df_file) or repeat is True:
-        print_if_verbose("generating integrated variant annotation")
-
-        # initialize df
-        df_variant_annotation = pd.DataFrame()
-
-        # initialize the previous vars
-        already_saved_vars = set()
-
-        for Is, sampleID in enumerate(samples_to_run):
-            print_if_verbose("%i/%i: %s"%(Is+1, len(samples_to_run), sampleID))
-
-            # load df
-            df = pd.read_csv("%s/%s_VarCallresults/smallVars_CNV_output/variant_annotation_ploidy%i.tab"%(VarCallOutdirs, sampleID, ploidy), sep="\t")
-
-            # get only the new vars
-            df_new = df[~df["#Uploaded_variation"].isin(already_saved_vars)]
-
-            # keep 
-            if len(df_new)>0: df_variant_annotation = df_variant_annotation.append(df_new)
-
-            # define the already existing vars
-            already_saved_vars = set(df_variant_annotation["#Uploaded_variation"])
-
-            # print the size
-            print_if_verbose("Size of df_variant_annotation: %.2f MB"%(sys.getsizeof(df_variant_annotation)/1000000))
-
-
-        # sort
-        df_variant_annotation = df_variant_annotation.sort_values(by="#Uploaded_variation").drop_duplicates()
-
-        # add some fields
-        """
-        df_variant_annotation["chromosome"] = df_variant_annotation["#Uploaded_variation"].apply(lambda x: "_".join(x.split("_")[0:-2]))
-        df_variant_annotation["position"] =  df_variant_annotation["#Uploaded_variation"].apply(lambda x: x.split("_")[-2]).apply(int)
-        df_variant_annotation["ref"] = df_variant_annotation["#Uploaded_variation"].apply(lambda x: x.split("_")[-1].split("/")[0])
-        df_variant_annotation["alt"] = df_variant_annotation["#Uploaded_variation"].apply(lambda x: x.split("_")[-1].split("/")[1])
-        """
-
-        # save
-        variant_annotation_df_file_tmp = "%s.tmp"%variant_annotation_df_file
-        df_variant_annotation.to_csv(variant_annotation_df_file_tmp, sep="\t", header=True, index=False)
-        os.rename(variant_annotation_df_file_tmp, variant_annotation_df_file)
-
-
-    ######################################
-
-
-
-
-    return variant_calling_df
-
-
 
 def run_repeat_modeller(reference_genome, threads=4, replace=False):
 
@@ -14612,3 +14270,298 @@ def remove_files_SV_CNVcalling(outdir):
 
     # remove 
     for f in files_to_remove: delete_file_or_folder("%s/%s"%(parameter_optimisation_dir, f))
+
+
+#######################################################################################
+#######################################################################################
+#######################################################################################
+###################### EXTRA FUNCTIONS, NOT USED BY THE PIPELINE ######################
+#######################################################################################
+#######################################################################################
+#######################################################################################
+
+
+
+def run_jobarray_file_greasy(jobs_filename, cluster_name, name, time="12:00:00", queue="bsc_ls", threads_per_job=4, extra_args={}):
+
+    """
+    This function takes a jobs filename and creates a jobscript with args (which is a list of lines to be written to the jobs cript). 
+    
+    Comments on each cluster:
+    
+    - MN4: There are many nodes, each of them with 48 threads. Each thread has 2Gb of RAM. If you add '--constraint highmem' it will get 8Gb per thread. You can add these extra args:
+
+        - "ntasks": The number of nodes to allocate to the whole greasy job. Each of them will account for 48 threads
+
+    """
+
+    # define dirs
+    outdir = get_dir(jobs_filename)
+    stddir = "%s/STDfiles"%outdir; make_folder(stddir)
+
+    # define the std files
+    greasy_logfile = "%s/%s_greasy.log"%(stddir, name)
+    stderr_file = "%s/%s_stderr.txt"%(stddir, name)
+    stdout_file = "%s/%s_stdout.txt"%(stddir, name)
+
+    # define the job script
+    jobs_filename_run = "%s.run"%jobs_filename
+
+    # init arguments with the interpreter and the stderr and stdout files
+    arguments = ["#!/bin/sh"]
+
+
+    # define things related to the cluster name
+    if cluster_name=="MN4":
+
+        cmd_submit = "sbatch %s"%jobs_filename_run
+
+        arguments += ["#SBATCH --error=%s"%stderr_file,
+                      "#SBATCH --output=%s"%stdout_file,
+                      "#SBATCH --job-name=%s"%name, 
+                      "#SBATCH --get-user-env",
+                      "#SBATCH --workdir=%s"%outdir,
+                      "#SBATCH --time=%s"%time,
+                      "#SBATCH --qos=%s"%queue,
+                      "#SBATCH --cpus-per-task=%i"%threads_per_job,
+                      
+                     ]
+
+        # add extra arguments
+        for arg_name, arg_value in extra_args.items(): arguments += ["#SBATCH --%s=%s"%(arg_name, arg_value)]
+
+    elif cluster_name=="Nord3":
+
+        # change things
+        time = ":".join(time.split(":")[0:2])
+
+        cmd_submit = "bsub < %s"%jobs_filename_run
+        arguments += ["#BSUB -e  %s"%stderr_file,
+                      "#BSUB -o %s"%stdout_file,
+                      "#BSUB -cwd %s"%outdir,
+                      "#BSUB -W %s"%time,
+                      "#BSUB -q %s"%queue 
+                     ]
+
+
+        # threads_per_job
+
+        # add extra arguments
+        for arg_name, arg_value in extra_args.items(): arguments += ["#BSUB -%s %s"%(arg_name, arg_value)]
+
+    else: raise ValueError("%s has not been considered"%cluster_name)
+
+    # add the greasy running
+    arguments += ["",
+                  "module load greasy",
+                  "export GREASY_LOGFILE=%s;"%(greasy_logfile),
+                  "echo 'running pipeline';",
+                  "greasy %s"%jobs_filename]
+
+
+    # define and write the run filename
+    with open(jobs_filename_run, "w") as fd: fd.write("\n".join(arguments))
+    
+    # run in cluster if specified
+    run_cmd(cmd_submit)
+
+def run_perSVade_severalSamples(paths_df, cwd, common_args, threads=4, sampleID_to_parentIDs={}, samples_to_run=set(), repeat=False, job_array_mode="job_array", ploidy=1, variant_calling_fields=["#Uploaded_variation", "QUAL", "fb_DP", "fb_MQM", "fb_MQMR", "fb_PQA", "fb_PQR", "fb_QA", "fb_QR", "fb_fractionReadsCov", "fb_readsCovVar"]):
+
+ 
+    """
+    This function inputs a paths_df, which contains an index as 0-N rows and columns "reads", "sampleID", "readID"  and runs the perSVade pipeline without repeating steps (unless indicated). pths_df can also be a tab-sepparated file were there are this 3 fields. The trimmed_reads_dir has to be the full path to the .fastq file. The sampleID has to be the unique sample identifier and the readID has to be R1 or R2 for paired-end sequencing. The p
+
+    - cwd is the current working directory, where files will be written
+    - repeat is a boolean that indicates whether to repeat all the steps of this function
+    - threads are the number of cores per task allocated. In mn, you can use 48 cores per node. It has not been tested whether more cores can be used per task
+    - samples_to_run is a set of samples for which we want to run all the pipeline
+    - job_array_mode can be 'job_array' or 'local'. If local each job will be run after the other
+    - sampleID_to_parentIDs is a dictionary that maps each sampleID to the parent sampleIDs (a set), in a way that there will be a col called parentIDs_with_var, which is a string of ||-joined parent IDs where the variant is also found
+    - common_args is a string with all the perSVade args except the reads. The arguments added will be -o, -f1, -f2
+    - max_ncores_queue is the total number of cores that will be assigned to the job.
+    - ploidy is the ploidy with which to run the varcall
+    - variant_calling_fields are the fields in variant_calling_ploidy<N>.tab to keep in the concatenated data
+    """
+
+    print_if_verbose("Running VarCall pipeline...")
+
+    # if it is a path
+    if type(paths_df)==str: paths_df = pd.read_csv(paths_df, sep="\t")
+
+    # create files that are necessary
+    VarCallOutdirs = "%s/VarCallOutdirs"%cwd; make_folder(VarCallOutdirs)
+    
+    # define the samples_to_run
+    if len(samples_to_run)==0: samples_to_run = set(paths_df.sampleID)
+
+    # get the info of all the reads and samples
+    all_cmds = []
+
+    for sampleID in samples_to_run:
+
+        # define the df for this sample
+        df = paths_df[paths_df.sampleID==sampleID]
+        df1 = df[df.readID=="R1"]
+        df2 = df[df.readID=="R2"]
+
+        # define the reads of interest and keep
+        reads1 = df1.reads.values[0]
+        reads2 = df2.reads.values[0]
+
+        # create an outdir
+        outdir = "%s/%s_VarCallresults"%(VarCallOutdirs, sampleID); make_folder(outdir)
+
+        # define the files that shoud be not empty in order not to run this code
+        #success_files = ["%s/smallVars_CNV_output/variant_annotation_ploidy%i.tab"%(outdir, ploidy)]
+        success_files = ["%s/perSVade_finished_file.txt"%(outdir)]
+                   
+        # define the cmd          
+        cmd = "%s -f1 %s -f2 %s -o %s --ploidy %i %s"%(perSVade_py, reads1, reads2, outdir, ploidy, common_args)
+
+        # add cmd if necessary
+        if any([file_is_empty(x) for x in success_files]) or repeat is True: all_cmds.append(cmd)
+
+    # submit to cluster or return True
+    if len(all_cmds)>0:
+
+        if job_array_mode=="local":
+
+            for Icmd, cmd in enumerate(all_cmds):
+                print_if_verbose("running cmd %i/%i"%(Icmd+1, len(all_cmds)))
+                run_cmd(cmd)
+
+        elif job_array_mode=="job_array":
+
+            print_if_verbose("Submitting %i jobs to cluster ..."%len(all_cmds))
+            jobs_filename = "%s/jobs.run_SNPs_CNV"%cwd
+            open(jobs_filename, "w").write("\n".join(all_cmds))
+
+            generate_jobarray_file(jobs_filename, "perSVade_severalSamples")
+
+        else: raise ValueError("%s is not a valid job_array_mode"%job_array_mode)
+
+        return False
+
+    print_if_verbose("Integrating all variants and CNV into one......")
+
+    checkthathteintegrationmakessense
+
+    ###### INTEGRATE VARIANT CALLING ######
+
+    # define the file
+    variant_calling_df_file = "%s/integrated_variant_calling_ploidy%i.tab"%(cwd, ploidy)
+
+    if file_is_empty(variant_calling_df_file) or repeat is True:
+        print_if_verbose("generating integrated vars")
+
+        # define the columns related to variant_calling_fields
+        df_example = pd.read_csv("%s/%s_VarCallresults/smallVars_CNV_output/variant_calling_ploidy%i.tab"%(VarCallOutdirs, next(iter(samples_to_run)), ploidy), sep="\t")
+        variant_calling_colNames = ",".join([str(I+1) for I, field in enumerate(df_example.keys()) if field in variant_calling_fields])
+
+        del df_example
+
+        # initialize df
+        df_variant_calling = pd.DataFrame()
+
+
+        for Is, sampleID in enumerate(samples_to_run):
+            print_if_verbose("%i/%i: %s"%(Is+1, len(samples_to_run), sampleID))
+
+            # get the partial file
+            target_varcall_file = "%s/%s_VarCallresults/smallVars_CNV_output/variant_calling_ploidy%i.tab"%(VarCallOutdirs, sampleID, ploidy)
+            partial_varcall_file = "%s/partial_variant_calling.tab"%cwd
+
+            cutting_cols_stderr = "%s.generating.stderr"%partial_varcall_file
+            print_if_verbose("getting the important cols. The stderr is in %s"%cutting_cols_stderr)
+            run_cmd("cut -f%s %s > %s 2>%s"%(variant_calling_colNames, target_varcall_file, partial_varcall_file, cutting_cols_stderr))
+            remove_file(cutting_cols_stderr)
+
+            # load df
+            df = pd.read_csv(partial_varcall_file, sep="\t")[variant_calling_fields]
+            remove_file(partial_varcall_file)
+
+            # append the sample ID 
+            df["sampleID"] = sampleID
+
+            # keep
+            df_variant_calling = df_variant_calling.append(df)
+
+            # print the size
+            print_if_verbose("Size of df_variant_calling: %.2f MB"%(sys.getsizeof(df_variant_calling)/1000000))
+
+        # save
+        variant_calling_df_file_tmp = "%s.tmp"%variant_calling_df_file
+        df_variant_calling.to_csv(variant_calling_df_file_tmp, sep="\t", header=True, index=False)
+        os.rename(variant_calling_df_file_tmp, variant_calling_df_file)
+
+    else: variant_calling_df = pd.read_csv(variant_calling_df_file, sep="\t")
+
+
+    ######################################
+
+    ###### INTEGRATE VARIANT ANNOTATION ######
+
+    # define the file
+    variant_annotation_df_file = "%s/integrated_variant_annotation_ploidy%i.tab"%(cwd, ploidy)
+
+    if file_is_empty(variant_annotation_df_file) or repeat is True:
+        print_if_verbose("generating integrated variant annotation")
+
+        # initialize df
+        df_variant_annotation = pd.DataFrame()
+
+        # initialize the previous vars
+        already_saved_vars = set()
+
+        for Is, sampleID in enumerate(samples_to_run):
+            print_if_verbose("%i/%i: %s"%(Is+1, len(samples_to_run), sampleID))
+
+            # load df
+            df = pd.read_csv("%s/%s_VarCallresults/smallVars_CNV_output/variant_annotation_ploidy%i.tab"%(VarCallOutdirs, sampleID, ploidy), sep="\t")
+
+            # get only the new vars
+            df_new = df[~df["#Uploaded_variation"].isin(already_saved_vars)]
+
+            # keep 
+            if len(df_new)>0: df_variant_annotation = df_variant_annotation.append(df_new)
+
+            # define the already existing vars
+            already_saved_vars = set(df_variant_annotation["#Uploaded_variation"])
+
+            # print the size
+            print_if_verbose("Size of df_variant_annotation: %.2f MB"%(sys.getsizeof(df_variant_annotation)/1000000))
+
+
+        # sort
+        df_variant_annotation = df_variant_annotation.sort_values(by="#Uploaded_variation").drop_duplicates()
+
+        # add some fields
+        """
+        df_variant_annotation["chromosome"] = df_variant_annotation["#Uploaded_variation"].apply(lambda x: "_".join(x.split("_")[0:-2]))
+        df_variant_annotation["position"] =  df_variant_annotation["#Uploaded_variation"].apply(lambda x: x.split("_")[-2]).apply(int)
+        df_variant_annotation["ref"] = df_variant_annotation["#Uploaded_variation"].apply(lambda x: x.split("_")[-1].split("/")[0])
+        df_variant_annotation["alt"] = df_variant_annotation["#Uploaded_variation"].apply(lambda x: x.split("_")[-1].split("/")[1])
+        """
+
+        # save
+        variant_annotation_df_file_tmp = "%s.tmp"%variant_annotation_df_file
+        df_variant_annotation.to_csv(variant_annotation_df_file_tmp, sep="\t", header=True, index=False)
+        os.rename(variant_annotation_df_file_tmp, variant_annotation_df_file)
+
+
+    ######################################
+
+
+
+
+    return variant_calling_df
+
+
+#######################################################################################
+#######################################################################################
+#######################################################################################
+#######################################################################################
+#######################################################################################
+#######################################################################################
+#######################################################################################
+

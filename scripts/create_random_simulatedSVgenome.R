@@ -28,7 +28,6 @@ argp = add_argument(argp, "--number_Dup", default=0, help="The number of duplica
 argp = add_argument(argp, "--len_shortest_chr", default=1000, help="Len of the shortest chrom")
 argp = add_argument(argp, "--percCopiedIns", default=0.5, help="The fraction of INS that are copy-and-paste")
 argp = add_argument(argp, "--percBalancedTrans", default=1, help="The fraction of TRA that are balanced")
-argp = add_argument(argp, "--max_time_rearrangement", default=120, help="The maximum number of seconds which a rearrangement will take. This is important because sometimes the simulateSV function gets stuck when simulating mtDNA variation")
 #argp = add_argument(argp, "--replace", flag=TRUE, default=FALSE, help="Replace genomes that a")
 
 argv = parse_args(argp)
@@ -57,10 +56,12 @@ rearranged_genome_generated = FALSE # a tag that defines that the rearranged gen
 all_fraction_shortest_chr_to_consider = c(0.1, 0.07, 0.05, 0.03, 0.02, 0.01, 0.005)
 #all_fraction_shortest_chr_to_consider = c(0.005)
 
-
 # define the fraction of nevents that will be considered
 all_fraction_n_events = c(1, 0.8, 0.7, 0.5, 0.3, 0.2, 0.1, 0.05, 0.01, 0.05)
 #all_fraction_n_events = c(1)
+
+# define the max_time_rearrangement
+all_max_time_rearrangement = c(200, 300, 400, 500, 600, 700, 800, 900, 1000, 2000, 3000, 4000, 5000, 10000)
 
 # first iterate through the number of events. It is more important to get as much events as possible
 for (fraction_n_events in all_fraction_n_events) {
@@ -76,26 +77,35 @@ for (fraction_n_events in all_fraction_n_events) {
   for (fraction_shortest_chr_to_consider in all_fraction_shortest_chr_to_consider) {
     print("fraction_n_events:"); print(fraction_n_events)
     print("fraction_shortest_chr_to_consider:"); print(fraction_shortest_chr_to_consider)
-    
-    # define the sizes of these evebts
-    print("getting the size of the SVs")
-    size = as.integer(len_shortest_chr*fraction_shortest_chr_to_consider)
 
-    # define length of each sv
-    size_Del = estimateSVSizes(n=number_Del, minSize=50, maxSize=size, default="deletions", hist=FALSE)
-    size_Ins = estimateSVSizes(n=number_Ins, minSize=50, maxSize=size, default="insertions", hist=FALSE)
-    size_Inv = estimateSVSizes(n=number_Inv, minSize=50, maxSize=size, default="inversions", hist=FALSE)
-    size_Dup = estimateSVSizes(n=number_Dup, minSize=50, maxSize=size, default="inversions", hist=FALSE)
+    # iterate through several time rearrangements
+    for (max_time_rearrangement in all_max_time_rearrangement) {
+      print("max_time_rearrangement:"); print(max_time_rearrangement)
 
-    # adjust the number of tra according to the number of chromosomes in the 
-    max_tra = length(chromosomes)-1
-    if (number_Tra>max_tra) {number_Tra = max_tra}
+      # define the sizes of these evebts
+      print("getting the size of the SVs")
+      size = as.integer(len_shortest_chr*fraction_shortest_chr_to_consider)
 
-    # new
-    rearranged_genome = withTimeout(try(simulateSV(output=NA, genome=genome_obj, chrs=chromosomes, dels=number_Del, ins=number_Ins, invs=number_Inv, trans=number_Tra, dups=number_Dup, sizeDels=size_Del, sizeIns=size_Ins, sizeInvs=size_Inv,  sizeDups=size_Dup, percCopiedIns=argv$percCopiedIns, percBalancedTrans=argv$percBalancedTrans, bpFlankSize=0, percSNPs=0, indelProb=0, maxIndelSize=0, repeatBias=FALSE, bpSeqSize=100, random=TRUE, verbose=TRUE, maxDups=1)), timeout=argv$max_time_rearrangement)
+      # define length of each sv
+      size_Del = estimateSVSizes(n=number_Del, minSize=50, maxSize=size, default="deletions", hist=FALSE)
+      size_Ins = estimateSVSizes(n=number_Ins, minSize=50, maxSize=size, default="insertions", hist=FALSE)
+      size_Inv = estimateSVSizes(n=number_Inv, minSize=50, maxSize=size, default="inversions", hist=FALSE)
+      size_Dup = estimateSVSizes(n=number_Dup, minSize=50, maxSize=size, default="inversions", hist=FALSE)
+
+      # adjust the number of tra according to the number of chromosomes in the 
+      max_tra = length(chromosomes)-1
+      if (number_Tra>max_tra) {number_Tra = max_tra}
+
+      # new
+      rearranged_genome = withTimeout(try(simulateSV(output=NA, genome=genome_obj, chrs=chromosomes, dels=number_Del, ins=number_Ins, invs=number_Inv, trans=number_Tra, dups=number_Dup, sizeDels=size_Del, sizeIns=size_Ins, sizeInvs=size_Inv,  sizeDups=size_Dup, percCopiedIns=argv$percCopiedIns, percBalancedTrans=argv$percBalancedTrans, bpFlankSize=0, percSNPs=0, indelProb=0, maxIndelSize=0, repeatBias=FALSE, bpSeqSize=100, random=TRUE, verbose=TRUE, maxDups=1)), timeout=max_time_rearrangement)
+
+      # if it passes the simulation then break
+      if (class(rearranged_genome)[1]=="DNAStringSet"){ rearranged_genome_generated=TRUE; break; }
+    }
 
     # if it passes the simulation then break
-    if (class(rearranged_genome)[1]=="DNAStringSet"){ rearranged_genome_generated=TRUE; break; }
+    if (class(rearranged_genome)[1]=="DNAStringSet"){ break }
+
   }
 
   # if it passes the simulation then break

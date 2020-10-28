@@ -113,12 +113,13 @@ species_Info = [("5478", "Candida_glabrata", 1, "mito_C_glabrata_CBS138"),
 species_Info = [("746128", "Aspergillus_fumigatus", 1, "CM016889.1"),
                 ("5207", "Cryptococcus_neoformans", 1, "CP003834.1")]
 """
-"""
+
 species_Info = [("7227", "Drosophila_melanogaster", 2, "KJ947872.2", 30),
-                ("3702", "Arabidopsis_thaliana", 2, "BK010421.1,AP000423.1", 30)]
-"""
+                ("3702", "Arabidopsis_thaliana", 2, "BK010421.1,AP000423.1", 30),
+                ("746128", "Aspergillus_fumigatus", 1, "CM016889.1", 10000000000000000)]
+
 #species_Info = [("3702", "Arabidopsis_thaliana", 2, "BK010421.1,AP000423.1", 30)]
-species_Info = [("7227", "Drosophila_melanogaster", 2, "KJ947872.2", 30)]
+#species_Info = [("7227", "Drosophila_melanogaster", 2, "KJ947872.2", 30)]
 
 
 taxIDs_with_noON_overalpping = {"5476", "746128"}
@@ -272,7 +273,7 @@ for taxID, spName, ploidy, mitochondrial_chromosome, max_coverage_sra_reads in s
         else: close_shortReads_table = "auto"
 
         # get the reads from SRA. 3 samples, 3 runs per sample. Process with the. --verbose
-        cmd = "%s --ref %s --threads %i -o %s --close_shortReads_table %s --target_taxID %s --n_close_samples 3 --nruns_per_sample 3 -f1 skip -f2 skip --mitochondrial_chromosome %s --testAccuracy --skip_SVcalling --verbose --skip_cleaning_simulations_files_and_parameters --StopAfter_testAccuracy_perSVadeRunning --max_coverage_sra_reads %i --replace_FromGridssRun_final_perSVade_run --replace_SV_CNVcalling"%(perSVade_py, genome, threads, outdir_perSVade, close_shortReads_table, taxID, mitochondrial_chromosome, max_coverage_sra_reads)
+        cmd = "%s --ref %s --threads %i -o %s --close_shortReads_table %s --target_taxID %s --n_close_samples 3 --nruns_per_sample 3 -f1 skip -f2 skip --mitochondrial_chromosome %s --testAccuracy --skip_SVcalling --verbose --skip_cleaning_simulations_files_and_parameters --StopAfter_testAccuracy_perSVadeRunning --max_coverage_sra_reads %i --replace_SV_CNVcalling --gff %s"%(perSVade_py, genome, threads, outdir_perSVade, close_shortReads_table, taxID, mitochondrial_chromosome, max_coverage_sra_reads, gff)
         # --StopAfter_testAccuracy_perSVadeRunning --slurm_constraint, --StopAfter_obtentionOFcloseSVs --gff %s
 
     elif running_type=="goldenSet":

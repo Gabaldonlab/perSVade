@@ -6152,8 +6152,7 @@ def get_df_windows_arround_pos_r(r, chrom_to_len, min_sv_size):
     return pd.DataFrame(data_dict).transpose()
 
 
-
-def simulate_SVs_in_genome(reference_genome, mitochondrial_chromosome, outdir, nvars=200, replace=False, svtypes={"insertions", "deletions", "inversions", "translocations", "tandemDuplications", "translocations"}, bedpe_breakpoints=None):
+def simulate_SVs_in_genome(reference_genome, mitochondrial_chromosome, outdir, nvars=200, replace=False, svtypes={"insertions", "deletions", "inversions", "translocations", "tandemDuplications", "translocations"}, bedpe_breakpoints=None, threads=4):
 
     """This function generates nvars into the reference genome splitting by gDNA and mtDNA with files written under outdir"""
 
@@ -6193,78 +6192,60 @@ def simulate_SVs_in_genome(reference_genome, mitochondrial_chromosome, outdir, n
 
         # simulate random SVs into regions without previous SVs 
         random_sim_dir = "%s/random_SVs"%genome_outdir
-
-        # define a bed file with all the regions
+       
+        # define the df_bedpe arround which to place the breakpoints
         if bedpe_breakpoints is None:
-            print_if_verbose("simulating randomly distributed SVs")
 
-            # define the len_shortest_chr
-            len_shortest_chr = min([lenChrom for lenChrom in chrom_to_len.values() if lenChrom>=window_l])
-
-            #### GET THE RANDOM INS,INV,DEL,TRA ####
-
-            # initialize the cmd
-            randomSV_cmd = "%s --input_genome %s --outdir %s --len_shortest_chr %i"%(create_random_simulatedSVgenome_R, genome_file, random_sim_dir,  len_shortest_chr) 
-
-            # add the numbers of SVs depending on if it is random or not
+            # define the expected SV types
             expected_svtypes = {"insertions", "deletions", "inversions", "tandemDuplications", "translocations", "translocations"}.intersection(svtypes)
 
             # if there is only one, get the expecyed SVtypes
             if len(chroms)==1: expected_svtypes = {s for s in expected_svtypes if s!="translocations"}
 
-            # define the expected_files
-            expected_files = {"%s/%s.tab"%(random_sim_dir, svtype) for svtype in expected_svtypes}
+            # keep trying to generate n_BPs until you have enough intrachromosomal and interchromosomal breakpoints
+            factor_n_BPs = 10
+            min_n_BPs = vars_to_simulate * len(expected_svtypes) * factor_n_BPs
+            previous_len_df_bedpe = -1
 
-            # add to cmd        
-            svtype_to_arg = {"insertions":"number_Ins", "deletions":"number_Del", "inversions":"number_Inv", "tandemDuplications":"number_Dup", "translocations":"number_Tra"}
-            for svtype in expected_svtypes: randomSV_cmd += " --%s %i"%(svtype_to_arg[svtype], vars_to_simulate)
+            print_if_verbose("looking for at least %i of each type"%min_n_BPs)
 
-            # define the finalisation file
-            random_sims_performed_file = "%s/random_sims_performed.txt"%random_sim_dir
+            # enter a loop in which you keep adding 
+            while True:
 
-            # remove the file if all the expected svtypes are empty
-            if any([file_is_empty(f) for f in expected_files]):
-                print_if_verbose("none of the files were performed")
-                remove_file(random_sims_performed_file)
+                # define the factor as twice the previous
+                factor_n_BPs = factor_n_BPs*3
 
-            # run the cmd if necessary
-            if any([file_is_empty(f) for f in expected_files]) or replace is True:
-                print_if_verbose("generating random SVs")
+                # get the number of breakpoints related to factor_n_BPs
+                n_BPs = vars_to_simulate * len(expected_svtypes) * factor_n_BPs
+                df_bedpe = get_random_df_bedpe(n_BPs, genome_file, replace=replace, threads=threads)
 
-                # make and delete the folder
-                delete_folder(random_sim_dir); make_folder(random_sim_dir)
+                # define the number of each typeBP
+                n_inter_chromosomal = sum(df_bedpe.chrom1!=df_bedpe.chrom2)
+                n_intra_chromosomal = sum(df_bedpe.chrom1==df_bedpe.chrom2)
 
-                # run the random simulation
-                std_rearranging_genome = "%s/simulation_std.txt"%random_sim_dir
-                #std_rearranging_genome = "stdout"
-                print_if_verbose("getting random SVs. The std is in %s"%std_rearranging_genome)
-                if std_rearranging_genome!="stdout": run_cmd("%s > %s 2>&1"%(randomSV_cmd, std_rearranging_genome))
-                else: run_cmd(randomSV_cmd)
+                print_if_verbose("There are %i/%i inter/intra chromosomal events"%(n_inter_chromosomal, n_intra_chromosomal))
 
-                # check that everything went fine
-                if any([file_is_empty(f) for f in expected_files]): raise ValueError("none of the SVs were simulated")
+                # once you have enough BPs of each type, break
+                if "translocations" in expected_svtypes and n_inter_chromosomal>=min_n_BPs and n_intra_chromosomal>=min_n_BPs: break
 
-                remove_file(std_rearranging_genome)
+                elif "translocations" not in expected_svtypes and n_intra_chromosomal>=min_n_BPs: break
 
-                # edit the insertions 
-                insertions_file = "%s/insertions.tab"%random_sim_dir
-                if not file_is_empty(insertions_file): rewrite_insertions_uniformizedFormat_simulateSV(insertions_file)
+                # if you are not finding any new breakpoints
+                if len(df_bedpe)<=previous_len_df_bedpe: break
 
-                open(random_sims_performed_file, "w").write("random simulations performed")          
+                # keep previous_len_df_bedpe
+                previous_len_df_bedpe = len(df_bedpe)
 
-            ########################################
-
-        ##### GET THE RANDOM TAN,DEL,INV,INS,TRA ARROUND PROVIDED BREAKPOINTS #####
+           
         else:
 
             # load the bedpe
             bedpe_fields = ["chrom1", "start1", "end1", "chrom2", "start2", "end2", "name", "score", "strand1", "strand2"]
             df_bedpe = pd.read_csv(bedpe_breakpoints, sep="\t", header=-1, names=bedpe_fields)
 
-            # define the translocations 
-            get_SVs_arround_breakpoints(genome_file, df_bedpe, vars_to_simulate, random_sim_dir, svtypes, replace=replace)
 
-        #######################################################################
+        # define the SVtypes arround the df_bedpe 
+        get_SVs_arround_breakpoints(genome_file, df_bedpe, vars_to_simulate, random_sim_dir, svtypes, replace=replace)
 
         ######### KEEP VARS #########
        
@@ -6287,6 +6268,9 @@ def simulate_SVs_in_genome(reference_genome, mitochondrial_chromosome, outdir, n
 
         ##############################
 
+
+    kadjhgkhajh
+
     ##### REARRANGE THE GENOME WITH THE CALCULATED VARS #####
 
     # define the final outdirs
@@ -6303,4 +6287,266 @@ def simulate_SVs_in_genome(reference_genome, mitochondrial_chromosome, outdir, n
     return final_svtype_to_svfile, final_rearranged_genome
 
     ############################################################
+
+
+def get_bedpe_series_brekends(Ileft, Iright, Ibp, df_windows):
+
+    """Takes a df_windows and returns a bedpe dict for windows Ileft and Iright"""
+
+    # map bools to strand
+    bool_to_strand = {True:"+", False:"-"}
+
+    # define the positions
+    r1 = df_windows.loc[Ileft]
+    r2 = df_windows.loc[Iright]
+
+    # get the dict
+    data_dict =  {"chrom1" : r1["chromosome"], 
+                  "start1" : r1["pos"],
+                  "end1" : r1["pos"]+5,
+
+                  "chrom2" : r2["chromosome"], 
+                  "start2" : r2["pos"],
+                  "end2" : r2["pos"]+5,
+
+                  "name": "bp_%i"%Ibp,
+                  "score": 1000,
+
+                  "strand1": bool_to_strand[random.uniform(0, 1)>=0.5],
+                  "strand2": bool_to_strand[random.uniform(0, 1)>=0.5]}
+
+    return pd.Series(data_dict)
+
+
+
+def get_random_df_bedpe(n_BPs, reference_genome, replace=False, threads=4):
+
+    """This function generates random bBPs breakpoints for a reference genome, and returns a bedpe with the reference genome"""
+
+    print_if_verbose("getting random df_bedpe")
+
+    ###### GET GENOME WINDOWS INTO DF ######
+
+    # index the genome
+    index_genome(reference_genome, replace=replace)
+
+    # get df_windows of 1000 bp
+    chrom_to_len = get_chr_to_len(reference_genome)
+    length_genome = sum(chrom_to_len.values())
+    window_size = max([200, int(length_genome/n_BPs)])
+    windows_file = "%s.windows%ibp.bed"%(reference_genome, window_size)
+    windows_file_stderr = "%s.generating.stderr"%windows_file
+
+    if file_is_empty(windows_file) or replace is True:
+
+        windows_file_tmp = "%s.tmp"%windows_file
+
+        print_if_verbose("generating windows_file. The stderr is in %s"%windows_file_stderr)
+        run_cmd("%s makewindows -g %s.fai -w %i > %s 2>%s"%(bedtools, reference_genome, window_size, windows_file_tmp, windows_file_stderr))
+        remove_file(windows_file_stderr)
+
+        os.rename(windows_file_tmp, windows_file)
+
+    # get df, the index is already unique
+    df_windows = pd.read_csv(windows_file, sep="\t", header=None, names=["chromosome", "start", "end"])
+    df_windows["pos"] = (df_windows.start + (df_windows.end - df_windows.start)/2).apply(int)
+
+    ##########################################
+
+    ##### define SVsizes with the estimateSVSizes R function #####
+
+    # define the max SVsize
+    all_lens = [lenChrom for lenChrom in chrom_to_len.values() if lenChrom>=window_l]
+    if len(all_lens)==0: all_lens = chrom_to_len.values()
+
+    len_shortest_chr = min(all_lens)
+    max_size_SV = int(len_shortest_chr*0.05)
+    min_size_SV = min([200, max_size_SV-1])
+
+    # define an Rscript that runs the estimateSVSizes
+    rscript = "%s.Rscript_calculateSVsizes.R"%reference_genome
+    rscript_lines = ["#!%s/bin/Rscript"%EnvDir,
+                     "library(RSVSim, quietly=TRUE)",
+                     "",
+                     "sizes = estimateSVSizes(n=%i, minSize=%i, maxSize=%i, default='inversions', hist=FALSE)"%(n_BPs, min_size_SV, max_size_SV),
+                     "print(sizes)"]
+
+    open(rscript, "w").write("\n".join(rscript_lines))
+    run_cmd("chmod u+x %s"%rscript)
+
+    # run
+    rscript_stdout = "%s.stdout"%rscript 
+    rscript_stderr = "%s.stderr"%rscript 
+    run_cmd("%s > %s 2>%s"%(rscript, rscript_stdout, rscript_stderr))
+
+    # get the SV sizes
+    SVsizes = make_flat_listOflists([[int(x) for x in l.split("]")[1].split()] for l in  open(rscript_stdout, "r").readlines()])
+
+    ##############################################################
+
+    ######## generate random breakpoints ########
+
+    print_if_verbose("placing random breakpoints. Looking for %i of them"%n_BPs)
+
+    # reshuffle df. This will ensure that the selection is random
+    df_windows = df_windows.sample(frac=1)[["chromosome", "pos"]]
+
+    # initialize the counter
+    Ibp = 0
+
+    # define all bpIDs
+    all_BPids = np.array(df_windows.index)
+
+    # define the Ileft, Iright combinations
+    get_bedpe_series_brekends_inputs = []
+
+    # iterate through each window, randomly
+    for Ileft in all_BPids:
+
+        # break if you already have enough BPs
+        if Ibp>=n_BPs: break
+
+        # iterate through the downstream windows
+        for Iright in all_BPids[all_BPids>Ileft]:
+
+            # break if you already have enough BPs
+            if Ibp>=n_BPs: break
+
+            # get the expected SVlen
+            SV_len = random.choice(SVsizes)
+
+            # skip if the length of the event is larger than SV_len
+            r1 = df_windows.loc[Ileft]
+            r2 = df_windows.loc[Iright]
+
+            if r1["chromosome"]==r2["chromosome"] and (r2["pos"]-r1["pos"]>SV_len): continue
+
+            get_bedpe_series_brekends_inputs.append((Ileft, Iright, Ibp, df_windows))
+            Ibp += 1
+
+    # get the df_bedpe from a pool
+    with multiproc.Pool(threads) as pool:
+
+        # run a dummy function
+        df_bedpe = pd.DataFrame(pool.starmap(get_bedpe_series_brekends, get_bedpe_series_brekends_inputs))
+
+        # close the pool
+        pool.close() 
+        pool.terminate()
+
+    # get 3x as much intrachromosomal than interchromosomal events
+    df_bedpe["intra_chromosome"] = df_bedpe.chrom1==df_bedpe.chrom2
+    df_bedpe_intra = df_bedpe[df_bedpe.intra_chromosome]
+    df_bedpe_inter = df_bedpe[~(df_bedpe.intra_chromosome)]
+
+    max_len_df_inter = len(df_bedpe_intra)
+    df_bedpe = df_bedpe_intra.append(df_bedpe_inter.iloc[0:max_len_df_inter])
+
+    print(df_bedpe)
+
+    # keep non-redundant events
+    add_interval_bp = 100
+    df_bedpe["affected_positions_arroundBp"] = df_bedpe.apply(lambda r: get_affected_positions_from_bedpe_r(r, extra_bp=add_interval_bp), axis=1)
+    df_bedpe = get_df_bedpe_with_nonOverlappingBreakpoints(df_bedpe)
+
+    # define the fields
+    bedpe_fields = ["chrom1", "start1", "end1", "chrom2", "start2", "end2", "name", "score", "strand1", "strand2"]
+
+    #############################################
+
+    return df_bedpe[bedpe_fields]
+
+
+
+
+
+def generate_jobarray_file_greasy(jobs_filename, walltime="48:00:00",  name="JobArray", queue="bsc_ls", sbatch=False, ncores_per_task=1, constraint="", email="miquel.schikora@bsc.es", number_tasks_to_run_at_once="all", max_ncores_queue=768):
+    
+    """ This function takes:
+        jobs_filename: a path to a file in which each line is a command that has to be executed as an independent job
+        name: the name of the jobs array
+        walltime is the time in "dd-hh:mm:ss". It is the sum of job times
+        ncores_per_task is the number of cores that each job gets
+        
+        name is the name prefix
+        queue can be "debug" or "bsc_ls", use bsc_queues to understand which works best
+        rmstd indicates if the previous std has to be removed
+        constraint is a list of constraints to pass to sbatch. For example “highmem” is useful for requesting more memory. You cannot submit a job requesting memory parameters, memory is automatically set for each asked cpu (2G/core by default, 8G/core for highmem)
+
+        number_tasks_to_run_at_once are the number of tasks in a job array to run at once
+        
+        It returns a jobs_filename.run file, which can be sbatch to the cluster directly if sbatch is True
+        This is run in the VarCall_CNV_env
+    """
+
+    # define the stddir
+    outdir = get_dir(jobs_filename)
+    stddir = "%s/STDfiles"%outdir; make_folder(stddir)
+
+    # remove all previous files from stddir that start with the same name
+    for file in os.listdir(stddir): 
+        if file.startswith(name): remove_file("%s/%s"%(stddir, file))
+    
+    # Get the number of jobs
+    n_jobs = len(open(jobs_filename, "r").readlines())
+
+    # if default, number_tasks_to_run_at_once is all, which means that it will try to run all tasks at once
+    if number_tasks_to_run_at_once=="all": number_tasks_to_run_at_once = min([int(max_ncores_queue/ncores_per_task), n_jobs])
+
+    # define the constraint only if it is necessary
+    if constraint!="": constraint_line = "#SBATCH --constraint=%s"%constraint
+    else: constraint_line = ""
+
+    # remove previous rst files
+    name_jobs_filename = get_file(jobs_filename)
+    for file in os.listdir(get_dir(jobs_filename)): 
+
+        if file.startswith("%s-"%name_jobs_filename) and file.endswith(".rst"): 
+            remove_file("%s/%s"%(get_dir(jobs_filename), file))
+
+    # rewrite the jobs_filename so that each std goes to a different file
+    std_perJob_prefix = "%s/%s"%(stddir, name)
+    jobs_filename_lines = ["%s > %s.%i.out 2>&1"%(l.strip(), std_perJob_prefix, I+1) for I, l in enumerate(open(jobs_filename, "r").readlines())]
+    open(jobs_filename, "w").write("\n".join(jobs_filename_lines))
+
+    # define the environment activating parms
+    #"echo 'sourcing conda to run pipeline...';",
+    #SOURCE_CONDA_CMD,
+    #CONDA_ACTIVATING_CMD,
+
+    # "#SBATCH --mail-type=all",
+    # "#SBATCH --mail-user=%s"%email,
+
+    # define the std files
+    greasy_logfile = "%s/%s_greasy.log"%(stddir, name)
+    stderr_file = "%s/%s_stderr.txt"%(stddir, name)
+    stdout_file = "%s/%s_stdout.txt"%(stddir, name)
+
+    # define arguments
+    arguments = ["#!/bin/sh", # the interpreter
+                 "#SBATCH --time=%s"%walltime, # several SBATCH misc commands
+                 "#SBATCH --qos=%s"%queue,
+                 "#SBATCH --job-name=%s"%name,
+                 "#SBATCH --cpus-per-task=%i"%ncores_per_task,
+                 "#SBATCH --error=%s"%(stderr_file), # the standard error
+                 "#SBATCH --output=%s"%(stdout_file), # the standard output
+                 "#SBATCH --get-user-env", # this is to maintain the environment
+                 "#SBATCH --workdir=%s"%outdir,
+                 "#SBATCH --ntasks=%i"%number_tasks_to_run_at_once,
+                 constraint_line,
+                 "",
+                 "module load greasy",
+                 "export GREASY_LOGFILE=%s;"%(greasy_logfile),
+                 "echo 'running pipeline';",
+                 "greasy %s"%jobs_filename]
+
+
+    # define and write the run filename
+    jobs_filename_run = "%s.run"%jobs_filename
+    with open(jobs_filename_run, "w") as fd: fd.write("\n".join(arguments))
+    
+    # run in cluster if specified
+    if sbatch is True: run_cmd("sbatch %s"%jobs_filename_run)
+
+    # get info about the exit status: sacct -j <jobid> --format=JobID,JobName,MaxRSS,Elapsed
 
