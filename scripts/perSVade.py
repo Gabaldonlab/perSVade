@@ -111,14 +111,8 @@ parser.add_argument("-f2", "--fastq2", dest="fastq2", default=None, help="fastq_
 parser.add_argument("-sbam", "--sortedbam", dest="sortedbam", default=None, help="The path to the sorted bam file, which should have a bam.bai file in the same dir. For example, if your bam file is called 'aligned_reads.bam', there should be an 'aligned_reads.bam.bai' as well. This is mutually exclusive with providing reads. By default, it is assumed that this bam has marked duplicates. If not, you can mark them with the option --markDuplicates_inBam.")
 
 # machine options
-parser.add_argument("--job_array_mode", dest="job_array_mode", type=str, default="local", help="It specifies in how to run the job arrays for,  --testAccuracy, the downloading of reads if  --close_shortReads_table is auto, and the SV calling for the table in --close_shortReads_table. It can be 'local' (runs one job after the other or 'greasy' (each job is run on a diferent node of a slurm cluster with the greasy system. It requires the machine to be able to run greasy jobs, as in https://user.cscs.ch/tools/high_throughput/). If 'greasy' is specified, this pipeline will stop with a warning everytime that unfinished jobs have to be submited, and you'll be able to track the job status with the squeue command.")
+parser.add_argument("--job_array_mode", dest="job_array_mode", type=str, default="local", help="It specifies in how to run the job arrays for,  --testAccuracy, the downloading of reads if  --close_shortReads_table is auto, and the SV calling for the table in --close_shortReads_table. It can be 'local' (runs one job after the other or 'job_array'. If 'job_array' is specified, this pipeline will generate a file with all the jobs to run, and stop. You will have to run these jobs before stepping into downstream analyses.")
 
-parser.add_argument("--queue_jobs", dest="queue_jobs", type=str, default="debug", help="The name of the queue were to submit the jobs when running with greasy")
-parser.add_argument("--max_ncores_queue", dest="max_ncores_queue", type=int, default=768, help="The maximum number of cores that the queue can handle in a single job")
-
-# timings of queues
-parser.add_argument("--time_read_obtention", dest="time_read_obtention", type=str, default="02:00:00", help="The time that the fastqdumping and trimming of reads will take to perform this task")
-parser.add_argument("--time_perSVade_running", dest="time_perSVade_running", type=str, default="48:00:00", help="The time that the running of perSVade in nodes of a cluster will take.")
 
 # other args
 parser.add_argument("-mchr", "--mitochondrial_chromosome", dest="mitochondrial_chromosome", default="mito_C_glabrata_CBS138", type=str, help="The name of the mitochondrial chromosome. This is important if you have mitochondrial proteins for which to annotate the impact of nonsynonymous variants, as the mitochondrial genetic code is different. This should be the same as in the gff. If there is no mitochondria just put 'no_mitochondria'. If there is more than one mitochindrial scaffold, provide them as comma-sepparated IDs.")
@@ -134,7 +128,7 @@ parser.add_argument("--QC_and_trimming_reads", dest="QC_and_trimming_reads", act
 parser.add_argument("--max_coverage_sra_reads", dest="max_coverage_sra_reads", default=10000000000000000, type=int, help="This is the maximum coverage allowed in the reads downloaded by SRA. If the datasets have a coverage above this perSVade will randmomly subset reads to match this.")
 
 # min chromosome name
-parser.add_argument("--min_chromosome_len", dest="min_chromosome_len", default=100000, type=int, help="The minimum length to consider chromosomes from the provided fasta for calculating the window length.")
+parser.add_argument("--min_chromosome_len", dest="min_chromosome_len", default=100000, type=int, help="The minimum length to consider chromosomes from the provided fasta for calculating the window length. Any chromosomes that shorter than the window length will not be considered in the random SV simulations.")
 
 # coverage CNV
 parser.add_argument("--min_coverage_duplication", dest="min_coverage_duplication", default="auto", help="The minimum rel. coverage to call a duplicated region. If set to auto, it will be calculated from optimisation")
@@ -166,9 +160,6 @@ parser.add_argument("--pooled_sequencing", dest="pooled_sequencing", action="sto
 
 # verbosity
 parser.add_argument("--verbose", dest="verbose", action="store_true", default=False, help="Whether to print a verbose output. This is important if there are any errors in the run.")
-
-# the greasy options
-parser.add_argument("--slurm_constraint", dest="slurm_constraint", type=str, default="", help="The value to pass to the argument --constraint of sbatch. This will only take effect if you are running in a slurm system. By default there is no constraint. In MN, if you specifiy 'highmem' you will get 8Gb of RAM per core.")
 
 # repeat obtention
 parser.add_argument("--consider_repeats_smallVarCall", dest="consider_repeats_smallVarCall", action="store_true", default=False, help="If --run_smallVarsCNV, this option will imply that each small  variant will have an annotation of whether it overlaps a repeat region.")
@@ -432,7 +423,7 @@ elif opt.fast_SVcalling is False and opt.close_shortReads_table is not None:
         # define the outdir where the close genomes whould be downloaded
         outdir_getting_closeReads = "%s/getting_closeReads"%outdir_finding_realVars; fun.make_folder(outdir_getting_closeReads)
 
-        opt.close_shortReads_table = fun.get_close_shortReads_table_close_to_taxID(opt.target_taxID, opt.ref, outdir_getting_closeReads, opt.ploidy, n_close_samples=opt.n_close_samples, nruns_per_sample=opt.nruns_per_sample, replace=opt.replace, threads=opt.threads, job_array_mode=opt.job_array_mode, StopAfter_sampleIndexingFromSRA=opt.StopAfter_sampleIndexingFromSRA, queue_jobs=opt.queue_jobs, max_ncores_queue=opt.max_ncores_queue, time_read_obtention=opt.time_read_obtention, StopAfterPrefecth_of_reads=opt.StopAfterPrefecth_of_reads, max_coverage_sra_reads=opt.max_coverage_sra_reads)
+        opt.close_shortReads_table = fun.get_close_shortReads_table_close_to_taxID(opt.target_taxID, opt.ref, outdir_getting_closeReads, opt.ploidy, n_close_samples=opt.n_close_samples, nruns_per_sample=opt.nruns_per_sample, replace=opt.replace, threads=opt.threads, job_array_mode=opt.job_array_mode, StopAfter_sampleIndexingFromSRA=opt.StopAfter_sampleIndexingFromSRA, StopAfterPrefecth_of_reads=opt.StopAfterPrefecth_of_reads, max_coverage_sra_reads=opt.max_coverage_sra_reads)
 
     # skip the running of the pipeline 
     if opt.StopAfter_readObtentionFromSRA:
@@ -445,7 +436,7 @@ elif opt.fast_SVcalling is False and opt.close_shortReads_table is not None:
         sys.exit(0) 
 
     # get the real SVs
-    real_bedpe_breakpoints = fun.get_compatible_real_bedpe_breakpoints(opt.close_shortReads_table, opt.ref, outdir_finding_realVars, replace=opt.replace, threads=opt.threads, max_nvars=opt.nvars, mitochondrial_chromosome=opt.mitochondrial_chromosome, job_array_mode=opt.job_array_mode, max_ncores_queue=opt.max_ncores_queue, time_perSVade_running=opt.time_perSVade_running, queue_jobs=opt.queue_jobs, parameters_json_file=opt.parameters_json_file)
+    real_bedpe_breakpoints = fun.get_compatible_real_bedpe_breakpoints(opt.close_shortReads_table, opt.ref, outdir_finding_realVars, replace=opt.replace, threads=opt.threads, max_nvars=opt.nvars, mitochondrial_chromosome=opt.mitochondrial_chromosome, job_array_mode=opt.job_array_mode, parameters_json_file=opt.parameters_json_file)
 
 else: 
     print("Avoiding the simulation of real variants. Only inserting randomSV.")
@@ -471,7 +462,7 @@ if opt.testAccuracy is True:
     if opt.close_shortReads_table is None or opt.fast_SVcalling is True: 
         raise ValueError("You have to specify a --close_shortReads_table and not run in --fast_SVcalling to test the accuracy of the pipeline on several datasets (--testAccuracy)")
 
-    fun.report_accuracy_realSVs(opt.close_shortReads_table, opt.ref, "%s/testing_Accuracy"%opt.outdir, real_bedpe_breakpoints, threads=opt.threads, replace=opt.replace, n_simulated_genomes=opt.nsimulations, mitochondrial_chromosome=opt.mitochondrial_chromosome, simulation_ploidies=simulation_ploidies, range_filtering_benchmark=opt.range_filtering_benchmark, nvars=opt.nvars, job_array_mode=opt.job_array_mode, max_ncores_queue=opt.max_ncores_queue, time_perSVade_running=opt.time_perSVade_running, queue_jobs=opt.queue_jobs, StopAfter_testAccuracy_perSVadeRunning=opt.StopAfter_testAccuracy_perSVadeRunning, skip_cleaning_simulations_files_and_parameters=opt.skip_cleaning_simulations_files_and_parameters, skip_cleaning_outdir=opt.skip_cleaning_outdir, slurm_constraint=opt.slurm_constraint, parameters_json_file=opt.parameters_json_file, gff=opt.gff, replace_FromGridssRun_final_perSVade_run=opt.replace_FromGridssRun_final_perSVade_run)
+    fun.report_accuracy_realSVs(opt.close_shortReads_table, opt.ref, "%s/testing_Accuracy"%opt.outdir, real_bedpe_breakpoints, threads=opt.threads, replace=opt.replace, n_simulated_genomes=opt.nsimulations, mitochondrial_chromosome=opt.mitochondrial_chromosome, simulation_ploidies=simulation_ploidies, range_filtering_benchmark=opt.range_filtering_benchmark, nvars=opt.nvars, job_array_mode=opt.job_array_mode, StopAfter_testAccuracy_perSVadeRunning=opt.StopAfter_testAccuracy_perSVadeRunning, skip_cleaning_simulations_files_and_parameters=opt.skip_cleaning_simulations_files_and_parameters, skip_cleaning_outdir=opt.skip_cleaning_outdir, parameters_json_file=opt.parameters_json_file, gff=opt.gff, replace_FromGridssRun_final_perSVade_run=opt.replace_FromGridssRun_final_perSVade_run)
 
 
 # get the golden set
@@ -480,7 +471,7 @@ if opt.goldenSet_dir is not None:
     needstoberefactoredwithnewstructure
 
     outdir_goldenSet = "%s/testing_goldenSetAccuracy"%opt.outdir
-    fun.report_accuracy_golden_set(opt.goldenSet_dir, outdir_goldenSet, opt.ref, real_svtype_to_file, threads=opt.threads, replace=opt.replace, n_simulated_genomes=opt.nsimulations, mitochondrial_chromosome=opt.mitochondrial_chromosome, simulation_ploidies=simulation_ploidies, range_filtering_benchmark=opt.range_filtering_benchmark, nvars=opt.nvars, job_array_mode=opt.job_array_mode, StopAfter_sampleIndexingFromSRA=opt.StopAfter_sampleIndexingFromSRA, time_read_obtention=opt.time_read_obtention, StopAfterPrefecth_of_reads=opt.StopAfterPrefecth_of_reads_goldenSet, queue_jobs=opt.queue_jobs, max_ncores_queue=opt.max_ncores_queue, time_perSVade_running=opt.time_perSVade_running, target_taxID=opt.target_taxID, parameters_json_file=opt.parameters_json_file)
+    fun.report_accuracy_golden_set(opt.goldenSet_dir, outdir_goldenSet, opt.ref, real_svtype_to_file, threads=opt.threads, replace=opt.replace, n_simulated_genomes=opt.nsimulations, mitochondrial_chromosome=opt.mitochondrial_chromosome, simulation_ploidies=simulation_ploidies, range_filtering_benchmark=opt.range_filtering_benchmark, nvars=opt.nvars, job_array_mode=opt.job_array_mode, StopAfter_sampleIndexingFromSRA=opt.StopAfter_sampleIndexingFromSRA, StopAfterPrefecth_of_reads=opt.StopAfterPrefecth_of_reads_goldenSet, target_taxID=opt.target_taxID, parameters_json_file=opt.parameters_json_file)
 
 # run the actual perSVade function optimising parameters
 if opt.skip_SVcalling is False and not any([x=="skip" for x in {opt.fastq1, opt.fastq2}]):
