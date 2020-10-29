@@ -3118,6 +3118,9 @@ def get_clove_output(output_vcf_clove):
 
     df["END"] = df.END.apply(getNaN_to_minus1)
 
+    # change the ID so that it ends always with an o
+    df_clove["ID"] = df_clove.ID.apply(lambda x: "+".join([y[0:-1]+"o" for y in re.split("\+|\-", x)]))
+
     return df
 
 def dummy_fun(x): return x
@@ -3145,10 +3148,6 @@ def get_coverage_per_window_df_without_repeating(reference_genome, sorted_bam, w
 
     """This function takes a windows file and a bam, and it runs generate_coverage_per_window_file_parallel but only for regions that are not previously calculated"""
 
-    # define bams
-    outdir_bam = "/".join(sorted_bam.split("/")[0:-1])
-    sorted_bam_name = sorted_bam.split("/")[-1]
-
     # check if it can be run in parallel
     if parallelization_is_possible(threads) is False: run_in_parallel = False
     print_if_verbose("running get_coverage_per_window_df_without_repeating with %i threads"%threads)
@@ -3158,7 +3157,7 @@ def get_coverage_per_window_df_without_repeating(reference_genome, sorted_bam, w
     if len(query_windows_df)==0: return pd.DataFrame()
 
     # define the file were the coverage will be calculated
-    calculated_coverage_file = "%s.coverage_per_window.tab"%sorted_bam_name
+    calculated_coverage_file = "%s.coverage_per_window.tab"%sorted_bam
 
     ######### define previously measured regions ##########
     print_if_verbose("getting the previously-calculated regions")
@@ -13452,9 +13451,6 @@ def get_vcf_all_SVs_and_CNV(perSVade_outdir, outdir, sorted_bam, reference_genom
         outfile_clove = "%s/gridss_output.vcf.withSimpleEventType.vcf.filtered_default.vcf.bedpe.raw.bedpe.clove.vcf"%outdir_gridss_final
         df_clove = get_clove_output(outfile_clove)
 
-        # change the ID so that it ends with a o
-        df_clove["ID"] = df_clove.ID.apply(lambda x: "+".join([y[0:-1]+"o" for y in re.split("\+|\-", x)]))
-     
         # get a vcf df, that comes from all vcfs
         df_vcf = pd.concat([get_vcf_df_for_svDF(svDF, svtype, reference_genome, df_gridss) for svtype, svDF in svtype_to_svDF.items() if svtype in {"tandemDuplications", "deletions", "inversions", "translocations", "insertions", "remaining"}])
 
@@ -13576,6 +13572,7 @@ def get_df_clove_from_sorted_bam(sorted_bam, outdir, parameters_jsonfile, refere
     # get the df_clove
     clove_outfile = "%s/gridss_output.vcf.withSimpleEventType.vcf.filtered_default.vcf.bedpe.raw.bedpe.clove.vcf"%outdir_gridss_final
     df_clove = get_clove_output(clove_outfile)
+
 
     # check
     check_that_cloveIDs_are_in_gridss_df(df_clove, df_gridss)
@@ -14282,7 +14279,7 @@ def remove_files_SV_CNVcalling(outdir):
 
 
 
-def run_jobarray_file_greasy(jobs_filename, cluster_name, name, time="12:00:00", queue="bsc_ls", threads_per_job=4, extra_args={}):
+def run_jobarray_file_greasy(jobs_filename, cluster_name, name, time="12:00:00", queue="bsc_ls", threads_per_job=4, MN_nodes=1, Nord3_RAM_thread=1800, Nord3_nodes=3):
 
     """
     This function takes a jobs filename and creates a jobscript with args (which is a list of lines to be written to the jobs cript). 
@@ -14291,7 +14288,7 @@ def run_jobarray_file_greasy(jobs_filename, cluster_name, name, time="12:00:00",
     
     - MN4: There are many nodes, each of them with 48 threads. Each thread has 2Gb of RAM. If you add '--constraint highmem' it will get 8Gb per thread. You can add these extra args:
 
-        - "ntasks": The number of nodes to allocate to the whole greasy job. Each of them will account for 48 threads
+    - Nord3: Each whole node has 16 threads. You can specify the RAM per thread in MB. If the RAM per thread is > 32, you will go into 64Gb nodes, and if not to 128 Gb nodes. For now, I run all the processes with 16 cores.
 
     """
 
@@ -14307,14 +14304,20 @@ def run_jobarray_file_greasy(jobs_filename, cluster_name, name, time="12:00:00",
     # define the job script
     jobs_filename_run = "%s.run"%jobs_filename
 
+    # define the number of jobs in the job array
+    njobs = len(open(jobs_filename, "r").readlines())
+
     # init arguments with the interpreter and the stderr and stdout files
     arguments = ["#!/bin/sh"]
-
 
     # define things related to the cluster name
     if cluster_name=="MN4":
 
         cmd_submit = "sbatch %s"%jobs_filename_run
+
+        # define the requested nodes. Each node has 48 threads
+        max_nodes = int((njobs*threads_per_job)/48)
+        requested_nodes = min([MN_nodes, max_nodes])
 
         arguments += ["#SBATCH --error=%s"%stderr_file,
                       "#SBATCH --output=%s"%stdout_file,
@@ -14324,30 +14327,32 @@ def run_jobarray_file_greasy(jobs_filename, cluster_name, name, time="12:00:00",
                       "#SBATCH --time=%s"%time,
                       "#SBATCH --qos=%s"%queue,
                       "#SBATCH --cpus-per-task=%i"%threads_per_job,
-                      
+                      "#SBATCH --ntasks=%i"%requested_nodes 
                      ]
 
-        # add extra arguments
-        for arg_name, arg_value in extra_args.items(): arguments += ["#SBATCH --%s=%s"%(arg_name, arg_value)]
-
     elif cluster_name=="Nord3":
+
+        cmd_submit = "bsub < %s"%jobs_filename_run
 
         # change things
         time = ":".join(time.split(":")[0:2])
 
-        cmd_submit = "bsub < %s"%jobs_filename_run
+        # define the processes (the number of nodes times the number of threads per node)
+        max_nodes = njobs
+        requested_nodes = min([Nord3_nodes, max_nodes])
+        n_processes = requested_nodes*16
+        
         arguments += ["#BSUB -e  %s"%stderr_file,
                       "#BSUB -o %s"%stdout_file,
                       "#BSUB -cwd %s"%outdir,
                       "#BSUB -W %s"%time,
-                      "#BSUB -q %s"%queue 
+                      "#BSUB -q %s"%queue,
+                      "#BSUB -n %i"%n_processes,
+                      "#BSUB -M %i"%Nord3_RAM_thread,
+                      '#BSUB -R "span[ptile=16]"',
+                      "export OMP_NUM_THREADS=16"
+
                      ]
-
-
-        # threads_per_job
-
-        # add extra arguments
-        for arg_name, arg_value in extra_args.items(): arguments += ["#BSUB -%s %s"%(arg_name, arg_value)]
 
     else: raise ValueError("%s has not been considered"%cluster_name)
 
