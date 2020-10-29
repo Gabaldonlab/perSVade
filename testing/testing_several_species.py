@@ -17,7 +17,7 @@ if os.path.exists(ParentDir):
 else:
     run_in_cluster = True    
     ParentDir = "/gpfs/projects/bsc40/mschikora"
-    threads = 48
+    threads = 16
 
 
 # define the dir where all perSVade code is
@@ -25,6 +25,7 @@ perSVade_dir = "%s/scripts/perSVade/perSVade_repository/scripts"%ParentDir
 sys.path.insert(0, perSVade_dir)
 
 # import functions
+print("importing functions")
 import sv_functions as fun
 
 # define paths
@@ -274,7 +275,7 @@ for taxID, spName, ploidy, mitochondrial_chromosome, max_coverage_sra_reads in s
 
         # get the reads from SRA. 3 samples, 3 runs per sample. Process with the. --verbose
         cmd = "%s --ref %s --threads %i -o %s --close_shortReads_table %s --target_taxID %s --n_close_samples 3 --nruns_per_sample 3 -f1 skip -f2 skip --mitochondrial_chromosome %s --testAccuracy --skip_SVcalling --verbose --skip_cleaning_simulations_files_and_parameters --StopAfter_testAccuracy_perSVadeRunning --max_coverage_sra_reads %i --replace_SV_CNVcalling --gff %s"%(perSVade_py, genome, threads, outdir_perSVade, close_shortReads_table, taxID, mitochondrial_chromosome, max_coverage_sra_reads, gff)
-        # --StopAfter_testAccuracy_perSVadeRunning --slurm_constraint, --StopAfter_obtentionOFcloseSVs --gff %s
+        # --StopAfter_testAccuracy_perSVadeRunning --slurm_constraint, --StopAfter_obtentionOFcloseSVs --gff %s. Need to add the ploidy (-p ploidy)
 
     elif running_type=="goldenSet":
 
@@ -287,17 +288,52 @@ for taxID, spName, ploidy, mitochondrial_chromosome, max_coverage_sra_reads in s
         cmd = "%s --ref %s --threads %i -o %s --target_taxID %s --n_close_samples 3 --nruns_per_sample 3 -f1 skip -f2 skip --mitochondrial_chromosome %s --gff %s --goldenSet_dir %s --skip_SVcalling --verbose"%(perSVade_py, genome, threads, outdir_perSVade, taxID, mitochondrial_chromosome, gff, goldenSet_dir)
 
     # add options depending on the machine
-    if run_in_cluster is True: cmd += " --job_array_mode greasy --queue_jobs bsc_ls --max_ncores_queue 144 --time_read_obtention 48:00:00 --time_perSVade_running 48:00:00"
-
+    if run_in_cluster is True: cmd += " --job_array_mode job_array"
     else: cmd += " --job_array_mode local"
 
     if StopAfterPrefecth_of_reads is True: cmd += " --StopAfterPrefecth_of_reads"
 
-    fun.run_cmd(cmd)
+    
+    cmd_output = "%s/cmd_testing.std"%outdir_perSVade
+    print("running std into %s"%cmd_output)
+    fun.run_cmd("%s > %s 2>&1"%(cmd, cmd_output))
+
+    ###### RUN JOB ARRAYS ######
+
+    # get the jobs file to run
+    all_lines_jobfile = [l for l in open(cmd_output, "r").readlines() if l.startswith("You need to successfully run all jobs in")]
+
+    if len(all_lines_jobfile)==1:
+
+        jobs_filename = [x for x in all_lines_jobfile[-1].split() if x.startswith("/gpfs/projects/bsc40/mschikora")][0]
+
+        # define parameters
+        name = "%s_jobs"%spName
+
+        # define the queue
+        #cluster_name = "MN4"; queue = "bsc_ls" 
+        cluster_name = "Nord3"; queue = "bsc_ls" 
+
+        # define the time
+        time = "18:00:00"
+
+        # define MN things
+        MN_nodes = 1
+
+        # define Nord3 args
+        Nord3_RAM_thread = 1800 # the megabytes per thread 
+        Nord3_nodes = 14
+
+        # run on greasy
+        fun.run_jobarray_file_greasy(jobs_filename, cluster_name, name, time=time, threads_per_job=threads, queue=queue, MN_nodes=MN_nodes, Nord3_RAM_thread=Nord3_RAM_thread, Nord3_nodes=Nord3_nodes)
+
+    elif len(all_lines_jobfile)!=0: raise ValueError("something went wrong")
+
+    ############################
 
     #if taxID=="5476": adkjhdakg # stop after C. albicans
 
-
+print("the testing of several species finsihed susccesffully")
 
 # an example CMD to debug de generation of merged vcfs
 """
