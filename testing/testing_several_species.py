@@ -17,9 +17,7 @@ if os.path.exists(ParentDir):
 else:
     run_in_cluster = True    
     ParentDir = "/gpfs/projects/bsc40/mschikora"
-    threads = 16
-
-
+        
 # define the dir where all perSVade code is
 perSVade_dir = "%s/scripts/perSVade/perSVade_repository/scripts"%ParentDir
 sys.path.insert(0, perSVade_dir)
@@ -27,6 +25,17 @@ sys.path.insert(0, perSVade_dir)
 # import functions
 print("importing functions")
 import sv_functions as fun
+
+
+# get the cluster name
+if run_in_cluster is True:
+
+    cluster_name = fun.get_current_clusterName_mareNostrum()
+    if cluster_name=="MN4": threads = 24
+    elif cluster_name=="Nord3": threads = 16
+
+
+
 
 # define paths
 perSVade_py = "%s/perSVade.py"%perSVade_dir
@@ -274,7 +283,7 @@ for taxID, spName, ploidy, mitochondrial_chromosome, max_coverage_sra_reads in s
         else: close_shortReads_table = "auto"
 
         # get the reads from SRA. 3 samples, 3 runs per sample. Process with the. --verbose
-        cmd = "%s --ref %s --threads %i -o %s --close_shortReads_table %s --target_taxID %s --n_close_samples 3 --nruns_per_sample 3 -f1 skip -f2 skip --mitochondrial_chromosome %s --testAccuracy --skip_SVcalling --verbose --skip_cleaning_simulations_files_and_parameters --StopAfter_testAccuracy_perSVadeRunning --max_coverage_sra_reads %i --replace_SV_CNVcalling --gff %s"%(perSVade_py, genome, threads, outdir_perSVade, close_shortReads_table, taxID, mitochondrial_chromosome, max_coverage_sra_reads, gff)
+        cmd = "%s --ref %s --threads %i -o %s --close_shortReads_table %s --target_taxID %s --n_close_samples 3 --nruns_per_sample 3 -f1 skip -f2 skip --mitochondrial_chromosome %s --testAccuracy --skip_SVcalling --verbose --skip_cleaning_simulations_files_and_parameters --StopAfter_testAccuracy_perSVadeRunning --max_coverage_sra_reads %i --replace_SV_CNVcalling --gff %s --nsimulations 2"%(perSVade_py, genome, threads, outdir_perSVade, close_shortReads_table, taxID, mitochondrial_chromosome, max_coverage_sra_reads, gff)
         # --StopAfter_testAccuracy_perSVadeRunning --slurm_constraint, --StopAfter_obtentionOFcloseSVs --gff %s. Need to add the ploidy (-p ploidy)
 
     elif running_type=="goldenSet":
@@ -293,7 +302,6 @@ for taxID, spName, ploidy, mitochondrial_chromosome, max_coverage_sra_reads in s
 
     if StopAfterPrefecth_of_reads is True: cmd += " --StopAfterPrefecth_of_reads"
 
-    
     cmd_output = "%s/cmd_testing.std"%outdir_perSVade
     print("running std into %s"%cmd_output)
     fun.run_cmd("%s > %s 2>&1"%(cmd, cmd_output))
@@ -310,22 +318,24 @@ for taxID, spName, ploidy, mitochondrial_chromosome, max_coverage_sra_reads in s
         # define parameters
         name = "%s_jobs"%spName
 
-        # define the queue
-        #cluster_name = "MN4"; queue = "bsc_ls" 
-        cluster_name = "Nord3"; queue = "bsc_ls" 
+     
+        # run jobs
+        if cluster_name=="MN4": 
 
-        # define the time
-        time = "18:00:00"
+            queue = "bsc_ls"
+            time = "48:00:00"
+            nodes = 1
 
-        # define MN things
-        MN_nodes = 1
+            fun.run_jobarray_file_MN4_greasy(jobs_filename, name, time=time, queue=queue, threads_per_job=threads, nodes=nodes)
 
-        # define Nord3 args
-        Nord3_RAM_thread = 1800 # the megabytes per thread 
-        Nord3_nodes = 14
+        elif cluster_name=="Nord3": 
 
-        # run on greasy
-        fun.run_jobarray_file_greasy(jobs_filename, cluster_name, name, time=time, threads_per_job=threads, queue=queue, MN_nodes=MN_nodes, Nord3_RAM_thread=Nord3_RAM_thread, Nord3_nodes=Nord3_nodes)
+
+            queue = "bsc_ls"; 
+            RAM_per_thread = 1800; 
+            time = "18:00:00" # per job
+
+            fun.run_jobarray_file_Nord3(jobs_filename, name, time=time, queue=queue, threads_per_job=threads, RAM_per_thread=RAM_per_thread, max_njobs_to_run=1000)
 
     elif len(all_lines_jobfile)!=0: raise ValueError("something went wrong")
 

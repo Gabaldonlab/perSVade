@@ -183,6 +183,7 @@ perSVade_py = "%s/perSVade.py"%CWD
 run_trimmomatic_and_fastqc_py = "%s/run_trimmomatic_and_fastqc.py"%CWD
 get_trimmed_reads_for_srr_py = "%s/get_trimmed_reads_for_srr.py"%CWD
 run_vep = "%s/run_vep.py"%CWD
+calculate_memory_py = "%s/calculate_memory.py"%CWD
 
 # old code
 #create_simulatedSVgenome_R = "%s/create_simulatedSVgenome.R"%CWD
@@ -694,11 +695,140 @@ def extract_BEDofGENES_of_gff3(gff, bed, replace=False, reference=""):
     # return for further usage
     return regions_filename
 
-def get_availableGbRAM():
+def get_availableGbRAM(outdir):
 
-    """This function returns a float with the available memory in your system"""
+    """This function returns a float with the available memory in your system. psutil.virtual_memory().available/1e9 would yield the theoretically available memory"""
 
-    return psutil.virtual_memory().available/1e9
+    print_if_verbose("calculating GB ram")
+
+    # define a file where to calculate memory
+    calc_memory_file = "%s/calculating_memory.txt"%outdir
+    remove_file(calc_memory_file)
+
+    # run the calculate memory
+    cmd_std = "%s.std"%calc_memory_file
+    try: run_cmd("%s --outfile %s > %s 2>&1"%(calculate_memory_py, calc_memory_file, cmd_std))
+    except: print_if_verbose("memory was calculated")
+
+    # get from file
+    availableGbRAM = float(open(calc_memory_file, "r").readlines()[-1])
+
+    # at the end remove the file
+    remove_file(calc_memory_file)
+    remove_file(cmd_std)
+
+    return availableGbRAM
+
+
+def simulate_testing_reads_on_genome(genome, window_l=2000, npairs=50000, read_length=150, median_insert_size=250, median_insert_size_sd=50, threads=4, replace=False):
+
+    """ 
+    Takes a genome and simulates reads for it, saving them under <genome>_simulating_reads 
+    """
+
+    # define the outdir
+    outdir = "%s_simulating_reads"%genome; 
+    outdir_reads = "%s/getting_reads"%outdir; 
+    
+    # remove the outdirs if replace is True
+    if replace is True: 
+        delete_folder(outdir)
+        delete_folder(outdir_reads)
+
+    # make folders 
+    make_folder(outdir)
+    make_folder(outdir_reads)
+
+    # define the expected reads
+    reads1 = "%s/all_reads1.correct.fq.gz"%outdir_reads
+    reads2 = "%s/all_reads2.correct.fq.gz"%outdir_reads
+
+    if any([file_is_empty(f) for f in [reads1, reads2]]):
+
+        # run index the genome
+        run_cmd("%s faidx %s"%(samtools, genome))
+
+        # get the windows df
+        windows_bed = "%s/windows_file.bed"%outdir
+        run_cmd("%s makewindows -g %s.fai -w %i > %s"%(bedtools, genome, window_l, windows_bed))
+        df_windows = pd.read_csv(windows_bed, sep="\t", header=-1, names=["chromosome", "start", "end"])
+        df_windows["predicted_relative_coverage"] = random.sample(list(np.linspace(0.5, 2, 10000)), len(df_windows))
+
+        # simulate reads
+        simulate_readPairs_per_window(df_windows, genome, npairs, outdir_reads, read_length, median_insert_size, median_insert_size_sd, replace=False, threads=threads) 
+
+    return reads1, reads2
+
+
+def get_sorted_bam_test(r1, r2, ref_genome, replace=False):
+
+    """Runs bwa mem on the reads and returns the sorted bam with marked duplicates"""
+
+    # define the outdir
+    outdir = "%s/aligning_reads_against_%s"%(get_dir(r1), get_file(ref_genome))
+
+    # if replace is True, delete the outdir
+    if replace is True: delete_folder(outdir)
+
+    # make de outdir
+    make_folder(outdir)
+
+    # define the inputs of bam
+    bamfile = "%s/aligned_reads.bam"%outdir
+    sorted_bam = "%s.sorted"%bamfile
+    index_bam = "%s.bai"%sorted_bam
+    name_sample = "test_sample"
+
+    # run
+    run_bwa_mem(r1, r2, ref_genome, outdir, bamfile, sorted_bam, index_bam, name_sample, threads=4, replace=False, MarkDuplicates=False)
+
+    return sorted_bam
+
+
+def get_available_threads(outdir):
+
+    """Returns the avilable number of threads by runnning GATK. It runs gatk on a dummy genome and returns the really available number of threads  """
+
+    # redefnie the outdir under outdir
+    outdir = "%s/getting_available_threads"%(outdir)
+    delete_folder(outdir)
+    make_folder(outdir)
+
+    # define a genome that has one chromosome
+    genome = "%s/genome.fasta"%outdir
+    genome_obj = SeqRecord(Seq("ACTGCGATCGACTCGATCGATGAGAGAGAGGACTCTCAACAG"*10), id="chromosomeX")
+    SeqIO.write([genome_obj], genome, "fasta")
+
+    # get some simulated reads
+    reads1, reads2 = simulate_testing_reads_on_genome(genome, window_l=75, npairs=1000, read_length=50, median_insert_size=15, median_insert_size_sd=5, threads=4, replace=False)
+
+    # get a sorted bam
+    sorted_bam = get_sorted_bam_test(reads1, reads2, genome, replace=False)
+
+    # create the files
+    create_sequence_dict(genome, replace=False)
+
+    # run GATK HC 
+    gatk_out = "%s/output_HC.vcf"%outdir
+    gatk_std = "%s.running.std"%gatk_out
+
+    gatk_cmd = "%s HaplotypeCaller -R %s -I %s -O %s -ploidy %i --genotyping-mode DISCOVERY --emit-ref-confidence NONE --stand-call-conf 30 --native-pair-hmm-threads %i > %s 2>&1"%(gatk, genome, sorted_bam, gatk_out, 1, 100000000, gatk_std)
+
+    run_cmd(gatk_cmd)
+
+    # get the available threads
+    threads_lines = [l for l in open(gatk_std, "r").readlines() if "IntelPairHmm - Using" in l and "available threads, but" in l and "were requested" in l]
+    if len(threads_lines)!=1: raise ValueError("the threads were not properly calculated")
+
+    available_threads = int(threads_lines[0].split("IntelPairHmm - Using ")[1].split("available threads")[0])
+
+    # print
+    print_if_verbose("there are %i available threads in this run"%available_threads)
+
+    # remove the outdir
+    delete_folder(outdir)
+
+    return available_threads
 
 def write_coverage_per_gene_mosdepth_and_parallel(sorted_bam, reference_genome, cnv_outdir, bed, gene_to_coverage_file, replace=False, threads=4):
 
@@ -2421,7 +2551,7 @@ def run_gridss_and_annotateSimpleType(sorted_bam, reference_genome, outdir, repl
                 remove_file(gridss_assemblyBAM)
 
                 # define the ram available
-                allocated_ram = get_availableGbRAM()*fractionRAM_to_dedicate
+                allocated_ram = get_availableGbRAM(gridss_tmpdir)*fractionRAM_to_dedicate
                 print_if_verbose("running gridss with %iGb of RAM"%allocated_ram)
 
                 # define the heap size, which depends on the cloud or not
@@ -3119,7 +3249,7 @@ def get_clove_output(output_vcf_clove):
     df["END"] = df.END.apply(getNaN_to_minus1)
 
     # change the ID so that it ends always with an o
-    df_clove["ID"] = df_clove.ID.apply(lambda x: "+".join([y[0:-1]+"o" for y in re.split("\+|\-", x)]))
+    df["ID"] = df.ID.apply(lambda x: "+".join([y[0:-1]+"o" for y in re.split("\+|\-", x)]))
 
     return df
 
@@ -3836,36 +3966,6 @@ def write_clove_df_into_bedORbedpe_files_like_RSVSim(df_clove, fileprefix, refer
     # return the df_clove and the remaining SVs
     return df_clove, svtype_to_svfile
 
-def merge_coverage_per_window_files_in_one(bamfile, bam_sufix=".coverage_per_window.tab"):
-
-    """This function takes all files that start with bamfile and end with coverage_per_window, """
-
-    print_if_verbose("merging coverage tables")
-
-    # define prefixes
-    bam_dir = get_dir(bamfile)
-    fileprefix = get_file(bamfile) + bam_sufix
-
-    # remove dirs
-    dirs_to_remove = ["%s/%s"%(bam_dir, f) for f in os.listdir(bam_dir) if os.path.isdir("%s/%s"%(bam_dir, f)) and f.startswith(fileprefix) and len(os.listdir("%s/%s"%(bam_dir, f)))==0] 
-    for f in dirs_to_remove: delete_folder(f)
-
-    # unite files
-    files_prefix = ["%s/%s"%(bam_dir, f) for f in os.listdir(bam_dir) if not file_is_empty("%s/%s"%(bam_dir, f)) and "temporary_file" not in f and f.startswith(fileprefix)]
-
-    # if there are no files, just skip the writing of the 'coverage_per_window.tab' file
-    if len(files_prefix)==0: return
-
-    df_all = pd.concat([pd.read_csv(f, sep="\t") for f in files_prefix])
-
-    # write into one
-    integrated_file = bamfile+bam_sufix
-    df_all.to_csv(integrated_file, sep="\t", header=True, index=False)
-
-    # remove other files
-    for f in files_prefix: 
-        if f!=integrated_file: remove_file(f)
-
 def run_gridssClove_given_filters(sorted_bam, reference_genome, working_dir, median_coverage, replace=True, threads=4, gridss_blacklisted_regions="", gridss_VCFoutput="", gridss_maxcoverage=50000, median_insert_size=250, median_insert_size_sd=0, gridss_filters_dict=default_filtersDict_gridss, tol_bp=50, run_in_parallel=True, max_rel_coverage_to_consider_del=0.2, min_rel_coverage_to_consider_dup=1.8, replace_FromGridssRun=False, define_insertions_based_on_coverage=False):
 
     """This function runs gridss and clove with provided filtering and parameters. This can be run at the end of a parameter optimisation process. It returns a dict mapping each SV to a table, and a df with the gridss.
@@ -3962,7 +4062,7 @@ def run_gridssClove_given_filters(sorted_bam, reference_genome, working_dir, med
     remaining_df_clove, svtype_to_SVtable = write_clove_df_into_bedORbedpe_files_like_RSVSim(df_clove, fileprefix, reference_genome, sorted_bam, tol_bp=tol_bp, replace=replace_FromGridssRun, svtypes_to_consider={"insertions", "deletions", "inversions", "translocations", "tandemDuplications", "remaining"}, run_in_parallel=run_in_parallel, define_insertions_based_on_coverage=define_insertions_based_on_coverage)
 
     # merge the coverage files in one
-    merge_coverage_per_window_files_in_one(sorted_bam)
+    #merge_coverage_per_window_files_in_one(sorted_bam)
 
     return svtype_to_SVtable, df_gridss
 
@@ -6778,6 +6878,28 @@ def index_genome(genome, replace=False):
         run_cmd("%s faidx %s > %s 2>&1"%(samtools, genome, faidx_std))
         remove_file(faidx_std)
 
+def create_sequence_dict(genome, replace=False):
+
+    """Takes a fasta and generates the reference dict"""
+
+    rstrip = genome.split(".")[-1]
+    dictionary = "%sdict"%(genome.rstrip(rstrip)); tmp_dictionary = "%s.tmp"%dictionary
+
+    if file_is_empty(dictionary) or replace is True:
+
+        # remove any previously created tmp_file
+        remove_file(tmp_dictionary)
+
+        # define the std
+        dictionary_std = "%s.generating.std"%dictionary
+        print_if_verbose("Creating picard dictionary. The std is in %s"%dictionary_std)
+
+        run_cmd("%s CreateSequenceDictionary R=%s O=%s TRUNCATE_NAMES_AT_WHITESPACE=true > %s 2>&1"%(picard_exec, genome, tmp_dictionary, dictionary_std)) 
+
+        remove_file(dictionary_std)  
+        os.rename(tmp_dictionary , dictionary)
+
+
 def get_windows_infoDF_with_predictedFromFeatures_coverage(genome, distToTel_chrom_GC_to_coverage_fn, expected_coverage_per_bp, replace=False, threads=4, make_plots=True):
 
     """This function gets a genome and returns a df for windows of the genome and the relative coverage predicted from distToTel_chrom_GC_to_coverage_fn"""
@@ -8287,7 +8409,7 @@ def benchmark_GridssClove_for_knownSV(sample_bam, reference_genome, know_SV_dict
                     print_if_verbose("working on chunk %i"%Ichunk)
 
                     # redefine the threads, so that you have at least 4Gb of RAM per thread
-                    available_RAM = get_availableGbRAM()
+                    available_RAM = get_availableGbRAM(outdir)
 
                     # define the maxiumum number of threads so that each thread has 8Gb of ram
                     max_threads = max([1, int(available_RAM/6 - 1)]) 
@@ -8321,7 +8443,7 @@ def benchmark_GridssClove_for_knownSV(sample_bam, reference_genome, know_SV_dict
             merge_tables_into_file(tables_coverage_windows, outfile)
 
             # merge all the coverage files generated in one
-            merge_coverage_per_window_files_in_one(sample_bam)
+            #merge_coverage_per_window_files_in_one(sample_bam)
 
             #################################################
 
@@ -9299,12 +9421,10 @@ def generate_jobarray_file(jobs_filename, name):
 
     # define the stddir
     outdir = get_dir(jobs_filename)
-    stddir = "%s/STDfiles"%outdir; make_folder(stddir)
+    stddir = "%s/STDfiles"%outdir; 
+    delete_folder(stddir)
+    make_folder(stddir)
 
-    # remove all previous files from stddir that start with the same name
-    for file in os.listdir(stddir): 
-        if file.startswith(name): remove_file("%s/%s"%(stddir, file))
- 
     # remove previous rst files
     name_jobs_filename = get_file(jobs_filename)
     for file in os.listdir(get_dir(jobs_filename)): 
@@ -10411,10 +10531,13 @@ def get_bam_with_duplicatesMarkedSpark(bam, threads=4, replace=False):
     bam_dupMarked = "%s.MarkDups.bam"%bam
     bam_dupMarked_tmp = "%s.MarkDups.tmp.bam"%bam
 
+    # calculate availableGbRAM
+    availableGbRAM = get_availableGbRAM(get_dir(bam))
+
     # different memory options
-    javaRamGb_common = int(get_availableGbRAM()*fractionRAM_to_dedicate) # At Broad, we run MarkDuplicates with 2GB Java heap (java -Xmx2g) and 10GB hard memory limit
-    javaRamGb_half = int(get_availableGbRAM()*0.5) # At Broad, we run MarkDuplicates with 2GB Java heap (java -Xmx2g) and 10GB hard memory limit
-    javaRamGb_allBut2 = int(get_availableGbRAM() - 2) # rule of thumb from GATK
+    javaRamGb_common = int(availableGbRAM*fractionRAM_to_dedicate) # At Broad, we run MarkDuplicates with 2GB Java heap (java -Xmx2g) and 10GB hard memory limit
+    javaRamGb_half = int(availableGbRAM*0.5) # At Broad, we run MarkDuplicates with 2GB Java heap (java -Xmx2g) and 10GB hard memory limit
+    javaRamGb_allBut2 = int(availableGbRAM - 2) # rule of thumb from GATK
     javaRamGb_4 = 4 # this is from a post from 2011, reccommended for a 170Gb RAM
 
     javaRamGb = javaRamGb_common
@@ -10478,9 +10601,9 @@ def get_sortedBam_with_duplicatesMarked(sorted_bam, threads=4, replace=False):
         print_if_verbose("marking duplicate reads")
 
         # define the java memory
-        #javaRamGb = int(get_availableGbRAM()*fractionRAM_to_dedicate) # At Broad, we run MarkDuplicates with 2GB Java heap (java -Xmx2g) and 10GB hard memory limit
-        #javaRamGb = int(get_availableGbRAM()*0.5) # At Broad, we run MarkDuplicates with 2GB Java heap (java -Xmx2g) and 10GB hard memory limit
-        javaRamGb = int(get_availableGbRAM() - 2) # rule of thumb from GATK
+        #javaRamGb = int(get_availableGbRAM(get_dir(sorted_bam))*fractionRAM_to_dedicate) # At Broad, we run MarkDuplicates with 2GB Java heap (java -Xmx2g) and 10GB hard memory limit
+        #javaRamGb = int(get_availableGbRAM(get_dir(sorted_bam))*0.5) # At Broad, we run MarkDuplicates with 2GB Java heap (java -Xmx2g) and 10GB hard memory limit
+        javaRamGb = int(get_availableGbRAM(get_dir(sorted_bam)) - 2) # rule of thumb from GATK
         #javaRamGb = 4 # this is from a post from 2011, reccommended for a 170Gb RAM
 
         # define the MAX_RECORDS_IN_RAM
@@ -13289,8 +13412,8 @@ def get_correctID_and_INFO_df_vcf_SV_CNV(r):
     elif r["INFO"].startswith("SVTYPE=insertionBND"): extraID = "insertion-%s-%i"%(r["#CHROM"], r["POS"])
     else: raise ValueError("r is not properly formatted")
 
-    # get the new ID
-    type_var, other_ID = r["ID"].split("|")
+    type_var = r["ID"].split("|")[0]
+    other_ID = "|".join(r["ID"].split("|")[1:])
     newID = "%s|%s|%s"%(type_var, extraID, other_ID)
 
     return pd.Series({"ID" : newID, "INFO" : newINFO})
@@ -14278,23 +14401,68 @@ def remove_files_SV_CNVcalling(outdir):
 #######################################################################################
 
 
+def run_jobarray_file_Nord3(jobs_filename, name, time="12:00:00", queue="bsc_ls", threads_per_job=4, RAM_per_thread=1800, max_njobs_to_run=1000):
 
-def run_jobarray_file_greasy(jobs_filename, cluster_name, name, time="12:00:00", queue="bsc_ls", threads_per_job=4, MN_nodes=1, Nord3_RAM_thread=1800, Nord3_nodes=3):
+    """Runs jobs_filename in Nord3"""
+
+   # define dirs
+    outdir = get_dir(jobs_filename)
+    stddir = "%s/STDfiles"%outdir; 
+
+    delete_folder(stddir); make_folder(stddir)
+
+    # define the std files
+    stderr_file = "%s/%s_stderr.txt"%(stddir, name)
+    stdout_file = "%s/%s_stdout.txt"%(stddir, name)
+
+    # define the job script
+    jobs_filename_run = "%s.run"%jobs_filename
+
+    # define the number of jobs in the job array
+    njobs = len(open(jobs_filename, "r").readlines())
+
+    # change the tome
+    time = ":".join(time.split(":")[0:2])
+
+    # define the number of jobs to run at once, maximum 1000
+    njobs_to_run = min([max_njobs_to_run, njobs])
+
+    arguments =  ["#!/bin/sh",
+                  "#BSUB -e  %s"%stderr_file,
+                  "#BSUB -o %s"%stdout_file,
+                  "#BSUB -cwd %s"%outdir,
+                  "#BSUB -W %s"%time,
+                  "#BSUB -q %s"%queue,
+                  "#BSUB -n %i"%threads_per_job, # the number of processes
+                  "#BSUB -M %i"%RAM_per_thread, # the ram per thread in Mb
+                  "#BSUB -J %s[1-%i]"%(name, njobs_to_run), # the job array
+                  "",
+                  "cmdFile=%s/command.$LSB_JOBINDEX &&"%stddir, # define the command file
+                  "head -n $LSB_JOBINDEX %s | tail -n 1 > $cmdFile &&"%jobs_filename, # create cmdFile
+                  'bash $cmdFile && echo "$cmdFile finished well"' # execute it
+                  ]
+
+    # '#BSUB -R "span[ptile=16]"', "export OMP_NUM_THREADS=16"
+    
+    # define and write the run filename
+    with open(jobs_filename_run, "w") as fd: fd.write("\n".join(arguments))
+    
+    # run in cluster if specified
+    run_cmd("bsub < %s"%jobs_filename_run)
+
+
+def run_jobarray_file_MN4_greasy(jobs_filename, name, time="12:00:00", queue="bsc_ls", threads_per_job=4, nodes=1):
 
     """
-    This function takes a jobs filename and creates a jobscript with args (which is a list of lines to be written to the jobs cript). 
-    
-    Comments on each cluster:
-    
-    - MN4: There are many nodes, each of them with 48 threads. Each thread has 2Gb of RAM. If you add '--constraint highmem' it will get 8Gb per thread. You can add these extra args:
-
-    - Nord3: Each whole node has 16 threads. You can specify the RAM per thread in MB. If the RAM per thread is > 32, you will go into 64Gb nodes, and if not to 128 Gb nodes. For now, I run all the processes with 16 cores.
+    This function takes a jobs filename and creates a jobscript with args (which is a list of lines to be written to the jobs cript). It works in MN4 for greasy    
 
     """
 
     # define dirs
     outdir = get_dir(jobs_filename)
-    stddir = "%s/STDfiles"%outdir; make_folder(stddir)
+    stddir = "%s/STDfiles"%outdir; 
+
+    delete_folder(stddir); make_folder(stddir)
 
     # define the std files
     greasy_logfile = "%s/%s_greasy.log"%(stddir, name)
@@ -14307,68 +14475,58 @@ def run_jobarray_file_greasy(jobs_filename, cluster_name, name, time="12:00:00",
     # define the number of jobs in the job array
     njobs = len(open(jobs_filename, "r").readlines())
 
-    # init arguments with the interpreter and the stderr and stdout files
-    arguments = ["#!/bin/sh"]
+    # define the requested nodes. Each node has 48 threads
+    max_nodes = int((njobs*threads_per_job)/48)
+    requested_nodes = min([nodes, max_nodes])
 
-    # define things related to the cluster name
-    if cluster_name=="MN4":
-
-        cmd_submit = "sbatch %s"%jobs_filename_run
-
-        # define the requested nodes. Each node has 48 threads
-        max_nodes = int((njobs*threads_per_job)/48)
-        requested_nodes = min([MN_nodes, max_nodes])
-
-        arguments += ["#SBATCH --error=%s"%stderr_file,
-                      "#SBATCH --output=%s"%stdout_file,
-                      "#SBATCH --job-name=%s"%name, 
-                      "#SBATCH --get-user-env",
-                      "#SBATCH --workdir=%s"%outdir,
-                      "#SBATCH --time=%s"%time,
-                      "#SBATCH --qos=%s"%queue,
-                      "#SBATCH --cpus-per-task=%i"%threads_per_job,
-                      "#SBATCH --ntasks=%i"%requested_nodes 
-                     ]
-
-    elif cluster_name=="Nord3":
-
-        cmd_submit = "bsub < %s"%jobs_filename_run
-
-        # change things
-        time = ":".join(time.split(":")[0:2])
-
-        # define the processes (the number of nodes times the number of threads per node)
-        max_nodes = njobs
-        requested_nodes = min([Nord3_nodes, max_nodes])
-        n_processes = requested_nodes*16
-        
-        arguments += ["#BSUB -e  %s"%stderr_file,
-                      "#BSUB -o %s"%stdout_file,
-                      "#BSUB -cwd %s"%outdir,
-                      "#BSUB -W %s"%time,
-                      "#BSUB -q %s"%queue,
-                      "#BSUB -n %i"%n_processes,
-                      "#BSUB -M %i"%Nord3_RAM_thread,
-                      '#BSUB -R "span[ptile=16]"',
-                      "export OMP_NUM_THREADS=16"
-
-                     ]
-
-    else: raise ValueError("%s has not been considered"%cluster_name)
-
-    # add the greasy running
-    arguments += ["",
+    # define the arguments
+    arguments = [ "#!/bin/sh",
+                  "#SBATCH --error=%s"%stderr_file,
+                  "#SBATCH --output=%s"%stdout_file,
+                  "#SBATCH --job-name=%s"%name, 
+                  "#SBATCH --get-user-env",
+                  "#SBATCH --workdir=%s"%outdir,
+                  "#SBATCH --time=%s"%time,
+                  "#SBATCH --qos=%s"%queue,
+                  "#SBATCH --cpus-per-task=%i"%threads_per_job,
+                  "#SBATCH --ntasks=%i"%requested_nodes,
+                  "",
                   "module load greasy",
                   "export GREASY_LOGFILE=%s;"%(greasy_logfile),
                   "echo 'running pipeline';",
-                  "greasy %s"%jobs_filename]
-
+                  "greasy %s"%jobs_filename
+                ]
 
     # define and write the run filename
     with open(jobs_filename_run, "w") as fd: fd.write("\n".join(arguments))
     
     # run in cluster if specified
-    run_cmd(cmd_submit)
+    run_cmd("sbatch %s"%jobs_filename_run)
+
+
+def get_current_clusterName_mareNostrum():
+
+    """Returns the cluster name in which you are. It can be MN4, Nord3"""
+
+    # try MN4
+    try: 
+        run_cmd("squeue > ~/misc_std.txt 2>&1")
+        cluster_name = "MN4"
+
+    except:
+
+        # try Nord3
+        try:
+
+            run_cmd("bjobs > ~/misc_std.txt 2>&1")
+            cluster_name = "Nord3"
+
+        except: 
+
+            raise ValueError("cluster could not be identified")
+
+    return cluster_name
+
 
 def run_perSVade_severalSamples(paths_df, cwd, common_args, threads=4, sampleID_to_parentIDs={}, samples_to_run=set(), repeat=False, job_array_mode="job_array", ploidy=1, variant_calling_fields=["#Uploaded_variation", "QUAL", "fb_DP", "fb_MQM", "fb_MQMR", "fb_PQA", "fb_PQR", "fb_QA", "fb_QR", "fb_fractionReadsCov", "fb_readsCovVar"]):
 
