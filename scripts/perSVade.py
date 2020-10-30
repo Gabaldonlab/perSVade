@@ -182,7 +182,6 @@ fun.make_folder(opt.outdir)
 # define the name as the sample as the first 10 characters of the outdir
 name_sample = fun.get_file(opt.outdir)[0:10]
 print("Running perSVade into %s"%opt.outdir)
-print("Running with %i Gb of RAM and %i cores"%(int(fun.get_availableGbRAM()), opt.threads))
 
 #### REPLACE THE REF GENOME ####
 
@@ -243,6 +242,7 @@ if opt.StopAfter_genomeObtention is True:
 
 #### define misc args ####
 
+
 # get the simulation ploidies
 if opt.simulation_ploidies!="auto": simulation_ploidies = opt.simulation_ploidies.split(",")
 
@@ -266,6 +266,16 @@ print("using a window length of %i"%fun.window_l)
 
 # define the verbosity. If opt.verbose is False, none of the 'print' statements of sv_functions will have an effect
 fun.printing_verbose_mode = opt.verbose
+
+# redefine the real threads
+real_available_threads = fun.get_available_threads(opt.outdir)
+if opt.threads>real_available_threads: 
+
+	print("WARNING: There are %i available threads, and you required %i. Running eveything on %i threads"%(real_available_threads, opt.threads, real_available_threads))
+	opt.threads = real_available_threads
+
+print("Running with %i Gb of RAM and %i cores"%(int(fun.get_availableGbRAM(opt.outdir)), opt.threads))
+
 
 # change the default parameters if specified
 if opt.parameters_json_file is not None:
@@ -354,22 +364,10 @@ if not any([x=="skip" for x in {opt.fastq1, opt.fastq2}]):
 # First create some files that are important for any program
 
 # Create a reference dictionary
-rstrip = opt.ref.split(".")[-1]
-dictionary = "%sdict"%(opt.ref.rstrip(rstrip)); tmp_dictionary = "%s.tmp"%dictionary; 
-if fun.file_is_empty(dictionary) or opt.replace is True:
-
-    # remove any previously created tmp_file
-    if not fun.file_is_empty(tmp_dictionary): os.unlink(tmp_dictionary)
-
-    print("Creating picard dictionary")
-    cmd_dict = "%s CreateSequenceDictionary R=%s O=%s TRUNCATE_NAMES_AT_WHITESPACE=true"%(picard_exec, opt.ref, tmp_dictionary); fun.run_cmd(cmd_dict)   
-    os.rename(tmp_dictionary , dictionary)
+fun.create_sequence_dict(opt.ref, replace=opt.replace)
 
 # Index the reference
-if fun.file_is_empty("%s.fai"%opt.ref) or opt.replace is True:
-    print ("Indexing the reference...")
-    cmd_indexRef = "%s faidx %s"%(samtools, opt.ref); fun.run_cmd(cmd_indexRef) # This creates a .bai file of the reference
-
+fun.index_genome(opt.ref, replace=opt.replace)
 
 #### calculate coverage per windows of window_l ####
 

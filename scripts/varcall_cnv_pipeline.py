@@ -111,7 +111,7 @@ if not opt.gff is None and fun.file_is_empty(opt.gff): raise ValueError("%s is n
 # define the minimum AF
 ploidy_to_minAF = {1:0.9, 2:0.25, 3:0.15, 4:0.1}
 if opt.minAF_smallVars=="infer": minAF_smallVars = ploidy_to_minAF[opt.ploidy]
-elif opt.minAF_smallVars<=1 and opt.minAF_smallVars>=0: minAF_smallVars = opt.minAF_smallVars
+elif float(opt.minAF_smallVars)<=1 and float(opt.minAF_smallVars)>=0: minAF_smallVars = float(opt.minAF_smallVars)
 else: raise ValueError("The value provided in --minAF_smallVars is incorrect")
 
 
