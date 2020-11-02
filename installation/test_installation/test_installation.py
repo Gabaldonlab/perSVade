@@ -92,11 +92,11 @@ if fun.file_is_empty(repeat_masker_db): raise ValueError("%s is missing. Check t
 #test_fun.test_conda_env_generation(testing_outputs_dir, replace=False)
 
 # test repeat masker obtention
-#test_fun.test_get_repeat_maskerDF(ref_genome, replace=False) # this will not work for repeat masker
+test_fun.test_get_repeat_maskerDF(ref_genome, replace=False) # this will not work for repeat masker
 
 # test the repeat masker obtention for a long chromosome 1, 2 and 6
-#test_fun.test_get_repeat_maskerDF(Calbicans_chr1_2_6, replace=False)
-#print("repeat masker works on chromosome 1, 2 and 6 of C. albicans")
+test_fun.test_get_repeat_maskerDF(Calbicans_chr1_2_6, replace=False)
+print("repeat masker works on chromosome 1, 2 and 6 of C. albicans")
 
 # test read simulation by simulating reads from the mutated genome
 r1_mutGenome, r2_mutGenome = test_fun.test_read_simulation_and_get_reads(mut_genome)
@@ -143,9 +143,8 @@ test_fun.test_parameter_optimisation_perSVade_real(Cglabrata_subsampled_reads_di
 outdir_SRAdb_query_downloading_and_readTrimming = "%s/testing_SRAdb_query_downloading_and_readTrimming_MERS"%testing_outputs_dir
 test_fun.test_SRAdb_query_downloading_and_readTrimming(outdir_SRAdb_query_downloading_and_readTrimming, MERS_genome, 1335626, replace=False)
 
-
 # test whether you can run greasy
-test_fun.test_greasy()
+#test_fun.test_greasy()
 
 ############################################
 

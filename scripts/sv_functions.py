@@ -35,9 +35,8 @@ import time
 from sklearn.metrics import r2_score
 from collections import Counter, defaultdict
 import collections
-from ete3 import Tree, NCBITaxa
+#from ete3 import Tree, NCBITaxa
 from shutil import copyfile
-#import igraph
 import urllib
 from subprocess import STDOUT, check_output
 import subprocess
@@ -249,6 +248,12 @@ wrong_SRRs = {"ERR2163728", "SRR8373447"}
 
 # define the fraction of RAM to dedicate to the pipeline
 fractionRAM_to_dedicate = 0.5
+
+# define the fraction of memory available
+fraction_available_mem = None
+
+# the minimum size of CNVs to be considered
+min_CNVsize_betweenBPs = 500
 
 svtype_to_color={"tandemDuplications": "gray", "deletions": "black", "inversions": "blue", "translocations": "olive", "insertions": "red", "remaining":"magenta", "integrated":"c"}
 
@@ -697,25 +702,52 @@ def extract_BEDofGENES_of_gff3(gff, bed, replace=False, reference=""):
 
 def get_availableGbRAM(outdir):
 
-    """This function returns a float with the available memory in your system. psutil.virtual_memory().available/1e9 would yield the theoretically available memory"""
+    """This function returns a float with the available memory in your system. psutil.virtual_memory().available/1e9 would yield the theoretically available memory.
 
-    print_if_verbose("calculating GB ram")
+    fraction_available_mem is the fraction of the total memory available in the node (computer) that is dedicated to the run of perSVade."""
 
-    # define a file where to calculate memory
-    calc_memory_file = "%s/calculating_memory.txt"%outdir
-    remove_file(calc_memory_file)
+    # get the memory with psutil
+    available_mem = psutil.virtual_memory().available/1e9
 
-    # run the calculate memory
-    cmd_std = "%s.std"%calc_memory_file
-    try: run_cmd("%s --outfile %s > %s 2>&1"%(calculate_memory_py, calc_memory_file, cmd_std))
-    except: print_if_verbose("memory was calculated")
+    # define the fraction_total_running 
+    if fraction_available_mem is None:
 
-    # get from file
-    availableGbRAM = float(open(calc_memory_file, "r").readlines()[-1])
+        # MN4
+        if "BSC_MACHINE" in os.environ and os.environ["BSC_MACHINE"]=="mn4":
 
-    # at the end remove the file
-    remove_file(calc_memory_file)
-    remove_file(cmd_std)
+            availableGbRAM = available_mem*(int(os.environ["SLURM_CPUS_PER_TASK"])/48)
+
+        # Nord3
+        elif "BSC_MACHINE" in os.environ and os.environ["BSC_MACHINE"]=="nord3":
+
+            availableGbRAM = available_mem*(int(os.environ["LSB_DJOB_NUMPROC"])/16)
+
+        # BSC machine
+        elif str(subprocess.check_output("uname -a", shell=True)).startswith("b'Linux bscls063 4.12.14-lp150.12.48-default"): 
+
+            availableGbRAM = available_mem
+
+        # others. Calculate from filling the memory
+        else:
+            print_if_verbose("WARNING: calculating the available RAM by filling it. This may be dangerous.")
+
+            # define a file where to calculate memory
+            calc_memory_file = "%s/calculating_memory.txt"%outdir
+            remove_file(calc_memory_file)
+
+            # run the calculate memory
+            cmd_std = "%s.std"%calc_memory_file
+            try: run_cmd("%s --outfile %s > %s 2>&1"%(calculate_memory_py, calc_memory_file, cmd_std))
+            except: print_if_verbose("memory was calculated")
+
+            # get from file
+            availableGbRAM = float(open(calc_memory_file, "r").readlines()[-1])
+
+            # at the end remove the file
+            remove_file(calc_memory_file)
+            remove_file(cmd_std)
+
+    else: availableGbRAM = available_mem*float(fraction_available_mem)
 
     return availableGbRAM
 
@@ -789,44 +821,57 @@ def get_available_threads(outdir):
 
     """Returns the avilable number of threads by runnning GATK. It runs gatk on a dummy genome and returns the really available number of threads  """
 
-    # redefnie the outdir under outdir
-    outdir = "%s/getting_available_threads"%(outdir)
-    delete_folder(outdir)
-    make_folder(outdir)
+    # MN4
+    if "BSC_MACHINE" in os.environ and os.environ["BSC_MACHINE"]=="mn4":
 
-    # define a genome that has one chromosome
-    genome = "%s/genome.fasta"%outdir
-    genome_obj = SeqRecord(Seq("ACTGCGATCGACTCGATCGATGAGAGAGAGGACTCTCAACAG"*10), id="chromosomeX")
-    SeqIO.write([genome_obj], genome, "fasta")
+        available_threads = int(os.environ["SLURM_CPUS_PER_TASK"])
 
-    # get some simulated reads
-    reads1, reads2 = simulate_testing_reads_on_genome(genome, window_l=75, npairs=1000, read_length=50, median_insert_size=15, median_insert_size_sd=5, threads=4, replace=False)
+    # BSC machine
+    elif str(subprocess.check_output("uname -a", shell=True)).startswith("b'Linux bscls063 4.12.14-lp150.12.48-default"): 
 
-    # get a sorted bam
-    sorted_bam = get_sorted_bam_test(reads1, reads2, genome, replace=False)
+        available_threads = 4
 
-    # create the files
-    create_sequence_dict(genome, replace=False)
+    # others. Calculate by running GATK
+    else:
 
-    # run GATK HC 
-    gatk_out = "%s/output_HC.vcf"%outdir
-    gatk_std = "%s.running.std"%gatk_out
+        # redefnie the outdir under outdir
+        outdir = "%s/getting_available_threads"%(outdir)
+        delete_folder(outdir)
+        make_folder(outdir)
 
-    gatk_cmd = "%s HaplotypeCaller -R %s -I %s -O %s -ploidy %i --genotyping-mode DISCOVERY --emit-ref-confidence NONE --stand-call-conf 30 --native-pair-hmm-threads %i > %s 2>&1"%(gatk, genome, sorted_bam, gatk_out, 1, 100000000, gatk_std)
+        # define a genome that has one chromosome
+        genome = "%s/genome.fasta"%outdir
+        genome_obj = SeqRecord(Seq("ACTGCGATCGACTCGATCGATGAGAGAGAGGACTCTCAACAG"*10), id="chromosomeX")
+        SeqIO.write([genome_obj], genome, "fasta")
 
-    run_cmd(gatk_cmd)
+        # get some simulated reads
+        reads1, reads2 = simulate_testing_reads_on_genome(genome, window_l=75, npairs=1000, read_length=50, median_insert_size=15, median_insert_size_sd=5, threads=4, replace=False)
 
-    # get the available threads
-    threads_lines = [l for l in open(gatk_std, "r").readlines() if "IntelPairHmm - Using" in l and "available threads, but" in l and "were requested" in l]
-    if len(threads_lines)!=1: raise ValueError("the threads were not properly calculated")
+        # get a sorted bam
+        sorted_bam = get_sorted_bam_test(reads1, reads2, genome, replace=False)
 
-    available_threads = int(threads_lines[0].split("IntelPairHmm - Using ")[1].split("available threads")[0])
+        # create the files
+        create_sequence_dict(genome, replace=False)
 
-    # print
-    print_if_verbose("there are %i available threads in this run"%available_threads)
+        # run GATK HC 
+        gatk_out = "%s/output_HC.vcf"%outdir
+        gatk_std = "%s.running.std"%gatk_out
 
-    # remove the outdir
-    delete_folder(outdir)
+        gatk_cmd = "%s HaplotypeCaller -R %s -I %s -O %s -ploidy %i --genotyping-mode DISCOVERY --emit-ref-confidence NONE --stand-call-conf 30 --native-pair-hmm-threads %i > %s 2>&1"%(gatk, genome, sorted_bam, gatk_out, 1, 100000000, gatk_std)
+
+        run_cmd(gatk_cmd)
+
+        # get the available threads
+        threads_lines = [l for l in open(gatk_std, "r").readlines() if "IntelPairHmm - Using" in l and "available threads, but" in l and "were requested" in l]
+        if len(threads_lines)!=1: raise ValueError("the threads were not properly calculated")
+
+        available_threads = int(threads_lines[0].split("IntelPairHmm - Using ")[1].split("available threads")[0])
+
+        # print
+        print_if_verbose("there are %i available threads in this run"%available_threads)
+
+        # remove the outdir
+        delete_folder(outdir)
 
     return available_threads
 
@@ -2803,7 +2848,8 @@ def add_info_to_gridssDF(df, reference_genome, expected_fields={"allele_frequenc
             if pd.isna(HOMLEN): return 0
             else: return int(HOMLEN)
 
-        df["length_microHomology"] = df.INFO_HOMLEN.apply(get_homology_length)
+        if "INFO_HOMLEN" in df.keys(): df["length_microHomology"] = df.INFO_HOMLEN.apply(get_homology_length)
+        else: df["length_microHomology"] = 0
 
         # add the actual allele_frequency, which depends on the median_insert_size and the median_insert_size_sd. If the breakend is longer than the insert size it is a large event
         maxiumum_insert_size = median_insert_size + median_insert_size_sd
@@ -4072,17 +4118,6 @@ def run_gridssClove_given_filters(sorted_bam, reference_genome, working_dir, med
 ###################################################################################################
 
 
-def get_taxid2name(taxIDs):
-
-    """Takes an iterable of taxIDs and returns a dict mapping each of them to the scientific name"""
-
-    taxIDs = list(taxIDs)
-
-    ncbi = NCBITaxa()
-    taxid2name = ncbi.get_taxid_translator(taxIDs)
-
-    return taxid2name
-
 def get_allOxfordNanopore_runInfo_fromSRA_forDivision(fileprefix, taxID_division, reference_genome, taxIDs_to_exclude=set(), replace=False, min_coverage=30):
 
     """This function tages all the SRRs that have WGS for the required taxIDs"""
@@ -4254,67 +4289,6 @@ def get_allWGS_runInfo_fromSRA_forDivision(fileprefix, taxID_division, reference
 
     return SRA_runInfo_df
 
-def get_allWGS_runInfo_fromSRA_forTaxIDs(fileprefix, taxIDs, reference_genome, replace=False, min_coverage=30):
-
-    """This function tages all the SRRs that have WGS for the required taxIDs"""
-
-    SRA_runInfo_df_file = "%s.SRA_runInfo_df.py"%fileprefix
-
-    if file_is_empty(SRA_runInfo_df_file) or replace is True:
-
-        # define the WGS fastq filters
-        WGS_filters = '("biomol dna"[Properties] AND "strategy wgs"[Properties] AND "library layout paired"[Properties] AND "platform illumina"[Properties] AND "strategy wgs"[Properties] OR "strategy wga"[Properties] OR "strategy wcs"[Properties] OR "strategy clone"[Properties] OR "strategy finishing"[Properties] OR "strategy validation"[Properties])'
-
-
-        # get the name of these taxIDs
-        taxid2name = get_taxid2name(taxIDs)
-
-        # define the esearch query
-        organism_filters = " OR ".join(['"%s"[orgn:__txid%i]'%(name.split()[0], taxID) for taxID, name in taxid2name.items()])
-        esearch_query = "(%s) AND %s"%(organism_filters, WGS_filters) 
-
-        # get esearch
-        efetch_outfile = "%s.efetch_output.txt"%fileprefix
-
-        columns_efetch = "Run,ReleaseDate,LoadDate,spots,bases,spots_with_mates,avgLength,size_MB,AssemblyName,download_path,Experiment,LibraryName,LibraryStrategy,LibrarySelection,LibrarySource,LibraryLayout,InsertSize,InsertDev,Platform,Model,SRAStudy,BioProject,Study_Pubmed_id,ProjectID,Sample,BioSample,SampleType,TaxID,ScientificName,SampleName,g1k_pop_code,source,g1k_analysis_group,Subject_ID,Sex,Disease,Tumor,Affection_Status,Analyte_Type,Histological_Type,Body_Site,CenterName,Submission,dbgap_study_accession,Consent,RunHash,ReadHash".split(",")
-
-        # if there are no runs, it will run an error
-        esearch_efetch_stderr = "%s.generating.stderr"%efetch_outfile
-        print_if_verbose("Querying the SRA database. This will throw an error if there are no results. The stderr is in %s"%esearch_efetch_stderr)
-        run_cmd("%s -db sra -query '%s' | %s -db sra --format runinfo | egrep -v '^Run' | egrep 'https' > %s 2>%s"%(esearch, esearch_query, efetch, efetch_outfile, esearch_efetch_stderr))
-        remove_file(esearch_efetch_stderr)
-
-        SRA_runInfo_df = pd.read_csv(efetch_outfile, sep=",", header=None, names=columns_efetch)
-
-        save_object(SRA_runInfo_df, SRA_runInfo_df_file)
-
-    else: SRA_runInfo_df = load_object(SRA_runInfo_df_file)
-
-
-    # define the expected coverage
-    length_genome = sum(get_chr_to_len(reference_genome).values())
-    SRA_runInfo_df["expected_coverage"] = SRA_runInfo_df.apply(lambda r: (r["spots_with_mates"]*r["avgLength"])/length_genome,axis=1)
-
-    # plot the number of spots
-    filename = "%s.distribution_parameters.pdf"%fileprefix
-    fig = plt.figure(figsize=(5,13))
-    for I, field in enumerate(["spots", "spots_with_mates", "avgLength", "InsertSize", "size_MB", "expected_coverage"]):
-        ax = plt.subplot(6, 1, I+1)
-        sns.distplot(SRA_runInfo_df[field], kde=False, rug=True)
-        ax.set_xlabel(field)
-
-    fig.tight_layout()  # otherwise the right y-label is slightly 
-    fig.savefig(filename, bbox_inches='tight');
-    plt.close(fig)
-
-    # keep only those that have at least a coverage of min_coverage    
-    SRA_runInfo_df = SRA_runInfo_df[SRA_runInfo_df["expected_coverage"]>=min_coverage]
-
-    for field in ["AssemblyName", "SampleType", "TaxID"]: pass
-
-    print_if_verbose("There are %i SRRs ready to use with at least %ix coverage"%(len(SRA_runInfo_df), min_coverage))
-
-    return SRA_runInfo_df
 
 def download_srr_subsetReads_onlyFastqDump(srr, download_dir, subset_n_reads=1000000):
 
@@ -4859,8 +4833,10 @@ def get_last_reads_fastqgz_file(file, nreads=100):
             print_if_verbose("These are the wrong reads:", last_reads)
             raise ValueError("There are some incorrect reads in %s"%file)
 
-    # change the reads 
-    if last_reads[0].endswith("/1") or last_reads[0].endswith("/2"): last_reads = ["/".join(r.split("/")[0:-1]) for r in last_reads]
+    if len(last_reads)>0:
+
+        # change the reads 
+        if last_reads[0].endswith("/1") or last_reads[0].endswith("/2"): last_reads = ["/".join(r.split("/")[0:-1]) for r in last_reads]
 
     return last_reads
 
@@ -4955,7 +4931,6 @@ def run_parallelFastqDump_on_prefetched_SRRfile(SRRfile, replace=False, threads=
         # remove unneccessary logs
         remove_file(testing_fastqdump_parallel_std)
         remove_file(stdfile)
-
 
         # rename
         os.rename(tmp_reads1, reads1)
@@ -5179,8 +5154,6 @@ def get_SRA_runInfo_df_with_mapping_data(SRA_runInfo_df, reference_genome, outdi
         # get fraction reads mapped
         fraction_mapped = get_fraction_readPairsMapped(sorted_bam)
 
-        #except: fraction_mapped = 0.0
-
         # get the fraction of reads mapped
         fraction_reads_mapped_list.append(fraction_mapped)
 
@@ -5189,11 +5162,6 @@ def get_SRA_runInfo_df_with_mapping_data(SRA_runInfo_df, reference_genome, outdi
     ############################################
 
     return SRA_runInfo_df
-
-
-
-
-
 
 def get_taxID_or_BioSample(r, target_taxID):
 
@@ -9957,7 +9925,7 @@ def plot_accuracy_of_parameters_on_test_samples(parameters_df, test_df, outdir, 
 
   
 
-def report_accuracy_realSVs(close_shortReads_table, reference_genome, outdir, real_bedpe_breakpoints, threads=4, replace=False, n_simulated_genomes=2, mitochondrial_chromosome="mito_C_glabrata_CBS138", simulation_ploidies=["haploid", "diploid_homo", "diploid_hetero", "ref:2_var:1", "ref:3_var:1", "ref:4_var:1", "ref:5_var:1", "ref:9_var:1", "ref:19_var:1", "ref:99_var:1"], range_filtering_benchmark="theoretically_meaningful", nvars=100, job_array_mode="local", StopAfter_testAccuracy_perSVadeRunning=False, skip_cleaning_simulations_files_and_parameters=False, skip_cleaning_outdir=False, parameters_json_file=None, gff=None, replace_FromGridssRun_final_perSVade_run=False):
+def report_accuracy_realSVs(close_shortReads_table, reference_genome, outdir, real_bedpe_breakpoints, threads=4, replace=False, n_simulated_genomes=2, mitochondrial_chromosome="mito_C_glabrata_CBS138", simulation_ploidies=["haploid", "diploid_homo", "diploid_hetero", "ref:2_var:1", "ref:3_var:1", "ref:4_var:1", "ref:5_var:1", "ref:9_var:1", "ref:19_var:1", "ref:99_var:1"], range_filtering_benchmark="theoretically_meaningful", nvars=100, job_array_mode="local", StopAfter_testAccuracy_perSVadeRunning=False, skip_cleaning_simulations_files_and_parameters=False, skip_cleaning_outdir=False, parameters_json_file=None, gff=None, replace_FromGridssRun_final_perSVade_run=False, fraction_available_mem=None, replace_SV_CNVcalling_and_optimisation=False, replace_only_SV_CNVcalling=False):
 
 
     """This function runs the SV pipeline for all the datasets in close_shortReads_table with the fastSV, optimisation based on uniform parameters and optimisation based on realSVs (specified in real_svtype_to_file). The latter is skipped if real_svtype_to_file is empty.
@@ -10041,6 +10009,9 @@ def report_accuracy_realSVs(close_shortReads_table, reference_genome, outdir, re
                     if parameters_json_file is not None: cmd += " --parameters_json_file %s"%parameters_json_file
                     if gff is not None: cmd += " --gff %s"%gff
                     if replace_FromGridssRun_final_perSVade_run is True: cmd += " --replace_FromGridssRun_final_perSVade_run"
+                    if fraction_available_mem is not None: cmd += " --fraction_available_mem %.3f"%(float(fraction_available_mem))
+                    if replace_SV_CNVcalling_and_optimisation is True: cmd += " --replace_SV_CNVcalling_and_optimisation"
+                    if replace_only_SV_CNVcalling is True: cmd += " --replace_only_SV_CNVcalling"
 
                     # if the running in slurm is false, just run the cmd
                     if job_array_mode=="local": run_cmd(cmd)
@@ -11458,11 +11429,11 @@ def merge_several_vcfsSameSample_into_oneMultiSample_vcf(vcf_iterable, reference
             vcf_df["called_programs_list"] = vcf_df[all_programs].apply(lambda r: [program_to_abbreviation[p] for p in all_programs if not r[p].endswith(".")], axis=1)
             vcf_df["PASS_programs_list"] = vcf_df.INFO.apply(lambda x: [program_to_abbreviation[p] for p in all_programs if "%s_FILTER=PASS"%program_to_abbreviation[p] in x]).apply(get_point_if_empty)
 
-            # get whether the variant overlaps repeats
-            vcf_df["overlaps_repeats"] = get_series_variant_in_repeats(vcf_df, repeats_table, replace=replace)
-
             # define the 'ID' in  a way that resembles VEP
             vcf_df["ID"] = vcf_df["#CHROM"] + "_" + vcf_df.POS.apply(str) + "_" + vcf_df.REF + "/" + vcf_df.ALT
+
+            # get whether the variant overlaps repeats
+            vcf_df["overlaps_repeats"] = get_series_variant_in_repeats(vcf_df, repeats_table, replace=replace)
 
             # check that the ID is unique (check that the drop_duplicates worked)
             if len(set(vcf_df.ID))!=len(vcf_df): 
@@ -12453,10 +12424,17 @@ def get_vcf_df_withInsertedSequence_from_svDF(svDF, gridss_fields, breakend_fiel
 
                 Ir += 1
 
-    # get as dict
+    # get as df
     df_vcf_insertions = pd.DataFrame(dict_all).transpose()
+    interesting_fields = list(df_vcf_insertions.keys())
 
-    return df_vcf_insertions
+    # add all the INFO fields
+    df_vcf_insertions = get_vcf_df_with_INFO_as_single_fields(df_vcf_insertions).sort_values(by=["ID", "#CHROM", "POS", "INFO_QUAL", "INFO_real_AF"], ascending=False)
+
+    # discard duplicates
+    df_vcf_insertions = df_vcf_insertions.drop_duplicates(subset=["ID", "#CHROM", "POS"], keep="first")
+
+    return df_vcf_insertions[interesting_fields]
 
 def get_vcf_df_for_svDF(svDF, svtype, reference_genome, df_gridss):
 
@@ -12875,6 +12853,8 @@ def get_nonRedundant_CNVcalls_coverage(df_CNV, df_vcf_forCNV):
 
     """Gets a df_CNV with no redudnant calls (those that overlap by more than 80% with other rows in df_CNV or df_vcf_forCNV)"""
 
+    if len(df_CNV)==0: return df_CNV
+
     print_if_verbose("getting non-redundant CNV calls")
 
     # get the index
@@ -12955,6 +12935,9 @@ def get_breakend_IDs_df_CNV_r(r, df_gridss, chrom_to_len):
 def get_df_CNV_with_metadata(df_CNV, df_gridss, chrom_to_len):
 
     """This function takes a df_CNV and add some metadata, for each field """
+
+    # debug
+    if len(df_CNV)==0: return df_CNV
 
     # get index
     df_gridss = cp.deepcopy(df_gridss)
@@ -13071,7 +13054,7 @@ def get_df_gridss_low_confidence_reasonable_breakpoints(df_gridss, ploidy, min_c
 
 
     # define an AF threshold
-    min_AF_gridss = (1/ploidy)*0.05
+    min_AF_gridss = (1/ploidy)*0.1
 
     # deinfe the initial fields
     initial_fields = list(df_gridss.columns)
@@ -13118,7 +13101,7 @@ def get_df_gridss_low_confidence_reasonable_breakpoints(df_gridss, ploidy, min_c
     if len(df_gridss)==0: return pd.DataFrame(columns=initial_fields)
     else: return df_gridss[initial_fields]
 
-def get_CNV_calling_with_coverageBased_added(df_vcf, outdir, sorted_bam, reference_genome, df_clove, df_gridss, ploidy, replace=False, threads=4, mitochondrial_chromosome="mito_C_glabrata_CBS138", max_coverage_deletion=0.01, min_coverage_duplication=1.8, min_sv_size=50, min_r_pearson_noFlatRegions=0.2, min_r_spearman_noFlatRegions=0.2):
+def get_CNV_calling_with_coverageBased_added(df_vcf, outdir, sorted_bam, reference_genome, df_clove, df_gridss, ploidy, replace=False, threads=4, mitochondrial_chromosome="mito_C_glabrata_CBS138", max_coverage_deletion=0.01, min_coverage_duplication=1.8, min_sv_size=min_CNVsize_betweenBPs, min_r_pearson_noFlatRegions=0.2, min_r_spearman_noFlatRegions=0.2):
 
     """This function gets a df_vcf with calls of CNV (<DUP> or <DEL>) based on coverage. It generates a bed with the query regions, which include genes and any region that is surrounded by breakpoints (this also includes whole chromosomes). """
 
@@ -13127,7 +13110,10 @@ def get_CNV_calling_with_coverageBased_added(df_vcf, outdir, sorted_bam, referen
     # keep objects
     df_clove = cp.deepcopy(df_clove)
     df_vcf = cp.deepcopy(df_vcf)
-                                                                                                                                    
+
+    # define the fields
+    vcf_fields = ["#CHROM", "POS", "ID", "REF", "ALT", "QUAL", "FILTER", "INFO", "FORMAT"]
+                                                                                                                          
     # add the IDs set
     df_clove["IDs_set"] = df_clove.ID.apply(lambda x: set(re.split("\+|\-", x)))
     check_that_cloveIDs_are_in_gridss_df(df_clove, df_gridss)
@@ -13154,6 +13140,15 @@ def get_CNV_calling_with_coverageBased_added(df_vcf, outdir, sorted_bam, referen
         coverage_df = pd.read_csv(generate_coverage_per_window_file_parallel(reference_genome, destination_dir, sorted_bam, windows_file="none", replace=replace, run_in_parallel=True, delete_bams=False), sep="\t")
         median_coverage = get_median_coverage(coverage_df, mitochondrial_chromosome)
 
+        # sort by type_BEND and QUAL
+        type_BEND_to_int = {"highConfidence":0, "lowConfidence":1}
+        df_gridss["type_BEND_int"] = df_gridss.type_BEND.apply(lambda x: type_BEND_to_int[x])
+
+        df_gridss = df_gridss.sort_values(by=["#CHROM", "POS", "type_BEND_int", "QUAL"])
+
+        # discard duplicates, marking the first as False, so that we keep the best breakpoint at each position
+        df_gridss = df_gridss[~(df_gridss.duplicated(subset=["#CHROM", "POS"], keep="first"))]
+
         if file_is_empty(raw_cnv_file) or replace is True:
             print_if_verbose("getting raw CNV calls")
 
@@ -13166,15 +13161,6 @@ def get_CNV_calling_with_coverageBased_added(df_vcf, outdir, sorted_bam, referen
 
                 # initialize all IDs
                 query_regions_dict = {}
-
-                # sort by type_BEND and QUAL
-                type_BEND_to_int = {"highConfidence":0, "lowConfidence":1}
-                df_gridss["type_BEND_int"] = df_gridss.type_BEND.apply(lambda x: type_BEND_to_int[x])
-
-                df_gridss = df_gridss.sort_values(by=["#CHROM", "POS", "type_BEND_int", "QUAL"])
-
-                # discard duplicates, marking the first as False, so that we keep the best breakpoint at each position
-                df_gridss = df_gridss[~(df_gridss.duplicated(subset=["#CHROM", "POS"], keep="first"))]
 
                 # get the chrom_to_bpPositions high confidence 
                 chrom_to_bpPositions_real = get_df_gridss_chrom_to_positions(df_gridss[df_gridss.type_BEND=="highConfidence"], chrom_to_len)
@@ -13325,7 +13311,6 @@ def get_CNV_calling_with_coverageBased_added(df_vcf, outdir, sorted_bam, referen
         ###### FORMAT AS VCF ######
 
         # define fields
-        vcf_fields = ["#CHROM", "POS", "ID", "REF", "ALT", "QUAL", "FILTER", "INFO", "FORMAT"]
         data_fields = ["chromosome", "start", "end", "ID", "SVTYPE", "INFO", "median95CI_lower_rel_coverage", "median95CI_higher_rel_coverage", "median95CI_lower_rel_coverage_relative", "median95CI_higher_rel_coverage_relative", "abs_spearman_r", "abs_pearson_r", "spearman_p", "pearson_p"]
 
         # get the coverage calculation for the input vcf TAN,DUP,DEL
@@ -13357,7 +13342,10 @@ def get_CNV_calling_with_coverageBased_added(df_vcf, outdir, sorted_bam, referen
         df_vcf_final = df_CNV[data_fields].append(df_vcf_forCNV_final[data_fields])
 
         # add the INFO
-        df_vcf_final["INFO"] = df_vcf_final.apply(lambda r: "%s;RELCOVERAGE=%.4f,%.4f;RELCOVERAGE_NEIGHBOR=%.4f,%.4f;REGION_ABS_SPEARMANR=%.4f;REGION_ABS_PEARSONR=%.4f;REGION_SPEARMANP=%.4f;REGION_PEARSONP=%.4f"%(r["INFO"], r["median95CI_lower_rel_coverage"], r["median95CI_higher_rel_coverage"], r["median95CI_lower_rel_coverage_relative"], r["median95CI_higher_rel_coverage_relative"], r["abs_spearman_r"], r["abs_pearson_r"], r["spearman_p"], r["pearson_p"]), axis=1)
+        if len(df_vcf_final)==0: df_vcf_final["INFO"] = ""
+        else:   
+
+            df_vcf_final["INFO"] = df_vcf_final.apply(lambda r: "%s;RELCOVERAGE=%.4f,%.4f;RELCOVERAGE_NEIGHBOR=%.4f,%.4f;REGION_ABS_SPEARMANR=%.4f;REGION_ABS_PEARSONR=%.4f;REGION_SPEARMANP=%.4f;REGION_PEARSONP=%.4f"%(r["INFO"], r["median95CI_lower_rel_coverage"], r["median95CI_higher_rel_coverage"], r["median95CI_lower_rel_coverage_relative"], r["median95CI_higher_rel_coverage_relative"], r["abs_spearman_r"], r["abs_pearson_r"], r["spearman_p"], r["pearson_p"]), axis=1)
 
         # add the ALT
         df_vcf_final["ALT"] = "<" + df_vcf_final.SVTYPE + ">"
@@ -13385,7 +13373,7 @@ def get_CNV_calling_with_coverageBased_added(df_vcf, outdir, sorted_bam, referen
     # load
     df_vcf_final = pd.read_csv(merged_vcf_file, sep="\t")
 
-    return  df_vcf_final
+    return  df_vcf_final[vcf_fields]
 
 
 def get_correct_POS_in1based(r):
@@ -13585,7 +13573,13 @@ def get_vcf_all_SVs_and_CNV(perSVade_outdir, outdir, sorted_bam, reference_genom
         df_vcf[["ID", "INFO"]] = df_vcf.apply(get_correctID_and_INFO_df_vcf_SV_CNV, axis=1)
 
         # check that all IDs are unique
-        if len(df_vcf)!=len(set(df_vcf.ID)): raise ValueError("IDs are not unique")
+        if len(df_vcf)!=len(set(df_vcf.ID)): 
+
+            ID_to_ntimes = {ID:ntimes for ID, ntimes in Counter(df_vcf.ID).items() if ntimes>1}
+            print("These are repetaed IDs:\n\n", ID_to_ntimes)
+            print("This is the vcf with the repeated IDs: %s/merged_SV_and_CNV.tab"%(outdir_CNV))
+
+            raise ValueError("IDs are not unique")
 
         # add the POS and END that are correct, these should be 1-based. Note that they wont match the ID
         df_vcf["POS"] = df_vcf.apply(get_correct_POS_in1based, axis=1)
@@ -13936,6 +13930,9 @@ def get_accuracy_dict_df_CNV_predicted_vs_known(df_predicted, df_known):
     approximate_fields  =["start", "end"]
     chromField_to_posFields = {"chromosome":{"start": "start", "end": "end"}}
 
+    # return the precision and recall
+    if len(df_predicted)==0: return {"precision":0.0, "recall":0.0, "Fvalue":0.0}
+
     # add to df_predicted the id_CNV, if matching any
     df_predicted["ids_CNV"] = df_predicted.apply(lambda rp: set(df_known[df_known.apply(lambda rk: get_is_matching_predicted_and_known_rows(rk, rp, equal_fields, approximate_fields, chromField_to_posFields), axis=1)]["id_CNV"]), axis=1)
 
@@ -14194,13 +14191,16 @@ def get_automatic_coverage_thresholds(outdir_perSVade, fast_SVcalling, ploidy, n
                     df_cnv = pd.concat([d[["Chr", "Start", "End", "CN", "ID"]] for d in [df_TAN, df_DEL, df_INV, df_INS]])
                     df_cnv = df_cnv.rename(columns={"Chr":"chromosome", "Start":"start", "End":"end"})
 
-                    # add a set of regions that are 0, only those with >50 bp
+                    # keep only those with a length above min_CNVsize_betweenBPs
+                    df_cnv = df_cnv[(df_cnv.end - df_cnv.start)>=min_CNVsize_betweenBPs]
+
+                    # add a set of regions that are 0, only those with >min_CNVsize_betweenBPs bp
                     df_regions_to_avoid = df_cnv[df_cnv.CN!=1]
                     bed_file_CN1 = "%s/regions_CN1.bed"%outdir_cnv
                     df_CN1 = get_random_regions_df_skipping_regions(df_regions_to_avoid, reference_genome, bed_file_CN1, threads=threads, replace=False)
 
                     df_CN1["length"] = df_CN1.end - df_CN1.start
-                    df_CN1 = df_CN1[df_CN1.length>=50]
+                    df_CN1 = df_CN1[df_CN1.length>=min_CNVsize_betweenBPs]
                     df_CN1["CN"] = 1
                     df_CN1["ID"] = list(range(0, len(df_CN1)))
                     df_CN1["ID"] = "random_nonCNV_" + df_CN1.ID.apply(str)
@@ -14349,7 +14349,9 @@ def get_varIDs_overlapping_target_regions(df_vcf, target_regions, outdir):
     if len(set(df_vcf_intersection.ID).difference(set(df_vcf.ID)))>0: raise ValueError("There are missing IDs")
 
     # get the IDs that are overlapping
-    overlapping_IDs = set.union(*df_vcf_intersection.ID.apply(lambda x: set(x.split(";"))))
+    if len(df_vcf_intersection)>0: overlapping_IDs = set.union(*df_vcf_intersection.ID.apply(lambda x: set(x.split(";"))))
+
+    else: overlapping_IDs = set() 
 
     return overlapping_IDs
 
