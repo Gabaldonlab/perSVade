@@ -34,9 +34,6 @@ if run_in_cluster is True:
     if cluster_name=="MN4": threads = 24
     elif cluster_name=="Nord3": threads = 16
 
-
-
-
 # define paths
 perSVade_py = "%s/perSVade.py"%perSVade_dir
 
@@ -283,7 +280,7 @@ for taxID, spName, ploidy, mitochondrial_chromosome, max_coverage_sra_reads in s
         else: close_shortReads_table = "auto"
 
         # get the reads from SRA. 3 samples, 3 runs per sample. Process with the. --verbose
-        cmd = "%s --ref %s --threads %i -o %s --close_shortReads_table %s --target_taxID %s --n_close_samples 3 --nruns_per_sample 3 -f1 skip -f2 skip --mitochondrial_chromosome %s --testAccuracy --skip_SVcalling --verbose --skip_cleaning_simulations_files_and_parameters --StopAfter_testAccuracy_perSVadeRunning --max_coverage_sra_reads %i --replace_SV_CNVcalling --gff %s --nsimulations 2"%(perSVade_py, genome, threads, outdir_perSVade, close_shortReads_table, taxID, mitochondrial_chromosome, max_coverage_sra_reads, gff)
+        cmd = "%s --ref %s --threads %i -o %s --close_shortReads_table %s --target_taxID %s --n_close_samples 3 --nruns_per_sample 3 -f1 skip -f2 skip --mitochondrial_chromosome %s --testAccuracy --skip_SVcalling --verbose --skip_cleaning_simulations_files_and_parameters --StopAfter_testAccuracy_perSVadeRunning --max_coverage_sra_reads %i --replace_SV_CNVcalling_and_optimisation --gff %s --nsimulations 2"%(perSVade_py, genome, threads, outdir_perSVade, close_shortReads_table, taxID, mitochondrial_chromosome, max_coverage_sra_reads, gff)
         # --StopAfter_testAccuracy_perSVadeRunning --slurm_constraint, --StopAfter_obtentionOFcloseSVs --gff %s. Need to add the ploidy (-p ploidy)
 
     elif running_type=="goldenSet":
@@ -332,8 +329,8 @@ for taxID, spName, ploidy, mitochondrial_chromosome, max_coverage_sra_reads in s
 
 
             queue = "bsc_ls"; 
-            RAM_per_thread = 1800; 
-            time = "18:00:00" # per job
+            RAM_per_thread = 3600; 
+            time = "48:00:00" # per job
 
             fun.run_jobarray_file_Nord3(jobs_filename, name, time=time, queue=queue, threads_per_job=threads, RAM_per_thread=RAM_per_thread, max_njobs_to_run=1000)
 

@@ -54,7 +54,9 @@ parser.add_argument("-p", "--ploidy", dest="ploidy", default=1, type=int, help="
 
 
 # replace CNV_calling
-parser.add_argument("--replace_SV_CNVcalling", dest="replace_SV_CNVcalling", action="store_true", help="Replace everything related to the SV and CNV calling.")
+parser.add_argument("--replace_SV_CNVcalling_and_optimisation", dest="replace_SV_CNVcalling_and_optimisation", action="store_true", help="Replace everything related to the SV and CNV calling.")
+
+parser.add_argument("--replace_only_SV_CNVcalling", dest="replace_only_SV_CNVcalling", action="store_true", help="Replace the running of SV_CNVcalling, but not the coverage thresholds")
 
 parser.add_argument("--replace_FromGridssRun_final_perSVade_run", dest="replace_FromGridssRun_final_perSVade_run", action="store_true", help="Replace from the clove running in the final gridss+clove running")
 
@@ -76,6 +78,10 @@ parser.add_argument("--parameters_json_file", dest="parameters_json_file", type=
 
 
 parser.add_argument("--fast_SVcalling", dest="fast_SVcalling", action="store_true", default=False, help="Run SV calling with a default set of parameters. There will not be any optimisation nor reporting of accuracy. This is expected to work almost as fast as gridss and clove together. If --parameters_json_file, the parameters are substituted by the json parameters.")
+
+
+# set the minimum SVsize
+parser.add_argument("--min_CNVsize_betweenBPs", dest="min_CNVsize_betweenBPs", default=500, type=int, help="The minimum size of a CNV inferred brtween breakpoints in the perSVade running.")
 
 # pipeline skipping options 
 parser.add_argument("--skip_SVcalling", dest="skip_SVcalling", action="store_true", default=False, help="Do not run SV calling.")
@@ -129,6 +135,9 @@ parser.add_argument("--max_coverage_sra_reads", dest="max_coverage_sra_reads", d
 
 # min chromosome name
 parser.add_argument("--min_chromosome_len", dest="min_chromosome_len", default=100000, type=int, help="The minimum length to consider chromosomes from the provided fasta for calculating the window length. Any chromosomes that shorter than the window length will not be considered in the random SV simulations.")
+
+# the fraction of available memory
+parser.add_argument("--fraction_available_mem", dest="fraction_available_mem", default=None, help="The fraction of RAM that is being allocated to this perSVade run. In several steps, this pipeline needs to calculate the available memory (using psutil.virtual_memory()). This returns all the available memory in the computer. If you are running on a fraction of the computers' resources, this calculation is overestimating the available RAM. In such case you can provide the fraction available through this argument. By default, it will calculate the available ram by filling the memory, which may give errors.")
 
 # coverage CNV
 parser.add_argument("--min_coverage_duplication", dest="min_coverage_duplication", default="auto", help="The minimum rel. coverage to call a duplicated region. If set to auto, it will be calculated from optimisation")
@@ -267,6 +276,12 @@ print("using a window length of %i"%fun.window_l)
 # define the verbosity. If opt.verbose is False, none of the 'print' statements of sv_functions will have an effect
 fun.printing_verbose_mode = opt.verbose
 
+# defin the fraction of available mem
+fun.fraction_available_mem = opt.fraction_available_mem
+
+# define the min_CNVsize_betweenBPs
+fun.min_CNVsize_betweenBPs = opt.min_CNVsize_betweenBPs
+
 # redefine the real threads
 real_available_threads = fun.get_available_threads(opt.outdir)
 if opt.threads>real_available_threads: 
@@ -275,7 +290,6 @@ if opt.threads>real_available_threads:
 	opt.threads = real_available_threads
 
 print("Running with %i Gb of RAM and %i cores"%(int(fun.get_availableGbRAM(opt.outdir)), opt.threads))
-
 
 # change the default parameters if specified
 if opt.parameters_json_file is not None:
@@ -460,7 +474,7 @@ if opt.testAccuracy is True:
     if opt.close_shortReads_table is None or opt.fast_SVcalling is True: 
         raise ValueError("You have to specify a --close_shortReads_table and not run in --fast_SVcalling to test the accuracy of the pipeline on several datasets (--testAccuracy)")
 
-    fun.report_accuracy_realSVs(opt.close_shortReads_table, opt.ref, "%s/testing_Accuracy"%opt.outdir, real_bedpe_breakpoints, threads=opt.threads, replace=opt.replace, n_simulated_genomes=opt.nsimulations, mitochondrial_chromosome=opt.mitochondrial_chromosome, simulation_ploidies=simulation_ploidies, range_filtering_benchmark=opt.range_filtering_benchmark, nvars=opt.nvars, job_array_mode=opt.job_array_mode, StopAfter_testAccuracy_perSVadeRunning=opt.StopAfter_testAccuracy_perSVadeRunning, skip_cleaning_simulations_files_and_parameters=opt.skip_cleaning_simulations_files_and_parameters, skip_cleaning_outdir=opt.skip_cleaning_outdir, parameters_json_file=opt.parameters_json_file, gff=opt.gff, replace_FromGridssRun_final_perSVade_run=opt.replace_FromGridssRun_final_perSVade_run)
+    fun.report_accuracy_realSVs(opt.close_shortReads_table, opt.ref, "%s/testing_Accuracy"%opt.outdir, real_bedpe_breakpoints, threads=opt.threads, replace=opt.replace, n_simulated_genomes=opt.nsimulations, mitochondrial_chromosome=opt.mitochondrial_chromosome, simulation_ploidies=simulation_ploidies, range_filtering_benchmark=opt.range_filtering_benchmark, nvars=opt.nvars, job_array_mode=opt.job_array_mode, StopAfter_testAccuracy_perSVadeRunning=opt.StopAfter_testAccuracy_perSVadeRunning, skip_cleaning_simulations_files_and_parameters=opt.skip_cleaning_simulations_files_and_parameters, skip_cleaning_outdir=opt.skip_cleaning_outdir, parameters_json_file=opt.parameters_json_file, gff=opt.gff, replace_FromGridssRun_final_perSVade_run=opt.replace_FromGridssRun_final_perSVade_run, fraction_available_mem=opt.fraction_available_mem, replace_SV_CNVcalling_and_optimisation=opt.replace_SV_CNVcalling_and_optimisation, replace_only_SV_CNVcalling=opt.replace_only_SV_CNVcalling)
 
 
 # get the golden set
@@ -469,7 +483,7 @@ if opt.goldenSet_dir is not None:
     needstoberefactoredwithnewstructure
 
     outdir_goldenSet = "%s/testing_goldenSetAccuracy"%opt.outdir
-    fun.report_accuracy_golden_set(opt.goldenSet_dir, outdir_goldenSet, opt.ref, real_svtype_to_file, threads=opt.threads, replace=opt.replace, n_simulated_genomes=opt.nsimulations, mitochondrial_chromosome=opt.mitochondrial_chromosome, simulation_ploidies=simulation_ploidies, range_filtering_benchmark=opt.range_filtering_benchmark, nvars=opt.nvars, job_array_mode=opt.job_array_mode, StopAfter_sampleIndexingFromSRA=opt.StopAfter_sampleIndexingFromSRA, StopAfterPrefecth_of_reads=opt.StopAfterPrefecth_of_reads_goldenSet, target_taxID=opt.target_taxID, parameters_json_file=opt.parameters_json_file)
+    fun.report_accuracy_golden_set(opt.goldenSet_dir, outdir_goldenSet, opt.ref, real_svtype_to_file, threads=opt.threads, replace=opt.replace, n_simulated_genomes=opt.nsimulations, mitochondrial_chromosome=opt.mitochondrial_chromosome, simulation_ploidies=simulation_ploidies, range_filtering_benchmark=opt.range_filtering_benchmark, nvars=opt.nvars, job_array_mode=opt.job_array_mode, StopAfter_sampleIndexingFromSRA=opt.StopAfter_sampleIndexingFromSRA, StopAfterPrefecth_of_reads=opt.StopAfterPrefecth_of_reads_goldenSet, target_taxID=opt.target_taxID, parameters_json_file=opt.parameters_json_file, fraction_available_mem=opt.fraction_available_mem)
 
 # run the actual perSVade function optimising parameters
 if opt.skip_SVcalling is False and not any([x=="skip" for x in {opt.fastq1, opt.fastq2}]):
@@ -491,7 +505,7 @@ print("structural variation analysis with perSVade finished")
 if opt.skip_SVcalling is False and not any([x=="skip" for x in {opt.fastq1, opt.fastq2}]):
 
     # delete key files if replace_SV_CNVcalling
-    if opt.replace_SV_CNVcalling is True: fun.remove_files_SV_CNVcalling(opt.outdir)
+    if opt.replace_SV_CNVcalling_and_optimisation is True: fun.remove_files_SV_CNVcalling(opt.outdir)
 
     #### get CNV parameters ####
 
@@ -519,6 +533,9 @@ if opt.skip_SVcalling is False and not any([x=="skip" for x in {opt.fastq1, opt.
     # get the variant calling 
     outdir_var_calling = "%s/SVcalling_output"%opt.outdir
     print("getting all SVs into one VCF. Regions with a cov>%.3f will be treated as DUP, and regions with cov <%.3f will be treated as DEL. Regions with a correlation between position and coverage >%.3f (pearson) and >%.3f (spearman) will not be considered as CNV, as they may be related to the smiley-face effect."%(min_coverage_duplication, max_coverage_deletion, min_r_pearson_noFlatRegions, min_r_spearman_noFlatRegions))
+
+    # delete only the CNV calling, but not the optimisation
+    if opt.replace_only_SV_CNVcalling is True: fun.delete_folder(outdir_var_calling)
 
     SV_CNV_vcf = fun.get_vcf_all_SVs_and_CNV(opt.outdir, outdir_var_calling, sorted_bam, opt.ref, opt.ploidy, replace=opt.replace, threads=opt.threads, mitochondrial_chromosome=opt.mitochondrial_chromosome, mito_code=opt.mitochondrial_code, gDNA_code=opt.gDNA_code, max_coverage_deletion=max_coverage_deletion, min_coverage_duplication=min_coverage_duplication, min_r_pearson_noFlatRegions=min_r_pearson_noFlatRegions, min_r_spearman_noFlatRegions=min_r_spearman_noFlatRegions)
 

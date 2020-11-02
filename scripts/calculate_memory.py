@@ -4,6 +4,7 @@
 
 # module imports
 import argparse, os, sys
+import psutil
 
 # parse args
 parser = argparse.ArgumentParser(description="Calculate memory")

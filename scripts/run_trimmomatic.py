@@ -56,6 +56,12 @@ import sys
 # define the EnvDir where the environment is defined
 EnvDir = "/".join(sys.executable.split("/")[0:-2])
 
+# get the cwd were all the scripts are 
+CWD = "/".join(__file__.split("/")[0:-1]); sys.path.insert(0, CWD)
+
+# import functions
+import sv_functions as fun
+
 # paths 
 JAVA = "%s/bin/java"%EnvDir
 TRIMMOMATIC = "%s/share/trimmomatic/trimmomatic.jar"%EnvDir 
@@ -77,6 +83,9 @@ for rdir in {trimmed_reads1_tmp, unpaired_trimmed_reads1_tmp, trimmed_reads2_tmp
 
 # run trimmomatic and generate temporary files
 trim_cmd = "%s -jar %s PE -phred33 -threads %i %s %s %s %s %s %s ILLUMINACLIP:%s:%i:%i:%i LEADING:%i TRAILING:%i SLIDINGWINDOW:%i:%i MINLEN:%i TOPHRED33"%(JAVA, TRIMMOMATIC, opt.number_threads, raw_reads1, raw_reads2, trimmed_reads1_tmp, unpaired_trimmed_reads1_tmp, trimmed_reads2_tmp, unpaired_trimmed_reads2_tmp, opt.adapters_filename, opt.seed_mismatches, opt.pal_clip_tshd, opt.simple_clip_tshd, opt.leading, opt.trailing,  opt.window_size, opt.window_req_quality, opt.min_len); run_cmd(trim_cmd)
+
+# check that the reads are correct
+fun.check_that_paired_reads_are_correct(trimmed_reads1_tmp, trimmed_reads2_tmp)
 
 # rename the temporary files so that you don't repeat.
 os.rename(trimmed_reads1_tmp, trimmed_reads1)

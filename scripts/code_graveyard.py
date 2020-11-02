@@ -6550,3 +6550,33 @@ def generate_jobarray_file_greasy(jobs_filename, walltime="48:00:00",  name="Job
 
     # get info about the exit status: sacct -j <jobid> --format=JobID,JobName,MaxRSS,Elapsed
 
+def merge_coverage_per_window_files_in_one(bamfile, bam_sufix=".coverage_per_window.tab"):
+
+    """This function takes all files that start with bamfile and end with coverage_per_window, """
+
+    print_if_verbose("merging coverage tables")
+
+    # define prefixes
+    bam_dir = get_dir(bamfile)
+    fileprefix = get_file(bamfile) + bam_sufix
+
+    # remove dirs
+    dirs_to_remove = ["%s/%s"%(bam_dir, f) for f in os.listdir(bam_dir) if os.path.isdir("%s/%s"%(bam_dir, f)) and f.startswith(fileprefix) and len(os.listdir("%s/%s"%(bam_dir, f)))==0] 
+    for f in dirs_to_remove: delete_folder(f)
+
+    # unite files
+    files_prefix = ["%s/%s"%(bam_dir, f) for f in os.listdir(bam_dir) if not file_is_empty("%s/%s"%(bam_dir, f)) and "temporary_file" not in f and f.startswith(fileprefix)]
+
+    # if there are no files, just skip the writing of the 'coverage_per_window.tab' file
+    if len(files_prefix)==0: return
+
+    df_all = pd.concat([pd.read_csv(f, sep="\t") for f in files_prefix])
+
+    # write into one
+    integrated_file = bamfile+bam_sufix
+    df_all.to_csv(integrated_file, sep="\t", header=True, index=False)
+
+    # remove other files
+    for f in files_prefix: 
+        if f!=integrated_file: remove_file(f)
+

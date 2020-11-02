@@ -240,7 +240,7 @@ def test_SRAdb_query_downloading_and_readTrimming(outdir, reference_genome, targ
 
     try:
         # run with 'get_lowest_coverage_possible=True', which will take the lowest coverage datasets
-        close_shortReads_table = fun.get_close_shortReads_table_close_to_taxID(target_taxID, reference_genome, outdir, ploidy, n_close_samples=2, nruns_per_sample=1, replace=replace, threads=threads, min_fraction_reads_mapped=0.0, coverage_subset_reads=0.1, min_coverage=5, job_array_mode="local", StopAfter_sampleIndexingFromSRA=False, queue_jobs="debug", max_ncores_queue=768, time_read_obtention="02:00:00", StopAfterPrefecth_of_reads=False, get_lowest_coverage_possible=True)
+        close_shortReads_table = fun.get_close_shortReads_table_close_to_taxID(target_taxID, reference_genome, outdir, ploidy, n_close_samples=1, nruns_per_sample=1, replace=replace, threads=threads, min_fraction_reads_mapped=0.0, coverage_subset_reads=0.1, min_coverage=5, job_array_mode="local", StopAfter_sampleIndexingFromSRA=False, StopAfterPrefecth_of_reads=False, get_lowest_coverage_possible=True)
 
         # check
         df_close_shortReads_table = fun.pd.read_csv(close_shortReads_table, sep="\t")
@@ -301,7 +301,7 @@ def test_parameter_optimisation_perSVade(sorted_bam, reference_genome, outdir, t
 
     if fun.file_is_empty("%s/perSVade_finished_file.txt"%outdir):
 
-        cmd = "%s -r %s -thr %i -o %s -sbam %s --nvars 5 --simulation_ploidies haploid,diploid_hetero --range_filtering_benchmark theoretically_meaningful -mchr mito_C_glabrata_CBS138 --min_chromosome_len 100 "%(fun.perSVade_py, reference_genome, threads, outdir, sorted_bam)
+        cmd = "%s -r %s -thr %i -o %s -sbam %s --nvars 5 --simulation_ploidies haploid --range_filtering_benchmark theoretically_meaningful -mchr mito_C_glabrata_CBS138 --min_chromosome_len 100 --nsimulations 1"%(fun.perSVade_py, reference_genome, threads, outdir, sorted_bam)
 
         if fun.printing_verbose_mode is True: cmd += " --verbose"
 
@@ -346,6 +346,8 @@ def test_parameter_optimisation_perSVade_real(reads_dir, outdir, repeats, refere
 
     """This function runs perSVade optimisation based on real SVs defined by real_bedpe_breakpoints."""
 
+    print("testing parameter optimisation based on real SVs")
+
     if fun.file_is_empty("%s/perSVade_finished_file.txt"%outdir) or replace is True:
 
         # define the reads
@@ -353,7 +355,7 @@ def test_parameter_optimisation_perSVade_real(reads_dir, outdir, repeats, refere
         reads2 = "%s/sampled_readsR2_first100k.fq.gz"%reads_dir
 
         # run persvade
-        cmd = "%s -r %s -thr %i -o %s -f1 %s -f2 %s --nvars 500 -mchr mito_C_glabrata_CBS138 --min_chromosome_len 10000 --real_bedpe_breakpoints %s --previous_repeats_table %s --simulation_ploidies haploid --range_filtering_benchmark large --nsimulations 1"%(fun.perSVade_py, reference_genome, threads, outdir, reads1, reads2, real_bedpe_breakpoints, repeats)
+        cmd = "%s -r %s -thr %i -o %s -f1 %s -f2 %s --nvars 10 -mchr mito_C_glabrata_CBS138 --min_chromosome_len 10000 --real_bedpe_breakpoints %s --previous_repeats_table %s --simulation_ploidies haploid --range_filtering_benchmark large --nsimulations 1 -p 1"%(fun.perSVade_py, reference_genome, threads, outdir, reads1, reads2, real_bedpe_breakpoints, repeats)
 
 
         if fun.printing_verbose_mode is True: cmd += " --verbose"

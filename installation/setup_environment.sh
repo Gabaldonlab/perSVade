@@ -6,6 +6,7 @@ set -e
 # define the path to the conda environment
 env_path=$(which python | sed 's/\/bin\/python//g');
 env_name=$(echo $env_path | rev | cut -d '/' -f1 | rev)
+conda_envs_dir=$(echo $env_path | sed "s/\/$env_name//g")
 
 # define the path to the installation dir
 installation_dir=$(readlink -f $0 | sed 's/\/setup_environment.sh//g')
@@ -22,8 +23,6 @@ echo 'make'
 echo 'export PATH=$PATH:<path_to_install_Ninja>/NINJA-0.95-cluster_only/NINJA'
 echo '---'
 echo 'You should check that a <path_to_install_Ninja>/NINJA-0.95-cluster_only/NINJA/Ninja binary was created. This is enough for running perSVade'
-
-# you may have to check that MAFFT is unset
 
 # copy the Ninja binary under the conda environment 
 ninja_binary=$(which Ninja)
@@ -95,10 +94,37 @@ wget https://github.com/PapenfussLab/clove/releases/download/v0.17/clove-0.17-ja
 # give execution permission to all
 chmod u+x *;
 
+#### CREATE SUBENVIRONMENTS ####
+
 # create a subenvironment that has bctools=1.10.2
 bcftools_env_name="$env_name"_bcftools_1.10.2_env
 echo "creating conda env $bcftools_env_name"
 conda create -y --name $bcftools_env_name -c bioconda bcftools=1.10.2;
+
+# create a submenvironment that has ete3=3.0.0
+ete3_env_name="$env_name"_ete3_3.0.0_env
+echo "creating conda env $ete3_env_name"
+conda create -y --name $ete3_env_name -c conda-forge ete3=3.0.0;
+
+
+# fix the ete3 script
+ete3_script="$conda_envs_dir"/"$ete3_env_name"/lib/python3.6/site-packages/ete3/ncbi_taxonomy/ncbiquery.py
+python $installation_dir/fix_ete3_script.py $ete3_script;
+
+# create a subenvironment with all the R dependencies
+R_env_name="$env_name"_R_env
+echo "creating conda env $R_env_name"
+conda create -y --name $R_env_name;
+
+conda install -n $R_env_name -c conda-forge -y r-base=4.0.2;
+conda install -n $R_env_name -c conda-forge -y r-argparser=0.6;
+conda install -n $R_env_name -c bioconda -y bioconductor-rsvsim=1.28;
+conda install -n $R_env_name -c conda-forge -y r-emdbook=1.3.12;
+conda install -n $R_env_name -c bioconda -y bioconductor-rtracklayer=1.48.0;
+conda install -n $R_env_name -c conda-forge -y r-r.utils=2.9.2;
+conda install -n $R_env_name -c bioconda -y bioconductor-structuralvariantannotation=1.4.0;
+
+####################################
 
 # print that everything went well
 echo 'SUCCESS: all perSVade dependencies were properly installed.'

@@ -6,7 +6,10 @@
 
 # remove previous env
 #conda activate base
-#conda remove --name perSVade_env --all
+#conda remove --name perSVade_env_ --all
+
+
+#################### PERSVADE ENV ####################
 
 # create and activate the env
 conda create -n perSVade_env python=3.6 &&
@@ -14,10 +17,7 @@ conda activate perSVade_env &&
 
 # add channels
 conda config --add channels conda-forge &&
-conda config --add channels biocore &&
 conda config --add channels bioconda &&
-#conda config --add channels etetoolkit &&
-conda config --add channels r &&
 conda config --add channels plotly &&
 
 # install packages that should be loaded 
@@ -25,14 +25,11 @@ conda install -y pandas=0.24.2 &&
 conda install -y biopython=1.73 &&
 conda install -y scipy=1.4.1 &&
 conda install -y scikit-learn=0.21.3 &&
-conda install -c conda-forge -y igraph=0.7.1 && # updates openssl pkgs/main::openssl-1.1.1g-h7b6447c_0 --> conda-forge::openssl-1.1.1g-h516909a_1
-conda install -c conda-forge -y python-igraph=0.7.1.post7 &&
-
-# the ete installation may give rise to problems
-#conda install -c etetoolkit -y ete3=3.1.1 && # at some point 3.1.2 was also installed (I try if ete 3.1.1 does not give segmentation errors)
-conda install -c conda-forge ete3=3.0.0 # with this you solved the problem
-
+conda install -y -c plotly plotly=2.7.0 &&
+conda install -y -c conda-forge cufflinks-py=0.13.0 &&
 conda install -c anaconda -y seaborn=0.9.0 && # updates: ca-certificates    conda-forge/label/cf201901::ca-certif~ --> anaconda::ca-certificates-2020.6.24-0, certifi  conda-forge/label/cf201901::certifi-2~ --> anaconda::certifi-2020.6.20-py36_0
+conda install -c anaconda psutil=5.7.2 &&
+conda install -c anaconda -y pigz=2.4 &&
 
 # install packages related to software
 conda install -c bioconda -y repeatmasker=4.0.9_p2 && # downgrades: gmp 6.2.0-he1b5a44_2 --> 6.1.2-hf484d3e_1000
@@ -54,9 +51,44 @@ conda install -c bioconda -y trimmomatic=0.38 &&
 conda install -c bioconda -y parallel-fastq-dump=0.6.3 &&
 conda install -c bioconda -y fastqc=0.11.9 &&
 
+############################################################
+
+conda env export --no-builds --from-history -n perSVade_env --file perSVade_env.yml
+
+
+#################### R env ####################
+
+#conda create -n perSVade_env_R
 
 # install R packages
-conda install -c conda-forge -y r-base=4.0.2 &&
+#conda install -c conda-forge -y r-base=4.0.2 &&
+#conda install -c conda-forge -y r-argparser=0.6 && # at some point this gave problems. The initially installed package was 0.4, which gave inconsistencies
+#conda install -c bioconda -y bioconductor-rsvsim=1.28 &&
+#conda install -c conda-forge -y r-emdbook=1.3.12 &&
+#conda install -c bioconda -y bioconductor-rtracklayer=1.48.0 &&
+#conda install -c conda-forge -y r-r.utils=2.9.2 &&
+#conda install -c bioconda -y bioconductor-structuralvariantannotation=1.4.0;
+
+########################################
+
+
+
+conda config --remove channels defaults
+conda config --remove channels r
+conda config --remove channels biocore
+
+
+
+
+
+
+
+
+
+
+## GRAVEYARD ## 
+
+
 # The following packages will be UPDATED:
 
 #   gsl                                        2.5-h294904e_1 --> 2.6-h294904e_0
@@ -72,18 +104,12 @@ conda install -c conda-forge -y r-base=4.0.2 &&
 #   bcftools                                   1.9-h68d8f2e_9 --> 1.9-ha228f0b_4
 #   libdeflate                                 1.2-h516909a_1 --> 1.0-h14c3975_1
 
-conda install -c bioconda -y bioconductor-rsvsim=1.28 &&
-conda install -c conda-forge -y r-argparser=0.4 && # at some point this gave problems
-conda install -c conda-forge -y r-emdbook=1.3.12 &&
-conda install -c bioconda -y bioconductor-rtracklayer=1.48.0 &&
-conda install -c conda-forge -y r-r.utils=2.9.2 &&
-conda install -c bioconda -y bioconductor-structuralvariantannotation=1.4.0;
 
 
-# add plotly
-conda install -y -c plotly plotly=2.7.0 &&
 
-conda install -y -c conda-forge cufflinks-py=0.13.0
+
+
+
 
 
 # The following NEW packages will be INSTALLED:
@@ -105,7 +131,6 @@ conda install -y -c conda-forge cufflinks-py=0.13.0
 
 
 # the environment can be exported as:
-#conda env export --no-builds --from-history -n perSVade_env --file perSVade_env.yml
 #conda env create --file perSVade_env.yml --name perSVade_env
 
 # it can be setup with 
@@ -150,10 +175,19 @@ conda install -y -c conda-forge cufflinks-py=0.13.0
 # # same as bioconductor-variantannotation
 
 
+#conda install -c conda-forge -y igraph=0.7.1 && # updates openssl pkgs/main::openssl-1.1.1g-h7b6447c_0 --> conda-forge::openssl-1.1.1g-h516909a_1
+#conda install -c conda-forge -y python-igraph=0.7.1.post7 &&
+
+# the ete installation may give rise to problems
+#conda install -c etetoolkit -y ete3=3.1.1 && # at some point 3.1.2 was also installed (I try if ete 3.1.1 does not give segmentation errors). This avoids a previous error that was not working.
+# I will install ete3 in a sepparate environment
+
+#conda config --add channels biocore &&
+
+#conda config --add channels etetoolkit &&
 
 
-
-
+# conda config --add channels r &&
 
 
 
