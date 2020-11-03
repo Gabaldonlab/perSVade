@@ -1,5 +1,6 @@
 name: perSVade_env
 channels:
+  - anaconda
   - plotly
   - bioconda
   - conda-forge
@@ -12,10 +13,12 @@ dependencies:
   - plotly=2.7.0
   - cufflinks-py=0.13.0
   - seaborn=0.9.0
+  - matplotlib=3.3.0
+  - psutil=5.7.2
+  - pigz=2.4
   - repeatmasker=4.0.9_p2
   - repeatmodeler=2.0.1
   - bwa=0.7.17
-  - picard=2.18.26
   - bcftools=1.9
   - samtools=1.9
   - bedtools=2.29.0
@@ -30,6 +33,4 @@ dependencies:
   - trimmomatic=0.38
   - parallel-fastq-dump=0.6.3
   - fastqc=0.11.9
-  - psutil=5.7.2
-  - pigz=2.4
 prefix: /gpfs/projects/bsc40/mschikora/anaconda3/envs/perSVade_env

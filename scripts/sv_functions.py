@@ -80,7 +80,7 @@ def get_date_and_time():
 # import inspect
 
 
-# chnage the errirs ti report
+# chnage the errors to report
 warnings.simplefilter(action='ignore', category=pd.core.common.SettingWithCopyWarning) # avoid the slicing warning
 #pd.options.mode.chained_assignment = 'raise'
 warnings.simplefilter('ignore', sklearn.metrics.regression.UndefinedMetricWarning)
@@ -98,6 +98,7 @@ try:
 
 except: import matplotlib.pyplot as plt
 
+
 import seaborn as sns
 
 # get the cwd were all the scripts are 
@@ -110,6 +111,16 @@ EnvDir = "/".join(sys.executable.split("/")[0:-2])
 CondaDir =  "/".join(sys.executable.split("/")[0:-4])
 EnvName = EnvDir.split("/")[-1]
 
+# define the R env name
+EnvName_R = "%s_R_env"%EnvName
+EnvName_gridss = "%s_gridss_env"%EnvName
+EnvName_picard = "%s_picard_env"%EnvName
+EnvName_ete3 = "%s_ete3_3.0.0_env"%EnvName
+EnvName_RepeatMasker = "%s_RepeatMasker_env"%EnvName
+
+# define other envDirs
+picard_EnvDir = "%s/envs/%s"%(CondaDir, EnvName_picard)
+RepeatMasker_EnvDir = "%s/envs/%s"%(CondaDir, EnvName_RepeatMasker)
 
 # EnvDir executables. These are all the ones installed with conda
 JAVA = "%s/bin/java"%EnvDir
@@ -121,41 +132,26 @@ bwa = "%s/bin/bwa"%EnvDir
 samtools = "%s/bin/samtools"%EnvDir
 gatk = "%s/bin/gatk"%EnvDir # this is gatk4
 freebayes = "%s/bin/freebayes"%EnvDir
-repeat_masker = "%s/bin/RepeatMasker"%EnvDir
 vcffilter = "%s/bin/vcffilter"%EnvDir
 freebayes_parallel = "%s/bin/freebayes-parallel"%EnvDir
 fasta_generate_regions_py = "%s/bin/fasta_generate_regions.py"%EnvDir
 wgsim = "%s/bin/wgsim"%EnvDir
-picard_exec = "%s/bin/picard"%EnvDir
 svim = "%s/bin/svim"%EnvDir
 mosdepth = "%s/bin/mosdepth"%EnvDir
-repeat_modeller_BuildDatabase = "%s/bin/BuildDatabase"%EnvDir
 perl = "%s/bin/perl"%EnvDir
-makeblastdb = "%s/bin/makeblastdb"%EnvDir
-abblast_dir = "%s/bin"%EnvDir
-cdhit_dir = "%s/bin"%EnvDir
-genometools_dir = "%s/bin"%EnvDir
-ltr_retriever_dir = "%s/bin"%EnvDir
-mafft_dir = "%s/bin"%EnvDir
-recon_dir = "%s/bin"%EnvDir
-rmblast_dir = "%s/bin"%EnvDir
-rscout_dir = "%s/bin"%EnvDir
-trf_prgm_dir = "%s/bin/trf"%EnvDir
-ninja_dir = "%s/bin"%EnvDir
 esearch = "%s/bin/esearch"%EnvDir
 efetch = "%s/bin/efetch"%EnvDir
 prefetch = "%s/bin/prefetch"%EnvDir
 fastqdump = "%s/bin/fastq-dump"%EnvDir
 parallel_fastq_dump = "%s/bin/parallel-fastq-dump"%EnvDir
 FASTQC = "%s/bin/fastqc"%EnvDir
-porechop = "%s/bin/porechop"%EnvDir
 seqtk = "%s/bin/seqtk"%EnvDir
-repeatmoder_dir = "%s/share/RepeatModeler"%EnvDir
-repeat_modeller = "%s/bin/RepeatModeler"%EnvDir
-repeatmasker_dir = "%s/share/RepeatMasker"%EnvDir
 fasta_generate_regions_py = "%s/bin/fasta_generate_regions.py"%EnvDir
 pigz = "%s/bin/pigz"%EnvDir
 unpigz = "%s/bin/unpigz"%EnvDir
+
+porechop = "%s/bin/porechop"%EnvDir
+
 
 # executables that are provided in the repository
 external_software = "%s/../installation/external_software"%CWD
@@ -163,6 +159,26 @@ gridss_run = "%s/gridss.sh"%external_software
 gridss_jar = "%s/gridss-2.9.2-gridss-jar-with-dependencies.jar"%external_software
 clove = "%s/clove-0.17-jar-with-dependencies.jar"%external_software
 gztool = "%s/gztool"%external_software
+
+# executables that are in other environments
+picard_exec = "%s/bin/picard"%picard_EnvDir
+
+repeatmoder_dir = "%s/share/RepeatModeler"%RepeatMasker_EnvDir
+repeat_modeller = "%s/bin/RepeatModeler"%RepeatMasker_EnvDir
+repeatmasker_dir = "%s/share/RepeatMasker"%RepeatMasker_EnvDir
+makeblastdb = "%s/bin/makeblastdb"%RepeatMasker_EnvDir
+repeat_modeller_BuildDatabase = "%s/bin/BuildDatabase"%RepeatMasker_EnvDir
+abblast_dir = "%s/bin"%RepeatMasker_EnvDir
+cdhit_dir = "%s/bin"%RepeatMasker_EnvDir
+trf_prgm_dir = "%s/bin/trf"%RepeatMasker_EnvDir
+ltr_retriever_dir = "%s/bin"%RepeatMasker_EnvDir
+genometools_dir = "%s/bin"%RepeatMasker_EnvDir
+repeat_masker = "%s/bin/RepeatMasker"%RepeatMasker_EnvDir
+mafft_dir = "%s/bin"%RepeatMasker_EnvDir
+recon_dir = "%s/bin"%RepeatMasker_EnvDir
+rmblast_dir = "%s/bin"%RepeatMasker_EnvDir
+rscout_dir = "%s/bin"%RepeatMasker_EnvDir
+ninja_dir = "%s/bin"%RepeatMasker_EnvDir
 
 # define the bcftools=1.10 by activating the conda env
 #SOURCE_CONDA_CMD = "source %s/etc/profile.d/conda.sh"%CondaDir
@@ -183,6 +199,7 @@ run_trimmomatic_and_fastqc_py = "%s/run_trimmomatic_and_fastqc.py"%CWD
 get_trimmed_reads_for_srr_py = "%s/get_trimmed_reads_for_srr.py"%CWD
 run_vep = "%s/run_vep.py"%CWD
 calculate_memory_py = "%s/calculate_memory.py"%CWD
+get_interestingTaxIDs_distanceToTarget_taxID_to_sciName_py = "%s/get_interestingTaxIDs_distanceToTarget_taxID_to_sciName.py"%CWD
 
 # old code
 #create_simulatedSVgenome_R = "%s/create_simulatedSVgenome.R"%CWD
@@ -444,17 +461,20 @@ def union_empty_sets(set_iterable):
 
     return set.union(*list(set_iterable) + [set()])
 
-def run_cmd(cmd):
+def run_cmd(cmd, env=EnvName):
 
-    """Runs a cmd under the VarCall_CNV_env environment, as defined in CONDA_ACTIVATING_CMD"""
+    """This function runs a cmd with a given env"""
 
-    # define the way to export the path to be first the EnvDir
-    #path_definition_cmd = "export PATH=%s/bin:$PATH"%EnvDir
-    #cmd_to_run = "%s && %s"%(path_definition_cmd, cmd) # the cmd with the path definition
-    cmd_to_run = cmd # the raw cmd
+    # define the cmds
+    SOURCE_CONDA_CMD = "source %s/etc/profile.d/conda.sh"%CondaDir
+    cmd_prefix = "%s && conda activate %s &&"%(SOURCE_CONDA_CMD, env)
+
+    # define the running
+    cmd_to_run = "%s %s"%(cmd_prefix, cmd)
+
+    # run
     out_stat = os.system(cmd_to_run) 
-    if out_stat!=0: raise ValueError("\n%s\n did not finish correctly. Out status: %i"%(cmd, out_stat))
-
+    if out_stat!=0: raise ValueError("\n%s\n did not finish correctly. Out status: %i"%(cmd_to_run, out_stat))
 
 def get_weigthed_median(df, field, weight_field, type_algorithm="fast"):
 
@@ -716,11 +736,6 @@ def get_availableGbRAM(outdir):
         if "BSC_MACHINE" in os.environ and os.environ["BSC_MACHINE"]=="mn4":
 
             availableGbRAM = available_mem*(int(os.environ["SLURM_CPUS_PER_TASK"])/48)
-
-        # Nord3
-        elif "BSC_MACHINE" in os.environ and os.environ["BSC_MACHINE"]=="nord3":
-
-            availableGbRAM = available_mem*(int(os.environ["LSB_DJOB_NUMPROC"])/16)
 
         # BSC machine
         elif str(subprocess.check_output("uname -a", shell=True)).startswith("b'Linux bscls063 4.12.14-lp150.12.48-default"): 
@@ -1810,8 +1825,8 @@ def generate_rearranged_genome_from_svtype_to_svDF(reference_genome, svtype_to_s
             #std_rearranging_genome = "stdout" # debug
             print_if_verbose("rearranging genome. The std is in %s"%std_rearranging_genome)
 
-            if std_rearranging_genome!="stdout": run_cmd("%s > %s 2>&1"%(targetSV_cmd, std_rearranging_genome))
-            else: run_cmd(targetSV_cmd)
+            if std_rearranging_genome!="stdout": run_cmd("%s > %s 2>&1"%(targetSV_cmd, std_rearranging_genome), env=EnvName_R)
+            else: run_cmd(targetSV_cmd, env=EnvName_R)
 
             # transform the cut-and-paste insertions to copy-and-paste, whenever necessary
             insertions_file = "%s/insertions.tab"%outdir
@@ -2261,8 +2276,8 @@ def simulate_SVs_in_genome(reference_genome, mitochondrial_chromosome, outdir, n
                 std_rearranging_genome = "%s/simulation_std.txt"%random_sim_dir
                 #std_rearranging_genome = "stdout"
                 print_if_verbose("getting random SVs. The std is in %s"%std_rearranging_genome)
-                if std_rearranging_genome!="stdout": run_cmd("%s > %s 2>&1"%(randomSV_cmd, std_rearranging_genome))
-                else: run_cmd(randomSV_cmd)
+                if std_rearranging_genome!="stdout": run_cmd("%s > %s 2>&1"%(randomSV_cmd, std_rearranging_genome), env=EnvName_R)
+                else: run_cmd(randomSV_cmd, env=EnvName_R)
 
                 # check that everything went fine
                 if any([file_is_empty(f) for f in expected_files]): raise ValueError("none of the SVs were simulated")
@@ -2612,7 +2627,7 @@ def run_gridss_and_annotateSimpleType(sorted_bam, reference_genome, outdir, repl
                 print_if_verbose("running gridss on %s jvmheap and %i threads"%(jvmheap, threads))
 
                 gridss_cmd = "%s --jar %s --reference %s -o %s --assembly %s --threads %i --workingdir %s --maxcoverage %i --blacklist %s --jvmheap %s %s > %s 2>&1"%(gridss_run, gridss_jar, reference_genome, gridss_VCFoutput, gridss_assemblyBAM, threads, gridss_tmpdir, maxcoverage, blacklisted_regions, jvmheap, sorted_bam_renamed, gridss_std)
-                run_cmd(gridss_cmd)
+                run_cmd(gridss_cmd, env=EnvName_gridss)
 
                 break
 
@@ -2636,7 +2651,7 @@ def run_gridss_and_annotateSimpleType(sorted_bam, reference_genome, outdir, repl
     simple_event_std = "%s/simple_event_annotation.std"%outdir
     print_if_verbose("annotating simple events in the grids output. The std is in %s"%simple_event_std)
     n_breakends = len([l for l in open(gridss_VCFoutput, "r").readlines() if not l.startswith("#")])
-    if (file_is_empty(gridss_VCFoutput_with_simple_event) or replace is True) and n_breakends>0 : run_cmd("%s %s > %s 2>&1"%(annotate_simpleEvents_gridssVCF_R, gridss_VCFoutput, simple_event_std))
+    if (file_is_empty(gridss_VCFoutput_with_simple_event) or replace is True) and n_breakends>0 : run_cmd("%s %s > %s 2>&1"%(annotate_simpleEvents_gridssVCF_R, gridss_VCFoutput, simple_event_std), env=EnvName_R)
 
     remove_file(simple_event_std)
 
@@ -2968,12 +2983,12 @@ def get_bedpe_from_svVCF(svVCF, outdir, replace=False, only_simple_conversion=Fa
             if only_simple_conversion is True:
 
                 print_if_verbose("Getting files for svVCF file. Mainly generating a bedpe file for breakpoints with some extra info, but simple. The std can be found in %s"%r_stdout)
-                run_cmd("%s %s > %s 2>&1"%(analyze_svVCF_simple, svVCF, r_stdout))                
+                run_cmd("%s %s > %s 2>&1"%(analyze_svVCF_simple, svVCF, r_stdout), env=EnvName_R)                
 
             else:
                 
                 print_if_verbose("Getting files for svVCF file. Mainly generating a bedpe file for breakpoints with some extra info. The std can be found in %s"%r_stdout)
-                run_cmd("%s %s > %s 2>&1"%(analyze_svVCF, svVCF, r_stdout))
+                run_cmd("%s %s > %s 2>&1"%(analyze_svVCF, svVCF, r_stdout), env=EnvName_R)
 
             remove_file(r_stdout)
 
@@ -5170,12 +5185,32 @@ def get_taxID_or_BioSample(r, target_taxID):
     if r["TaxID"]==target_taxID: return r["BioSample"]
     else: return r["TaxID"]
 
+
+def get_ancestor_taxID(target_taxID, nancestorNodes, outdir):
+
+    """This function gets the ancestor taxID on nancestorNodes.
+
+    ancestor_taxID = int(ncbi.get_lineage(target_taxID)[-nancestorNodes]) """
+
+
+    cmds_ancestor_taxID = ["from ete3 import NCBITaxa; ncbi = NCBITaxa()",
+                           "ancestor_taxID = int(ncbi.get_lineage(%i)[-%i])"%(target_taxID, nancestorNodes),
+                           "print(ancestor_taxID)"]
+
+    ancestor_taxID_std = "%s/ancestor_taxID.std"%outdir              
+    run_cmd("python -c '%s' > %s 2>&1"%("; ".join(cmds_ancestor_taxID), ancestor_taxID_std), env=EnvName_ete3)
+
+    ancestor_taxID = int(open(ancestor_taxID_std, "r").readlines()[0])
+
+    return ancestor_taxID
+
 def get_SRA_runInfo_df(target_taxID, n_close_samples, nruns_per_sample, outdir, reference_genome, min_coverage, replace, threads, coverage_subset_reads, min_fraction_reads_mapped, get_lowest_coverage_possible=False):
 
     """This function mines the SRA to find n_close_samples and nruns_per_sample, returning the necessary df """
 
     ######## UPDATE NCBI TAXONOMY ########
 
+    # this will update the current database in the computer
     print_if_verbose("Getting genomes for taxID into %s"%(outdir))
 
     # load the NCBI taxonomy database and upgrade it if not already done
@@ -5184,9 +5219,6 @@ def get_SRA_runInfo_df(target_taxID, n_close_samples, nruns_per_sample, outdir, 
     # change the dir and the taxdump
     curdir = get_fullpath(os.getcwd())
     outdir = get_fullpath(outdir)
-
-    # get the ncbi taxa
-    ncbi = NCBITaxa()
     
     ncbiTaxa_updated_file = "%s/ncbiTaxa_updated.txt"%outdir
     if file_is_empty(ncbiTaxa_updated_file) or replace is True:
@@ -5195,8 +5227,9 @@ def get_SRA_runInfo_df(target_taxID, n_close_samples, nruns_per_sample, outdir, 
         os.chdir(dir_updating_ete3)
         print_if_verbose("updating db into %s"%dir_updating_ete3)
 
-        # update
-        ncbi.update_taxonomy_database()
+        # update the ncbi taxonomy database
+        cmd_update = "from ete3 import NCBITaxa; ncbi = NCBITaxa(); ncbi.update_taxonomy_database()"
+        run_cmd("python -c '%s'"%cmd_update, env=EnvName_ete3)
 
         # delete 
         delete_folder(dir_updating_ete3)
@@ -5231,8 +5264,10 @@ def get_SRA_runInfo_df(target_taxID, n_close_samples, nruns_per_sample, outdir, 
         # create a folder for this number of ancestors
         outdir_ancestors = "%s/all_runsWithWGS_arround_target_taxID_%i_considering%iAncestors"%(outdir, target_taxID, nancestorNodes); make_folder(outdir_ancestors)
 
-        # get the ancestor
-        ancestor_taxID = int(ncbi.get_lineage(target_taxID)[-nancestorNodes])
+        # get the ancestor taxID
+        ancestor_taxID = get_ancestor_taxID(target_taxID, nancestorNodes, outdir_ancestors)
+
+        print(ancestor_taxID)
 
         # get the runs for this division excluding the target taxID
         print_if_verbose("Getting WGS info")
@@ -5248,24 +5283,12 @@ def get_SRA_runInfo_df(target_taxID, n_close_samples, nruns_per_sample, outdir, 
         # define the runs with target taxID
         runs_target_taxID = set(all_SRA_runInfo_df[all_SRA_runInfo_df.TaxID==target_taxID].Run)
 
-        # get the tree
-        tree = ncbi.get_descendant_taxa(ancestor_taxID, collapse_subspecies=False, return_tree=True, intermediate_nodes=True)
-        #print("You can visualize the tree in http://etetoolkit.org/treeview/: \n\n%s\n\n"%(tree.write()))
+        # get the interesting taxIDs, the distance to the target and the scientific name with an external script
+        outfile_interesting_objects = "%s/interestingTaxIDs_distanceToTarget_taxID_to_sciName.py"%outdir_ancestors
 
-        if type(tree)==list:
-            interesting_taxIDs = set(tree)
-            taxID_to_distanceToTarget = {tree[0] : 0}
+        run_cmd("%s %i %i %s"%(get_interestingTaxIDs_distanceToTarget_taxID_to_sciName_py, ancestor_taxID, target_taxID, outfile_interesting_objects), env=EnvName_ete3)
 
-        else:
-
-            # define interesting taxIDs (the leafs and the species names that may be intermediate)
-            interesting_taxIDs = {int(x) for x in set(tree.get_leaf_names()).union({n.name for n in tree.traverse() if n.rank=="species"})}.difference({target_taxID})
-
-            # map the distance between each leave and the target
-            taxID_to_distanceToTarget = {taxID : tree.get_distance(str(target_taxID), str(taxID)) for taxID in interesting_taxIDs}
-
-        # map names
-        taxID_to_sciName = ncbi.get_taxid_translator(interesting_taxIDs)
+        interesting_taxIDs, taxID_to_distanceToTarget, taxID_to_sciName = load_object(outfile_interesting_objects)
 
         # add the sciName
         all_SRA_runInfo_df["sci_name"] = all_SRA_runInfo_df.TaxID.map(taxID_to_sciName)
@@ -6820,7 +6843,7 @@ def get_insert_size_distribution(sorted_bam, replace=False, threads=4):
         # run the calculation of insert sizes
         picard_insertSize_std = "%s.generating.std"%outfile_tmp
         print_if_verbose("calculating insert size distribution. The std is in %s"%picard_insertSize_std)
-        run_cmd("%s CollectInsertSizeMetrics HISTOGRAM_FILE=%s INPUT=%s OUTPUT=%s > %s 2>&1"%(picard_exec, hist_file, sampled_bam, outfile_tmp, picard_insertSize_std))
+        run_cmd("%s CollectInsertSizeMetrics HISTOGRAM_FILE=%s INPUT=%s OUTPUT=%s > %s 2>&1"%(picard_exec, hist_file, sampled_bam, outfile_tmp, picard_insertSize_std), env=EnvName_picard)
         remove_file(picard_insertSize_std)
         remove_file(sampled_bam)
 
@@ -6862,7 +6885,7 @@ def create_sequence_dict(genome, replace=False):
         dictionary_std = "%s.generating.std"%dictionary
         print_if_verbose("Creating picard dictionary. The std is in %s"%dictionary_std)
 
-        run_cmd("%s CreateSequenceDictionary R=%s O=%s TRUNCATE_NAMES_AT_WHITESPACE=true > %s 2>&1"%(picard_exec, genome, tmp_dictionary, dictionary_std)) 
+        run_cmd("%s CreateSequenceDictionary R=%s O=%s TRUNCATE_NAMES_AT_WHITESPACE=true > %s 2>&1"%(picard_exec, genome, tmp_dictionary, dictionary_std), env=EnvName_picard) 
 
         remove_file(dictionary_std)  
         os.rename(tmp_dictionary , dictionary)
@@ -8149,12 +8172,14 @@ def makePlots_gridsss_benchmarking_oneGenome(df_benchmark, PlotsDir, plots={"his
             plt.axhline(1, color="black", linestyle="--", linewidth=1.0)
             plt.plot([0, 1], color="black", linestyle="--", linewidth=1.0)
             
-
             ax.set_title(svtype)
+
 
         fig.tight_layout()  # otherwise the right y-label is slightly 
         filename="%s/scatter_PRvsRCa_eachSVtype.pdf"%(PlotsDir)
+
         fig.savefig(filename, bbox_inches='tight');
+
         #if is_cluster is False: plt.show()
         plt.close(fig)
 
@@ -10507,9 +10532,9 @@ def get_bam_with_duplicatesMarkedSpark(bam, threads=4, replace=False):
 
     # different memory options
     javaRamGb_common = int(availableGbRAM*fractionRAM_to_dedicate) # At Broad, we run MarkDuplicates with 2GB Java heap (java -Xmx2g) and 10GB hard memory limit
-    javaRamGb_half = int(availableGbRAM*0.5) # At Broad, we run MarkDuplicates with 2GB Java heap (java -Xmx2g) and 10GB hard memory limit
-    javaRamGb_allBut2 = int(availableGbRAM - 2) # rule of thumb from GATK
-    javaRamGb_4 = 4 # this is from a post from 2011, reccommended for a 170Gb RAM
+    #javaRamGb_half = int(availableGbRAM*0.5) # At Broad, we run MarkDuplicates with 2GB Java heap (java -Xmx2g) and 10GB hard memory limit
+    #javaRamGb_allBut2 = int(availableGbRAM - 2) # rule of thumb from GATK
+    #javaRamGb_4 = 4 # this is from a post from 2011, reccommended for a 170Gb RAM
 
     javaRamGb = javaRamGb_common
 
@@ -10534,7 +10559,10 @@ def get_bam_with_duplicatesMarkedSpark(bam, threads=4, replace=False):
         print_if_verbose("running MarkDuplicates with %iGb of RAM. The std is in %s"%(javaRamGb, markduplicates_std))
 
         try: 
+
             run_cmd("%s --java-options '-Xms%ig -Xmx%ig' MarkDuplicatesSpark -I %s -O %s --verbosity INFO --tmp-dir %s  --create-output-variant-index false --create-output-bam-splitting-index false --create-output-bam-index false > %s 2>&1"%(gatk, javaRamGb, javaRamGb, bam, bam_dupMarked_tmp, tmpdir, markduplicates_std))
+
+            print_if_verbose("MarkDuplicatesSpark worked correctly")
 
         except: 
 
@@ -10546,7 +10574,7 @@ def get_bam_with_duplicatesMarkedSpark(bam, threads=4, replace=False):
 
             # running with the traditional MarkDuplicates implementation
             bam_dupMarked_metrics = "%s.metrics.txt"%bam_dupMarked_tmp
-            run_cmd("%s -Xms%ig -Xmx%ig MarkDuplicates I=%s O=%s M=%s ASSUME_SORT_ORDER=queryname > %s 2>&1"%(picard_exec, javaRamGb, javaRamGb, bam, bam_dupMarked_tmp, bam_dupMarked_metrics, markduplicates_std))
+            run_cmd("%s -Xms%ig -Xmx%ig MarkDuplicates I=%s O=%s M=%s ASSUME_SORT_ORDER=queryname > %s 2>&1"%(picard_exec, javaRamGb, javaRamGb, bam, bam_dupMarked_tmp, bam_dupMarked_metrics, markduplicates_std), env=EnvName_picard)
             
             remove_file(bam_dupMarked_metrics)
 
@@ -10558,7 +10586,7 @@ def get_bam_with_duplicatesMarkedSpark(bam, threads=4, replace=False):
 
     return bam_dupMarked
 
-        
+
 def get_sortedBam_with_duplicatesMarked(sorted_bam, threads=4, replace=False):
 
     """This function takes a sorted bam and returns the equivalent with the duplicates marked with picard MarkDuplicates. It also indexes this bam"""
@@ -10590,7 +10618,7 @@ def get_sortedBam_with_duplicatesMarked(sorted_bam, threads=4, replace=False):
         print_if_verbose("running MarkDuplicates with %iGb of RAM and %i MAX_FILE_HANDLES_FOR_READ_ENDS_MAP. The std is in %s"%(javaRamGb, MAX_FILE_HANDLES_FOR_READ_ENDS_MAP, markduplicates_std))
 
         # running with the traditional MarkDuplicates implementation
-        run_cmd("%s -Xmx%ig MarkDuplicates I=%s O=%s M=%s ASSUME_SORT_ORDER=coordinate MAX_FILE_HANDLES_FOR_READ_ENDS_MAP=%i MAX_RECORDS_IN_RAM=%i > %s 2>&1"%(picard_exec, javaRamGb, sorted_bam, sorted_bam_dupMarked_tmp, sorted_bam_dupMarked_metrics, MAX_FILE_HANDLES_FOR_READ_ENDS_MAP, MAX_RECORDS_IN_RAM, markduplicates_std))
+        run_cmd("%s -Xmx%ig MarkDuplicates I=%s O=%s M=%s ASSUME_SORT_ORDER=coordinate MAX_FILE_HANDLES_FOR_READ_ENDS_MAP=%i MAX_RECORDS_IN_RAM=%i > %s 2>&1"%(picard_exec, javaRamGb, sorted_bam, sorted_bam_dupMarked_tmp, sorted_bam_dupMarked_metrics, MAX_FILE_HANDLES_FOR_READ_ENDS_MAP, MAX_RECORDS_IN_RAM, markduplicates_std), env=EnvName_picard)
         #REMOVE_DUPLICATES=Boolean
 
         remove_file(markduplicates_std)
@@ -11994,7 +12022,18 @@ def run_repeat_modeller(reference_genome, threads=4, replace=False):
         bulding_repModeler_db_std = "%s.genearting_db.std"%genome_dir
         print_if_verbose("getting repeat modeler db. The std is in %s"%bulding_repModeler_db_std)
 
-        run_cmd("cd %s && %s -name %s %s > %s 2>&1"%(outdir, repeat_modeller_BuildDatabase, name_database, genome_dir, bulding_repModeler_db_std))
+        # define the path o
+        thishastobeadapted_to_run_in_Nord3
+        json.load(f)
+        prefix_cmd = "/gpfs/projects/bsc40/mschikora/anaconda3/pkgs/glibc-2.12.2-3"
+
+
+        
+        
+
+
+        # define the cmd prefix, just in case that you are running in Nord3
+        run_cmd("%s cd %s && %s -name %s %s > %s 2>&1"%(prefix_cmd, outdir, repeat_modeller_BuildDatabase, name_database, genome_dir, bulding_repModeler_db_std), env=EnvName_RepeatMasker)
 
         remove_file(bulding_repModeler_db_std)
 
@@ -12010,7 +12049,7 @@ def run_repeat_modeller(reference_genome, threads=4, replace=False):
         print_if_verbose("running repeatmodeler. The std is in %s"%repeatmodeler_std)        
         cmd += " -abblast_dir %s -cdhit_dir %s -genometools_dir %s -ltr_retriever_dir %s -mafft_dir %s -ninja_dir %s -recon_dir %s -repeatmasker_dir %s -rmblast_dir %s -rscout_dir %s -trf_prgm %s > %s 2>&1"%(abblast_dir, cdhit_dir, genometools_dir, ltr_retriever_dir, mafft_dir, ninja_dir, recon_dir, repeatmasker_dir, rmblast_dir, rscout_dir, trf_prgm_dir, repeatmodeler_std)
 
-        run_cmd(cmd)
+        run_cmd(cmd, env=EnvName_RepeatMasker)
 
         if file_is_empty(repeat_modeler_outfile): 
 
@@ -12067,7 +12106,7 @@ def run_repeat_masker(reference_genome, threads=4, replace=False, use_repeat_mod
 
     if file_is_empty(repeat_masker_outfile_default) or replace is True:
         print_if_verbose("running repeatmasker to get the repeats of the genome in the default configuration. The std is in %s"%repeat_masker_std_default)
-        run_cmd("cd %s && %s -pa %i -dir %s -poly -html -gff %s > %s 2>&1"%(repeat_masker_outdir_default, repeat_masker, threads, repeat_masker_outdir_default, reference_genome, repeat_masker_std_default))
+        run_cmd("cd %s && %s -pa %i -dir %s -poly -html -gff %s > %s 2>&1"%(repeat_masker_outdir_default, repeat_masker, threads, repeat_masker_outdir_default, reference_genome, repeat_masker_std_default), env=EnvName_RepeatMasker)
         remove_file(repeat_masker_std_default)
 
     # run in the personal configuration
@@ -12078,7 +12117,7 @@ def run_repeat_masker(reference_genome, threads=4, replace=False, use_repeat_mod
         
         if file_is_empty(repeat_masker_outfile_personal) or replace is True:
             print_if_verbose("running repeatmasker to get the repeats of the genome with the lib obtained with RepeatModeler. The std is in %s"%repeat_masker_std_personal)
-            run_cmd("cd %s && %s -pa %i -dir %s -poly -html -gff -lib %s %s > %s 2>&1"%(repeat_masker_outdir_personal, repeat_masker, threads, repeat_masker_outdir_personal, library_repeats_repeatModeller, reference_genome, repeat_masker_std_personal))
+            run_cmd("cd %s && %s -pa %i -dir %s -poly -html -gff -lib %s %s > %s 2>&1"%(repeat_masker_outdir_personal, repeat_masker, threads, repeat_masker_outdir_personal, library_repeats_repeatModeller, reference_genome, repeat_masker_std_personal), env=EnvName_RepeatMasker)
             
     else: 
 
@@ -13548,48 +13587,57 @@ def get_vcf_all_SVs_and_CNV(perSVade_outdir, outdir, sorted_bam, reference_genom
     if file_is_empty(vcf_SVcalling) or replace is True:
         print_if_verbose("getting all CNV and SVs into one vcf")
 
-        # get files from output
-        svtype_to_svfile, df_gridss = get_svtype_to_svfile_and_df_gridss_from_perSVade_outdir(perSVade_outdir, reference_genome)
+        # define the outdir
         outdir_gridss_final = "%s/SVdetection_output/final_gridss_running"%perSVade_outdir
-
-        # get the svDF metadata
-        print_if_verbose("getting the svtype_to_svDF")
-        svtype_to_svDF = get_sampleID_to_svtype_to_svDF_filtered({"x":svtype_to_svfile}, {"x":df_gridss}, sampleID_to_parentIDs={}, breakend_info_to_keep=['#CHROM', 'POS', 'other_coordinates', 'allele_frequency', 'allele_frequency_SmallEvent', 'real_AF', 'FILTER', 'inserted_sequence', 'has_poly16GC', 'length_inexactHomology', 'length_microHomology', 'QUAL', 'overlaps_repeats', 'REF', 'BREAKPOINTID'])["x"]
-
-        print_if_verbose("svtype_to_svDF got")
 
         # get the clove output
         outfile_clove = "%s/gridss_output.vcf.withSimpleEventType.vcf.filtered_default.vcf.bedpe.raw.bedpe.clove.vcf"%outdir_gridss_final
         df_clove = get_clove_output(outfile_clove)
 
-        # get a vcf df, that comes from all vcfs
-        df_vcf = pd.concat([get_vcf_df_for_svDF(svDF, svtype, reference_genome, df_gridss) for svtype, svDF in svtype_to_svDF.items() if svtype in {"tandemDuplications", "deletions", "inversions", "translocations", "insertions", "remaining"}])
+        # get files from output
+        svtype_to_svfile, df_gridss = get_svtype_to_svfile_and_df_gridss_from_perSVade_outdir(perSVade_outdir, reference_genome)
 
-        # get a vcf with the coverage-based calling
-        outdir_CNV = "%s/calculating_CNVcoverage"%outdir
-        df_vcf = get_CNV_calling_with_coverageBased_added(df_vcf, outdir_CNV, sorted_bam, reference_genome, df_clove, df_gridss, ploidy, replace=replace, threads=threads, mitochondrial_chromosome=mitochondrial_chromosome, max_coverage_deletion=max_coverage_deletion, min_coverage_duplication=min_coverage_duplication, min_r_pearson_noFlatRegions=min_r_pearson_noFlatRegions, min_r_spearman_noFlatRegions=min_r_spearman_noFlatRegions)
+        if len(svtype_to_svfile)==0:  
 
-        # add a tag to the ID, that makes it unique
-        df_vcf[["ID", "INFO"]] = df_vcf.apply(get_correctID_and_INFO_df_vcf_SV_CNV, axis=1)
+            vcf_fields = ["#CHROM", "POS", "ID", "REF", "ALT", "QUAL", "FILTER", "INFO", "FORMAT"]
+            df_vcf = pd.DataFrame(columns=vcf_fields)
 
-        # check that all IDs are unique
-        if len(df_vcf)!=len(set(df_vcf.ID)): 
+        else:
 
-            ID_to_ntimes = {ID:ntimes for ID, ntimes in Counter(df_vcf.ID).items() if ntimes>1}
-            print("These are repetaed IDs:\n\n", ID_to_ntimes)
-            print("This is the vcf with the repeated IDs: %s/merged_SV_and_CNV.tab"%(outdir_CNV))
+            # get the svDF metadata
+            print_if_verbose("getting the svtype_to_svDF")
+            svtype_to_svDF = get_sampleID_to_svtype_to_svDF_filtered({"x":svtype_to_svfile}, {"x":df_gridss}, sampleID_to_parentIDs={}, breakend_info_to_keep=['#CHROM', 'POS', 'other_coordinates', 'allele_frequency', 'allele_frequency_SmallEvent', 'real_AF', 'FILTER', 'inserted_sequence', 'has_poly16GC', 'length_inexactHomology', 'length_microHomology', 'QUAL', 'overlaps_repeats', 'REF', 'BREAKPOINTID'])["x"]
 
-            raise ValueError("IDs are not unique")
+            print_if_verbose("svtype_to_svDF got")
 
-        # add the POS and END that are correct, these should be 1-based. Note that they wont match the ID
-        df_vcf["POS"] = df_vcf.apply(get_correct_POS_in1based, axis=1)
+            # get a vcf df, that comes from all vcfs
+            df_vcf = pd.concat([get_vcf_df_for_svDF(svDF, svtype, reference_genome, df_gridss) for svtype, svDF in svtype_to_svDF.items() if svtype in {"tandemDuplications", "deletions", "inversions", "translocations", "insertions", "remaining"}])
 
-        # add to the END + 1
-        chr_to_len = get_chr_to_len(reference_genome)
-        df_vcf["INFO"] = df_vcf.apply(lambda r: get_correct_INFO_withEND_in1based(r, chr_to_len), axis=1)
+            # get a vcf with the coverage-based calling
+            outdir_CNV = "%s/calculating_CNVcoverage"%outdir
+            df_vcf = get_CNV_calling_with_coverageBased_added(df_vcf, outdir_CNV, sorted_bam, reference_genome, df_clove, df_gridss, ploidy, replace=replace, threads=threads, mitochondrial_chromosome=mitochondrial_chromosome, max_coverage_deletion=max_coverage_deletion, min_coverage_duplication=min_coverage_duplication, min_r_pearson_noFlatRegions=min_r_pearson_noFlatRegions, min_r_spearman_noFlatRegions=min_r_spearman_noFlatRegions)
 
-        # add the breakend IDs and 
-        df_vcf["INFO"] = df_vcf.apply(lambda r: get_correct_INFO_with_bendIDs_and_bendStats(r, df_gridss), axis=1)
+            # add a tag to the ID, that makes it unique
+            df_vcf[["ID", "INFO"]] = df_vcf.apply(get_correctID_and_INFO_df_vcf_SV_CNV, axis=1)
+
+            # check that all IDs are unique
+            if len(df_vcf)!=len(set(df_vcf.ID)): 
+
+                ID_to_ntimes = {ID:ntimes for ID, ntimes in Counter(df_vcf.ID).items() if ntimes>1}
+                print("These are repetaed IDs:\n\n", ID_to_ntimes)
+                print("This is the vcf with the repeated IDs: %s/merged_SV_and_CNV.tab"%(outdir_CNV))
+
+                raise ValueError("IDs are not unique")
+
+            # add the POS and END that are correct, these should be 1-based. Note that they wont match the ID
+            df_vcf["POS"] = df_vcf.apply(get_correct_POS_in1based, axis=1)
+
+            # add to the END + 1
+            chr_to_len = get_chr_to_len(reference_genome)
+            df_vcf["INFO"] = df_vcf.apply(lambda r: get_correct_INFO_withEND_in1based(r, chr_to_len), axis=1)
+
+            # add the breakend IDs and 
+            df_vcf["INFO"] = df_vcf.apply(lambda r: get_correct_INFO_with_bendIDs_and_bendStats(r, df_gridss), axis=1)
 
         # write vcf
         vcf_SVcalling_tmp = "%s.tmp"%vcf_SVcalling
@@ -14530,7 +14578,89 @@ def get_current_clusterName_mareNostrum():
     return cluster_name
 
 
-def run_perSVade_severalSamples(paths_df, cwd, common_args, threads=4, sampleID_to_parentIDs={}, samples_to_run=set(), repeat=False, job_array_mode="job_array", ploidy=1, variant_calling_fields=["#Uploaded_variation", "QUAL", "fb_DP", "fb_MQM", "fb_MQMR", "fb_PQA", "fb_PQR", "fb_QA", "fb_QR", "fb_fractionReadsCov", "fb_readsCovVar"]):
+def get_integrated_variants_into_one_df(df, file_prefix):
+
+    """This function takes a df (or a .tab file) with the following fields:
+    
+       - smallVars_vcf. The vcf of the small vars provided by perSVade
+       - smallVars_var_annotation. The annotation of smallVars_vcf
+
+       - SV_CNV_vcf. The vcf of the integrated SV and CNV calling by perSVade.
+       - SV_CNV_var_annotation. The annotation of SV_CNV_vcf
+
+       Either of the two should be provided
+
+       The index of the df shouold be the sample ID.
+
+    """
+
+    # define files
+    small_vars_file = "%s_small_vars.tab"%file_prefix
+    small_vars_annot_file = "%s_small_vars_annot.tab"%file_prefix
+    SV_CNV_file = "%s_SV_CNV.tab"%file_prefix
+    SV_CNV_annot_file = "%s_SV_CNV_annot.tab"%file_prefix
+
+    # define the expected files
+    expected_files = set()
+    if "smallVars_vcf" in df.keys(): expected_files.update({small_vars_file, small_vars_annot_file})
+    if "SV_CNV_vcf" in df.keys(): expected_files.update({SV_CNV_file, SV_CNV_annot_file})
+
+    if any([fun.file_is_empty(f) for f in expected_files]):
+
+        # initialize dfs
+        small_vars = pd.DataFrame()
+        small_vars_annot = pd.DataFrame()
+        SV_CNV = pd.DataFrame()
+        SV_CNV_annot = pd.DataFrame()
+
+        # go through each sample
+        for sampleID, r in df.iterrows():
+
+            # small vars
+            if "smallVars_vcf" in r.keys():
+
+                # get dfs
+                vcf = get_vcf_df_with_INFO_as_single_fields(get_df_and_header_from_vcf(r["smallVars_vcf"])[0])
+                annotation = pd.read_csv(r["smallVars_var_annotation"], sep="\t")
+
+                # add to df
+                vcf["sampleID"] = sampleID
+
+                small_vars = small_vars.append(vcf)
+                small_vars_annot = small_vars_annot.append(annotation)
+
+            # SVs
+            if "SV_CNV_vcf" in df.keys():
+
+                # get dfs
+                vcf = get_vcf_df_with_INFO_as_single_fields(get_df_and_header_from_vcf(r["SV_CNV_vcf"])[0])
+                annotation = pd.read_csv(r["SV_CNV_var_annotation"], sep="\t")
+
+                # add to df
+                vcf["sampleID"] = sampleID
+
+                SV_CNV = SV_CNV.append(vcf)
+                SV_CNV_annot = SV_CNV_annot.append(annotation)
+
+        # drop duplicates from the annotations
+        small_vars_annot = small_vars_annot.drop_duplicates()
+        SV_CNV_annot = SV_CNV_annot.drop_duplicates()
+
+        # save each of them
+        save_df_as_tab(small_vars, small_vars_file)
+        save_df_as_tab(small_vars_annot, small_vars_annot_file)
+        save_df_as_tab(SV_CNV, SV_CNV_file)
+        save_df_as_tab(SV_CNV_annot, SV_CNV_annot_file)
+
+    # load them
+    small_vars = get_tab_as_df_or_empty_df(small_vars_file)
+    small_vars_annot = get_tab_as_df_or_empty_df(small_vars_annot_file)
+    SV_CNV = get_tab_as_df_or_empty_df(SV_CNV_file)
+    SV_CNV_annot = get_tab_as_df_or_empty_df(SV_CNV_annot_file)
+
+    return small_vars, small_vars_annot, SV_CNV, SV_CNV_annot
+
+def run_perSVade_severalSamples(paths_df, cwd, common_args, threads=4, sampleID_to_parentIDs={}, samples_to_run=set(), repeat=False, job_array_mode="job_array", ploidy=1, get_integrated_dfs=True):
 
  
     """
@@ -14559,6 +14689,9 @@ def run_perSVade_severalSamples(paths_df, cwd, common_args, threads=4, sampleID_
     # define the samples_to_run
     if len(samples_to_run)==0: samples_to_run = set(paths_df.sampleID)
 
+    # keep a dict with the paths
+    sampleID_to_dataDict = {}
+
     # get the info of all the reads and samples
     all_cmds = []
 
@@ -14586,6 +14719,9 @@ def run_perSVade_severalSamples(paths_df, cwd, common_args, threads=4, sampleID_
         # add cmd if necessary
         if any([file_is_empty(x) for x in success_files]) or repeat is True: all_cmds.append(cmd)
 
+        # keep data
+        #sampleID_to_dataDict[sampleID] = 
+
     # submit to cluster or return True
     if len(all_cmds)>0:
 
@@ -14607,7 +14743,11 @@ def run_perSVade_severalSamples(paths_df, cwd, common_args, threads=4, sampleID_
 
         return False
 
-    print_if_verbose("Integrating all variants and CNV into one......")
+
+    if get_integrated_dfs is True:
+
+        print_if_verbose("Integrating all variants and CNV into one......")
+
 
     checkthathteintegrationmakessense
 
@@ -14663,6 +14803,8 @@ def run_perSVade_severalSamples(paths_df, cwd, common_args, threads=4, sampleID_
 
 
     ######################################
+
+
 
     ###### INTEGRATE VARIANT ANNOTATION ######
 

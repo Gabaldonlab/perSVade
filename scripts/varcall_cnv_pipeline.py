@@ -33,7 +33,6 @@ samtools = "%s/bin/samtools"%EnvDir
 java = "%s/bin/java"%EnvDir
 bcftools = "%s/bin/bcftools"%EnvDir
 bedtools = "%s/bin/bedtools"%EnvDir
-picard_exec = "%s/bin/picard"%EnvDir
 
 #vcfallelicprimitives = "%s/bin/vcfallelicprimitives"%EnvDir
 #sift4g = "%s/bin/sift4g"%EnvDir
@@ -125,24 +124,12 @@ if not opt.gff is None: correct_gff, gff_with_biotype = fun.get_correct_gff_and_
   
 # First create some files that are important for any program
 
+
 # Create a reference dictionary
-rstrip = opt.ref.split(".")[-1]
-dictionary = "%sdict"%(opt.ref.rstrip(rstrip)); tmp_dictionary = "%s.tmp"%dictionary; 
-if fun.file_is_empty(dictionary) or opt.replace is True:
-
-    # remove any previously created tmp_file
-    if not fun.file_is_empty(tmp_dictionary): os.unlink(tmp_dictionary)
-
-    print("Creating picard dictionary")
-    cmd_dict = "%s CreateSequenceDictionary R=%s O=%s TRUNCATE_NAMES_AT_WHITESPACE=true"%(picard_exec, opt.ref, tmp_dictionary); fun.run_cmd(cmd_dict)   
-    #  cmd_dict = "%s -jar %s CreateSequenceDictionary R=%s O=%s TRUNCATE_NAMES_AT_WHITESPACE=true"%(java, picard, opt.ref, tmp_dictionary); fun.run_cmd(cmd_dict)   
-    os.rename(tmp_dictionary , dictionary)
+fun.create_sequence_dict(opt.ref, replace=opt.replace)
 
 # Index the reference
-if fun.file_is_empty("%s.fai"%opt.ref) or opt.replace is True:
-    print ("Indexing the reference...")
-    cmd_indexRef = "%s faidx %s"%(samtools, opt.ref); fun.run_cmd(cmd_indexRef) # This creates a .bai file of the reference
-
+fun.index_genome(opt.ref, replace=opt.replace)
 
 # define the sorted bam
 sorted_bam = opt.sortedbam

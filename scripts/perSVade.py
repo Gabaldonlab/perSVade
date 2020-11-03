@@ -31,7 +31,6 @@ import sv_functions as fun
 # packages installed into the conda environment 
 samtools = "%s/bin/samtools"%EnvDir
 java = "%s/bin/java"%EnvDir
-picard_exec = "%s/bin/picard"%EnvDir
 
 # scripts that are installed under this software
 varcall_cnv_pipeline = "%s/varcall_cnv_pipeline.py"%CWD

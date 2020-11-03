@@ -6580,3 +6580,196 @@ def merge_coverage_per_window_files_in_one(bamfile, bam_sufix=".coverage_per_win
     for f in files_prefix: 
         if f!=integrated_file: remove_file(f)
 
+
+
+def run_perSVade_severalSamples(paths_df, cwd, common_args, threads=4, sampleID_to_parentIDs={}, samples_to_run=set(), repeat=False, job_array_mode="job_array", ploidy=1, variant_calling_fields=["#Uploaded_variation", "QUAL", "fb_DP", "fb_MQM", "fb_MQMR", "fb_PQA", "fb_PQR", "fb_QA", "fb_QR", "fb_fractionReadsCov", "fb_readsCovVar"]):
+
+ 
+    """
+    This function inputs a paths_df, which contains an index as 0-N rows and columns "reads", "sampleID", "readID"  and runs the perSVade pipeline without repeating steps (unless indicated). pths_df can also be a tab-sepparated file were there are this 3 fields. The trimmed_reads_dir has to be the full path to the .fastq file. The sampleID has to be the unique sample identifier and the readID has to be R1 or R2 for paired-end sequencing. The p
+
+    - cwd is the current working directory, where files will be written
+    - repeat is a boolean that indicates whether to repeat all the steps of this function
+    - threads are the number of cores per task allocated. In mn, you can use 48 cores per node. It has not been tested whether more cores can be used per task
+    - samples_to_run is a set of samples for which we want to run all the pipeline
+    - job_array_mode can be 'job_array' or 'local'. If local each job will be run after the other
+    - sampleID_to_parentIDs is a dictionary that maps each sampleID to the parent sampleIDs (a set), in a way that there will be a col called parentIDs_with_var, which is a string of ||-joined parent IDs where the variant is also found
+    - common_args is a string with all the perSVade args except the reads. The arguments added will be -o, -f1, -f2
+    - max_ncores_queue is the total number of cores that will be assigned to the job.
+    - ploidy is the ploidy with which to run the varcall
+    - variant_calling_fields are the fields in variant_calling_ploidy<N>.tab to keep in the concatenated data
+    """
+
+    print_if_verbose("Running VarCall pipeline...")
+
+    # if it is a path
+    if type(paths_df)==str: paths_df = pd.read_csv(paths_df, sep="\t")
+
+    # create files that are necessary
+    VarCallOutdirs = "%s/VarCallOutdirs"%cwd; make_folder(VarCallOutdirs)
+    
+    # define the samples_to_run
+    if len(samples_to_run)==0: samples_to_run = set(paths_df.sampleID)
+
+
+    # get the info of all the reads and samples
+    all_cmds = []
+
+    for sampleID in samples_to_run:
+
+        # define the df for this sample
+        df = paths_df[paths_df.sampleID==sampleID]
+        df1 = df[df.readID=="R1"]
+        df2 = df[df.readID=="R2"]
+
+        # define the reads of interest and keep
+        reads1 = df1.reads.values[0]
+        reads2 = df2.reads.values[0]
+
+        # create an outdir
+        outdir = "%s/%s_VarCallresults"%(VarCallOutdirs, sampleID); make_folder(outdir)
+
+        # define the files that shoud be not empty in order not to run this code
+        #success_files = ["%s/smallVars_CNV_output/variant_annotation_ploidy%i.tab"%(outdir, ploidy)]
+        success_files = ["%s/perSVade_finished_file.txt"%(outdir)]
+                   
+        # define the cmd          
+        cmd = "%s -f1 %s -f2 %s -o %s --ploidy %i %s"%(perSVade_py, reads1, reads2, outdir, ploidy, common_args)
+
+        # add cmd if necessary
+        if any([file_is_empty(x) for x in success_files]) or repeat is True: all_cmds.append(cmd)
+
+    # submit to cluster or return True
+    if len(all_cmds)>0:
+
+        if job_array_mode=="local":
+
+            for Icmd, cmd in enumerate(all_cmds):
+                print_if_verbose("running cmd %i/%i"%(Icmd+1, len(all_cmds)))
+                run_cmd(cmd)
+
+        elif job_array_mode=="job_array":
+
+            print_if_verbose("Submitting %i jobs to cluster ..."%len(all_cmds))
+            jobs_filename = "%s/jobs.run_SNPs_CNV"%cwd
+            open(jobs_filename, "w").write("\n".join(all_cmds))
+
+            generate_jobarray_file(jobs_filename, "perSVade_severalSamples")
+
+        else: raise ValueError("%s is not a valid job_array_mode"%job_array_mode)
+
+        return False
+
+    print_if_verbose("Integrating all variants and CNV into one......")
+
+    checkthathteintegrationmakessense
+
+    ###### INTEGRATE VARIANT CALLING ######
+
+    # define the file
+    variant_calling_df_file = "%s/integrated_variant_calling_ploidy%i.tab"%(cwd, ploidy)
+
+    if file_is_empty(variant_calling_df_file) or repeat is True:
+        print_if_verbose("generating integrated vars")
+
+        # define the columns related to variant_calling_fields
+        df_example = pd.read_csv("%s/%s_VarCallresults/smallVars_CNV_output/variant_calling_ploidy%i.tab"%(VarCallOutdirs, next(iter(samples_to_run)), ploidy), sep="\t")
+        variant_calling_colNames = ",".join([str(I+1) for I, field in enumerate(df_example.keys()) if field in variant_calling_fields])
+
+        del df_example
+
+        # initialize df
+        df_variant_calling = pd.DataFrame()
+
+
+        for Is, sampleID in enumerate(samples_to_run):
+            print_if_verbose("%i/%i: %s"%(Is+1, len(samples_to_run), sampleID))
+
+            # get the partial file
+            target_varcall_file = "%s/%s_VarCallresults/smallVars_CNV_output/variant_calling_ploidy%i.tab"%(VarCallOutdirs, sampleID, ploidy)
+            partial_varcall_file = "%s/partial_variant_calling.tab"%cwd
+
+            cutting_cols_stderr = "%s.generating.stderr"%partial_varcall_file
+            print_if_verbose("getting the important cols. The stderr is in %s"%cutting_cols_stderr)
+            run_cmd("cut -f%s %s > %s 2>%s"%(variant_calling_colNames, target_varcall_file, partial_varcall_file, cutting_cols_stderr))
+            remove_file(cutting_cols_stderr)
+
+            # load df
+            df = pd.read_csv(partial_varcall_file, sep="\t")[variant_calling_fields]
+            remove_file(partial_varcall_file)
+
+            # append the sample ID 
+            df["sampleID"] = sampleID
+
+            # keep
+            df_variant_calling = df_variant_calling.append(df)
+
+            # print the size
+            print_if_verbose("Size of df_variant_calling: %.2f MB"%(sys.getsizeof(df_variant_calling)/1000000))
+
+        # save
+        variant_calling_df_file_tmp = "%s.tmp"%variant_calling_df_file
+        df_variant_calling.to_csv(variant_calling_df_file_tmp, sep="\t", header=True, index=False)
+        os.rename(variant_calling_df_file_tmp, variant_calling_df_file)
+
+    else: variant_calling_df = pd.read_csv(variant_calling_df_file, sep="\t")
+
+
+    ######################################
+
+    ###### INTEGRATE VARIANT ANNOTATION ######
+
+    # define the file
+    variant_annotation_df_file = "%s/integrated_variant_annotation_ploidy%i.tab"%(cwd, ploidy)
+
+    if file_is_empty(variant_annotation_df_file) or repeat is True:
+        print_if_verbose("generating integrated variant annotation")
+
+        # initialize df
+        df_variant_annotation = pd.DataFrame()
+
+        # initialize the previous vars
+        already_saved_vars = set()
+
+        for Is, sampleID in enumerate(samples_to_run):
+            print_if_verbose("%i/%i: %s"%(Is+1, len(samples_to_run), sampleID))
+
+            # load df
+            df = pd.read_csv("%s/%s_VarCallresults/smallVars_CNV_output/variant_annotation_ploidy%i.tab"%(VarCallOutdirs, sampleID, ploidy), sep="\t")
+
+            # get only the new vars
+            df_new = df[~df["#Uploaded_variation"].isin(already_saved_vars)]
+
+            # keep 
+            if len(df_new)>0: df_variant_annotation = df_variant_annotation.append(df_new)
+
+            # define the already existing vars
+            already_saved_vars = set(df_variant_annotation["#Uploaded_variation"])
+
+            # print the size
+            print_if_verbose("Size of df_variant_annotation: %.2f MB"%(sys.getsizeof(df_variant_annotation)/1000000))
+
+
+        # sort
+        df_variant_annotation = df_variant_annotation.sort_values(by="#Uploaded_variation").drop_duplicates()
+
+        # add some fields
+        """
+        df_variant_annotation["chromosome"] = df_variant_annotation["#Uploaded_variation"].apply(lambda x: "_".join(x.split("_")[0:-2]))
+        df_variant_annotation["position"] =  df_variant_annotation["#Uploaded_variation"].apply(lambda x: x.split("_")[-2]).apply(int)
+        df_variant_annotation["ref"] = df_variant_annotation["#Uploaded_variation"].apply(lambda x: x.split("_")[-1].split("/")[0])
+        df_variant_annotation["alt"] = df_variant_annotation["#Uploaded_variation"].apply(lambda x: x.split("_")[-1].split("/")[1])
+        """
+
+        # save
+        variant_annotation_df_file_tmp = "%s.tmp"%variant_annotation_df_file
+        df_variant_annotation.to_csv(variant_annotation_df_file_tmp, sep="\t", header=True, index=False)
+        os.rename(variant_annotation_df_file_tmp, variant_annotation_df_file)
+
+
+    ######################################
+
+
+
+
+    return variant_calling_df

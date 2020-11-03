@@ -24,7 +24,7 @@ import sv_functions as fun
 import multiprocessing as multiproc
 
 # change the verbosity
-#fun.printing_verbose_mode = True
+fun.printing_verbose_mode = True
 
 # define the threads
 threads = multiproc.cpu_count()
@@ -218,11 +218,6 @@ def test_smallVarCall_CNV_running(sorted_bam, outdir, ref_genome, gff, threads=t
 
     print("small variant calling and CNV of genes works")
 
-
-
-
-
-
 def test_SRAdb_query_downloading_and_readTrimming(outdir, reference_genome, target_taxID, replace=False, threads=threads):
 
     """This function runs get_close_shortReads_table_close_to_taxID for the MERS coronavirus and taking the lowest coverage reads. This tests that sra tools, entrez tools, trimmomatic and fastqc work well.
@@ -245,7 +240,7 @@ def test_SRAdb_query_downloading_and_readTrimming(outdir, reference_genome, targ
         # check
         df_close_shortReads_table = fun.pd.read_csv(close_shortReads_table, sep="\t")
 
-        if set(df_close_shortReads_table.keys())!={'short_reads2', 'short_reads1', 'runID', 'sampleID'} or len(df_close_shortReads_table)!=2: raise ValueError("The close_shortReads_table %s was not created as expected"%close_shortReads_table)
+        if set(df_close_shortReads_table.keys())!={'short_reads2', 'short_reads1', 'runID', 'sampleID'} or len(df_close_shortReads_table)!=1: raise ValueError("The close_shortReads_table %s was not created as expected"%close_shortReads_table)
 
         print("The system to query the SRA database, dowload and trim reads works")
 
