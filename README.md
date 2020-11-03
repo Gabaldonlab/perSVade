@@ -55,9 +55,17 @@ In addition, you should install some additional dependencies with the following 
 
 Make sure that this script ends with the message: `SUCCESS: all perSVade dependencies were properly installed.`
 
-NOTE: This will create an additional environment called `<env_name>_bcftools_1.10.2_env`. Make sure that  `<env_name>_bcftools_1.10.2_env` does not exist before running this script. You can change `<env_name>` to fullfil this requirement.
+NOTE: This will create the following additional environments:
 
-We note that this was tested with `conda 4.8.0` on a Linux-x86 64-bit architecture, installed at 03/2019.
+1. `<env_name>_bcftools_1.10.2_env`
+2. `<env_name>_ete3_3.0.0_env`
+3. `<env_name>_R_env`
+4. `<env_name>_gridss_env`
+5. `<env_name>_picard_env`
+
+Make sure that none of them exist before running this script. You can change `<env_name>` to fullfil this requirement.
+
+We note that this was tested with `conda 4.8.0` on a Linux-x86 64-bit architecture, installed at 03/2019. If you have a different conda version, you may change a bit the perSVade_env.yml file so that it does not create dependency problems.
 
 ### 5. Test installation
 
@@ -69,11 +77,9 @@ This process should take arround 45 minutes on 4 cores. Verify that it finishes 
 
 `SUCCESS: perSVade was properly installed`
 
-There are two WARNING messages that you should look for after running this script:
+There is a WARNING message that you should look for after running this script:
 
-1. `WARNING: greasy is not installed properly in your system.` perSVade includes the option to distribute some of the processes on parallel jobs in a SLURM-based cluster (with the option `--job_array_mode greasy`). If this warning appears, it means that your machine is not configured to do this. You can instead run `--job_array_mode local` to run each process in a sequential manner.
-
-2. `WARNING: The connection to SRA did not work`. perSVade includes the option to query and download from the SRA database for the benchmarking of SV calling. This requires a proper network access and SRA connection, which may not always be available. This warning indicates that this process is not possible on your machine. You can skip this connection by providing the reads on your own through `--close_shortReads_table`.
+`WARNING: The connection to SRA did not work`. perSVade includes the option to query and download from the SRA database for the benchmarking of SV calling. This requires a proper network access and SRA connection, which may not always be available. This warning indicates that this process is not possible on your machine. You can skip this connection by providing the reads on your own through `--close_shortReads_table`.
 
 ## Running in MareNostrum
 
@@ -83,7 +89,7 @@ If you are working from any cluster that has access to the BSC /gpfs filesystem 
 
 `source /gpfs/projects/bsc40/mschikora/anaconda3/etc/profile.d/conda.sh`  # activate the conda environment of mschikora
 
-`conda activate perSVade_v0.2_env` # activate the environment of perSVade version 0.2. You can change the version
+`conda activate perSVade_v0.4_env` # activate the environment of perSVade version 0.4. You can change the version
 
 VERY IMPORTANT NOTE:
 

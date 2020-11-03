@@ -27,7 +27,7 @@ test_gff = "%s/reduced_annotation.gff"%testing_inputs_dir
 # load the functions (test if you can import python packages)
 import sv_functions as fun
 print("loading python packages worked successfully")
-fun.printing_verbose_mode = False
+fun.printing_verbose_mode = True
 
 # define the testing inuts dir 
 testing_outputs_dir = "%s/testing_outputs"%test_dir # this is the normal place
@@ -89,7 +89,7 @@ repeat_masker_db = "%s/Libraries/RepeatMasker.lib.nsq"%(fun.repeatmasker_dir)
 if fun.file_is_empty(repeat_masker_db): raise ValueError("%s is missing. Check that you ran ./installation/setup_environment.sh"%repeat_masker_db)
 
 # test that the environment can be recreated. This is only important from the developer's package
-#test_fun.test_conda_env_generation(testing_outputs_dir, replace=False)
+#test_fun.test_conda_env_generation(testing_outputs_dir, replace=True)
 
 # test repeat masker obtention
 test_fun.test_get_repeat_maskerDF(ref_genome, replace=False) # this will not work for repeat masker
@@ -97,6 +97,8 @@ test_fun.test_get_repeat_maskerDF(ref_genome, replace=False) # this will not wor
 # test the repeat masker obtention for a long chromosome 1, 2 and 6
 test_fun.test_get_repeat_maskerDF(Calbicans_chr1_2_6, replace=False)
 print("repeat masker works on chromosome 1, 2 and 6 of C. albicans")
+
+kajdghkdahjad
 
 # test read simulation by simulating reads from the mutated genome
 r1_mutGenome, r2_mutGenome = test_fun.test_read_simulation_and_get_reads(mut_genome)
@@ -124,7 +126,7 @@ test_fun.test_gridss_clove_pipeline(sorted_bam_svGenome, ref_genome, outdir_test
 
 # test whether the parameter optimisation pipeline works well to find the rearrangements
 outdir_testing_parameterOptimisation = "%s/testing_parameter_optimisation_pipeline"%(testing_outputs_dir)
-test_fun.test_parameter_optimisation_perSVade(sorted_bam_svGenome, ref_genome, outdir_testing_parameterOptimisation, replace=False)
+#test_fun.test_parameter_optimisation_perSVade(sorted_bam_svGenome, ref_genome, outdir_testing_parameterOptimisation, replace=False)
 
 # test the integration of variants from previous sequencing data
 Cglabrata_genome = "%s/Candida_glabrata.fasta"%testing_inputs_dir
@@ -132,10 +134,10 @@ Cglabrata_subsampled_reads_dir = "%s/Cglabrata_reads"%testing_inputs_dir
 Cglabrata_subsampled_perSVade_outdir = "%s/Cglabrata_reads_subsampled_perSVade_outdir"%testing_outputs_dir
 Cglabrata_repeats = "%s/Candida_glabrata.repeats.tab"%testing_inputs_dir
 relaxed_parms = "%s/perSVade_parameters_relaxed.json"%testing_inputs_dir
-real_bedpe_breakpoints = test_fun.test_realSVgeneration(Cglabrata_subsampled_reads_dir, Cglabrata_subsampled_perSVade_outdir, Cglabrata_repeats, Cglabrata_genome, relaxed_parms, replace=False)
+#real_bedpe_breakpoints = test_fun.test_realSVgeneration(Cglabrata_subsampled_reads_dir, Cglabrata_subsampled_perSVade_outdir, Cglabrata_repeats, Cglabrata_genome, relaxed_parms, replace=False)
 
 # test the parameter optimisation based on real_bedpe_breakpoints
-test_fun.test_parameter_optimisation_perSVade_real(Cglabrata_subsampled_reads_dir, Cglabrata_subsampled_perSVade_outdir, Cglabrata_repeats, Cglabrata_genome, real_bedpe_breakpoints, replace=False)
+#test_fun.test_parameter_optimisation_perSVade_real(Cglabrata_subsampled_reads_dir, Cglabrata_subsampled_perSVade_outdir, Cglabrata_repeats, Cglabrata_genome, real_bedpe_breakpoints, replace=False)
 
 ### TESTING THINGS THAT ARE DISPENSABLE ###
 
@@ -143,8 +145,6 @@ test_fun.test_parameter_optimisation_perSVade_real(Cglabrata_subsampled_reads_di
 outdir_SRAdb_query_downloading_and_readTrimming = "%s/testing_SRAdb_query_downloading_and_readTrimming_MERS"%testing_outputs_dir
 test_fun.test_SRAdb_query_downloading_and_readTrimming(outdir_SRAdb_query_downloading_and_readTrimming, MERS_genome, 1335626, replace=False)
 
-# test whether you can run greasy
-#test_fun.test_greasy()
 
 ############################################
 

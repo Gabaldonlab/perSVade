@@ -19,6 +19,8 @@ conda activate perSVade_env &&
 conda config --add channels conda-forge &&
 conda config --add channels bioconda &&
 conda config --add channels plotly &&
+conda config --add channels anaconda &&
+
 
 # install packages that should be loaded 
 conda install -y pandas=0.24.2 &&
@@ -28,14 +30,12 @@ conda install -y scikit-learn=0.21.3 &&
 conda install -y -c plotly plotly=2.7.0 &&
 conda install -y -c conda-forge cufflinks-py=0.13.0 &&
 conda install -c anaconda -y seaborn=0.9.0 && # updates: ca-certificates    conda-forge/label/cf201901::ca-certif~ --> anaconda::ca-certificates-2020.6.24-0, certifi  conda-forge/label/cf201901::certifi-2~ --> anaconda::certifi-2020.6.20-py36_0
-conda install -c anaconda psutil=5.7.2 &&
+conda install -c conda-forge -y matplotlib=3.3.0 # by default, seaborn installs 3.3.1, which raises errors
+conda install -c anaconda -y psutil=5.7.2 &&
 conda install -c anaconda -y pigz=2.4 &&
 
 # install packages related to software
-conda install -c bioconda -y repeatmasker=4.0.9_p2 && # downgrades: gmp 6.2.0-he1b5a44_2 --> 6.1.2-hf484d3e_1000
-conda install -c bioconda -y repeatmodeler=2.0.1 &&
 conda install -c bioconda -y bwa=0.7.17 &&
-conda install -c bioconda -y picard=2.18.26 &&
 conda install -c bioconda -y bcftools=1.9 &&
 conda install -c bioconda -y samtools=1.9 && # this will downgrade: ncurses.2-he1b5a44_1 --> 6.1-hf484d3e_1002 python 3.6.11-h425cb1d_1_cpython --> 3.6.10-h8356626_1011_cpython readline  8.0-he28a2e2_2 --> 8.0-h46ee950_1
 conda install -c bioconda -y bedtools=2.29.0 &&
@@ -71,11 +71,15 @@ conda env export --no-builds --from-history -n perSVade_env --file perSVade_env.
 
 ########################################
 
+#conda install -c bioconda -y repeatmasker=4.0.9_p2 && # downgrades: gmp 6.2.0-he1b5a44_2 --> 6.1.2-hf484d3e_1000
+#conda install -c bioconda -y repeatmodeler=2.0.1 &&
+# conda install -c asmeurer -y glibc=2.19 # This was necessary to run in Nord3
 
 
-conda config --remove channels defaults
-conda config --remove channels r
-conda config --remove channels biocore
+
+#conda config --remove channels defaults
+#conda config --remove channels r
+#conda config --remove channels biocore
 
 
 
@@ -87,6 +91,11 @@ conda config --remove channels biocore
 
 
 ## GRAVEYARD ## 
+
+#conda install -c bioconda -y picard=2.18.26 &&
+
+
+#conda install -c conda-forge -y r-base=4.0.2 # originally: conda install -c conda-forge -y r-base=4.0.2
 
 
 # The following packages will be UPDATED:
