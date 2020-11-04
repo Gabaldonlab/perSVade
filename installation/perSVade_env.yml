@@ -4,6 +4,7 @@ channels:
   - plotly
   - bioconda
   - conda-forge
+  - asmeurer
 dependencies:
   - python=3.6
   - pandas=0.24.2
@@ -16,8 +17,6 @@ dependencies:
   - matplotlib=3.3.0
   - psutil=5.7.2
   - pigz=2.4
-  - repeatmasker=4.0.9_p2
-  - repeatmodeler=2.0.1
   - bwa=0.7.17
   - bcftools=1.9
   - samtools=1.9
