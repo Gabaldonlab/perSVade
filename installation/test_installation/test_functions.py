@@ -36,15 +36,30 @@ def test_get_repeat_maskerDF(test_genome, replace=False):
 
     """Tests the generation of repeats"""
 
-    # define the ref genome
-    df_repeats, repeat_masker_outfile_default = fun.get_repeat_maskerDF(test_genome, threads=threads, replace=replace)
+    try: 
 
-    # test
-    expected_fields = {'perc_ins', 'perc_del', 'type', 'end_repeat', 'perc_div', 'position_inRepeat_begin', 'repeat', 'left_repeat', 'IDrepeat', 'strand', 'left_positionINrepeat', 'SW_score', 'chromosome', 'begin_repeat', 'position_inRepeat_end'}
+        print("trying to generate repeats for %s"%test_genome)
 
-    if set(list(df_repeats.keys()))!=expected_fields: raise ValueError("something went wrong with the repeats generation")
+        # define the ref genome
+        df_repeats, repeat_masker_outfile_default = fun.get_repeat_maskerDF(test_genome, threads=threads, replace=replace)
 
-    print("repeats were generated correctly")
+        # test
+        expected_fields = {'perc_ins', 'perc_del', 'type', 'end_repeat', 'perc_div', 'position_inRepeat_begin', 'repeat', 'left_repeat', 'IDrepeat', 'strand', 'left_positionINrepeat', 'SW_score', 'chromosome', 'begin_repeat', 'position_inRepeat_end'}
+
+        if set(list(df_repeats.keys()))!=expected_fields: raise ValueError("something went wrong with the repeats generation")
+
+        print("repeats were generated correctly for %s"%test_genome)
+
+    except Exception as err:
+
+
+        print("\n\n---\nWARNING: The running of RepeatModeller and/or RepeatMasker did not work. This is expected to happen in old linux systems with a GLIBC version <2.12. You may provide the already calculated repeats through the command --previous_repeats_table. This is returned by the function of get_repeat_maskerDF from sv_functions.py . \n---\n\n")
+
+        print("---\nThis is the error:")
+
+        traceback.print_tb(err.__traceback__)
+        print(err)
+        print("---\n")
 
 def test_conda_env_generation(outdir, replace=False):
 
@@ -196,7 +211,8 @@ def test_smallVarCall_CNV_running(sorted_bam, outdir, ref_genome, gff, threads=t
     fun.make_folder(outdir)
 
     # get the repeats
-    repeats_table = fun.get_repeat_maskerDF(ref_genome, threads=threads, replace=False)[1]
+    repeats_table = "%s.repeats.tab"%ref_genome
+    fun.write_repeats_table_file(repeats_table)
 
     for pooled_seq in [False]: # this may be also [False, True] to test pooled seq
 
@@ -206,7 +222,7 @@ def test_smallVarCall_CNV_running(sorted_bam, outdir, ref_genome, gff, threads=t
         final_file = "%s/variant_annotation_ploidy2.tab"%outdir_varCall
 
         if fun.file_is_empty(final_file) or replace is True:
-            print("running on pooled_seq=%s. This may take a bit because a lot of variants will be considered"%pooled_seq)
+            print("running on pooled_seq=%s. If pooled_seq is True, this may take a bit because a lot of variants will be considered"%pooled_seq)
 
             # define the cmd
             cmd = "%s -r %s -o %s -p 2 -sbam %s -caller all -c 5 -mchr %s -mcode 3 -gcode 1 --repeats_table %s --remove_smallVarsCNV_nonEssentialFiles -gff %s -thr %i"%(varcall_cnv_pipeline, ref_genome, outdir_varCall, sorted_bam, mitochondrial_chromosome, repeats_table, gff, threads) 
@@ -296,7 +312,7 @@ def test_parameter_optimisation_perSVade(sorted_bam, reference_genome, outdir, t
 
     if fun.file_is_empty("%s/perSVade_finished_file.txt"%outdir):
 
-        cmd = "%s -r %s -thr %i -o %s -sbam %s --nvars 5 --simulation_ploidies haploid --range_filtering_benchmark theoretically_meaningful -mchr mito_C_glabrata_CBS138 --min_chromosome_len 100 --nsimulations 1"%(fun.perSVade_py, reference_genome, threads, outdir, sorted_bam)
+        cmd = "%s -r %s -thr %i -o %s -sbam %s --nvars 5 --simulation_ploidies haploid --range_filtering_benchmark theoretically_meaningful -mchr mito_C_glabrata_CBS138 --min_chromosome_len 100 --nsimulations 1 --skip_repeat_analysis"%(fun.perSVade_py, reference_genome, threads, outdir, sorted_bam)
 
         if fun.printing_verbose_mode is True: cmd += " --verbose"
 
@@ -350,7 +366,7 @@ def test_parameter_optimisation_perSVade_real(reads_dir, outdir, repeats, refere
         reads2 = "%s/sampled_readsR2_first100k.fq.gz"%reads_dir
 
         # run persvade
-        cmd = "%s -r %s -thr %i -o %s -f1 %s -f2 %s --nvars 10 -mchr mito_C_glabrata_CBS138 --min_chromosome_len 10000 --real_bedpe_breakpoints %s --previous_repeats_table %s --simulation_ploidies haploid --range_filtering_benchmark large --nsimulations 1 -p 1"%(fun.perSVade_py, reference_genome, threads, outdir, reads1, reads2, real_bedpe_breakpoints, repeats)
+        cmd = "%s -r %s -thr %i -o %s -f1 %s -f2 %s --nvars 10 -mchr mito_C_glabrata_CBS138 --min_chromosome_len 10000 --real_bedpe_breakpoints %s --previous_repeats_table %s --simulation_ploidies haploid --range_filtering_benchmark large --nsimulations 1 -p 1 --skip_repeat_analysis"%(fun.perSVade_py, reference_genome, threads, outdir, reads1, reads2, real_bedpe_breakpoints, repeats)
 
 
         if fun.printing_verbose_mode is True: cmd += " --verbose"

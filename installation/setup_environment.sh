@@ -108,6 +108,7 @@ echo "creating conda env $gridss_env_name"
 conda create -y --name $gridss_env_name -c conda-forge r-base=4.0.2
 conda install -n $gridss_env_name -c bioconda -y samtools=1.10
 conda install -n $gridss_env_name -c bioconda -y bwa=0.7.17
+conda install -n $gridss_env_name -c anaconda -y openjdk=8.0.152
 
 # create a subenvironment to run picard
 picard_env_name="$env_name"_picard_env

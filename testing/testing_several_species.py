@@ -33,6 +33,7 @@ if run_in_cluster is True:
     cluster_name = fun.get_current_clusterName_mareNostrum()
     if cluster_name=="MN4": threads = 24
     elif cluster_name=="Nord3": threads = 16
+    else: raise ValueError("cluster could not be identified")
 
 # define paths
 perSVade_py = "%s/perSVade.py"%perSVade_dir
@@ -121,9 +122,9 @@ species_Info = [("746128", "Aspergillus_fumigatus", 1, "CM016889.1"),
                 ("5207", "Cryptococcus_neoformans", 1, "CP003834.1")]
 """
 
-species_Info = [("7227", "Drosophila_melanogaster", 2, "KJ947872.2", 30),
-                ("3702", "Arabidopsis_thaliana", 2, "BK010421.1,AP000423.1", 30),
-                ("746128", "Aspergillus_fumigatus", 1, "CM016889.1", 10000000000000000)]
+species_Info = [("7227", "Drosophila_melanogaster", 2, "KJ947872.2", 30, 10000),
+                ("3702", "Arabidopsis_thaliana", 2, "BK010421.1,AP000423.1", 30, 10000),
+                ("746128", "Aspergillus_fumigatus", 1, "CM016889.1", 10000000000000000, 5000)]
 
 #species_Info = [("3702", "Arabidopsis_thaliana", 2, "BK010421.1,AP000423.1", 30)]
 #species_Info = [("7227", "Drosophila_melanogaster", 2, "KJ947872.2", 30)]
@@ -145,7 +146,7 @@ if fun.file_is_empty(filename_timing_df):
     open(filename_timing_df, "w").write("\t".join(header_fields) + "\n")
 
 # go through each species
-for taxID, spName, ploidy, mitochondrial_chromosome, max_coverage_sra_reads in species_Info:
+for taxID, spName, ploidy, mitochondrial_chromosome, max_coverage_sra_reads, min_CNVsize_betweenBPs in species_Info:
     print(taxID, spName)
 
     #if spName=="Candida_glabrata": continue # debug
@@ -280,8 +281,8 @@ for taxID, spName, ploidy, mitochondrial_chromosome, max_coverage_sra_reads in s
         else: close_shortReads_table = "auto"
 
         # get the reads from SRA. 3 samples, 3 runs per sample. Process with the. --verbose
-        cmd = "%s --ref %s --threads %i -o %s --close_shortReads_table %s --target_taxID %s --n_close_samples 3 --nruns_per_sample 3 -f1 skip -f2 skip --mitochondrial_chromosome %s --testAccuracy --skip_SVcalling --verbose --skip_cleaning_simulations_files_and_parameters --StopAfter_testAccuracy_perSVadeRunning --max_coverage_sra_reads %i --replace_SV_CNVcalling_and_optimisation --gff %s --nsimulations 2"%(perSVade_py, genome, threads, outdir_perSVade, close_shortReads_table, taxID, mitochondrial_chromosome, max_coverage_sra_reads, gff)
-        # --StopAfter_testAccuracy_perSVadeRunning --slurm_constraint, --StopAfter_obtentionOFcloseSVs --gff %s. Need to add the ploidy (-p ploidy)
+        cmd = "%s --ref %s --threads %i -o %s --close_shortReads_table %s --target_taxID %s --n_close_samples 3 --nruns_per_sample 3 -f1 skip -f2 skip --mitochondrial_chromosome %s --testAccuracy --skip_SVcalling --verbose --skip_cleaning_simulations_files_and_parameters --StopAfter_testAccuracy_perSVadeRunning --max_coverage_sra_reads %i --gff %s --nsimulations 2 --min_CNVsize_betweenBPs %i"%(perSVade_py, genome, threads, outdir_perSVade, close_shortReads_table, taxID, mitochondrial_chromosome, max_coverage_sra_reads, gff, min_CNVsize_betweenBPs)
+        # --StopAfter_testAccuracy_perSVadeRunning --slurm_constraint, --StopAfter_obtentionOFcloseSVs --gff %s. Need to add the ploidy (-p ploidy) min_CNV_size # replace_SV_CNVcalling_and_optimisation
 
     elif running_type=="goldenSet":
 
@@ -330,7 +331,7 @@ for taxID, spName, ploidy, mitochondrial_chromosome, max_coverage_sra_reads in s
 
             queue = "bsc_ls"; 
             RAM_per_thread = 3600; 
-            time = "48:00:00" # per job
+            time = "18:00:00" # per job
 
             fun.run_jobarray_file_Nord3(jobs_filename, name, time=time, queue=queue, threads_per_job=threads, RAM_per_thread=RAM_per_thread, max_njobs_to_run=1000)
 
