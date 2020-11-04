@@ -6773,3 +6773,52 @@ def run_perSVade_severalSamples(paths_df, cwd, common_args, threads=4, sampleID_
 
 
     return variant_calling_df
+
+
+
+
+except:
+
+    # define the error_log
+    error_log = "building the db for RepeatModeler did not work. Check %s"%bulding_repModeler_db_std
+
+    # if you are running in Nord3, this can be circumvented by running the makeblastdb sepparately
+    if "BSC_MACHINE" in os.environ and os.environ["BSC_MACHINE"]=="nord3":
+
+        # setup the db
+        delete_folder(outdir)
+        make_folder(outdir)
+        shutil.copy2(reference_genome, genome_dir)
+
+        # make the blast db
+        makeblastdb_stdout = "%s/makeblastdb_nord3.std"%outdir
+        print_if_verbose("runnning makeblastdb in nord3. The std is in %s"%makeblastdb_stdout)
+
+        nord3_makeblastdb = "/apps/BLAST/2.2.28/bin/makeblastdb"
+        run_cmd("cd %s && %s -out %s -parse_seqids -dbtype nucl -in %s > %s 2>&1"%(outdir, nord3_makeblastdb, name_database, name_database, makeblastdb_stdout), env=EnvName_RepeatMasker)
+
+        remove_file(makeblastdb_stdout)
+
+    else: raise ValueError(error_log)
+
+
+
+  # setup variables if you are in specific machines
+        if "BSC_MACHINE" in os.environ and os.environ["BSC_MACHINE"]=="nord3":
+
+            # define paths
+            nord3_makeblastdb = "/apps/BLAST/2.2.28/bin/makeblastdb"
+            abblast_dir 
+            rmblast_dir
+
+
+
+            # make the blast db
+            makeblastdb_stdout = "%s/makeblastdb_nord3.std"%outdir
+            print_if_verbose("runnning makeblastdb in nord3. The std is in %s"%makeblastdb_stdout)
+
+            
+            run_cmd("cd %s && %s -out %s -parse_seqids -dbtype nucl -in %s > %s 2>&1"%(outdir, nord3_makeblastdb, name_database, name_database, makeblastdb_stdout), env=EnvName_RepeatMasker)
+
+            remove_file(makeblastdb_stdout)
+

@@ -160,6 +160,7 @@ parser.add_argument("--generate_alternative_genome", dest="generate_alternative_
 parser.add_argument("--skip_cnv_analysis", dest="skip_cnv_analysis", default=False, action="store_true", help="Don't perform the cnv analysis")
 
 
+
 # visualization
 parser.add_argument("--visualization_results", dest="visualization_results", default=False, action="store_true", help="Visualize the results")
 
@@ -172,6 +173,8 @@ parser.add_argument("--verbose", dest="verbose", action="store_true", default=Fa
 # repeat obtention
 parser.add_argument("--consider_repeats_smallVarCall", dest="consider_repeats_smallVarCall", action="store_true", default=False, help="If --run_smallVarsCNV, this option will imply that each small  variant will have an annotation of whether it overlaps a repeat region.")
 parser.add_argument("--previous_repeats_table", dest="previous_repeats_table", default=None, help="This may be the path to a file that contains the processed output of RepeatMasker (such as the one output by the function get_repeat_maskerDF). This should be a table with the following header: 'SW_score, perc_div, perc_del, perc_ins, chromosome, begin_repeat, end_repeat, left_repeat, strand, repeat, type, position_inRepeat_begin, position_inRepeat_end, left_positionINrepeat, IDrepeat'. It is created by parsing the tabular output of RepeatMasker and putting into a real .tab format.")
+
+parser.add_argument("--skip_repeat_analysis", dest="skip_repeat_analysis", default=False, action="store_true", help="Skip the inference of repeats. If --previous_repeats_table is provided, this argument will override it.")
 
 # small varCall stop options
 parser.add_argument("--StopAfter_smallVarCallSimpleRunning", dest="StopAfter_smallVarCallSimpleRunning", action="store_true", default=False, help="Stop after obtaining the filtered vcf outputs of each program.")
@@ -186,6 +189,13 @@ opt = parser.parse_args()
 # if replace is set remove the outdir, and then make it
 if opt.replace is True: fun.delete_folder(opt.outdir)
 fun.make_folder(opt.outdir)
+
+# define the final file. and exit if it exists
+final_file = "%s/perSVade_finished_file.txt"%opt.outdir
+if not fun.file_is_empty(final_file): 
+	
+	print("WARNING: %s exists, suggesting that perSVade was already  run in this folder. Remove this file if you want this command to work. Exiting..."%final_file)
+	sys.exit(0)
 
 # define the name as the sample as the first 10 characters of the outdir
 name_sample = fun.get_file(opt.outdir)[0:10]
@@ -231,14 +241,14 @@ else:
 #########################
 
 #### REPLACE THE REPEATS TABLE IF PROVIDED ####
+
+# define the 
+repeats_table_file = "%s.repeats.tab"%opt.ref
+
 if opt.previous_repeats_table is not None:
     print("using privided repeats %s"%opt.previous_repeats_table)
 
     if fun.file_is_empty(opt.previous_repeats_table): raise ValueError("The provided repeats table does not exist")
-
-    # define the dest file
-    repeats_table_file = "%s.repeats.tab"%opt.ref
-
     # softlink
     fun.soft_link_files(opt.previous_repeats_table, repeats_table_file)
 
@@ -249,7 +259,6 @@ if opt.StopAfter_genomeObtention is True:
     sys.exit(0)
 
 #### define misc args ####
-
 
 # get the simulation ploidies
 if opt.simulation_ploidies!="auto": simulation_ploidies = opt.simulation_ploidies.split(",")
@@ -283,10 +292,7 @@ fun.min_CNVsize_betweenBPs = opt.min_CNVsize_betweenBPs
 
 # redefine the real threads
 real_available_threads = fun.get_available_threads(opt.outdir)
-if opt.threads>real_available_threads: 
-
-	print("WARNING: There are %i available threads, and you required %i. Running eveything on %i threads"%(real_available_threads, opt.threads, real_available_threads))
-	opt.threads = real_available_threads
+if opt.threads>real_available_threads:  print("WARNING: There are %i available threads, and you required %i."%(real_available_threads, opt.threads))
 
 print("Running with %i Gb of RAM and %i cores"%(int(fun.get_availableGbRAM(opt.outdir)), opt.threads))
 
@@ -306,8 +312,15 @@ if opt.parameters_json_file is not None:
 if opt.gff is not None: correct_gff, gff_with_biotype = fun.get_correct_gff_and_gff_with_biotype(opt.gff, replace=opt.replace)
 
 # get the repeats table
-print("getting repeats")
-repeats_df, repeats_table_file = fun.get_repeat_maskerDF(opt.ref, threads=opt.threads, replace=opt.replace)
+if opt.skip_repeat_analysis is False:
+
+	print("getting repeats")
+	repeats_df, repeats_table_file = fun.get_repeat_maskerDF(opt.ref, threads=opt.threads, replace=opt.replace)
+
+else:
+
+	print("skipping the repeats analysis")
+	fun.write_repeats_table_file(repeats_table_file)
 
 if opt.StopAfter_repeatsObtention is True:
     print("Stopping after the obtention of repeats")
@@ -631,12 +644,10 @@ if (opt.skip_SVcalling is False or run_smallVarsCNV is True) and not any([x=="sk
 #####################################
 #####################################
 
-
 # at the end you want to clean the outdir to keep only the essential files
 if opt.skip_cleaning_outdir is False: fun.clean_perSVade_outdir(opt.outdir)
 
 # generate a file that indicates whether the gridss run is finished
-final_file = "%s/perSVade_finished_file.txt"%opt.outdir
 open(final_file, "w").write("perSVade_finished finished...")
 
 print("perSVade Finished correctly")

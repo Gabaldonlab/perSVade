@@ -737,6 +737,15 @@ def get_availableGbRAM(outdir):
 
             availableGbRAM = available_mem*(int(os.environ["SLURM_CPUS_PER_TASK"])/48)
 
+        # nord3
+        elif "BSC_MACHINE" in os.environ and os.environ["BSC_MACHINE"]=="nord3":
+
+            # define the available threads
+            real_available_threads = get_available_threads(outdir)
+
+            # get thr ram considering that 1 node has 16 threads
+            availableGbRAM = available_mem*(int(real_available_threads)/16)
+
         # BSC machine
         elif str(subprocess.check_output("uname -a", shell=True)).startswith("b'Linux bscls063 4.12.14-lp150.12.48-default"): 
 
@@ -5207,6 +5216,9 @@ def get_ancestor_taxID(target_taxID, nancestorNodes, outdir):
 def get_SRA_runInfo_df(target_taxID, n_close_samples, nruns_per_sample, outdir, reference_genome, min_coverage, replace, threads, coverage_subset_reads, min_fraction_reads_mapped, get_lowest_coverage_possible=False):
 
     """This function mines the SRA to find n_close_samples and nruns_per_sample, returning the necessary df """
+
+    # check if you have network access
+    if connected_to_network() is False: raise ValueError("There is no network connection available, which is necessary to get the get_SRA_runInfo_df working")
 
     ######## UPDATE NCBI TAXONOMY ########
 
@@ -11242,6 +11254,15 @@ def get_normed_bgzip_and_tabix_vcf_file(file, reference_genome, replace=False, t
     return file_gz
 
 
+def write_repeats_table_file(repeats_table_file):
+
+    """This function writes an empty repeats table file"""
+
+    repeats_fields = ["IDrepeat", "SW_score", "begin_repeat", "chromosome", "end_repeat", "left_positionINrepeat", "left_repeat", "perc_del", "perc_div", "perc_ins", "position_inRepeat_begin", "position_inRepeat_end", "repeat", "strand", "type"]
+
+    open(repeats_table_file, "w").write("\t".join(repeats_fields) + "\n")
+
+
 def get_altAllele_freq_noMultiAllele_fromAD(ad):
 
     """Takes AD and returns the alternative allele freq"""
@@ -11467,7 +11488,6 @@ def merge_several_vcfsSameSample_into_oneMultiSample_vcf(vcf_iterable, reference
             if len(set(vcf_df.ID))!=len(vcf_df): 
 
                 #duplicated_ID = vcf_df[vcf_df.duplicate]
-                #print(.duplicate())
 
                 raise ValueError("The ID has to be unique")
 
@@ -12007,33 +12027,21 @@ def run_repeat_modeller(reference_genome, threads=4, replace=False):
     if file_is_empty(repeat_modeler_outfile) or replace is True:
         print_if_verbose("running repeat modeler")
 
-        # delete the outdir
-        delete_folder(outdir)
-
-        # create it
-        make_folder(outdir)
-
-        # put the genome under this outdir
-        shutil.copy2(reference_genome, genome_dir)
-
         # run the database
         name_database = get_file(genome_dir)
+
+        # setup the folder
+        delete_folder(outdir)
+        make_folder(outdir)
+        shutil.copy2(reference_genome, genome_dir)
 
         bulding_repModeler_db_std = "%s.genearting_db.std"%genome_dir
         print_if_verbose("getting repeat modeler db. The std is in %s"%bulding_repModeler_db_std)
 
-        # define the path o
-        thishastobeadapted_to_run_in_Nord3
-        json.load(f)
-        prefix_cmd = "/gpfs/projects/bsc40/mschikora/anaconda3/pkgs/glibc-2.12.2-3"
-
-
-        
-        
-
-
-        # define the cmd prefix, just in case that you are running in Nord3
-        run_cmd("%s cd %s && %s -name %s %s > %s 2>&1"%(prefix_cmd, outdir, repeat_modeller_BuildDatabase, name_database, genome_dir, bulding_repModeler_db_std), env=EnvName_RepeatMasker)
+        # define the cmd
+        build_db_cmd = "cd %s && %s -name %s %s > %s 2>&1"%(outdir, repeat_modeller_BuildDatabase, name_database, genome_dir, bulding_repModeler_db_std)
+        # run
+        run_cmd(build_db_cmd, env=EnvName_RepeatMasker)
 
         remove_file(bulding_repModeler_db_std)
 
@@ -14379,27 +14387,32 @@ def get_varIDs_overlapping_target_regions(df_vcf, target_regions, outdir):
     target_bed = "%s/target_regions.bed"%outdir
     target_regions[["chromosome", "start", "end"]].to_csv(target_bed, sep="\t", header=False, index=False)
 
-    # run bedtools to get the intersection
-    intersection_vcf_bed = "%s/variant_locations_intersecting_targetRegions.bed"%outdir
-    intersection_vcf_bed_stderr = "%s.generating.stderr"%intersection_vcf_bed
-    print_if_verbose("running bedtools to get the variants that intersect the provided regions. The stderr is in %s"%intersection_vcf_bed_stderr)
+    # if the target regions are empty, define None as overlapping IDs
+    if len(target_regions)==0: overlapping_IDs = set()
 
-    intersection_vcf_bed_tmp = "%s.tmp"%intersection_vcf_bed
-    run_cmd("%s intersect -a %s -b %s -wa > %s 2>%s"%(bedtools, vcf_bed, target_bed, intersection_vcf_bed_tmp, intersection_vcf_bed_stderr))
+    else:
 
-    remove_file(intersection_vcf_bed_stderr)
-    os.rename(intersection_vcf_bed_tmp, intersection_vcf_bed)
+        # run bedtools to get the intersection
+        intersection_vcf_bed = "%s/variant_locations_intersecting_targetRegions.bed"%outdir
+        intersection_vcf_bed_stderr = "%s.generating.stderr"%intersection_vcf_bed
+        print_if_verbose("running bedtools to get the variants that intersect the provided regions. The stderr is in %s"%intersection_vcf_bed_stderr)
 
-    # get into df
-    df_vcf_intersection = pd.read_csv(intersection_vcf_bed, sep="\t", header=None, names=["chromosome", "start", "end", "ID"])
+        intersection_vcf_bed_tmp = "%s.tmp"%intersection_vcf_bed
+        run_cmd("%s intersect -a %s -b %s -wa > %s 2>%s"%(bedtools, vcf_bed, target_bed, intersection_vcf_bed_tmp, intersection_vcf_bed_stderr))
 
-    # check that all IDs are in the beginning
-    if len(set(df_vcf_intersection.ID).difference(set(df_vcf.ID)))>0: raise ValueError("There are missing IDs")
+        remove_file(intersection_vcf_bed_stderr)
+        os.rename(intersection_vcf_bed_tmp, intersection_vcf_bed)
 
-    # get the IDs that are overlapping
-    if len(df_vcf_intersection)>0: overlapping_IDs = set.union(*df_vcf_intersection.ID.apply(lambda x: set(x.split(";"))))
+        # get into df
+        df_vcf_intersection = pd.read_csv(intersection_vcf_bed, sep="\t", header=None, names=["chromosome", "start", "end", "ID"])
 
-    else: overlapping_IDs = set() 
+        # check that all IDs are in the beginning
+        if len(set(df_vcf_intersection.ID).difference(set(df_vcf.ID)))>0: raise ValueError("There are missing IDs")
+
+        # get the IDs that are overlapping
+        if len(df_vcf_intersection)>0: overlapping_IDs = set.union(*df_vcf_intersection.ID.apply(lambda x: set(x.split(";"))))
+
+        else: overlapping_IDs = set() 
 
     return overlapping_IDs
 
