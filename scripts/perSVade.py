@@ -370,6 +370,7 @@ if not any([x=="skip" for x in {opt.fastq1, opt.fastq2}]):
         print("WORKING ON ALIGNMENT")
         fun.run_bwa_mem(opt.fastq1, opt.fastq2, opt.ref, opt.outdir, bamfile, sorted_bam, index_bam, name_sample, threads=opt.threads, replace=opt.replace)
 
+        fun.clean_sorted_bam_coverage_per_window_files(sorted_bam)
 
     else: print("Warning: No fastq file given, assuming that you provided a bam file")
 
