@@ -6822,3 +6822,122 @@ except:
 
             remove_file(makeblastdb_stdout)
 
+
+
+
+def get_set_overlappingIDs_df_CNV_r(r, df_CNV, equal_fields, approximate_fields, chromField_to_posFields, tol_bp, pct_overlap):
+
+    """This function takes a row from a df_CNV and the same df, returning the set of IDs that are overlapping with this row according to several fields"""
+
+    # define the df_overlap
+    df_overlapping = df_CNV[(df_CNV.apply(lambda r_cnv: get_is_matching_predicted_and_known_rows(r, r_cnv, equal_fields, approximate_fields, chromField_to_posFields, tol_bp=tol_bp, pct_overlap=pct_overlap), axis=1))]
+
+    return set(df_overlapping.index)
+
+
+def get_nonRedundant_CNVcalls_coverage(df_CNV, df_vcf_forCNV, threads, pct_overlap=0.8, tol_bp=1000000000):
+
+    """Gets a df_CNV with no redudnant calls (those that overlap by more than 80% with other rows in df_CNV or df_vcf_forCNV)"""
+
+    if len(df_CNV)==0: return df_CNV
+
+    print_if_verbose("getting non-redundant CNV calls")
+
+    # get the index
+    initial_index = set(df_CNV.index)
+    if len(initial_index)!=len(df_CNV): raise ValueError("index should be unique")
+
+    # get the initial fields
+    initial_fields = list(df_CNV.columns)
+
+    # keep
+    df_CNV = cp.deepcopy(df_CNV)
+    df_vcf_forCNV = cp.deepcopy(df_vcf_forCNV)
+
+    # add the quality and AF, which are useful for the sorting of redundant variants
+    df_CNV["QUAL"] = df_CNV.QUAL_mean
+    df_CNV["AF"] = df_CNV.real_AF_min
+    df_vcf_forCNV["QUAL"] = 1000000000
+    df_vcf_forCNV["AF"] = 1.0
+
+    # define all called SVs
+    fields = ["ID", "chromosome", "start", "end", "SVTYPE", "type_CNVcall", "typeBPs", "QUAL", "AF"]
+    all_df_CNV = df_CNV[fields].append(df_vcf_forCNV[fields])
+    all_df_CNV = all_df_CNV.set_index("ID")
+
+    # make sure that the ID is unique
+    check_that_df_index_is_unique(all_df_CNV)
+
+    # define the clusters of CNVs that are overlapping by >=80% of their extension
+    list_clusters = get_list_clusters_overlapping_df_CNV(all_df_CNV, pct_overlap, tol_bp, threads)
+
+    # add fields for sorting of redundant variants according to their type and the quality mesurements
+    type_CNVcall_to_int = {"gridssClove":1, "coverage":0}
+    all_df_CNV["type_CNVcall_int"] = all_df_CNV.type_CNVcall.apply(lambda x: type_CNVcall_to_int[x])
+
+    typeBPs_to_int = {"RealBPs":3, "wholeChrom":2, "oneRealBP":1, "FilteredOutBPs":0}
+    all_df_CNV["typeBPs_int"] = all_df_CNV.typeBPs.apply(lambda x: typeBPs_to_int[x])
+
+    all_df_CNV["length"] = all_df_CNV.end - all_df_CNV.start
+
+    # get the best IDs from each cluster
+    best_NR_IDs = set(map( (lambda x: get_bestID_from_df_CNV_cluster(x, all_df_CNV) ), list_clusters))
+
+    # get the df with these IDs
+    df_CNV_NR = df_CNV[df_CNV.ID.isin(best_NR_IDs)]
+    
+    # at the end set the quality to a '.'
+    df_CNV_NR["QUAL"] = "."
+
+    return df_CNV_NR[initial_fields]
+
+
+def get_list_clusters_overlapping_df_CNV(df_CNV, pct_overlap, tol_bp, threads):
+
+    """Takes a df_CNV with chromosome, start, and end, where the ID is the index. It returns a list of sets, each set containing IDs of CNVs that overlap by >=80% and are from the same type """
+
+    print_if_verbose("getting list_clusters_overlapping_df_CNV")
+
+    # checks
+    if len(set(df_CNV.SVTYPE).difference({"DUP", "DEL"}))>0: raise ValueError("SVTYPE is not properly formated")
+    if len(set(df_CNV.type_CNVcall).difference({"gridssClove", "coverage"}))>0: raise ValueError("type_CNVcall is not properly formated")
+    if len(set(df_CNV.typeBPs).difference({"RealBPs", "wholeChrom", "oneRealBP", "FilteredOutBPs"}))>0: raise ValueError("typeBPs is not properly formated")
+
+    # init dict
+    ID_to_overlappingIDs = {}
+
+    # define the fields for comparison
+    equal_fields = ["chromosome", "SVTYPE"]
+    approximate_fields = ["start", "end"]
+    chromField_to_posFields = {"chromosome":{"start": "start", "end": "end"}}
+
+    # define two lists
+    print_if_verbose("mapping each row to the cluster")
+
+    all_IDs_list = list(df_CNV.index)
+    inputs_fn = [(x[1], df_CNV, equal_fields, approximate_fields, chromField_to_posFields, tol_bp, pct_overlap) for x in df_CNV.iterrows()]
+
+    # get the list of sets in parallel
+    with multiproc.Pool(threads) as pool:
+        list_overlappingIDs_sets = pool.starmap(get_set_overlappingIDs_df_CNV_r, inputs_fn) 
+            
+        pool.close()
+        pool.terminate()
+
+    # merge
+    ID_to_overlappingIDs = dict(zip(all_IDs_list, list_overlappingIDs_sets))
+
+    # initialize clusters list
+    print_if_verbose("getting lists of clusters")
+    list_clusters = get_list_clusters_from_dict(ID_to_overlappingIDs)
+
+    # check
+    all_IDs = set(df_CNV.index)
+    all_IDs_in_cluster = set.union(*list_clusters)
+    if all_IDs!=all_IDs_in_cluster: raise ValueError("all IDs should be in clusters")
+
+    print_if_verbose("list_clusters_overlapping_df_CNV already ran. There are %i clusters"%len(list_clusters))
+  
+    return list_clusters
+
+
