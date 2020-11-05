@@ -94,7 +94,7 @@ test_Ninja_installation $previously_installed_Ninja "previously_installed"  || {
 	test_gxx_installation && echo 'g++ is properly installed'
 
 	# try to install NINJA 0.95
-	rm  -r 0.95-cluster_only* || echo 'It is the first time this folder is attempted to be accessed'
+	rm  -rf 0.95-cluster_only* || echo 'It is the first time this folder is attempted to be accessed'
 	wget https://github.com/TravisWheelerLab/NINJA/archive/0.95-cluster_only.tar.gz
 	tar -xvf 0.95-cluster_only.tar.gz && rm 0.95-cluster_only.tar.gz 
 	cd NINJA-0.95-cluster_only/NINJA
@@ -108,7 +108,7 @@ test_Ninja_installation $previously_installed_Ninja "previously_installed"  || {
 		cd $installation_dir/Ninja_data
 
 		# decompress
-		rm -r NINJA_repo_05112020 || echo 'Ninja repo was never accessed'
+		rm -rf NINJA_repo_05112020 || echo 'Ninja repo was never accessed'
 		tar -xvf NINJA_repo_05112020.tar.gz && mv NINJA NINJA_repo_05112020
 
 		# go inside the folder and make the binaries
@@ -157,7 +157,7 @@ conda create -y --name $bcftools_env_name -c bioconda bcftools=1.10.2;
 ete3_env_name="$env_name"_ete3_3.0.0_env
 echo "creating conda env $ete3_env_name"
 conda config --add channels conda-forge
-rm -r $conda_dir/envs/$ete3_env_name || echo 'ete3 was not created'
+rm -rf $conda_dir/envs/$ete3_env_name || echo 'ete3 was not created'
 conda create -y --name $ete3_env_name python=3.6 # I install python because it is missing
 conda install -n $ete3_env_name -c conda-forge -y ete3=3.0.0;
 
@@ -200,7 +200,7 @@ conda install -n $picard_env_name -c bioconda -y picard=2.18.26
 cd $installation_dir
 if [ -d external_software ] 
 then 
-	rm -r external_software
+	rm -rf external_software
 fi
 mkdir external_software
 cd external_software
