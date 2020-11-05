@@ -45,9 +45,15 @@ cd $repeatMasker_env_path/share/RepeatMasker;
 echo "configuring RepeatModeler"
 expected_file=./Libraries/RepeatMasker.lib
 t="0"
-while [ ! -f $expected_file ]
+while [ ! -s $expected_file ]
 do
-	t=$[$t+10]
+
+	# remove files
+	rm ./Libraries/RepeatMasker.lib || echo 'already removed' 
+	rm ./Libraries/RepeatMaskerLib.embl || echo 'already removed' 
+
+	# get the libraries
+	t=$[$t+20]
 	timeout $t ./configure || echo 'exiting the generation on RepeatMasker.lib';
 
 done
