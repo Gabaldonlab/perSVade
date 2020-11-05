@@ -91,6 +91,9 @@ if fun.file_is_empty(repeat_masker_db): raise ValueError("%s is missing. Check t
 # test that the environment can be recreated. This is only important from the developer's package
 #test_fun.test_conda_env_generation(testing_outputs_dir, replace=True)
 
+# test repeat masker obtention
+test_fun.test_get_repeat_maskerDF(ref_genome, replace=False) # this will not work for repeat masker
+
 # test read simulation by simulating reads from the mutated genome
 r1_mutGenome, r2_mutGenome = test_fun.test_read_simulation_and_get_reads(mut_genome)
 
@@ -131,9 +134,6 @@ real_bedpe_breakpoints = test_fun.test_realSVgeneration(Cglabrata_subsampled_rea
 #test_fun.test_parameter_optimisation_perSVade_real(Cglabrata_subsampled_reads_dir, Cglabrata_subsampled_perSVade_outdir, Cglabrata_repeats, Cglabrata_genome, real_bedpe_breakpoints, replace=False)
 
 ### TESTING THINGS THAT ARE DISPENSABLE ###
-
-# test repeat masker obtention
-test_fun.test_get_repeat_maskerDF(ref_genome, replace=False) # this will not work for repeat masker
 
 # test the repeat masker obtention for a long chromosome 1, 2 and 6
 test_fun.test_get_repeat_maskerDF(Calbicans_chr1_2_6, replace=False)
