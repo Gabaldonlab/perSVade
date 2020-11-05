@@ -12,19 +12,6 @@ conda_dir=$(echo $env_path | sed "s/\/envs\/$env_name//g")
 # define the path to the installation dir
 installation_dir=$(readlink -f $0 | sed 's/\/setup_environment.sh//g')
 
-# move ninja to the conda env
-echo 'NOTE: Befeore setting up the installation of further dependencies, you have to make sure that the folder containing the binary of Ninja (https://github.com/TravisWheelerLab/NINJA, preferably release 0.95-cluster_only) can be found in your $PATH. This is an example of how you can do this:'
-echo '---'
-echo 'cd <path_to_install_Ninja>'
-echo 'wget https://github.com/TravisWheelerLab/NINJA/archive/0.95-cluster_only.tar.gz'
-echo 'tar -xvf 0.95-cluster_only.tar.gz'
-echo 'rm 0.95-cluster_only.tar.gz'
-echo 'cd NINJA-0.95-cluster_only/NINJA'
-echo 'make'
-echo 'export PATH=$PATH:<path_to_install_Ninja>/NINJA-0.95-cluster_only/NINJA'
-echo '---'
-echo 'You should check that a <path_to_install_Ninja>/NINJA-0.95-cluster_only/NINJA/Ninja binary was created. This is enough for running perSVade'
-
 ######### CREATE THE REPEATMASKER SUBENVIRONMENT #########
 
 # create a subenvitonment to run repeat modeller. This needs a specific GLIBC version
@@ -48,7 +35,7 @@ t="0"
 while [ ! -s $expected_file ]
 do
 
-	# remove files
+	# remove files so that in a next run the repeats library will be re-generated
 	rm ./Libraries/RepeatMasker.lib || echo 'already removed' 
 	rm ./Libraries/RepeatMaskerLib.embl || echo 'already removed' 
 
@@ -93,16 +80,17 @@ function test_gxx_installation {
 	}
 
 # first try to run as if it was already installed
-test_Ninja_installation $(which Ninja) "previously_installed"  || {
+previously_installed_Ninja=$(which Ninja) || echo 'Ninja was nor previously installed'
+test_Ninja_installation $previously_installed_Ninja "previously_installed"  || {
 
 	echo "Ninja was not previously installed. Installing through several options"
 
 	# install g++ with conda, if not installed
-	test_gxx_installation || conda install -y gxx_linux-64
+	test_gxx_installation || conda install -y gxx_linux-64 # this will install gcc and gxx
 	test_gxx_installation || ln -s $repeatMasker_env_path/bin/x86_64-conda_cos6-linux-gnu-g++ $repeatMasker_env_path/bin/g++
 	test_gxx_installation || chmod 755 $repeatMasker_env_path/bin/g++
 
-	# thes that installation worked
+	# test that installation worked
 	test_gxx_installation && echo 'g++ is properly installed'
 
 	# try to install NINJA 0.95
@@ -157,6 +145,9 @@ echo 'NINJA is installed successfully in your system'
 
 ###### INSTALL OTHER SOFTWARE ######
 
+# activate the normal env
+source $conda_dir/etc/profile.d/conda.sh && conda activate $env_name
+
 # create a subenvironment that has bctools=1.10.2
 bcftools_env_name="$env_name"_bcftools_1.10.2_env
 echo "creating conda env $bcftools_env_name"
@@ -165,7 +156,10 @@ conda create -y --name $bcftools_env_name -c bioconda bcftools=1.10.2;
 # create a submenvironment that has ete3=3.0.0
 ete3_env_name="$env_name"_ete3_3.0.0_env
 echo "creating conda env $ete3_env_name"
-conda create -y --name $ete3_env_name -c conda-forge ete3=3.0.0;
+conda config --add channels conda-forge
+rm -r $conda_dir/envs/$ete3_env_name || echo 'ete3 was not created'
+conda create -y --name $ete3_env_name python=3.6 # I install python because it is missing
+conda install -n $ete3_env_name -c conda-forge -y ete3=3.0.0;
 
 # fix the ete3 script
 ete3_script="$conda_envs_dir"/"$ete3_env_name"/lib/python3.6/site-packages/ete3/ncbi_taxonomy/ncbiquery.py
