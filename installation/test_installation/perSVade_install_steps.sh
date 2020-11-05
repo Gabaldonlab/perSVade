@@ -15,6 +15,10 @@ bash Anaconda3-2020.07-Linux-x86_64.sh
 # the tested version is 
 # wget https://repo.anaconda.com/archive/Anaconda3-2019.03-Linux-x86_64.sh
 
+# you may have to install the following commands to compile binaries: 
+
+#conda install gcc_linux-64
+#conda install gxx_linux-64
 
 #################### PERSVADE ENV ####################
 
@@ -58,6 +62,7 @@ conda install -c bioconda -y trimmomatic=0.38 &&
 conda install -c bioconda -y parallel-fastq-dump=0.6.3 &&
 conda install -c bioconda -y fastqc=0.11.9 &&
 
+
 ############################################################
 
 conda env export --no-builds --from-history -n perSVade_env --file perSVade_env.yml
@@ -77,6 +82,9 @@ conda env export --no-builds --from-history -n perSVade_env --file perSVade_env.
 #conda install -c bioconda -y bioconductor-structuralvariantannotation=1.4.0;
 
 ########################################
+
+# conda install -y gcc_linux-64 &&
+conda install -y gxx_linux-64
 
 #conda install -c bioconda -y repeatmasker=4.0.9_p2 && # downgrades: gmp 6.2.0-he1b5a44_2 --> 6.1.2-hf484d3e_1000
 #conda install -c bioconda -y repeatmodeler=2.0.1 &&
@@ -205,6 +213,26 @@ conda env export --no-builds --from-history -n perSVade_env --file perSVade_env.
 
 # conda config --add channels r &&
 
+
+
+# Ninja installation 
+git clone https://github.com/TravisWheelerLab/NINJA
+cd NINJA
+make build
+
+wget https://github.com/TravisWheelerLab/NINJA/archive/0.95-cluster_only.tar.gz
+tar -xvf 0.95-cluster_only.tar.gz; rm 0.95-cluster_only.tar.gz; cd NINJA-0.95-cluster_only/NINJA
+make all
+
+wget https://github.com/TravisWheelerLab/NINJA/archive/0.97-cluster_only.tar.gz
+tar -xvf 0.97-cluster_only.tar.gz; rm 0.97-cluster_only.tar.gz; cd NINJA-0.97-cluster_only/NINJA
+make all
+
+ln -s ~/anaconda3/bin/x86_64-conda-cos6-linux-gnu-gcc ~/anaconda3/bin/gcc
+ln -s ~/anaconda3/bin/x86_64-conda_cos6-linux-gnu-g++ ~/anaconda3/bin/g++
+
+chmod 755 ~/anaconda3/bin/gcc
+chmod 755 ~/anaconda3/bin/g++
 
 
 

@@ -15,4 +15,7 @@ installation/test_installation/__pycache__
 installation/test_installation/testing_outputs
 installation/test_installation/taxdump.tar.gz
 installation/test_installation/__pycache__
+installation/Ninja_data/NINJA-0.95-cluster_only
+installation/Ninja_data/NINJA_repo_05112020
+installation/Ninja_data/ninja_test.out
 scripts/__pycache__
