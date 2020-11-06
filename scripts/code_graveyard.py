@@ -6941,3 +6941,485 @@ def get_list_clusters_overlapping_df_CNV(df_CNV, pct_overlap, tol_bp, threads):
     return list_clusters
 
 
+
+
+def get_list_clusters_overlapping_df_CNV(outdir, df_CNV, pct_overlap, threads):
+
+    """Takes a df_CNV with chromosome, start, and end, where the ID is the index. It returns a list of sets, each set containing IDs of CNVs that overlap by >=pct_overlap and are from the same type.
+
+    It will run bedtools intersect between the df_CNV against itself."""
+
+    print_if_verbose("getting list_clusters_overlapping_df_CNV")
+
+    # checks
+    if len(set(df_CNV.SVTYPE).difference({"DUP", "DEL"}))>0: raise ValueError("SVTYPE is not properly formated")
+    if len(set(df_CNV.type_CNVcall).difference({"gridssClove", "coverage"}))>0: raise ValueError("type_CNVcall is not properly formated")
+    if len(set(df_CNV.typeBPs).difference({"RealBPs", "wholeChrom", "oneRealBP", "FilteredOutBPs"}))>0: raise ValueError("typeBPs is not properly formated")
+
+    ####### GET A DF WITH THE INTERSECTION #######
+
+    # add the combination of chromosome and SVtype. This will be used in the bedtools intersect to get the correct IDs
+    df_CNV["chromosome_SVTYPE"] = df_CNV.chromosome + "_" + df_CNV.SVTYPE
+
+    # add the ID and the numeric ID (the numeric ID takes less space in the bedtools intersect)
+    df_CNV["ID"] = df_CNV.index
+    df_CNV["numericID"] = list(range(0, len(df_CNV)))
+
+    # define a directory where the bedtools will be run
+    outdir_bedtools = "%s/running_get_list_clusters_overlapping_df_CNV"%outdir
+    make_folder(outdir_bedtools)
+
+    # define the input of a function that will take data from one chromosome and 
+    inputs_fn = [(df_CNV, chromosome, outdir_bedtools) for chrom in set(df_CNV.chromosome_SVTYPE)] 
+
+
+
+    # get 2 bed files, to run df_CNV against itself
+    bedA = "%s/df_CNV_A.bed"%outdir_bedtools
+    bedB = "%s/df_CNV_B.bed"%outdir_bedtools
+    intersection_bed = "%s/intersection.bed"%outdir_bedtools
+
+    df_CNV[["chromosome_SVTYPE", "start", "end", "ID"]].to_csv(bedA, sep="\t", header=False, index=False)
+    df_CNV[["chromosome_SVTYPE", "start", "end", "ID"]].to_csv(bedB, sep="\t", header=False, index=False)
+
+    df_CNV.pop("ID")
+
+    # run bedtools intersect
+    bedtools_stderr = "%s.generating.stderr"%intersection_bed
+    print_if_verbose("Running bedtools intersect. The stderr is in %s"%bedtools_stderr)
+
+    run_cmd("%s intersect -a %s -b %s -f %.2f -r -wa -wb | cut -f4,8 > %s 2>%s"%(bedtools, bedA, bedB, pct_overlap, intersection_bed, bedtools_stderr))
+
+    # load as df, and keep only those where the IDs are different
+    df_intersection = pd.read_csv(intersection_bed, sep="\t", header=None, names=["IDa", "IDb"])
+    df_intersection = df_intersection[df_intersection.IDa!=df_intersection.IDb]
+
+    # clean
+    delete_folder(outdir_bedtools)
+
+    ##########################################
+
+    # define the ID_to_overlappingIDs from a groupby
+    print_if_verbose("calculating the overlapping IDs")
+    ID_to_overlappingIDs = dict(df_intersection.groupby("IDa").apply(lambda df_a: set(df_a["IDb"])))
+
+    # define the IDs that are not overlapping 
+    nonoverlapping_IDs = set(df_CNV.index).difference(set(ID_to_overlappingIDs))
+    ID_to_overlappingIDs = {**ID_to_overlappingIDs, **dict(zip(nonoverlapping_IDs, [set()]*len(nonoverlapping_IDs)))}
+
+    # initialize clusters list
+    print_if_verbose("getting lists of clusters")
+    list_clusters = get_list_clusters_from_dict(ID_to_overlappingIDs)
+
+    # check
+    all_IDs = set(df_CNV.index)
+    all_IDs_in_cluster = set.union(*list_clusters)
+    if all_IDs!=all_IDs_in_cluster: raise ValueError("all IDs should be in clusters")
+
+    print_if_verbose("list_clusters_overlapping_df_CNV already ran. There are %i clusters"%len(list_clusters))
+  
+    return list_clusters
+
+
+
+def get_coverage_per_window_for_chromosomeDF(chromosome_id, destination_dir, windows_bed, sorted_bam, replace, window_l):
+
+    """Takes a chromosome id, a destination dir where to write files, a windows file (provided by generate_coverage_per_window_file_parallel) and a sorted bam and it generates a dataframe with the coverage stats"""
+
+    # define the output coverage file
+        
+    # generate a randomID
+    randID = id_generator(25)
+
+    # define a file for the coverage
+    windows_bed_chromsome = "%s.%s.%s.bed"%(windows_bed, chromosome_id, randID)
+    egrepping_windows_stderr = "%s.generaing.stderr"%windows_bed_chromsome
+    #print_if_verbose("Running egrep on chromosome. The stderr is in %s"%egrepping_windows_stderr)
+    run_cmd("egrep '%s\t' %s > %s 2>%s"%(chromosome_id, windows_bed, windows_bed_chromsome, egrepping_windows_stderr))
+    remove_file(egrepping_windows_stderr)
+
+    # if there is nothing, return an empty df
+    bamstats_fields = ["#chrom", "start", "end", "length", "mediancov_1", "nocoveragebp_1", "percentcovered_1"]
+    if file_is_empty(windows_bed_chromsome): return pd.DataFrame(columns=bamstats_fields)
+
+    # calculate extra threads
+    extra_threads = multiproc.cpu_count() - 1
+
+    # define a file prefix on which to calculate the coverage
+    mosdepth_outprefix = "%s.mosdepth_output"%windows_bed_chromsome
+
+    # get a df that has all the info
+    df_coverage =  get_mosdepth_coverage_per_windows_output_likeBamStats(mosdepth_outprefix, sorted_bam, windows_bed_chromsome, replace=replace, extra_threads=extra_threads, chromosome_id=chromosome_id)
+
+    remove_file(windows_bed_chromsome)
+
+    return df_coverage[bamstats_fields]
+
+def generate_coverage_per_window_file_parallel(reference_genome, destination_dir, sorted_bam, windows_file="none", replace=False, run_in_parallel=True, delete_bams=True, threads=4):
+
+    """Takes a reference genome and a sorted bam and runs a calculation of coverage per window (with bamstats04_jar) in parallel for sorted_bam, writing results under ddestination_dir. if window_file is provided then it is used. If not, it generates a file with non overlappping windows of length window_l"""
+
+    # in the case that you have provided a window file
+    if windows_file=="none":
+
+        make_folder(destination_dir)
+
+        # first generate the windows file
+        windows_file = "%s.windows%ibp.bed"%(reference_genome, window_l)
+        windows_file_stderr = "%s.generating.stderr"%windows_file
+        print_if_verbose("genearting windows_file. The stderr is in %s"%windows_file_stderr)
+        run_cmd("%s makewindows -g %s.fai -w %i > %s 2>%s"%(bedtools, reference_genome, window_l, windows_file, windows_file_stderr))
+        remove_file(windows_file_stderr)
+
+        # define the file
+        coverage_file = "%s/coverage_windows_%ibp.tab"%(destination_dir, window_l)
+
+        # define the chromosomes
+        all_chromosome_IDs = [seq.id for seq in SeqIO.parse(reference_genome, "fasta")]
+
+    # in the case you have provied a window file
+    elif not file_is_empty(windows_file):
+
+        # rename windows_file so that it is sorted
+        pd.read_csv(windows_file, sep="\t", header=None, names=["chromosome", "start", "end"]).sort_values(by=["chromosome", "start", "end"]).to_csv(windows_file, header=False, index=False, sep="\t")
+
+        # create the coverage file
+        coverage_file = "%s.coverage_provided_windows.tab"%windows_file
+
+        # define the destination dir personalized for the given windows file
+        destination_dir = "%s.coverage_measurement_destination"%windows_file; make_folder(destination_dir)
+
+        # define the chromosomes
+        all_chromosome_IDs = sorted(set(pd.read_csv(windows_file, sep="\t", header=None, names=["chromosome", "start", "end"])["chromosome"]))
+
+        # debug the fact that there is nothing to analyze
+        if len(all_chromosome_IDs)==0: raise ValueError("There are no chromosomes in %s, so that no coverage can be calculated"%windows_file)
+
+    else: raise ValueError("The provided windows_file %s does not exist"%windows_file)
+
+    # generate the coverage file in parallel    
+    if file_is_empty(coverage_file) or replace is True:
+
+        # get the chromosomal dfs
+        inputs_run = [(ID, destination_dir, windows_file, sorted_bam, replace, window_l) for ID in all_chromosome_IDs]
+
+        if run_in_parallel is True:
+        #if False is True: # DEBUG!!! ALWAYS NOT RUN IN PARALLEL # never running in parallel
+            
+            try:
+
+                # initialize the pool class with the available CPUs --> this is syncronous parallelization
+                pool = multiproc.Pool(threads)
+
+                # run in parallel the coverage generation, which returns a list of dataframes, each with one chromosome
+                chromosomal_dfs = pool.starmap(get_coverage_per_window_for_chromosomeDF, inputs_run)
+
+                # close the pool
+                pool.close(); pool.terminate(); pool.join()
+                
+            except KeyboardInterrupt:
+                
+                pool.close(); pool.terminate(); pool.join()
+                raise ValueError("Keyboard Interrupt")
+
+        else: chromosomal_dfs = list(map(lambda x: get_coverage_per_window_for_chromosomeDF(x[0], x[1], x[2], x[3], x[4], x[5]), inputs_run))
+
+        # merge the dfs
+        all_df = pd.DataFrame()
+        for df in chromosomal_dfs: all_df = all_df.append(df, sort=True)
+
+        # remove chromosomal files:
+        for ID in all_chromosome_IDs: remove_file("%s/%s_coverage_windows%ibp.tab"%(destination_dir, ID, window_l))
+
+        # check that it is not empty
+        if len(all_df)==0: raise ValueError("There is no proper coverage calculation for %s on windows %s"%(sorted_bam, windows_file))
+
+        # write
+        coverage_file_tmp = "%s.tmp"%coverage_file
+        all_df.to_csv(coverage_file_tmp, sep="\t", header=True, index=False)
+
+        # at the end remove all the bam files # at some point I commented the lines below and I don't know why
+        if delete_bams is True and run_in_parallel is True:
+            print_if_verbose("removing chromosomal bamfiles")
+
+            for chrom in all_chromosome_IDs: 
+                sorted_bam_chr = "%s.%s.bam"%(sorted_bam, chrom)
+                remove_file(sorted_bam_chr); remove_file("%s.bai"%sorted_bam_chr)
+
+        # rename
+        os.rename(coverage_file_tmp, coverage_file)
+
+    return coverage_file
+
+
+############### NONREDUNDANT DATA ###################
+
+
+def get_list_clusters_for_chromosome_and_SVTYPE(outdir, chromosome_SVTYPE, df_CNV, pct_overlap):
+
+    """
+    This fucntion runs bedtools intersect to get regions that reciprocally intersect by >pct_overlap in chromosome_SVTYPE. It returns a series mapping the ID to overlappingIDs.
+
+    Everything is done on the basis of the numeric ID
+
+    """
+
+    ######## RUN BEDTOOLS INTERSECT #########
+
+    # define the beds
+    bedA = "%s/%s_regionsA.bed"%(outdir, chromosome_SVTYPE)
+    bedB = "%s/%s_regionsB.bed"%(outdir, chromosome_SVTYPE)
+    intersection_bed = "%s/%s_intersection.bed"%(outdir, chromosome_SVTYPE)
+
+    # get the chromosomal df
+    df_c = df_CNV[df_CNV.chromosome_SVTYPE==chromosome_SVTYPE]
+    if len(df_c)==0: raise ValueError("this can't be 0")
+
+    # get the sorted df
+    df_c = df_c[["chromosome_SVTYPE", "start", "end", "numericID"]].sort_values(by="start")
+
+    # write the same df twice
+    df_c.to_csv(bedA, sep="\t", header=False, index=False)
+    df_c.to_csv(bedB, sep="\t", header=False, index=False)
+
+    # run bedtools intersect
+    bedtools_stderr = "%s.generating.stderr"%intersection_bed
+    print_if_verbose("Running bedtools intersect. The stderr is in %s"%bedtools_stderr)
+
+    run_cmd("%s intersect -a %s -b %s -f %.2f -r -wa -wb -sorted | cut -f4,8 > %s 2>%s"%(bedtools, bedA, bedB, pct_overlap, intersection_bed, bedtools_stderr))
+
+    # clean files
+    for f in [bedA, bedB, bedtools_stderr]: remove_file(f)
+
+    # load as df, and keep only those where the IDs are different
+    df_intersection = pd.read_csv(intersection_bed, sep="\t", header=None, names=["IDa", "IDb"])
+    df_intersection = df_intersection[df_intersection.IDa!=df_intersection.IDb]
+
+    #########################################
+
+    # define the ID_to_overlappingIDs from a groupby
+    ID_to_overlappingIDs = dict(df_intersection.groupby("IDa").apply(lambda df_a: set(df_a["IDb"])))
+
+    # define the IDs that are not overlapping 
+    nonoverlapping_IDs = set(df_c.numericID).difference(set(ID_to_overlappingIDs))
+    ID_to_overlappingIDs = {**ID_to_overlappingIDs, **dict(zip(nonoverlapping_IDs, [set()]*len(nonoverlapping_IDs)))}
+
+    # get the list of clusters
+    list_clusters = get_list_clusters_from_dict(ID_to_overlappingIDs)
+
+    # check that IDs are in a cluster
+    all_IDs = set(df_c.numericID)
+    all_IDs_in_cluster = set.union(*list_clusters)
+    if all_IDs!=all_IDs_in_cluster: raise ValueError("all IDs should be in clusters")
+
+    # clean the intersection bed
+    remove_file(intersection_bed)
+
+    del df_intersection
+
+    return list_clusters
+
+def get_list_clusters_overlapping_df_CNV(outdir, df_CNV, pct_overlap, threads):
+
+    """Takes a df_CNV with chromosome, start, and end, where the ID is the index. It returns a list of sets, each set containing IDs of CNVs that overlap by >=pct_overlap and are from the same type.
+
+    It will run bedtools intersect between the df_CNV against itself.
+
+    The returned list of clusters are based on a numeric ID"""
+
+    print_if_verbose("getting list_clusters_overlapping_df_CNV")
+
+    # checks
+    if len(set(df_CNV.SVTYPE).difference({"DUP", "DEL"}))>0: raise ValueError("SVTYPE is not properly formated")
+    if len(set(df_CNV.type_CNVcall).difference({"gridssClove", "coverage"}))>0: raise ValueError("type_CNVcall is not properly formated")
+    if len(set(df_CNV.typeBPs).difference({"RealBPs", "wholeChrom", "oneRealBP", "FilteredOutBPs"}))>0: raise ValueError("typeBPs is not properly formated")
+
+    # add the combination of chromosome and SVtype. This will be used in the bedtools intersect to get the correct IDs
+    df_CNV["chromosome_SVTYPE"] = df_CNV.chromosome + "_" + df_CNV.SVTYPE
+
+    # define a directory where the bedtools will be run
+    outdir_bedtools = "%s/running_get_list_clusters_overlapping_df_CNV"%outdir
+    delete_folder(outdir_bedtools); make_folder(outdir_bedtools)
+
+    # go through each chromosome and create the list of clusters
+    list_clusters = []
+    for chrom_SVTYPE in set(df_CNV.chromosome_SVTYPE): list_clusters += get_list_clusters_for_chromosome_and_SVTYPE(outdir_bedtools, chrom_SVTYPE, df_CNV, pct_overlap)
+
+    print_if_verbose("list_clusters_overlapping_df_CNV already ran. There are %i clusters and %i regions"%(len(list_clusters), len(df_CNV)))
+    
+    delete_folder(outdir_bedtools)
+
+    return list_clusters
+
+def get_bestID_from_df_CNV_cluster(clustered_nuericIDs, df_CNV):
+
+    """This function takes a df_CNV and the clusteredIDs. It returns the best clusterID"""
+
+    # get the df with the lcuster IDs
+    df = df_CNV.loc[clustered_nuericIDs].sort_values(by=["type_CNVcall_int", "typeBPs_int", "QUAL", "AF", "length"], ascending=False)
+
+    return df.ID.iloc[0]
+
+def get_nonRedundant_CNVcalls_coverage(outdir, df_CNV, df_vcf_forCNV, threads, pct_overlap=0.8):
+
+    """Gets a df_CNV with no redudnant calls (those that overlap by more than 80% with other rows in df_CNV or df_vcf_forCNV)"""
+
+    if len(df_CNV)==0: return df_CNV
+
+    print_if_verbose("getting non-redundant CNV calls")
+
+    # get the index
+    initial_index = set(df_CNV.index)
+    if len(initial_index)!=len(df_CNV): raise ValueError("index should be unique")
+
+    # get the initial fields
+    initial_fields = list(df_CNV.columns)
+
+    # keep
+    df_CNV = cp.deepcopy(df_CNV)
+    df_vcf_forCNV = cp.deepcopy(df_vcf_forCNV)
+
+    # add the quality and AF, which are useful for the sorting of redundant variants
+    df_CNV["QUAL"] = df_CNV.QUAL_mean
+    df_CNV["AF"] = df_CNV.real_AF_min
+    df_vcf_forCNV["QUAL"] = 1000000000
+    df_vcf_forCNV["AF"] = 1.0
+
+    # define all called SVs
+    fields = ["ID", "chromosome", "start", "end", "SVTYPE", "type_CNVcall", "typeBPs", "QUAL", "AF"]
+    all_df_CNV = df_CNV[fields].append(df_vcf_forCNV[fields])
+
+    # add the ID and the numeric ID (the numeric ID takes less space in the bedtools intersect). This will be the index
+    all_df_CNV["numericID"] = list(range(0, len(all_df_CNV)))
+    all_df_CNV = all_df_CNV.set_index("numericID", drop=False)
+
+    # make sure that the ID is unique
+    check_that_df_index_is_unique(all_df_CNV)
+
+    # define the clusters of CNVs that are overlapping by >=80% of their extension
+    list_clusters = get_list_clusters_overlapping_df_CNV(outdir, all_df_CNV, pct_overlap, threads)
+
+    # add fields for sorting of redundant variants according to their type and the quality mesurements
+    type_CNVcall_to_int = {"gridssClove":1, "coverage":0}
+    all_df_CNV["type_CNVcall_int"] = all_df_CNV.type_CNVcall.apply(lambda x: type_CNVcall_to_int[x])
+
+    typeBPs_to_int = {"RealBPs":3, "wholeChrom":2, "oneRealBP":1, "FilteredOutBPs":0}
+    all_df_CNV["typeBPs_int"] = all_df_CNV.typeBPs.apply(lambda x: typeBPs_to_int[x])
+
+    all_df_CNV["length"] = all_df_CNV.end - all_df_CNV.start
+
+    # get the best IDs from each cluster
+    best_NR_IDs = set(map( (lambda x: get_bestID_from_df_CNV_cluster(x, all_df_CNV) ), list_clusters))
+
+    # get the df with these IDs
+    df_CNV_NR = df_CNV[df_CNV.ID.isin(best_NR_IDs)]
+    
+    # at the end set the quality to a '.'
+    df_CNV_NR["QUAL"] = "."
+
+    return df_CNV_NR[initial_fields]
+
+
+def get_list_clusters_for_chromosome_and_SVTYPE(outdir, chromosome_SVTYPE, df_CNV, pct_overlap):
+
+    """
+    This fucntion runs bedtools intersect to get regions that reciprocally intersect by >pct_overlap in chromosome_SVTYPE. It returns a series mapping the ID to overlappingIDs.
+
+    Everything is done on the basis of the numeric ID
+
+    """
+
+    ######## RUN BEDTOOLS INTERSECT #########
+
+    # define the beds
+    bedA = "%s/%s_regionsA.bed"%(outdir, chromosome_SVTYPE)
+    bedB = "%s/%s_regionsB.bed"%(outdir, chromosome_SVTYPE)
+    intersection_bed = "%s/%s_intersection.bed"%(outdir, chromosome_SVTYPE)
+
+    # get the chromosomal df
+    df_c = df_CNV[df_CNV.chromosome_SVTYPE==chromosome_SVTYPE]
+    if len(df_c)==0: raise ValueError("this can't be 0")
+
+    # get the sorted df
+    df_c = df_c[["chromosome_SVTYPE", "start", "end", "numericID"]].sort_values(by="start")
+
+    # write the same df twice
+    df_c.to_csv(bedA, sep="\t", header=False, index=False)
+    df_c.to_csv(bedB, sep="\t", header=False, index=False)
+
+    # run bedtools intersect
+    bedtools_stderr = "%s.generating.stderr"%intersection_bed
+    print_if_verbose("Running bedtools intersect. The stderr is in %s"%bedtools_stderr)
+
+    run_cmd("%s intersect -a %s -b %s -f %.2f -r -wa -wb -sorted | cut -f4,8 > %s 2>%s"%(bedtools, bedA, bedB, pct_overlap, intersection_bed, bedtools_stderr))
+
+
+    kjdhjkha
+
+    # clean files
+    for f in [bedA, bedB, bedtools_stderr]: remove_file(f)
+
+    # load as df, and keep only those where the IDs are different
+    df_intersection = pd.read_csv(intersection_bed, sep="\t", header=None, names=["IDa", "IDb"])
+    df_intersection = df_intersection[df_intersection.IDa!=df_intersection.IDb]
+
+    #########################################
+
+    # define the ID_to_overlappingIDs from a groupby
+    ID_to_overlappingIDs = dict(df_intersection.groupby("IDa").apply(lambda df_a: set(df_a["IDb"])))
+
+    # define the IDs that are not overlapping 
+    nonoverlapping_IDs = set(df_c.numericID).difference(set(ID_to_overlappingIDs))
+    ID_to_overlappingIDs = {**ID_to_overlappingIDs, **dict(zip(nonoverlapping_IDs, [set()]*len(nonoverlapping_IDs)))}
+
+    # get the list of clusters
+    list_clusters = get_list_clusters_from_dict(ID_to_overlappingIDs)
+
+    # check that IDs are in a cluster
+    all_IDs = set(df_c.numericID)
+    all_IDs_in_cluster = set.union(*list_clusters)
+    if all_IDs!=all_IDs_in_cluster: raise ValueError("all IDs should be in clusters")
+
+    kjadhdjkhakadh
+
+    # clean the intersection bed
+    remove_file(intersection_bed)
+
+    del df_intersection
+
+    return list_clusters
+
+def get_list_clusters_overlapping_df_CNV(outdir, df_CNV, pct_overlap, threads):
+
+    """Takes a df_CNV with chromosome, start, and end, where the ID is the index. It returns a list of sets, each set containing IDs of CNVs that overlap by >=pct_overlap and are from the same type.
+
+    It will run bedtools intersect between the df_CNV against itself.
+
+    The returned list of clusters are based on a numeric ID"""
+
+    print_if_verbose("getting list_clusters_overlapping_df_CNV")
+
+    # checks
+    if len(set(df_CNV.SVTYPE).difference({"DUP", "DEL"}))>0: raise ValueError("SVTYPE is not properly formated")
+    if len(set(df_CNV.type_CNVcall).difference({"gridssClove", "coverage"}))>0: raise ValueError("type_CNVcall is not properly formated")
+    if len(set(df_CNV.typeBPs).difference({"RealBPs", "wholeChrom", "oneRealBP", "FilteredOutBPs"}))>0: raise ValueError("typeBPs is not properly formated")
+
+    # add the combination of chromosome and SVtype. This will be used in the bedtools intersect to get the correct IDs
+    df_CNV["chromosome_SVTYPE"] = df_CNV.chromosome + "_" + df_CNV.SVTYPE
+
+    # define a directory where the bedtools will be run
+    outdir_bedtools = "%s/running_get_list_clusters_overlapping_df_CNV"%outdir
+    delete_folder(outdir_bedtools); make_folder(outdir_bedtools)
+
+    # go through each chromosome and create the list of clusters
+    list_clusters = []
+    for chrom_SVTYPE in set(df_CNV.chromosome_SVTYPE): list_clusters += get_list_clusters_for_chromosome_and_SVTYPE(outdir_bedtools, chrom_SVTYPE, df_CNV, pct_overlap)
+
+    print_if_verbose("list_clusters_overlapping_df_CNV already ran. There are %i clusters and %i regions"%(len(list_clusters), len(df_CNV)))
+
+    kljhadjkhdakjhda
+    
+    delete_folder(outdir_bedtools)
+
+    return list_clusters
+

@@ -281,7 +281,7 @@ for taxID, spName, ploidy, mitochondrial_chromosome, max_coverage_sra_reads, min
         else: close_shortReads_table = "auto"
 
         # get the reads from SRA. 3 samples, 3 runs per sample. Process with the. --verbose
-        cmd = "%s --ref %s --threads %i -o %s --close_shortReads_table %s --target_taxID %s --n_close_samples 3 --nruns_per_sample 3 -f1 skip -f2 skip --mitochondrial_chromosome %s --testAccuracy --skip_SVcalling --verbose --skip_cleaning_simulations_files_and_parameters --StopAfter_testAccuracy_perSVadeRunning --max_coverage_sra_reads %i --gff %s --nsimulations 2 --min_CNVsize_betweenBPs %i --replace_SV_CNVcalling_and_optimisation"%(perSVade_py, genome, threads, outdir_perSVade, close_shortReads_table, taxID, mitochondrial_chromosome, max_coverage_sra_reads, gff, min_CNVsize_betweenBPs)
+        cmd = "%s --ref %s --threads %i -o %s --close_shortReads_table %s --target_taxID %s --n_close_samples 3 --nruns_per_sample 3 -f1 skip -f2 skip --mitochondrial_chromosome %s --testAccuracy --skip_SVcalling --verbose --skip_cleaning_simulations_files_and_parameters --StopAfter_testAccuracy_perSVadeRunning --max_coverage_sra_reads %i --gff %s --nsimulations 2 --min_CNVsize_betweenBPs %i"%(perSVade_py, genome, threads, outdir_perSVade, close_shortReads_table, taxID, mitochondrial_chromosome, max_coverage_sra_reads, gff, min_CNVsize_betweenBPs)
         # --StopAfter_testAccuracy_perSVadeRunning --slurm_constraint, --StopAfter_obtentionOFcloseSVs --gff %s. Need to add the ploidy (-p ploidy) min_CNV_size # replace_SV_CNVcalling_and_optimisation
 
     elif running_type=="goldenSet":
