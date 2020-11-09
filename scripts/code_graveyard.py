@@ -7423,3 +7423,576 @@ def get_list_clusters_overlapping_df_CNV(outdir, df_CNV, pct_overlap, threads):
 
     return list_clusters
 
+
+
+def get_bed_intersecting_numericIDs(df_CNV, outdir, threads, pct_overlap, replace):
+
+    """This function takes a df_CNV and writes a bed under outdir with the intersecting numeric IDs"""
+
+    print_if_verbose("running get_bed_intersecting_numericIDs")
+
+    # checks
+    if len(set(df_CNV.SVTYPE).difference({"DUP", "DEL"}))>0: raise ValueError("SVTYPE is not properly formated")
+    if len(set(df_CNV.type_CNVcall).difference({"gridssClove", "coverage"}))>0: raise ValueError("type_CNVcall is not properly formated")
+    if len(set(df_CNV.typeBPs).difference({"RealBPs", "wholeChrom", "oneRealBP", "FilteredOutBPs"}))>0: raise ValueError("typeBPs is not properly formated")
+
+    # define the final file
+    bed_intersecting_numericIDs = "%s/intersecting_numericIDs.bed"%outdir
+
+    if file_is_empty(bed_intersecting_numericIDs) or replace is True:
+
+        # add the combination of chromosome and SVtype. This will be used in the bedtools intersect to get the correct IDs
+        df_CNV["chromosome_SVTYPE"] = df_CNV.chromosome + "_" + df_CNV.SVTYPE
+
+        # define a directory where the bedtools will be run
+        outdir_bedtools = "%s/running_get_list_clusters_overlapping_df_CNV"%outdir
+        delete_folder(outdir_bedtools); make_folder(outdir_bedtools)
+
+        # get all beds on the intersection
+        inputs_fn = [(outdir_bedtools, chromosome_SVTYPE, df_CNV, pct_overlap) for chromosome_SVTYPE in set(df_CNV.chromosome_SVTYPE)]
+
+        # generate the files 
+        with multiproc.Pool(threads) as pool:
+            pool.starmap(get_intersecting_bed_chromosome_SVTYPE, inputs_fn) 
+                
+            pool.close()
+            pool.terminate()
+
+        # cat all the files in one
+        bed_intersecting_numericIDs_tmp = "%s.tmp"%bed_intersecting_numericIDs
+        bed_intersecting_numericIDs_stderr = "%s.generating.stderr"%bed_intersecting_numericIDs 
+
+        print_if_verbose("catting all files. The stderr is in %s"%bed_intersecting_numericIDs_stderr)
+        run_cmd("cat %s/* > %s 2>%s"%(outdir_bedtools, bed_intersecting_numericIDs_tmp, bed_intersecting_numericIDs_stderr))
+
+        # clean
+        remove_file(bed_intersecting_numericIDs_stderr)
+        delete_folder(outdir_bedtools)
+
+        # rename
+        os.rename(bed_intersecting_numericIDs_tmp, bed_intersecting_numericIDs)
+
+    return bed_intersecting_numericIDs
+
+
+
+
+def get_intersecting_bed_chromosome_SVTYPE(outdir, chromosome_SVTYPE, df_CNV, pct_overlap):
+
+    """
+    This fucntion runs bedtools intersect to get regions that reciprocally intersect by >pct_overlap in chromosome_SVTYPE. It returns the file where this intersection was written
+
+    Everything is done on the basis of the numeric ID.
+
+    """
+
+    # define the beds
+    bedA = "%s/%s_regionsA.bed"%(outdir, chromosome_SVTYPE)
+    bedB = "%s/%s_regionsB.bed"%(outdir, chromosome_SVTYPE)
+    intersection_bed = "%s/%s_intersection.bed"%(outdir, chromosome_SVTYPE)
+
+    # get the chromosomal df
+    df_c = df_CNV[df_CNV.chromosome_SVTYPE==chromosome_SVTYPE]
+    if len(df_c)==0: raise ValueError("this can't be 0")
+
+    # get the sorted df
+    df_c = df_c[["chromosome_SVTYPE", "start", "end", "numericID"]].sort_values(by="start")
+
+    # write the same df twice
+    df_c.to_csv(bedA, sep="\t", header=False, index=False)
+    df_c.to_csv(bedB, sep="\t", header=False, index=False)
+
+    # run bedtools intersect
+    bedtools_stderr = "%s.generating.stderr"%intersection_bed
+    print_if_verbose("Running bedtools intersect. The stderr is in %s"%bedtools_stderr)
+
+    run_cmd("%s intersect -a %s -b %s -f %.2f -r -wa -wb -sorted | cut -f4,8 > %s 2>%s"%(bedtools, bedA, bedB, pct_overlap, intersection_bed, bedtools_stderr))
+
+    # clean files
+    for f in [bedA, bedB, bedtools_stderr]: remove_file(f)
+
+    return intersection_bed
+
+dlajhdjkah
+
+# get a file that has the 
+
+# get a bed with the intersecting numericIDs
+bed_intersecting_numericIDs = get_bed_intersecting_numericIDs(all_df_CNV, outdir, threads, pct_overlap, replace)
+
+
+adlhjalhjdahkdahk
+
+# define  a series that will have the number of overlapping features for each numericID
+bed_number_overlaps = "%s.number_overlapping_regions.tab"%bed_intersecting_numericIDs
+bed_number_overlaps_stderr = "%s.stderr"%bed_number_overlaps
+
+run_cmd("cut -f1 %s | uniq -c | sed 's/^[ \t]*//g'> %s 2>%s"%(bed_intersecting_numericIDs, bed_number_overlaps, bed_number_overlaps_stderr))
+remove_file(bed_number_overlaps_stderr)
+
+n_overlaps_series = pd.read_csv(bed_number_overlaps, sep=" ", header=None, names=["n_overlaps", "numericID"]).set_index("numericID")["n_overlaps"]
+
+# add to the df
+all_df_CNV["n_overlaps"] = n_overlaps_series[all_df_CNV.index]
+if len(all_df_CNV)!=initial_len_all_df_CNV: raise ValueError("There was an error with the number of overlaps")
+
+ljhadlhadlhdakhadkjhkajdh
+
+print(n_overlaps_series)
+
+adkjhdkjha
+
+
+def get_last_position_from_pipeSepparatedString(x):
+
+    """Takes the last position of a pipe-sepparated string"""
+
+    return x.split("|")[-1]
+
+def  get_query_df_CNVregions_with_metadata_for_redundance(query_df, df_gridss, chrom_to_len):
+
+    """This function takes a CNV of regions that match the df_gridss and it returns it with several added fields that are necessary to get non-redundant regions by the function get_nonRedundant_CNVcalls_coverage """
+
+    if len(query_df)==0: return query_df
+
+    print_if_verbose("adding metadata to query_df")
+
+    # keep
+    df_gridss = cp.deepcopy(df_gridss)
+
+    # define fields that are generally applicable
+    query_df["type_CNVcall"] = "coverage"
+    query_df["typeBPs"] = query_df.ID.apply(get_last_position_from_pipeSepparatedString)
+    query_df["SVTYPE"] = "DUP"
+
+ 
+    ######### REFORMAT df_gridss #########
+
+    # add the 0-based-pos
+    df_gridss["POS_0based"] = df_gridss.POS - 1
+
+    # keep important fields
+    df_gridss = df_gridss[["#CHROM", "POS_0based", "QUAL", "real_AF"]]
+    df_gridss["bend_POS"] = df_gridss["#CHROM"] + "_" + df_gridss.POS_0based.apply(str)
+    df_gridss = df_gridss.set_index("bend_POS")
+    
+    # define the maxQUAL
+    maxQUAL = max(df_gridss.QUAL)+1
+
+    # add the first and last positions
+    for chrom, length in chrom_to_len.items():
+
+        # add the start
+        df_gridss = df_gridss.append(pd.DataFrame({"%s_0"%chrom: {"QUAL":maxQUAL, "real_AF":1.0, "#CHROM":chrom, "POS_0based":0}}).transpose())
+
+        # add the end
+        df_gridss = df_gridss.append(pd.DataFrame({"%s_%i"%(chrom, length): {"QUAL":maxQUAL, "real_AF":1.0, "#CHROM":chrom, "POS_0based":length}}).transpose())
+
+    # sort
+    df_gridss = df_gridss.sort_values(by=["#CHROM", "POS_0based", "QUAL"], ascending=False)
+    df_gridss = df_gridss.drop_duplicates(subset=["#CHROM", "POS_0based"], keep="first")
+
+    check_that_df_index_is_unique(df_gridss)
+
+    ########################################
+
+    # init len
+    initial_query_df_len = len(query_df)
+
+    # add the indicators of each breakend
+    for field in ["start", "end"]:
+
+        # add the position
+        bend_POSitions = np.array(query_df.chromosome + "_" + query_df[field].apply(str))
+
+        # add the metadata
+        query_df["QUAL_%s"%field] = df_gridss.loc[bend_POSitions, "QUAL"].values
+        query_df["real_AF_%s"%field] = df_gridss.loc[bend_POSitions, "real_AF"].values
+
+    # debug
+    if len(query_df)!=initial_query_df_len: raise ValueError("something went wrong with the merging")
+    for f in ["QUAL_start", "QUAL_end", "real_AF_start", "real_AF_end"]: 
+        if any(pd.isna(query_df[f])): raise ValueError("There are NaNs after the merhing")
+
+    # get the important fields
+    query_df["QUAL_mean"] = query_df[["QUAL_start", "QUAL_end"]].apply(np.mean, axis=1)
+    query_df["real_AF_min"] = query_df[["real_AF_start", "real_AF_end"]].apply(min, axis=1)
+
+    return query_df
+
+
+
+# get the query df with metadata to skip the redundant regions
+#query_df = get_query_df_CNVregions_with_metadata_for_redundance(query_df, df_gridss, chrom_to_len)
+
+# skip the redundant regions
+#df_empty = pd.DataFrame(columns=list(query_df.keys()))
+#query_df = get_nonRedundant_CNVcalls_coverage(outdir, query_df, df_empty, threads, replace, pct_overlap=0.9)
+
+
+def run_perSVade_severalSamples(paths_df, cwd, common_args, threads=4, sampleID_to_parentIDs={}, samples_to_run=set(), repeat=False, job_array_mode="job_array", ploidy=1, get_integrated_dfs=True):
+
+ 
+    """
+    This function inputs a paths_df, which contains an index as 0-N rows and columns "reads", "sampleID", "readID"  and runs the perSVade pipeline without repeating steps (unless indicated). pths_df can also be a tab-sepparated file were there are this 3 fields. The trimmed_reads_dir has to be the full path to the .fastq file. The sampleID has to be the unique sample identifier and the readID has to be R1 or R2 for paired-end sequencing. The p
+
+    - cwd is the current working directory, where files will be written
+    - repeat is a boolean that indicates whether to repeat all the steps of this function
+    - threads are the number of cores per task allocated. In mn, you can use 48 cores per node. It has not been tested whether more cores can be used per task
+    - samples_to_run is a set of samples for which we want to run all the pipeline
+    - job_array_mode can be 'job_array' or 'local'. If local each job will be run after the other
+    - sampleID_to_parentIDs is a dictionary that maps each sampleID to the parent sampleIDs (a set), in a way that there will be a col called parentIDs_with_var, which is a string of ||-joined parent IDs where the variant is also found
+    - common_args is a string with all the perSVade args except the reads. The arguments added will be -o, -f1, -f2
+    - max_ncores_queue is the total number of cores that will be assigned to the job.
+    - ploidy is the ploidy with which to run the varcall
+    - variant_calling_fields are the fields in variant_calling_ploidy<N>.tab to keep in the concatenated data
+    """
+
+    print_if_verbose("Running VarCall pipeline...")
+
+    # if it is a path
+    if type(paths_df)==str: paths_df = pd.read_csv(paths_df, sep="\t")
+
+    # create files that are necessary
+    VarCallOutdirs = "%s/VarCallOutdirs"%cwd; make_folder(VarCallOutdirs)
+    
+    # define the samples_to_run
+    if len(samples_to_run)==0: samples_to_run = set(paths_df.sampleID)
+
+    # keep a dict with the paths
+    sampleID_to_dataDict = {}
+
+    # get the info of all the reads and samples
+    all_cmds = []
+
+    for sampleID in samples_to_run:
+
+        # define the df for this sample
+        df = paths_df[paths_df.sampleID==sampleID]
+        df1 = df[df.readID=="R1"]
+        df2 = df[df.readID=="R2"]
+
+        # define the reads of interest and keep
+        reads1 = df1.reads.values[0]
+        reads2 = df2.reads.values[0]
+
+        # create an outdir
+        outdir = "%s/%s_VarCallresults"%(VarCallOutdirs, sampleID); make_folder(outdir)
+
+        # define the files that shoud be not empty in order not to run this code
+        #success_files = ["%s/smallVars_CNV_output/variant_annotation_ploidy%i.tab"%(outdir, ploidy)]
+        success_files = ["%s/perSVade_finished_file.txt"%(outdir)]
+                   
+        # define the cmd          
+        cmd = "%s -f1 %s -f2 %s -o %s --ploidy %i %s"%(perSVade_py, reads1, reads2, outdir, ploidy, common_args)
+
+        # add cmd if necessary
+        if any([file_is_empty(x) for x in success_files]) or repeat is True: all_cmds.append(cmd)
+
+        # keep data
+        #sampleID_to_dataDict[sampleID] = 
+
+    # submit to cluster or return True
+    if len(all_cmds)>0:
+
+        if job_array_mode=="local":
+
+            for Icmd, cmd in enumerate(all_cmds):
+                print_if_verbose("running cmd %i/%i"%(Icmd+1, len(all_cmds)))
+                run_cmd(cmd)
+
+        elif job_array_mode=="job_array":
+
+            print_if_verbose("Submitting %i jobs to cluster ..."%len(all_cmds))
+            jobs_filename = "%s/jobs.run_SNPs_CNV"%cwd
+            open(jobs_filename, "w").write("\n".join(all_cmds))
+
+            generate_jobarray_file(jobs_filename, "perSVade_severalSamples")
+
+        else: raise ValueError("%s is not a valid job_array_mode"%job_array_mode)
+
+        return False
+
+
+    if get_integrated_dfs is True:
+
+        print_if_verbose("Integrating all variants and CNV into one......")
+
+
+    checkthathteintegrationmakessense
+
+    ###### INTEGRATE VARIANT CALLING ######
+
+    # define the file
+    variant_calling_df_file = "%s/integrated_variant_calling_ploidy%i.tab"%(cwd, ploidy)
+
+    if file_is_empty(variant_calling_df_file) or repeat is True:
+        print_if_verbose("generating integrated vars")
+
+        # define the columns related to variant_calling_fields
+        df_example = pd.read_csv("%s/%s_VarCallresults/smallVars_CNV_output/variant_calling_ploidy%i.tab"%(VarCallOutdirs, next(iter(samples_to_run)), ploidy), sep="\t")
+        variant_calling_colNames = ",".join([str(I+1) for I, field in enumerate(df_example.keys()) if field in variant_calling_fields])
+
+        del df_example
+
+        # initialize df
+        df_variant_calling = pd.DataFrame()
+
+
+        for Is, sampleID in enumerate(samples_to_run):
+            print_if_verbose("%i/%i: %s"%(Is+1, len(samples_to_run), sampleID))
+
+            # get the partial file
+            target_varcall_file = "%s/%s_VarCallresults/smallVars_CNV_output/variant_calling_ploidy%i.tab"%(VarCallOutdirs, sampleID, ploidy)
+            partial_varcall_file = "%s/partial_variant_calling.tab"%cwd
+
+            cutting_cols_stderr = "%s.generating.stderr"%partial_varcall_file
+            print_if_verbose("getting the important cols. The stderr is in %s"%cutting_cols_stderr)
+            run_cmd("cut -f%s %s > %s 2>%s"%(variant_calling_colNames, target_varcall_file, partial_varcall_file, cutting_cols_stderr))
+            remove_file(cutting_cols_stderr)
+
+            # load df
+            df = pd.read_csv(partial_varcall_file, sep="\t")[variant_calling_fields]
+            remove_file(partial_varcall_file)
+
+            # append the sample ID 
+            df["sampleID"] = sampleID
+
+            # keep
+            df_variant_calling = df_variant_calling.append(df)
+
+            # print the size
+            print_if_verbose("Size of df_variant_calling: %.2f MB"%(sys.getsizeof(df_variant_calling)/1000000))
+
+        # save
+        variant_calling_df_file_tmp = "%s.tmp"%variant_calling_df_file
+        df_variant_calling.to_csv(variant_calling_df_file_tmp, sep="\t", header=True, index=False)
+        os.rename(variant_calling_df_file_tmp, variant_calling_df_file)
+
+    else: variant_calling_df = pd.read_csv(variant_calling_df_file, sep="\t")
+
+
+    ######################################
+
+
+
+    ###### INTEGRATE VARIANT ANNOTATION ######
+
+    # define the file
+    variant_annotation_df_file = "%s/integrated_variant_annotation_ploidy%i.tab"%(cwd, ploidy)
+
+    if file_is_empty(variant_annotation_df_file) or repeat is True:
+        print_if_verbose("generating integrated variant annotation")
+
+        # initialize df
+        df_variant_annotation = pd.DataFrame()
+
+        # initialize the previous vars
+        already_saved_vars = set()
+
+        for Is, sampleID in enumerate(samples_to_run):
+            print_if_verbose("%i/%i: %s"%(Is+1, len(samples_to_run), sampleID))
+
+            # load df
+            df = pd.read_csv("%s/%s_VarCallresults/smallVars_CNV_output/variant_annotation_ploidy%i.tab"%(VarCallOutdirs, sampleID, ploidy), sep="\t")
+
+            # get only the new vars
+            df_new = df[~df["#Uploaded_variation"].isin(already_saved_vars)]
+
+            # keep 
+            if len(df_new)>0: df_variant_annotation = df_variant_annotation.append(df_new)
+
+            # define the already existing vars
+            already_saved_vars = set(df_variant_annotation["#Uploaded_variation"])
+
+            # print the size
+            print_if_verbose("Size of df_variant_annotation: %.2f MB"%(sys.getsizeof(df_variant_annotation)/1000000))
+
+
+        # sort
+        df_variant_annotation = df_variant_annotation.sort_values(by="#Uploaded_variation").drop_duplicates()
+
+        # add some fields
+        """
+        df_variant_annotation["chromosome"] = df_variant_annotation["#Uploaded_variation"].apply(lambda x: "_".join(x.split("_")[0:-2]))
+        df_variant_annotation["position"] =  df_variant_annotation["#Uploaded_variation"].apply(lambda x: x.split("_")[-2]).apply(int)
+        df_variant_annotation["ref"] = df_variant_annotation["#Uploaded_variation"].apply(lambda x: x.split("_")[-1].split("/")[0])
+        df_variant_annotation["alt"] = df_variant_annotation["#Uploaded_variation"].apply(lambda x: x.split("_")[-1].split("/")[1])
+        """
+
+        # save
+        variant_annotation_df_file_tmp = "%s.tmp"%variant_annotation_df_file
+        df_variant_annotation.to_csv(variant_annotation_df_file_tmp, sep="\t", header=True, index=False)
+        os.rename(variant_annotation_df_file_tmp, variant_annotation_df_file)
+
+
+    ######################################
+
+
+
+
+    return variant_calling_df
+
+    if get_integrated_dfs is True:
+
+        print_if_verbose("Integrating all variants and CNV into one......")
+
+        ###### INTEGRATE VARIANT CALLING ######
+
+        # define the file
+        variant_calling_df_file = "%s/integrated_variant_calling_ploidy%i.tab"%(cwd, ploidy)
+
+        if file_is_empty(variant_calling_df_file) or repeat is True:
+            print_if_verbose("generating integrated vars")
+
+            # define the columns related to variant_calling_fields
+            df_example = pd.read_csv("%s/%s_VarCallresults/smallVars_CNV_output/variant_calling_ploidy%i.tab"%(VarCallOutdirs, next(iter(samples_to_run)), ploidy), sep="\t")
+            variant_calling_colNames = ",".join([str(I+1) for I, field in enumerate(df_example.keys()) if field in variant_calling_fields])
+
+            del df_example
+
+            # initialize df
+            df_variant_calling = pd.DataFrame()
+
+
+            for Is, sampleID in enumerate(samples_to_run):
+                print_if_verbose("%i/%i: %s"%(Is+1, len(samples_to_run), sampleID))
+
+                # get the partial file
+                target_varcall_file = "%s/%s_VarCallresults/smallVars_CNV_output/variant_calling_ploidy%i.tab"%(VarCallOutdirs, sampleID, ploidy)
+                partial_varcall_file = "%s/partial_variant_calling.tab"%cwd
+
+                cutting_cols_stderr = "%s.generating.stderr"%partial_varcall_file
+                print_if_verbose("getting the important cols. The stderr is in %s"%cutting_cols_stderr)
+                run_cmd("cut -f%s %s > %s 2>%s"%(variant_calling_colNames, target_varcall_file, partial_varcall_file, cutting_cols_stderr))
+                remove_file(cutting_cols_stderr)
+
+                # load df
+                df = pd.read_csv(partial_varcall_file, sep="\t")[variant_calling_fields]
+                remove_file(partial_varcall_file)
+
+                # append the sample ID 
+                df["sampleID"] = sampleID
+
+                # keep
+                df_variant_calling = df_variant_calling.append(df)
+
+                # print the size
+                print_if_verbose("Size of df_variant_calling: %.2f MB"%(sys.getsizeof(df_variant_calling)/1000000))
+
+            # save
+            variant_calling_df_file_tmp = "%s.tmp"%variant_calling_df_file
+            df_variant_calling.to_csv(variant_calling_df_file_tmp, sep="\t", header=True, index=False)
+            os.rename(variant_calling_df_file_tmp, variant_calling_df_file)
+
+        else: variant_calling_df = pd.read_csv(variant_calling_df_file, sep="\t")
+
+
+        ######################################
+
+        ###### INTEGRATE VARIANT ANNOTATION ######
+
+        # define the file
+        variant_annotation_df_file = "%s/integrated_variant_annotation_ploidy%i.tab"%(cwd, ploidy)
+
+        if file_is_empty(variant_annotation_df_file) or repeat is True:
+            print_if_verbose("generating integrated variant annotation")
+
+            # initialize df
+            df_variant_annotation = pd.DataFrame()
+
+            # initialize the previous vars
+            already_saved_vars = set()
+
+            for Is, sampleID in enumerate(samples_to_run):
+                print_if_verbose("%i/%i: %s"%(Is+1, len(samples_to_run), sampleID))
+
+                # load df
+                df = pd.read_csv("%s/%s_VarCallresults/smallVars_CNV_output/variant_annotation_ploidy%i.tab"%(VarCallOutdirs, sampleID, ploidy), sep="\t")
+
+                # get only the new vars
+                df_new = df[~df["#Uploaded_variation"].isin(already_saved_vars)]
+
+                # keep 
+                if len(df_new)>0: df_variant_annotation = df_variant_annotation.append(df_new)
+
+                # define the already existing vars
+                already_saved_vars = set(df_variant_annotation["#Uploaded_variation"])
+
+                # print the size
+                print_if_verbose("Size of df_variant_annotation: %.2f MB"%(sys.getsizeof(df_variant_annotation)/1000000))
+
+
+            # sort
+            df_variant_annotation = df_variant_annotation.sort_values(by="#Uploaded_variation").drop_duplicates()
+
+            # add some fields
+            """
+            df_variant_annotation["chromosome"] = df_variant_annotation["#Uploaded_variation"].apply(lambda x: "_".join(x.split("_")[0:-2]))
+            df_variant_annotation["position"] =  df_variant_annotation["#Uploaded_variation"].apply(lambda x: x.split("_")[-2]).apply(int)
+            df_variant_annotation["ref"] = df_variant_annotation["#Uploaded_variation"].apply(lambda x: x.split("_")[-1].split("/")[0])
+            df_variant_annotation["alt"] = df_variant_annotation["#Uploaded_variation"].apply(lambda x: x.split("_")[-1].split("/")[1])
+            """
+
+            # save
+            variant_annotation_df_file_tmp = "%s.tmp"%variant_annotation_df_file
+            df_variant_annotation.to_csv(variant_annotation_df_file_tmp, sep="\t", header=True, index=False)
+            os.rename(variant_annotation_df_file_tmp, variant_annotation_df_file)
+
+
+        ######################################
+
+    e
+
+
+
+
+    return variant_calling_df
+
+
+
+
+def get_bed_df_from_variantID(varID):
+
+    """Takes a variant ID, such as the ones in SV_CNV vcf 'INFO_variantID'. It returns a df with all chromosome-start-end information that should be matched to be considered as the same variant"""
+
+    # get the ID svtype
+    svtype = varID.split("|")[0]
+
+    # inferred by coverage 
+    if svtype in {"coverageDUP", "coverageDEL", "TDUP", "DEL", "INV"} : 
+
+        chrom = "%s_%s"%(svtype, varID.split("|")[1].split(":")[0])
+        start = int(varID.split("|")[1].split(":")[1].split("-")[0])
+        end = int(varID.split("|")[1].split(":")[1].split("-")[1])
+
+        dict_bed = {0 : {"chromosome":chrom, "start":start, "end":end, "ID":varID, "type_overlap":"both"}}
+
+    elif svtype.endswith("like"):
+
+        posA, posB = varID.split("|")[1].split("-")
+
+
+        chromA = "%s_%s"%(svtype, posA.split(":")[0])
+        chromB = "%s_%s"%(svtype, posB.split(":")[0])
+
+        startA = int(posA.split(":")[1])
+        endA = startA + 1
+
+        startB = endB = int(posB.split(":")[1])
+        endB = startB + 1
+
+        dict_bed = {0 : {"chromosome":chromA, "start":startA, "end":endA, "ID":varID+"-A", "type_overlap":"bp_pos"},
+                    1 : {"chromosome":chromB, "start":startB, "end":endB, "ID":varID+"-B"}}
+
+    else: raise ValueError("%s has not been parsed"%varID)
+
+
+    # get as df
+    df_bed = pd.DataFrame(dict_bed).transpose()
+
+    # add the variantID, which will be useful to track, and is not necessarily unique
+    df_bed["variantID"] = varID
+
+    return df_bed
+

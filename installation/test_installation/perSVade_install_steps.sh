@@ -61,6 +61,8 @@ conda install -c bioconda -y sra-tools=2.10.0 &&
 conda install -c bioconda -y trimmomatic=0.38 &&
 conda install -c bioconda -y parallel-fastq-dump=0.6.3 &&
 conda install -c bioconda -y fastqc=0.11.9 &&
+conda install -c bioconda -y bedops=2.4.39
+
 
 
 ############################################################

@@ -149,6 +149,7 @@ seqtk = "%s/bin/seqtk"%EnvDir
 fasta_generate_regions_py = "%s/bin/fasta_generate_regions.py"%EnvDir
 pigz = "%s/bin/pigz"%EnvDir
 unpigz = "%s/bin/unpigz"%EnvDir
+bedmap = "%s/bin/bedmap"%EnvDir
 
 porechop = "%s/bin/porechop"%EnvDir
 
@@ -12824,96 +12825,58 @@ def get_bestID_from_df_CNV_cluster(clustered_nuericIDs, df_CNV):
 
     return df.ID.iloc[0]
 
-def get_intersecting_bed_chromosome_SVTYPE(outdir, chromosome_SVTYPE, df_CNV, pct_overlap):
 
-    """
-    This fucntion runs bedtools intersect to get regions that reciprocally intersect by >pct_overlap in chromosome_SVTYPE. It returns the file where this intersection was written
+def get_list_clusters_overlapping_df_CNV(outdir, df_CNV, pct_overlap, threads):
 
-    Everything is done on the basis of the numeric ID.
+    """Takes a df_CNV with chromosome, start, and end, where the ID is the index. It returns a list of sets, each set containing IDs of CNVs that overlap by >=pct_overlap and are from the same type.
 
-    """
+    It will run bedtools intersect between the df_CNV against itself."""
 
-    # define the beds
-    bedA = "%s/%s_regionsA.bed"%(outdir, chromosome_SVTYPE)
-    bedB = "%s/%s_regionsB.bed"%(outdir, chromosome_SVTYPE)
-    intersection_bed = "%s/%s_intersection.bed"%(outdir, chromosome_SVTYPE)
-
-    # get the chromosomal df
-    df_c = df_CNV[df_CNV.chromosome_SVTYPE==chromosome_SVTYPE]
-    if len(df_c)==0: raise ValueError("this can't be 0")
-
-    # get the sorted df
-    df_c = df_c[["chromosome_SVTYPE", "start", "end", "numericID"]].sort_values(by="start")
-
-    # write the same df twice
-    df_c.to_csv(bedA, sep="\t", header=False, index=False)
-    df_c.to_csv(bedB, sep="\t", header=False, index=False)
-
-    # run bedtools intersect
-    bedtools_stderr = "%s.generating.stderr"%intersection_bed
-    print_if_verbose("Running bedtools intersect. The stderr is in %s"%bedtools_stderr)
-
-    run_cmd("%s intersect -a %s -b %s -f %.2f -r -wa -wb -sorted | cut -f4,8 > %s 2>%s"%(bedtools, bedA, bedB, pct_overlap, intersection_bed, bedtools_stderr))
-
-    # clean files
-    for f in [bedA, bedB, bedtools_stderr]: remove_file(f)
-
-    return intersection_bed
-
-
-def get_bed_intersecting_numericIDs(df_CNV, outdir, threads, pct_overlap, replace):
-
-    """This function takes a df_CNV and writes a bed under outdir with the intersecting numeric IDs"""
-
-    print_if_verbose("running get_bed_intersecting_numericIDs")
+    print_if_verbose("getting list_clusters_overlapping_df_CNV")
 
     # checks
     if len(set(df_CNV.SVTYPE).difference({"DUP", "DEL"}))>0: raise ValueError("SVTYPE is not properly formated")
     if len(set(df_CNV.type_CNVcall).difference({"gridssClove", "coverage"}))>0: raise ValueError("type_CNVcall is not properly formated")
     if len(set(df_CNV.typeBPs).difference({"RealBPs", "wholeChrom", "oneRealBP", "FilteredOutBPs"}))>0: raise ValueError("typeBPs is not properly formated")
 
-    # define the final file
-    bed_intersecting_numericIDs = "%s/intersecting_numericIDs.bed"%outdir
+    # get the ID_to_overlappingIDs
 
-    if file_is_empty(bed_intersecting_numericIDs) or replace is True:
+    # add the combination of chromosome and SVtype. This will be used in the bedtools intersect to get the correct IDs
+    df_CNV["chromosome_SVTYPE"] = df_CNV.chromosome + "_" + df_CNV.SVTYPE
 
-        # add the combination of chromosome and SVtype. This will be used in the bedtools intersect to get the correct IDs
-        df_CNV["chromosome_SVTYPE"] = df_CNV.chromosome + "_" + df_CNV.SVTYPE
+   
+    # write a bed with the intersecting IDs
+    bed_cnv_regions = "%s/df_CNV.bed"%outdir
+    df_CNV[["chromosome_SVTYPE", "start", "end", "numericID"]].to_csv(bed_cnv_regions, sep="\t", header=False, index=False)
 
-        # define a directory where the bedtools will be run
-        outdir_bedtools = "%s/running_get_list_clusters_overlapping_df_CNV"%outdir
-        delete_folder(outdir_bedtools); make_folder(outdir_bedtools)
+    # run bedmap to get a file where each line corresponds to the regions to which each 
+    bedmap_outfile = "%s/overlapping_IDs.txt"%outdir
+    bedmap_stderr = "%s.stderr"%bedmap_outfile
 
-        # get all beds on the intersection
-        inputs_fn = [(outdir_bedtools, chromosome_SVTYPE, df_CNV, pct_overlap) for chromosome_SVTYPE in set(df_CNV.chromosome_SVTYPE)]
+    print_if_verbose("running bedmap. The stderr is in %s"%bedmap_stderr)
+    run_cmd("%s --fraction-both %.2f --echo-map-id  --delim '\t' %s > %s 2>%s"%(bedmap, pct_overlap, bed_cnv_regions, bedmap_outfile, bedmap_stderr))
 
-        # generate the files 
-        with multiproc.Pool(threads) as pool:
-            pool.starmap(get_intersecting_bed_chromosome_SVTYPE, inputs_fn) 
-                
-            pool.close()
-            pool.terminate()
+    remove_file(bedmap_stderr)
 
-        # cat all the files in one
-        bed_intersecting_numericIDs_tmp = "%s.tmp"%bed_intersecting_numericIDs
-        bed_intersecting_numericIDs_stderr = "%s.generating.stderr"%bed_intersecting_numericIDs 
+    # load as df, which already has the same order as df_CNV
+    df_bedmap = pd.read_csv(bedmap_outfile, sep="\t", header=None, names=["overlapping_IDs"])
+    df_bedmap["overlapping_IDs_set"] = df_bedmap.overlapping_IDs.apply(lambda x: {int(y) for y in x.split(";")})
 
-        print_if_verbose("catting all files. The stderr is in %s"%bed_intersecting_numericIDs_stderr)
-        run_cmd("cat %s/* > %s 2>%s"%(outdir_bedtools, bed_intersecting_numericIDs_tmp, bed_intersecting_numericIDs_stderr))
+    # define
+    ID_to_overlappingIDs = dict(df_bedmap["overlapping_IDs_set"])
 
-        # clean
-        remove_file(bed_intersecting_numericIDs_stderr)
-        delete_folder(outdir_bedtools)
+    # get the list of clusters
+    print_if_verbose("getting lists of clusters")
+    list_clusters = get_list_clusters_from_dict(ID_to_overlappingIDs)
 
-        # rename
-        os.rename(bed_intersecting_numericIDs_tmp, bed_intersecting_numericIDs)
+    # check
+    all_IDs = set(df_CNV.numericID)
+    all_IDs_in_cluster = set.union(*list_clusters)
+    if all_IDs!=all_IDs_in_cluster: raise ValueError("all IDs should be in clusters")
 
-    return bed_intersecting_numericIDs
+    print_if_verbose("list_clusters_overlapping_df_CNV already ran. There are %i clusters"%len(list_clusters))
 
-
-
-
-
+    return list_clusters
 
 
 def get_nonRedundant_CNVcalls_coverage(outdir, df_CNV, df_vcf_forCNV, threads, replace, pct_overlap=0.8):
@@ -12945,6 +12908,9 @@ def get_nonRedundant_CNVcalls_coverage(outdir, df_CNV, df_vcf_forCNV, threads, r
     fields = ["ID", "chromosome", "start", "end", "SVTYPE", "type_CNVcall", "typeBPs", "QUAL", "AF"]
     all_df_CNV = df_CNV[fields].append(df_vcf_forCNV[fields]).sort_values(by=["SVTYPE", "chromosome", "start", "end"])
 
+    # sort as bed
+    all_df_CNV = all_df_CNV.sort_values(by=["SVTYPE", "chromosome", "start", "end"])
+
     # add the ID and the numeric ID (the numeric ID takes less space in the bedtools intersect). This will be the index
     all_df_CNV["numericID"] = list(range(0, len(all_df_CNV)))
     all_df_CNV = all_df_CNV.set_index("numericID", drop=False)
@@ -12952,58 +12918,11 @@ def get_nonRedundant_CNVcalls_coverage(outdir, df_CNV, df_vcf_forCNV, threads, r
     # make sure that the ID is unique
     check_that_df_index_is_unique(all_df_CNV)
 
-    # get a bed with the intersecting numericIDs
-    bed_intersecting_numericIDs = get_bed_intersecting_numericIDs(all_df_CNV, outdir, threads, pct_overlap, replace)
-
     # define the initial length
     initial_len_all_df_CNV = len(all_df_CNV)
 
-    # define  a series that will have the number of overlapping features for each numericID
-    bed_number_overlaps = "%s.number_overlapping_regions.tab"%bed_intersecting_numericIDs
-    bed_number_overlaps_stderr = "%s.stderr"%bed_number_overlaps
-
-    run_cmd("cut -f1 %s | uniq -c | sed 's/^[ \t]*//g'> %s 2>%s"%(bed_intersecting_numericIDs, bed_number_overlaps, bed_number_overlaps_stderr))
-    remove_file(bed_number_overlaps_stderr)
-
-    n_overlaps_series = pd.read_csv(bed_number_overlaps, sep=" ", header=None, names=["n_overlaps", "numericID"]).set_index("numericID")["n_overlaps"]
-
-    # add to the df
-    all_df_CNV["n_overlaps"] = n_overlaps_series[all_df_CNV.index]
-    if len(all_df_CNV)!=initial_len_all_df_CNV: raise ValueError("There was an error with the number of overlaps")
-
-    ljhadlhadlhdakhadkjhkajdh
-
-    print(n_overlaps_series)
-
-    adkjhdkjha
-
-
-
-
-
-
-    ####### MAKE A INTERSECTION BED #######
-
-
-
-
-
-    #######################################
-
-
-
-
-
-
-
-
-
-
     # define the clusters of CNVs that are overlapping by >=80% of their extension
     list_clusters = get_list_clusters_overlapping_df_CNV(outdir, all_df_CNV, pct_overlap, threads)
-
-
-    dljhajkadhhad
 
     # add fields for sorting of redundant variants according to their type and the quality mesurements
     type_CNVcall_to_int = {"gridssClove":1, "coverage":0}
@@ -13241,83 +13160,303 @@ def get_df_gridss_low_confidence_reasonable_breakpoints(df_gridss, ploidy, min_c
     else: return df_gridss[initial_fields]
 
 
-def get_last_position_from_pipeSepparatedString(x):
+def get_setIDs_query_df_NR(IDs):
 
-    """Takes the last position of a pipe-sepparated string"""
+    """Takes an IDs set and returns it as set"""
 
-    return x.split("|")[-1]
+    return {int(x) for x in IDs.split(";")}
 
-def  get_query_df_CNVregions_with_metadata_for_redundance(query_df, df_gridss, chrom_to_len):
+def get_bedmap_df_per_chromosome_NR_query_regions(input_bed, chromosome, replace):
 
-    """This function takes a CNV of regions that match the df_gridss and it returns it with several added fields that are necessary to get non-redundant regions by the function get_nonRedundant_CNVcalls_coverage """
+    """This function takes an input bed and runs bedmap against itself. It does it only per chromosome. It returns a df with the important features"""
 
-    if len(query_df)==0: return query_df
+    # define the outfile
+    outfile = "%s.bedmap_run.%s.bed"%(input_bed, chromosome)
 
-    print_if_verbose("adding metadata to query_df")
+    if file_is_empty(outfile) or replace is True:
 
-    # keep
-    df_gridss = cp.deepcopy(df_gridss)
+        outfile_tmp = "%s.tmp"%outfile
+        stderr = "%s.generating.stderr"%outfile
 
-    # define fields that are generally applicable
-    query_df["type_CNVcall"] = "coverage"
-    query_df["typeBPs"] = query_df.ID.apply(get_last_position_from_pipeSepparatedString)
-    query_df["SVTYPE"] = "DUP"
+        # define the 2 cmds
+        cmd_normal = "%s --delim '\t' --fraction-both 0.95 --echo-map-range --echo-map-id --chrom %s %s | sort -u -t '\t' -k4,4 > %s 2>%s"%(bedmap, chromosome, input_bed, outfile_tmp, stderr)
 
- 
-    ######### REFORMAT df_gridss #########
+        cmd_low_memory = cmd_normal.replace("--echo-map-range", "--min-memory --echo-map-range")
 
-    # add the 0-based-pos
-    df_gridss["POS_0based"] = df_gridss.POS - 1
+        # try with more or less memory consumption
+        try: run_cmd(cmd_normal)
+        except: run_cmd(cmd_low_memory)
 
-    # keep important fields
-    df_gridss = df_gridss[["#CHROM", "POS_0based", "QUAL", "real_AF"]]
-    df_gridss["bend_POS"] = df_gridss["#CHROM"] + "_" + df_gridss.POS_0based.apply(str)
-    df_gridss = df_gridss.set_index("bend_POS")
+        remove_file(stderr)
+
+        os.rename(outfile_tmp, outfile)
+
+    # load as df
+    df_NR_bed = pd.read_csv(outfile, sep="\t", header=None, names=["chromosome", "start", "end", "IDs"])
+
+    # get the IDs as set
+    df_NR_bed["IDs_set"] = df_NR_bed.IDs.apply(get_setIDs_query_df_NR)
+
+    return df_NR_bed
+
+
+def get_non_redundant_regions_df_from_query_df(query_df, outdir, threads, replace):
+
+    """Takes a query_df and returns the df where there are only unique regions"""
+
+    print_if_verbose("running get_non_redundant_regions_df_from_query_df")
+
+    # write a sorted bed into outdir
+    query_df = query_df.sort_values(by=["chromosome", "start", "end"])
+    regions_bed = "%s/query_df_regions.bed"%outdir
+    query_df[["chromosome", "start", "end", "numericID"]].to_csv(regions_bed, sep="\t", header=False, index=False)
+
+    # define the inputs of get_bedmap_output_per_chromosome
+    inputs_fn = [(regions_bed, chromosome, replace) for chromosome in set(query_df.chromosome)]
+
+    # run in parallel
+    """ 
+    with multiproc.Pool(threads) as pool:
+        list_NR_dfs = pool.starmap(get_bedmap_df_per_chromosome_NR_query_regions, inputs_fn) 
+            
+        pool.close()
+        pool.terminate()
+
+    """
+
+    # not in parallel
+    list_NR_dfs = map(lambda x: get_bedmap_df_per_chromosome_NR_query_regions(x[0], x[1], x[2]), inputs_fn)
+
+    # get the concatenated 
+    df_NR_regions = pd.concat(list_NR_dfs)
+
+    # define the missing IDs
+    missing_IDs = set(query_df.numericID).difference(set.union(*df_NR_regions.IDs_set))
+    if len(missing_IDs)>0: raise ValueError("%s are missing in df_NR_regions"%missing_IDs)
+
+    # add a numeric ID
+    df_NR_regions["numericID"] = list(range(0, len(df_NR_regions)))
+
+    return df_NR_regions[["chromosome", "start", "end", "IDs_set", "numericID"]]
+
+def get_potentially_CNV_query_df(query_df, sorted_bam, reference_genome, outdir, threads, replace, max_coverage_deletion, min_coverage_duplication, mitochondrial_chromosome, median_coverage):
+
+    """This function takes a query_df (query, start, end). It will filter out regions with no possibility of CNV. The idea is to downsample the bam to 5x and keep those regions 
+
+        -  """
+
+    print_if_verbose("running get_potentially_CNV_query_df")
+
+    # define the initial fields
+    initial_fields = list(query_df.keys())
+
+    # add the ID
+    query_df["numericID"] = list(range(0, len(query_df)))
+
+    ######### DOWNSAMPLE BAM TO MAKE QUICK CALCULATIONS #########
+
+    # downasmple the bam so that the coverage is keep to 5
+    fraction_bam = 5/median_coverage
+    if fraction_bam<1: 
+
+        # downsample
+        downsampled_bam = "%s/sorted_bam_downsampled_%.3f.bam"%(outdir, fraction_bam)
+
+        if file_is_empty(downsampled_bam) or replace is True:
+
+            downsampled_bam_tmp = "%s.tmp"%downsampled_bam
+            downsample_bamfile_keeping_pairs(sorted_bam, fraction_reads=fraction_bam, threads=threads, name="sampleX", sampled_bamfile=downsampled_bam_tmp)
+
+            # index
+            index_bam(downsampled_bam_tmp, threads=threads)
+
+            # renames
+            os.rename(downsampled_bam_tmp+".bai", downsampled_bam+".bai")
+            os.rename(downsampled_bam_tmp, downsampled_bam)
+    else: 
+
+        downsampled_bam = sorted_bam
+        print("WARNING: The median coverage of your bam is %.3f"%median_coverage)
+
+    # calculate the median_coverage for the downsampled bam
+    destination_dir = "%s.calculating_windowcoverage"%downsampled_bam
+    downsampled_coverage_df = pd.read_csv(generate_coverage_per_window_file_parallel(reference_genome, destination_dir, downsampled_bam, windows_file="none", replace=replace, run_in_parallel=True, delete_bams=True), sep="\t")
+
+    downsampled_median_coverage = get_median_coverage(downsampled_coverage_df, mitochondrial_chromosome)
+
+    #############################################################
+
+    # get a df with the unique regions that overlap 0.95 between them
+    df_NR_regions = get_non_redundant_regions_df_from_query_df(query_df, outdir, threads, replace)
+
+    ######### ADD COVERAGE TO THE df_NR_regions #########
+
+    # write as a bed
+    NR_regions_file = "%s/NR_query_df_regions.bed"%outdir
+    df_NR_regions[["chromosome", "start", "end"]].to_csv(NR_regions_file, sep="\t", index=False, header=True)
+
+    # get df coverage
+    df_coverage = get_coverage_per_window_df_without_repeating(reference_genome, downsampled_bam, NR_regions_file, replace=replace, run_in_parallel=True, delete_bams=True, threads=threads)[["chromosome", "start", "end", "mediancov_1"]]
+
+    # merge 
+    initial_len_df_NR_regions = len(df_NR_regions)
+    df_NR_regions = df_NR_regions.merge(df_coverage, on=["chromosome", "start", "end"], validate="many_to_one", how="left")
+    if len(df_NR_regions)!=initial_len_df_NR_regions or any(pd.isna(df_NR_regions.mediancov_1)): raise ValueError("the merge did not work")
+
+    # add the relative coverage
+    df_NR_regions["relative_coverage"] = df_NR_regions.mediancov_1/downsampled_median_coverage
+
+    #####################################################
+
+
+    ###### DEFINE THE INTERESTING REGIONS ######
+
+    # define the CNV IDs
+    thshd_max_coverage_deletion = max_coverage_deletion*1.5
+    thshd_min_coverage_duplication = min_coverage_duplication*0.9
+
+    # define the series of set IDs that might be under CNV
+    CNV_IDs_set = df_NR_regions[(df_NR_regions.relative_coverage>=thshd_min_coverage_duplication) | (df_NR_regions.relative_coverage<=thshd_max_coverage_deletion)]["IDs_set"]
+
+    if len(CNV_IDs_set)>0: CNV_IDs = set.union(*CNV_IDs_set)
+    else: CNV_IDs = set()
+
+    query_df = query_df[query_df.numericID.isin(CNV_IDs)]
+
+    ############################################
+
+    return query_df[initial_fields]
+
+def get_bestID_from_df_gridss_lowConf_cluster(clustered_numericIDs, df_lowConf):
+
+    """This function takes a df_gridss_lowConf and the clusteredIDs. It returns the best clusterID"""
+
+    # get the df with the lcuster IDs
+    df = df_lowConf.loc[clustered_numericIDs].sort_values(by=["QUAL", "real_AF"], ascending=False)
+
+    return df.numericID.iloc[0]
+
+
+def get_df_gridss_removing_redundant_lowConfidenceBPs(df_gridss, outdir, threads, chrom_to_len, replace, overlap_bp=100):
+
+    """Takes a df_gridss and returns it after removing those low-confidence breakends that are close (<=overlap_bp bp to high-confidence BPs). It also removes those gridss breakpoints that are close to themselves"""
+
+    print_if_verbose("running get_df_gridss_removing_redundant_lowConfidenceBPs")
+
+
+    # define the initial fields
+    initial_fields = list(df_gridss.keys())
+
+    # add a numeric ID
+    df_gridss["numericID"] = list(range(0, len(df_gridss)))
+
+    # add fields
+    df_gridss["start_bed"] = df_gridss["POS"]
+    df_gridss["end_bed"] = df_gridss["POS"]
+
+    # sort 
+    df_gridss = df_gridss.sort_values(by=["#CHROM", "start_bed", "end_bed"])
+
+    # define high and low confidence dfs
+    df_highConf = df_gridss[df_gridss.type_BEND=="highConfidence"]
+    df_lowConf = df_gridss[df_gridss.type_BEND=="lowConfidence"]
+
+    # define the initial length
+    initial_len_df_lowConf = len(df_lowConf)
+
+    # define the bed files
+    bed_fields = ["#CHROM", "start_bed", "end_bed", "numericID"]
     
-    # define the maxQUAL
-    maxQUAL = max(df_gridss.QUAL)+1
+    ########## KEEP THE LOW CONFIDENCE BP THAT DON'T OVERLAP HIGH CONFIDENCE IDs ##########
 
-    # add the first and last positions
-    for chrom, length in chrom_to_len.items():
+    # define the bedmap file
+    bedmap_outfile = "%s/mapping_lowConfidence_to_highConfidence_breakends.txt"%outdir
 
-        # add the start
-        df_gridss = df_gridss.append(pd.DataFrame({"%s_0"%chrom: {"QUAL":maxQUAL, "real_AF":1.0, "#CHROM":chrom, "POS_0based":0}}).transpose())
+    if file_is_empty(bedmap_outfile) or replace is True:
 
-        # add the end
-        df_gridss = df_gridss.append(pd.DataFrame({"%s_%i"%(chrom, length): {"QUAL":maxQUAL, "real_AF":1.0, "#CHROM":chrom, "POS_0based":length}}).transpose())
+        # get the as bed files
+        bed_highConf = "%s/high_confidence_breakends.bed"%outdir
+        bed_lowConf = "%s/low_confidence_breakends.bed"%outdir
 
-    # sort
-    df_gridss = df_gridss.sort_values(by=["#CHROM", "POS_0based", "QUAL"], ascending=False)
-    df_gridss = df_gridss.drop_duplicates(subset=["#CHROM", "POS_0based"], keep="first")
+        df_highConf[bed_fields].to_csv(bed_highConf, sep="\t", index=False, header=False)
+        df_lowConf[bed_fields].to_csv(bed_lowConf, sep="\t", index=False, header=False)
 
-    check_that_df_index_is_unique(df_gridss)
+        # run bedmap only mapping all highConfidence against the low confidence, and only keep those that have at least one match. The output will have one line per each low confidence map
 
-    ########################################
+        bedmap_outfile_tmp = "%s.tmp"%bedmap_outfile
+        bedmap_stderr = "%s.generating.stderr"%bedmap_outfile
+        run_cmd("%s --range %i --delim '\t' --count %s %s > %s 2>%s"%(bedmap, overlap_bp, bed_lowConf, bed_highConf, bedmap_outfile_tmp, bedmap_stderr))
 
-    # init len
-    initial_query_df_len = len(query_df)
+        remove_file(bedmap_stderr)
+        os.rename(bedmap_outfile_tmp, bedmap_outfile)
 
-    # add the indicators of each breakend
-    for field in ["start", "end"]:
+    # load file as df and add IDs
+    df_n_highConf_overlap = pd.read_csv(bedmap_outfile, sep="\t", header=None, names=["n_overlapping_highConfidence"])
 
-        # add the position
-        bend_POSitions = np.array(query_df.chromosome + "_" + query_df[field].apply(str))
+    df_n_highConf_overlap["numericID"] = list(df_lowConf.numericID)
 
-        # add the metadata
-        query_df["QUAL_%s"%field] = df_gridss.loc[bend_POSitions, "QUAL"].values
-        query_df["real_AF_%s"%field] = df_gridss.loc[bend_POSitions, "real_AF"].values
+    # define the non-overlapping IDs of the low confidence df
+    non_overlapping_highConf_lowConfidence_IDs = set(df_n_highConf_overlap[df_n_highConf_overlap.n_overlapping_highConfidence==0].numericID)
 
-    # debug
-    if len(query_df)!=initial_query_df_len: raise ValueError("something went wrong with the merging")
-    for f in ["QUAL_start", "QUAL_end", "real_AF_start", "real_AF_end"]: 
-        if any(pd.isna(query_df[f])): raise ValueError("There are NaNs after the merhing")
+    df_lowConf = df_lowConf[df_lowConf.numericID.isin(non_overlapping_highConf_lowConfidence_IDs)]
 
-    # get the important fields
-    query_df["QUAL_mean"] = query_df[["QUAL_start", "QUAL_end"]].apply(np.mean, axis=1)
-    query_df["real_AF_min"] = query_df[["real_AF_start", "real_AF_end"]].apply(min, axis=1)
+    ######################################################################################
 
-    return query_df
+    ####### KEEP NON-REDUDNAT BPs #######
 
+    # define outfile
+    bedmap_outfile_lowConf = "%s/mapping_lowConfidence_to_themselves_breakends.txt"%outdir
+
+    if file_is_empty(bedmap_outfile_lowConf) or replace is True:
+
+        # get the as bed files
+        bed_lowConf = "%s/low_confidence_breakends_filt.bed"%outdir
+        df_lowConf[bed_fields].to_csv(bed_lowConf, sep="\t", index=False, header=False)
+        
+        # run bedmap mapping low confidence to themselves, in order to get an ID_to_overlappingIDs
+
+        bedmap_outfile_lowConf_tmp = "%s.tmp"%bedmap_outfile_lowConf
+        bedmap_stderr = "%s.generating.stderr"%bedmap_outfile_lowConf
+        run_cmd("%s --range %i --delim '\t' --echo-map-id %s > %s 2>%s"%(bedmap, overlap_bp, bed_lowConf, bedmap_outfile_lowConf_tmp, bedmap_stderr))
+
+        remove_file(bedmap_stderr)
+        os.rename(bedmap_outfile_lowConf_tmp, bedmap_outfile_lowConf)
+
+    # get as df
+    df_bedmap_lowConf = pd.read_csv(bedmap_outfile_lowConf, sep="\t", header=None, names=["overlapping_IDs"])
+    df_bedmap_lowConf["overlapping_IDs_set"] = df_bedmap_lowConf.overlapping_IDs.apply(lambda x: {int(y) for y in x.split(";")})
+
+    # add the index
+    df_bedmap_lowConf["numericID"] = list(df_lowConf.numericID)
+
+    # define
+    ID_to_overlappingIDs = dict(df_bedmap_lowConf.set_index("numericID")["overlapping_IDs_set"])
+
+    # get the list of clusters
+    print_if_verbose("getting lists of clusters")
+    list_clusters = get_list_clusters_from_dict(ID_to_overlappingIDs)
+
+    # check
+    all_IDs = set(df_lowConf.numericID)
+    all_IDs_in_cluster = set.union(*list_clusters)
+    if all_IDs!=all_IDs_in_cluster: raise ValueError("all IDs should be in clusters")
+
+    print_if_verbose("list_clusters_overlapping_df_CNV already ran. There are %i clusters and %i breakends"%(len(list_clusters), len(all_IDs)))    
+
+    # get the best ID for each cluster
+    df_lowConf = df_lowConf.set_index("numericID", drop=False)
+    best_NR_bend_numericIDs = set(map( (lambda x: get_bestID_from_df_gridss_lowConf_cluster(x, df_lowConf) ), list_clusters))
+
+    #####################################
+
+    interesting_numericIDs = set(df_highConf.numericID).union(best_NR_bend_numericIDs)
+    print_if_verbose("There are %i/%i breakends not overlapping high confidence IDs by <%i bp and also non-redundant between them"%(len(interesting_numericIDs), len(df_gridss), overlap_bp))
+
+    # define all interesting breakends
+    df_gridss = df_gridss[df_gridss.numericID.isin(interesting_numericIDs)]
+    if len(interesting_numericIDs)!=len(df_gridss): raise ValueError("something went wrong with the NR generation")
+
+    return df_gridss[initial_fields]
 
 
 
@@ -13368,6 +13507,9 @@ def get_CNV_calling_with_coverageBased_added(df_vcf, outdir, sorted_bam, referen
 
         # discard duplicates, marking the first as False, so that we keep the best breakpoint at each position
         df_gridss = df_gridss[~(df_gridss.duplicated(subset=["#CHROM", "POS"], keep="first"))]
+
+        # discard gridss breakpoints that are close to high-confidence breakpoints, also removing those that are redundant from the low-confidence cathegory. Any two low
+        df_gridss  = get_df_gridss_removing_redundant_lowConfidenceBPs(df_gridss, outdir, threads, chrom_to_len, replace, overlap_bp=min_sv_size)
 
         if file_is_empty(raw_cnv_file) or replace is True:
             print_if_verbose("getting raw CNV calls")
@@ -13446,15 +13588,9 @@ def get_CNV_calling_with_coverageBased_added(df_vcf, outdir, sorted_bam, referen
 
             # debug
             if any((query_df.end-query_df.start)<min_sv_size): raise ValueError("there are regions that are shorter than min_sv_size")
-            
-            # get the query df with metadata to skip the redundant regions
-            query_df = get_query_df_CNVregions_with_metadata_for_redundance(query_df, df_gridss, chrom_to_len)
 
-            # skip the redundant regions
-            df_empty = pd.DataFrame(columns=list(query_df.keys()))
-            query_df = get_nonRedundant_CNVcalls_coverage(outdir, query_df, df_empty, threads, replace, pct_overlap=0.9)
-
-            print_if_verbose("There are %i/%i non redundant regions to test CNV for"%(len(query_df), total_n_regions))
+            # keep the interesting query regions after some coverage testings
+            query_df = get_potentially_CNV_query_df(query_df, sorted_bam, reference_genome, outdir, threads, replace, max_coverage_deletion, min_coverage_duplication, mitochondrial_chromosome, median_coverage)
 
             query_df = query_df[["chromosome", "start", "end", "ID"]]
 
@@ -13855,6 +13991,9 @@ def get_vcf_all_SVs_and_CNV(perSVade_outdir, outdir, sorted_bam, reference_genom
 
             # add the breakend IDs and 
             df_vcf["INFO"] = df_vcf.apply(lambda r: get_correct_INFO_with_bendIDs_and_bendStats(r, df_gridss), axis=1)
+
+        # clean
+        delete_folder(outdir_CNV)
 
         # write vcf
         vcf_SVcalling_tmp = "%s.tmp"%vcf_SVcalling
@@ -14817,7 +14956,7 @@ def get_current_clusterName_mareNostrum():
     return cluster_name
 
 
-def get_integrated_variants_into_one_df(df, file_prefix):
+def get_integrated_variants_into_one_df(df, file_prefix, replace=False):
 
     """This function takes a df (or a .tab file) with the following fields:
     
@@ -14844,7 +14983,7 @@ def get_integrated_variants_into_one_df(df, file_prefix):
     if "smallVars_vcf" in df.keys(): expected_files.update({small_vars_file, small_vars_annot_file})
     if "SV_CNV_vcf" in df.keys(): expected_files.update({SV_CNV_file, SV_CNV_annot_file})
 
-    if any([fun.file_is_empty(f) for f in expected_files]):
+    if any([file_is_empty(f) for f in expected_files]) or replace is True:
 
         # initialize dfs
         small_vars = pd.DataFrame()
@@ -14928,9 +15067,6 @@ def run_perSVade_severalSamples(paths_df, cwd, common_args, threads=4, sampleID_
     # define the samples_to_run
     if len(samples_to_run)==0: samples_to_run = set(paths_df.sampleID)
 
-    # keep a dict with the paths
-    sampleID_to_dataDict = {}
-
     # get the info of all the reads and samples
     all_cmds = []
 
@@ -14958,9 +15094,6 @@ def run_perSVade_severalSamples(paths_df, cwd, common_args, threads=4, sampleID_
         # add cmd if necessary
         if any([file_is_empty(x) for x in success_files]) or repeat is True: all_cmds.append(cmd)
 
-        # keep data
-        #sampleID_to_dataDict[sampleID] = 
-
     # submit to cluster or return True
     if len(all_cmds)>0:
 
@@ -14982,126 +15115,188 @@ def run_perSVade_severalSamples(paths_df, cwd, common_args, threads=4, sampleID_
 
         return False
 
-
-    if get_integrated_dfs is True:
-
-        print_if_verbose("Integrating all variants and CNV into one......")
+    else: return True
 
 
-    checkthathteintegrationmakessense
+def get_bed_df_from_variantID(varID):
 
-    ###### INTEGRATE VARIANT CALLING ######
+    """Takes a variant ID, such as the ones in SV_CNV vcf 'INFO_variantID'. It returns a df with all chromosome-start-end information that should be matched to be considered as the same variant"""
 
-    # define the file
-    variant_calling_df_file = "%s/integrated_variant_calling_ploidy%i.tab"%(cwd, ploidy)
+    # get the ID svtype
+    svtype = varID.split("|")[0]
 
-    if file_is_empty(variant_calling_df_file) or repeat is True:
-        print_if_verbose("generating integrated vars")
+    # inferred by coverage 
+    if svtype in {"coverageDUP", "coverageDEL", "TDUP", "DEL", "INV"} : 
 
-        # define the columns related to variant_calling_fields
-        df_example = pd.read_csv("%s/%s_VarCallresults/smallVars_CNV_output/variant_calling_ploidy%i.tab"%(VarCallOutdirs, next(iter(samples_to_run)), ploidy), sep="\t")
-        variant_calling_colNames = ",".join([str(I+1) for I, field in enumerate(df_example.keys()) if field in variant_calling_fields])
+        chrom = "%s_%s"%(svtype, varID.split("|")[1].split(":")[0])
+        start = int(varID.split("|")[1].split(":")[1].split("-")[0])
+        end = int(varID.split("|")[1].split(":")[1].split("-")[1])
+        type_overlap = "all"
 
-        del df_example
+        dict_bed = {0 : {"chromosome":chrom, "start":start, "end":end, "ID":varID, "type_overlap":type_overlap}}
 
-        # initialize df
-        df_variant_calling = pd.DataFrame()
+    elif svtype.endswith("like"):
 
-
-        for Is, sampleID in enumerate(samples_to_run):
-            print_if_verbose("%i/%i: %s"%(Is+1, len(samples_to_run), sampleID))
-
-            # get the partial file
-            target_varcall_file = "%s/%s_VarCallresults/smallVars_CNV_output/variant_calling_ploidy%i.tab"%(VarCallOutdirs, sampleID, ploidy)
-            partial_varcall_file = "%s/partial_variant_calling.tab"%cwd
-
-            cutting_cols_stderr = "%s.generating.stderr"%partial_varcall_file
-            print_if_verbose("getting the important cols. The stderr is in %s"%cutting_cols_stderr)
-            run_cmd("cut -f%s %s > %s 2>%s"%(variant_calling_colNames, target_varcall_file, partial_varcall_file, cutting_cols_stderr))
-            remove_file(cutting_cols_stderr)
-
-            # load df
-            df = pd.read_csv(partial_varcall_file, sep="\t")[variant_calling_fields]
-            remove_file(partial_varcall_file)
-
-            # append the sample ID 
-            df["sampleID"] = sampleID
-
-            # keep
-            df_variant_calling = df_variant_calling.append(df)
-
-            # print the size
-            print_if_verbose("Size of df_variant_calling: %.2f MB"%(sys.getsizeof(df_variant_calling)/1000000))
-
-        # save
-        variant_calling_df_file_tmp = "%s.tmp"%variant_calling_df_file
-        df_variant_calling.to_csv(variant_calling_df_file_tmp, sep="\t", header=True, index=False)
-        os.rename(variant_calling_df_file_tmp, variant_calling_df_file)
-
-    else: variant_calling_df = pd.read_csv(variant_calling_df_file, sep="\t")
+        posA, posB = varID.split("|")[1].split("-")
 
 
-    ######################################
+        chromA = "%s_%s"%(svtype, posA.split(":")[0])
+        chromB = "%s_%s"%(svtype, posB.split(":")[0])
+
+        startA = int(posA.split(":")[1])
+        endA = startA + 1
+
+        startB = endB = int(posB.split(":")[1])
+        endB = startB + 1
+
+        type_overlap = "pos"
+
+        dict_bed = {0 : {"chromosome":chromA, "start":startA, "end":endA, "ID":varID+"-A", "type_overlap":type_overlap},
+                    1 : {"chromosome":chromB, "start":startB, "end":endB, "ID":varID+"-B", "type_overlap":type_overlap}}
+
+    else: raise ValueError("%s has not been parsed"%varID)
 
 
+    # get as df
+    df_bed = pd.DataFrame(dict_bed).transpose()
 
-    ###### INTEGRATE VARIANT ANNOTATION ######
+    # add the variantID, which will be useful to track, and is not necessarily unique
+    df_bed["variantID"] = varID
 
-    # define the file
-    variant_annotation_df_file = "%s/integrated_variant_annotation_ploidy%i.tab"%(cwd, ploidy)
+    return df_bed
 
-    if file_is_empty(variant_annotation_df_file) or repeat is True:
-        print_if_verbose("generating integrated variant annotation")
+def get_SV_CNV_df_with_common_variantID_acrossSamples(SV_CNV, outdir, pct_overlap, tol_bp):
 
-        # initialize df
-        df_variant_annotation = pd.DataFrame()
+    """Takes a SV_CNV df and returns it with the field 'common_variantID_across_samples'. It uses bedmap to be particularly efficient."""
 
-        # initialize the previous vars
-        already_saved_vars = set()
+    make_folder(outdir)
 
-        for Is, sampleID in enumerate(samples_to_run):
-            print_if_verbose("%i/%i: %s"%(Is+1, len(samples_to_run), sampleID))
+    # get all variantIDs
+    all_variantIDs = SV_CNV[["INFO_variantID"]].drop_duplicates()["INFO_variantID"]
 
-            # load df
-            df = pd.read_csv("%s/%s_VarCallresults/smallVars_CNV_output/variant_annotation_ploidy%i.tab"%(VarCallOutdirs, sampleID, ploidy), sep="\t")
+    # create a bed with all the regions that need to be matching in order to be considered the same
+    df_bed_all = pd.concat(map(get_bed_df_from_variantID, all_variantIDs)).sort_values(by=["chromosome", "start", "end"])
+    df_bed_all.index = list(range(0, len(df_bed_all)))
 
-            # get only the new vars
-            df_new = df[~df["#Uploaded_variation"].isin(already_saved_vars)]
-
-            # keep 
-            if len(df_new)>0: df_variant_annotation = df_variant_annotation.append(df_new)
-
-            # define the already existing vars
-            already_saved_vars = set(df_variant_annotation["#Uploaded_variation"])
-
-            # print the size
-            print_if_verbose("Size of df_variant_annotation: %.2f MB"%(sys.getsizeof(df_variant_annotation)/1000000))
+    # write the bed
+    variants_bed = "%s/variants_regions.bed"%outdir
+    df_bed_all[["chromosome", "start", "end", "ID"]].to_csv(variants_bed, sep="\t", index=False, header=False)
 
 
-        # sort
-        df_variant_annotation = df_variant_annotation.sort_values(by="#Uploaded_variation").drop_duplicates()
+    print(df_bed_all[["start", "end"]])
 
-        # add some fields
-        """
-        df_variant_annotation["chromosome"] = df_variant_annotation["#Uploaded_variation"].apply(lambda x: "_".join(x.split("_")[0:-2]))
-        df_variant_annotation["position"] =  df_variant_annotation["#Uploaded_variation"].apply(lambda x: x.split("_")[-2]).apply(int)
-        df_variant_annotation["ref"] = df_variant_annotation["#Uploaded_variation"].apply(lambda x: x.split("_")[-1].split("/")[0])
-        df_variant_annotation["alt"] = df_variant_annotation["#Uploaded_variation"].apply(lambda x: x.split("_")[-1].split("/")[1])
-        """
+    ######### RUN BEDMAP #########
 
-        # save
-        variant_annotation_df_file_tmp = "%s.tmp"%variant_annotation_df_file
-        df_variant_annotation.to_csv(variant_annotation_df_file_tmp, sep="\t", header=True, index=False)
-        os.rename(variant_annotation_df_file_tmp, variant_annotation_df_file)
+    # define the stderr
+    bedmap_stderr = "%s/running_bedmap_.stderr"%outdir
+
+    # run bedmap tol_bp
+    bedmap_outfile = "%s/bedmap_outfile_range.txt"%outdir
+    run_cmd("%s --delim '\t' --range %i --echo-map-id %s > %s 2>%s"%(bedmap, tol_bp, variants_bed, bedmap_outfile, bedmap_stderr))
+
+    df_overlap_tolBp  = pd.read_csv(bedmap_outfile, sep="\t", header=None, names=["overlapping_IDs"])
+    df_overlap_tolBp["ID"] = list(df_bed_all.ID)
+    df_overlap_tolBp = df_overlap_tolBp.set_index("ID", drop=False)
+
+    # run bedmap pct overlap
+    bedmap_outfile = "%s/bedmap_outfile_pctOverlap.txt"%outdir
+    run_cmd("%s --delim '\t' --fraction-both %.2f --echo-map-id %s > %s 2>%s"%(bedmap, pct_overlap, variants_bed, bedmap_outfile, bedmap_stderr))
+
+    df_overlap_pctOverlap  = pd.read_csv(bedmap_outfile, sep="\t", header=None, names=["overlapping_IDs"])
+    df_overlap_pctOverlap["ID"] = list(df_bed_all.ID)
+    df_overlap_pctOverlap = df_overlap_pctOverlap.set_index("ID", drop=False)
+
+    # get a unique df_overlap, which only considers overlaps that fullfill both the Bp and pct overlap
+    df_overlap = pd.DataFrame()
+    df_overlap["ID"] = df_overlap_tolBp.ID
+    df_overlap = df_overlap.set_index("ID", drop=False)
+
+    thisneedstoberefactored
+
+    # at the IDs that overlap by either measures 
+    df_overlap["tol_bp_IDs_overlap"] = df_overlap_tolBp.loc[df_overlap.index, "overlapping_IDs"].apply(lambda x: set(x.split(";")))
+
+    df_overlap["pct_overlap_IDs_overlap"] = df_overlap_pctOverlap.loc[df_overlap.index, "overlapping_IDs"].apply(lambda x: set(x.split(";")))
+
+    df_overlap["IDs_overlap_both"] = df_overlap.apply(lambda r: r["tol_bp_IDs_overlap"].intersection(r["pct_overlap_IDs_overlap"]), axis=1)
+
+    df_overlap["IDs_overlap_any"] = df_overlap.apply(lambda r: r["tol_bp_IDs_overlap"].union(r["pct_overlap_IDs_overlap"]), axis=1)
 
 
-    ######################################
+    #############################
 
+
+    # map each variantID to the bedIDs
+    varID_to_bedIDs = dict(df_bed_all.groupby("variantID").apply(lambda df_varID: set(df_varID.ID)))
 
 
 
-    return variant_calling_df
 
+    print(varID_to_bedIDs)
+    bedmap
+    kjhadkjhdahda
+
+
+
+    
+
+
+    lhjdskljhdskjh
+
+def get_integrated_SV_CNV_smallVars_df_from_run_perSVade_severalSamples(paths_df, cwd, ploidy, pct_overlap, tol_bp):
+
+    """Takes the same input as run_perSVade_severalSamples and writes the integrated dfs under cwd, adding to the integrated SV_CNV datasets some added fields that indicate that the SVs and CNV are shared among several samples """
+
+    # create files that are necessary
+    VarCallOutdirs = "%s/VarCallOutdirs"%cwd; make_folder(VarCallOutdirs)
+
+    # init dfs
+    small_vars_df = pd.DataFrame()
+    small_var_annot = pd.DataFrame()
+
+    # init dict
+    sampleID_to_SV_dataDict = {}
+
+
+    samples_to_run = set(paths_df.sampleID)
+    samples_to_run = {"RUN2_H99_Kerstin", "RUN2_H99_1"}
+
+    for sampleID in samples_to_run:
+        print(sampleID)
+
+        # create an outdir
+        outdir = "%s/%s_VarCallresults"%(VarCallOutdirs, sampleID); make_folder(outdir)
+
+        # add the small vars
+        s_small_vars_df = pd.read_csv("%s/smallVars_CNV_output/variant_calling_ploidy%i.tab"%(outdir, ploidy), sep="\t")
+        s_small_vars_df["sampleID"] = sampleID
+        small_vars_df = small_vars_df.append(s_small_vars_df)
+
+        # add the small variants annotation
+        small_var_annot = small_var_annot.append(pd.read_csv("%s/smallVars_CNV_output/variant_annotation_ploidy%i.tab"%(outdir, ploidy), sep="\t")).drop_duplicates()
+
+        # add data to 
+        sampleID_to_SV_dataDict[sampleID] = {"sampleID":sampleID,
+                                             "SV_CNV_vcf":"%s/SVcalling_output/SV_and_CNV_variant_calling.vcf"%(outdir),
+                                             "SV_CNV_var_annotation":"%s/SVcalling_output/SV_and_CNV_variant_calling.vcf_annotated_VEP.tab"%(outdir)
+                                             }
+
+
+    # get the integrated SV_CNV dfs
+    df_data = pd.DataFrame(sampleID_to_SV_dataDict).transpose()
+    file_prefix = "%s/integrated_SV_CNV_calling"%cwd
+
+    SV_CNV, SV_CNV_annot = get_integrated_variants_into_one_df(df_data, file_prefix, replace=True)[2:]
+
+    # add the common variant ID across samples
+    outdir_common_variantID_acrossSamples = "%s/getting_common_variantID_acrossSamples"%cwd
+    delete_folder(outdir_common_variantID_acrossSamples)
+
+    SV_CNV = get_SV_CNV_df_with_common_variantID_acrossSamples(SV_CNV, outdir_common_variantID_acrossSamples, pct_overlap, tol_bp) 
+
+    delete_folder(outdir_common_variantID_acrossSamples)
+
+    return small_vars_df, small_var_annot, SV_CNV, SV_CNV_annot
 
 #######################################################################################
 #######################################################################################
