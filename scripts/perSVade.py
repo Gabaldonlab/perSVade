@@ -85,6 +85,9 @@ parser.add_argument("--min_CNVsize_betweenBPs", dest="min_CNVsize_betweenBPs", d
 # pipeline skipping options 
 parser.add_argument("--skip_SVcalling", dest="skip_SVcalling", action="store_true", default=False, help="Do not run SV calling.")
 
+parser.add_argument("--skip_SV_CNV_calling", dest="skip_SV_CNV_calling", action="store_true", default=False, help="Do not run the SV and CNV calling.")
+
+
 # options of the long reads-based benchmarking
 parser.add_argument("--goldenSet_dir", dest="goldenSet_dir", type=str, default=None, help="This is the path to a directory that has some oxford nanopore reads (should end with'long_reads.fasta') and some  short paired end reads (ending with '1.fastq.gz' and '2.fastq.gz'). These are assumed to be from the exact same sample. If provided, perSVade will call SVs from it using the --nanopore configuration of svim and validate each of the 'real' (if provided), 'uniform' and 'fast' versions from the short reads on it. If you state 'auto', it will look for samples of your --target_taxID in the SRA that are suited. We already provide some automated finding of reads in the SRA for several taxIDs: 3702 (Arabidopsis_thaliana). All the jobs will be run in an squeue as specified by --job_array_mode.")
 
@@ -515,7 +518,7 @@ print("structural variation analysis with perSVade finished")
 ###### SV and CNV ANNOTATION ########
 #####################################
 
-if opt.skip_SVcalling is False and not any([x=="skip" for x in {opt.fastq1, opt.fastq2}]):
+if opt.skip_SVcalling is False and not any([x=="skip" for x in {opt.fastq1, opt.fastq2}]) and opt.skip_SV_CNV_calling is False:
 
     # delete key files if replace_SV_CNVcalling
     if opt.replace_SV_CNVcalling_and_optimisation is True: fun.remove_files_SV_CNVcalling(opt.outdir)
@@ -562,7 +565,7 @@ if opt.skip_SVcalling is False and not any([x=="skip" for x in {opt.fastq1, opt.
 
         print("annotated SV vcf can be found in %s"%SV_CNV_vcf_annotated)
     
-else: print("WARNING: Skipping SV annotation because -gff was not provided, --skip_SVcalling was provided or fastq1/fastq2 have 'skip'.")
+    else: print("WARNING: Skipping SV annotation because -gff was not provided.")
 
 #####################################
 #####################################
