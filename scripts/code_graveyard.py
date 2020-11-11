@@ -7996,3 +7996,104 @@ def get_bed_df_from_variantID(varID):
 
     return df_bed
 
+
+
+    # inferred by coverage 
+    if IDsvtype=="coverageDUP" and r["INFO_BPS_TYPE"] in {"RealBPs", "wholeChrom"}: 
+        x = [r["POS"], r["INFO_END"]]
+        color = "cyan"
+        symbol = "circle"
+        name = "coverageDUP_highConf"
+
+    elif IDsvtype=="coverageDUP" and r["INFO_BPS_TYPE"] in {"FilteredOutBPs", "oneRealBP"}: 
+        x = [r["POS"], r["INFO_END"]]
+        color = "cyan"
+        symbol = "square"
+        name = "coverageDUP_lowConf"
+
+
+    elif IDsvtype=="coverageDEL" and r["INFO_BPS_TYPE"] in {"RealBPs", "wholeChrom"}: 
+        x = [r["POS"], r["INFO_END"]]
+        color = "magenta"
+        symbol = "circle"
+        name = "coverageDEL_highConf"
+
+
+    elif IDsvtype=="coverageDEL" and r["INFO_BPS_TYPE"] in {"FilteredOutBPs", "oneRealBP"}: 
+        x = [r["POS"], r["INFO_END"]]
+        color = "magenta"
+        symbol = "square"
+        name = "coverageDEL_lowConf"
+
+    # inferred by GRIDSS+CLOVE
+    elif IDsvtype=="TDUP" and r["INFO_SVTYPE"]=="TDUP": 
+        x = [r["POS"], r["INFO_END"]]
+        color = "blue"
+        symbol = "circle"
+        name = "tandem duplications"
+
+    elif IDsvtype=="INS" and r["INFO_SVTYPE"]=="DUP": 
+        x = [r["POS"], r["INFO_END"]]
+        color = "navy"
+        symbol = "circle"
+        name = "copy-paste insertions"
+
+    elif IDsvtype=="CVD" and r["INFO_SVTYPE"]=="DUP": 
+        x = [r["POS"], r["INFO_END"]]
+        color = "green"
+        symbol = "circle"
+        name = "complex inverted duplications"
+
+
+    elif IDsvtype=="DEL" and r["INFO_SVTYPE"]=="DEL": 
+        x = [r["POS"], r["INFO_END"]]
+        color = "red"
+        symbol = "circle"
+        name = "deletions"
+
+    elif IDsvtype.endswith("like") and r["INFO_SVTYPE"]=="BND": 
+        x = [r["POS"]]
+        color = "gray"
+        symbol = "x"
+        name = "unclassified SVs BND"
+
+    elif IDsvtype.endswith("like") and r["INFO_SVTYPE"]=="insertionBND": 
+        x = [r["POS"]]
+        color = "gray"
+        symbol = "cross"
+        name = "unclassified SVs insertions"
+
+    elif not IDsvtype.endswith("like"):
+
+        # define an X for all
+        x = [r["POS"]]
+
+        needtoworkhere
+
+        # all the classified BND go into the same name 
+        if r["INFO_SVTYPE"]=="BND": 
+            symbol = "x"
+            name = "classified SVs BND"
+            color = "black"
+
+        elif r["INFO_SVTYPE"]=="insertionBND": 
+
+            pass
+            youshouldworkonthis
+
+            x = [r["POS"]]
+            color = "black"
+            symbol = "cross"
+            name = "classified SVs insertions"
+
+
+
+
+
+
+
+    else:
+        print(r["ID"])
+        print(r["INFO_SVTYPE"])
+        print(r["INFO_BPS_TYPE"])
+        raise ValueError("not considered case")

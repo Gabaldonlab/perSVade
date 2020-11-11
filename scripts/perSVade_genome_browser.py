@@ -62,12 +62,12 @@ parser.add_argument("--target_genes", dest="target_genes", default=None, type=st
 parser.add_argument("--sample_group_labels", dest="sample_group_labels", default="sample", type=str, help="A comma-sepparated string of the labels related to the different cathegories of 'bgcolor' from inout_data.")
 
 parser.add_argument("-thr", "--threads", dest="threads", default=16, type=int, help="Number of threads, Default: 16")
+parser.add_argument("--fraction_y_domain_by_gene_browser", dest="fraction_y_domain_by_gene_browser", default=0.3, type=float, help="The fraction of the yaxis taken by the gene browser")
 parser.add_argument("--replace", dest="replace", action="store_true", help="Replace existing files")
 parser.add_argument("--only_affected_genes", dest="only_affected_genes", action="store_true", help="add only the affected genes in the browser")
 parser.add_argument("--vcf_fields_onHover", dest="vcf_fields_onHover", default="all", type=str, help="A comma-sepparated string of the interesting fields of the vcf to show. If you want fields from the 'INFO', set them as 'INFO_<field>'.")
 parser.add_argument("-mchr", "--mitochondrial_chromosome", dest="mitochondrial_chromosome", default="mito_C_glabrata_CBS138", type=str, help="The name of the mitochondrial chromosome. This is important if you have mitochondrial proteins for which to annotate the impact of nonsynonymous variants, as the mitochondrial genetic code is different. This should be the same as in the gff. If there is no mitochondria just put 'no_mitochondria'. If there is more than one mitochindrial scaffold, provide them as comma-sepparated IDs.")
-
-
+parser.add_argument("--gff_annotation_fields", dest="gff_annotation_fields", default="upmost_parent,ANNOTATION_product", type=str, help="A comma-sepparated string of the interesting fields of the gff (it can include fields in the annotation by starting with 'ANNOTATION_') to add to the browser. By default, it will draw the upmost_parent of each feature, which is usually the ID of the corresponding gene.")
 
 opt = parser.parse_args()
 
@@ -105,7 +105,7 @@ opt.reference_genome = new_reference_genome
 # add the bgcolor as a random palette if not there
 if "bgcolor" not in df.keys(): 
 
-    sample_to_color, palette_sample = gfun.get_value_to_color(set(df.sampleID), palette="hls", type_color="hex")
+    sample_to_color, palette_sample = gfun.get_value_to_color(set(df.sampleID), palette="Paired", type_color="hex")
     df["bgcolor"] = df.sampleID.apply(lambda x: sample_to_color[x])
 
 # get the bgcolor as a list
@@ -114,8 +114,9 @@ df["bgcolor"] = df.bgcolor.apply(lambda x: x.split(","))
 # load the gff df
 df_gff = gfun.load_gff3_intoDF(opt.gff)
 
+
 # check that the fields of the gff are as expected
-expected_features = {'pseudogene', 'rRNA', 'tRNA', 'repeat_region', 'chromosome', 'CDS', 'mRNA', 'gene', 'exon', 'centromere', 'ncRNA', 'long_terminal_repeat'} # long_terminal_repeat
+expected_features = {'pseudogene', 'rRNA', 'tRNA', 'repeat_region', 'chromosome', 'CDS', 'mRNA', 'gene', 'exon', 'centromere', 'ncRNA', 'long_terminal_repeat', 'polyA_site', 'region'} # long_terminal_repeat
 missing_features = set(df_gff.feature).difference(expected_features)
 if len(missing_features)>0: raise ValueError("Features %s are not expected in the gff"%missing_features)
 
@@ -159,9 +160,12 @@ samples_colors_df = pd.DataFrame({sample_label : {sampleID : bgcolor[I] for samp
 if opt.vcf_fields_onHover!="all": opt.vcf_fields_onHover = set(opt.vcf_fields_onHover.split(","))
 else: opt.vcf_fields_onHover = {"#CHROM", "POS", "INFO_BREAKEND_overlaps_repeats", "INFO_BREAKEND_real_AF", "INFO_BREAKENDIDs", "INFO_BREAKEND_coordinates", "INFO_BREAKEND_FILTER"}
 
+# define the gff_annotation_fields. These are extra fields of the gff_df that are written
+gff_annotation_fields = set(opt.gff_annotation_fields.split(","))
+
 # get the browser
 filename = "%s/genome_variation_browser.html"%opt.outdir
-gfun.get_genome_variation_browser(df, samples_colors_df, target_regions, target_genes, df_gff, filename, data_dir, opt.reference_genome, threads=opt.threads, sample_group_labels=opt.sample_group_labels.split(","), only_affected_genes=opt.only_affected_genes, vcf_fields_onHover=opt.vcf_fields_onHover, replace=opt.replace, mitochondrial_chromosome=opt.mitochondrial_chromosome)
+gfun.get_genome_variation_browser(df, samples_colors_df, target_regions, target_genes, df_gff, filename, data_dir, opt.reference_genome, threads=opt.threads, sample_group_labels=opt.sample_group_labels.split(","), only_affected_genes=opt.only_affected_genes, vcf_fields_onHover=opt.vcf_fields_onHover, replace=opt.replace, mitochondrial_chromosome=opt.mitochondrial_chromosome, gff_annotation_fields=gff_annotation_fields, fraction_y_domain_by_gene_browser=opt.fraction_y_domain_by_gene_browser)
 print("genome variation browser was written into %s"%filename)
 
 

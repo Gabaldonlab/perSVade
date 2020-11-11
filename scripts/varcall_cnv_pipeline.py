@@ -429,10 +429,8 @@ else:
 
         df_vep['is_snp'] = (df_vep["ref"].apply(len)==1) & (df_vep["ref"]!="-") & (df_vep["alt"].apply(len)==1) & (df_vep["alt"]!="-")
 
-        prot_altering_mutations = {'missense_variant', 'start_lost', 'inframe_deletion', 'protein_altering_variant', 'stop_gained', 'inframe_insertion', 'frameshift_variant', 'stop_lost', 'splice_acceptor_variant', 'splice_donor_variant', 'splice_region_variant', 'non_coding_transcript_exon_variant'}
-
         df_vep["consequences_set"] = df_vep.Consequence.apply(lambda x: set(str(x).split(",")))
-        df_vep["is_protein_altering"] = df_vep.consequences_set.apply(lambda x: len(x.intersection(prot_altering_mutations))>0)
+        df_vep["is_protein_altering"] = df_vep.Consequence.apply(fun.get_is_protein_altering_consequence)
 
         # generate a table that has all the variant annotation info
         varSpec_fields = ['#Uploaded_variation', 'Gene', 'Feature', 'Feature_type', 'Consequence', 'cDNA_position', 'CDS_position', 'Protein_position', 'Amino_acids', 'Codons', 'is_snp', 'is_protein_altering']
