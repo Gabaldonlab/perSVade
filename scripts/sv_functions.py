@@ -214,6 +214,100 @@ get_interestingTaxIDs_distanceToTarget_taxID_to_sciName_py = "%s/get_interesting
 ######## DEFINE VARIABLES ##########
 ####################################
 
+# types of small variants
+ALL_MUTATIONS = {'stop_gained', 'intron_variant', 'upstream_gene_variant', '5_prime_UTR_variant', 'inframe_insertion', 'synonymous_variant', 'non_coding_transcript_exon_variant', 'intergenic_variant', 'protein_altering_variant', 'coding_sequence_variant', 'downstream_gene_variant', '3_prime_UTR_variant', 'missense_variant', 'splice_region_variant', 'splice_acceptor_variant', 'inframe_deletion', 'stop_lost', 'non_coding_transcript_variant', 'start_retained_variant', 'frameshift_variant', 'stop_retained_variant', 'start_lost', 'incomplete_terminal_codon_variant', 'splice_donor_variant'}
+
+PROT_ALTERRING_MUTATIONS = {'missense_variant', 'start_lost', 'inframe_deletion', 'protein_altering_variant', 'stop_gained', 'inframe_insertion', 'frameshift_variant', 'stop_lost', 'splice_acceptor_variant', 'splice_donor_variant', 'splice_region_variant'}
+
+NON_PROT_ALTERRING_MUTATIONS = ALL_MUTATIONS.difference(PROT_ALTERRING_MUTATIONS)
+
+# variant representation data
+sorted_consequences = ["downstream_gene_variant", "upstream_gene_variant", "3_prime_UTR_variant", "5_prime_UTR_variant", "stop_retained_variant", "synonymous_variant", "missense_variant", "stop_gained", "frameshift_variant"]
+
+consequence_to_abbreviation  = {'frameshift_variant':"FS",
+                                 'inframe_deletion':"del",
+                                 'inframe_insertion':"ins",
+                                 'missense_variant':"mis",
+                                 'protein_altering_variant':"FS",
+                                 'splice_acceptor_variant':"spliceAcc",
+                                 'splice_donor_variant':"spliceDon",
+                                 'splice_region_variant':"spliceReg",
+                                 'start_lost':"lostATG",
+                                 'stop_gained':"PTC",
+                                 'stop_lost':"lostSTOP",
+                                 'non_coding_transcript_exon_variant':"nonCodExon",
+                                 '3_prime_UTR_variant':"UTR3",
+                                 '5_prime_UTR_variant':"UTR5",
+                                 'downstream_gene_variant':"down",
+                                 'intron_variant':"intr",
+                                 'non_coding_transcript_variant':"nonCodTrans",
+                                 'start_retained_variant':"retATG",
+                                 'stop_retained_variant':"retSTOP",
+                                 'synonymous_variant':"syn",
+                                 'upstream_gene_variant':"up",
+                                 'intergenic_variant':"ig", 
+                                 'incomplete_terminal_codon_variant':"incTermCodonVar",
+                                 "coding_sequence_variant":"codSeqVar",
+                                 '':"empty"}
+
+# define a set of priorities of the variants                                                   
+var_to_IDX  =  {'frameshift_variant':0,
+                'stop_gained':1,
+                'start_lost':2,
+                'protein_altering_variant':3,
+                'inframe_deletion':4,
+                'inframe_insertion':5,
+                'stop_lost':6,
+                'missense_variant':7,
+                'splice_acceptor_variant':8,
+                'splice_donor_variant':8,
+                'splice_region_variant':9,
+                '3_prime_UTR_variant':10,
+                'downstream_gene_variant':11,
+                'upstream_gene_variant':11,
+                '5_prime_UTR_variant':11,
+                'intron_variant':12,
+                'synonymous_variant':13,
+                'coding_sequence_variant':13,
+                'incomplete_terminal_codon_variant':14,
+                'start_retained_variant':14,
+                'stop_retained_variant':15,
+                'non_coding_transcript_exon_variant':16,
+                'non_coding_transcript_variant':17,
+                'intergenic_variant':18,
+                '':19}
+
+# map each type of variant to either CDS position, Codons or Protein_position, Amino_acids
+info_codons = ("c", "CDS_position", "Codons")
+info_aa = ("p", "Protein_position", "Amino_acids")
+info_spliciingAndNoncoding = ("g", "CDS_position", "#Uploaded_variation")
+
+protVar_to_info =  {'frameshift_variant':info_aa,
+                             'inframe_deletion': info_aa,
+                             'inframe_insertion': info_aa,
+                             'missense_variant': info_aa,
+                             'protein_altering_variant': info_aa,
+                             'splice_acceptor_variant': info_spliciingAndNoncoding,
+                             'splice_region_variant': info_spliciingAndNoncoding,
+                             'start_lost': info_codons,
+                             'stop_gained': info_aa,
+                             'stop_lost': info_codons,
+                             'non_coding_transcript_exon_variant': info_spliciingAndNoncoding,
+                             'splice_donor_variant':info_spliciingAndNoncoding,
+                             '3_prime_UTR_variant': info_spliciingAndNoncoding,
+                             '5_prime_UTR_variant': info_spliciingAndNoncoding,
+                             'downstream_gene_variant': info_spliciingAndNoncoding,
+                             'non_coding_transcript_variant': info_spliciingAndNoncoding,
+                             'start_retained_variant': info_spliciingAndNoncoding,
+                             'stop_retained_variant': info_spliciingAndNoncoding,
+                             'synonymous_variant': info_codons,
+                             'upstream_gene_variant': info_spliciingAndNoncoding,
+                             'intron_variant':info_spliciingAndNoncoding,
+                             'intergenic_variant':info_spliciingAndNoncoding,
+                             "coding_sequence_variant":info_codons,
+                             "incomplete_terminal_codon_variant":info_spliciingAndNoncoding,
+                             "":info_spliciingAndNoncoding}
+
 # define the strings that have to be considered as NaN in the VCF parsing
 vcf_strings_as_NaNs = ['', '#N/A', '#N/A N/A', '#NA', '-1.#IND', '-1.#QNAN', '-NaN', '-nan', '1.#IND', '1.#QNAN', 'N/A', 'NULL', 'NaN', 'n/a', 'nan', 'null']
 
@@ -6478,6 +6572,20 @@ def get_svtype_to_svfile_and_df_gridss_from_perSVade_outdir(perSVade_outdir, ref
     print_if_verbose("There are %i svfiles"%len(svtype_to_svfile))
 
     return svtype_to_svfile, df_gridss
+
+
+def get_is_protein_altering_consequence(consequence):
+
+    """Takes tha consequences and returns whether they are protein altering"""
+
+    # get as set
+    consequences_set = set(consequence.split(","))
+
+    # ask
+    if len(consequences_set.intersection(PROT_ALTERRING_MUTATIONS))>0: return True
+    elif len(consequences_set.difference(NON_PROT_ALTERRING_MUTATIONS))==0: return False
+    else: raise ValueError("%s contains non-described vars"%consequences_set)
+
 
 def copy_file(origin, target):
 
@@ -14956,7 +15064,7 @@ def get_current_clusterName_mareNostrum():
     return cluster_name
 
 
-def get_integrated_variants_into_one_df(df, file_prefix, replace=False):
+def get_integrated_variants_into_one_df(df, file_prefix, replace=False, remove_files=False):
 
     """This function takes a df (or a .tab file) with the following fields:
     
@@ -15035,6 +15143,11 @@ def get_integrated_variants_into_one_df(df, file_prefix, replace=False):
     small_vars_annot = get_tab_as_df_or_empty_df(small_vars_annot_file)
     SV_CNV = get_tab_as_df_or_empty_df(SV_CNV_file)
     SV_CNV_annot = get_tab_as_df_or_empty_df(SV_CNV_annot_file)
+
+
+    if remove_files is True:
+        for f in [small_vars_file, small_vars_annot_file, SV_CNV_file, SV_CNV_annot_file]: remove_file(f)
+
 
     return small_vars, small_vars_annot, SV_CNV, SV_CNV_annot
 
@@ -15120,7 +15233,9 @@ def run_perSVade_severalSamples(paths_df, cwd, common_args, threads=4, sampleID_
 
 def get_bed_df_from_variantID(varID):
 
-    """Takes a variant ID, such as the ones in SV_CNV vcf 'INFO_variantID'. It returns a df with all chromosome-start-end information that should be matched to be considered as the same variant"""
+    """Takes a variant ID, such as the ones in SV_CNV vcf 'INFO_variantID'. It returns a df with all chromosome-start-end information that should be matched to be considered as the same variant.
+
+    The chromosomes always have extra information, such as the svtype, which makes that the future bedmap run will not match events from the same chromosome but different svtypes."""
 
     # get the ID svtype
     svtype = varID.split("|")[0]
@@ -15131,14 +15246,13 @@ def get_bed_df_from_variantID(varID):
         chrom = "%s_%s"%(svtype, varID.split("|")[1].split(":")[0])
         start = int(varID.split("|")[1].split(":")[1].split("-")[0])
         end = int(varID.split("|")[1].split(":")[1].split("-")[1])
-        type_overlap = "all"
+        type_overlap = "both" # this means that both the positions and fraction of overlap should be matching
 
         dict_bed = {0 : {"chromosome":chrom, "start":start, "end":end, "ID":varID, "type_overlap":type_overlap}}
 
     elif svtype.endswith("like"):
 
         posA, posB = varID.split("|")[1].split("-")
-
 
         chromA = "%s_%s"%(svtype, posA.split(":")[0])
         chromB = "%s_%s"%(svtype, posB.split(":")[0])
@@ -15149,10 +15263,25 @@ def get_bed_df_from_variantID(varID):
         startB = endB = int(posB.split(":")[1])
         endB = startB + 1
 
-        type_overlap = "pos"
+        type_overlap = "pos" # this means that only the position should be mapping
 
         dict_bed = {0 : {"chromosome":chromA, "start":startA, "end":endA, "ID":varID+"-A", "type_overlap":type_overlap},
                     1 : {"chromosome":chromB, "start":startB, "end":endB, "ID":varID+"-B", "type_overlap":type_overlap}}
+
+    elif svtype in {"INS"}:
+
+        regionA, posB, typeIns = varID.split("|")[1:]
+
+        chromA = "%s_%s_%s"%(svtype, typeIns, regionA.split(":")[0])
+        startA, endA = [int(x) for x in regionA.split(":")[1].split("-")]
+
+        chromB = "%s_%s_%s"%(svtype, typeIns, posB.split(":")[0])
+        startB = int(posB.split(":")[1])
+        endB = startB + 1
+
+        # here the A region is copied or pasted into a B breakend. This means that the type_overlap is different
+        dict_bed = {0 : {"chromosome":chromA, "start":startA, "end":endA, "ID":varID+"-A", "type_overlap":"both"},
+                    1 : {"chromosome":chromB, "start":startB, "end":endB, "ID":varID+"-B", "type_overlap":"pos"}}
 
     else: raise ValueError("%s has not been parsed"%varID)
 
@@ -15165,9 +15294,10 @@ def get_bed_df_from_variantID(varID):
 
     return df_bed
 
+
 def get_SV_CNV_df_with_common_variantID_acrossSamples(SV_CNV, outdir, pct_overlap, tol_bp):
 
-    """Takes a SV_CNV df and returns it with the field 'common_variantID_across_samples'. It uses bedmap to be particularly efficient."""
+    """Takes a SV_CNV df and returns it with the field 'variantID_across_samples'. It uses bedmap to be particularly efficient."""
 
     make_folder(outdir)
 
@@ -15182,10 +15312,7 @@ def get_SV_CNV_df_with_common_variantID_acrossSamples(SV_CNV, outdir, pct_overla
     variants_bed = "%s/variants_regions.bed"%outdir
     df_bed_all[["chromosome", "start", "end", "ID"]].to_csv(variants_bed, sep="\t", index=False, header=False)
 
-
-    print(df_bed_all[["start", "end"]])
-
-    ######### RUN BEDMAP #########
+    ######### RUN BEDMAP TO MAP VARIANTS TO EACH OTHER #########
 
     # define the stderr
     bedmap_stderr = "%s/running_bedmap_.stderr"%outdir
@@ -15211,37 +15338,67 @@ def get_SV_CNV_df_with_common_variantID_acrossSamples(SV_CNV, outdir, pct_overla
     df_overlap["ID"] = df_overlap_tolBp.ID
     df_overlap = df_overlap.set_index("ID", drop=False)
 
-    thisneedstoberefactored
-
     # at the IDs that overlap by either measures 
-    df_overlap["tol_bp_IDs_overlap"] = df_overlap_tolBp.loc[df_overlap.index, "overlapping_IDs"].apply(lambda x: set(x.split(";")))
+    df_overlap["IDs_overlap_pos"] = df_overlap_tolBp.loc[df_overlap.index, "overlapping_IDs"].apply(lambda x: set(x.split(";")))
 
-    df_overlap["pct_overlap_IDs_overlap"] = df_overlap_pctOverlap.loc[df_overlap.index, "overlapping_IDs"].apply(lambda x: set(x.split(";")))
+    df_overlap["IDs_overlap_fraction"] = df_overlap_pctOverlap.loc[df_overlap.index, "overlapping_IDs"].apply(lambda x: set(x.split(";")))
 
-    df_overlap["IDs_overlap_both"] = df_overlap.apply(lambda r: r["tol_bp_IDs_overlap"].intersection(r["pct_overlap_IDs_overlap"]), axis=1)
+    df_overlap["IDs_overlap_both"] = df_overlap.apply(lambda r: r["IDs_overlap_pos"].intersection(r["IDs_overlap_fraction"]), axis=1)
 
-    df_overlap["IDs_overlap_any"] = df_overlap.apply(lambda r: r["tol_bp_IDs_overlap"].union(r["pct_overlap_IDs_overlap"]), axis=1)
+    df_overlap["IDs_overlap_any"] = df_overlap.apply(lambda r: r["IDs_overlap_pos"].union(r["IDs_overlap_fraction"]), axis=1)
 
+    ###############################################
 
-    #############################
-
+    ######## MAP EACH VARID TO THE OTHER IDs ########
 
     # map each variantID to the bedIDs
     varID_to_bedIDs = dict(df_bed_all.groupby("variantID").apply(lambda df_varID: set(df_varID.ID)))
 
+    # map each bedID to the type overlap field
+    bedID_to_typeOverlapF = dict("IDs_overlap_" + df_bed_all.set_index("ID")["type_overlap"])
 
+    # init
+    varID_to_overlapping_varIDs = {}
 
+    # go through each variantID
+    for varID_q, bedIDs_q in varID_to_bedIDs.items():
 
-    print(varID_to_bedIDs)
-    bedmap
-    kjhadkjhdahda
+        # init 
+        varID_to_overlapping_varIDs[varID_q] = set()
 
+        # go through the targets, and ke
+        for varID_t, bedIDs_t in varID_to_bedIDs.items():
 
+            # In order to have the variants overlapping, all the query bedIDs should be overlapped by at least one target bedID according to bedID_to_typeOverlapF
 
-    
+            variants_are_overlapping = all([ any([ bedID_t in df_overlap.loc[bedID_q, bedID_to_typeOverlapF[bedID_q]] for bedID_t in bedIDs_t ]) for bedID_q in bedIDs_q ])
 
+            if variants_are_overlapping is True: varID_to_overlapping_varIDs[varID_q].add(varID_t)
 
-    lhjdskljhdskjh
+    # print
+    for varID, o_varIDs in varID_to_overlapping_varIDs.items(): print(varID, o_varIDs)
+
+    #################################################
+
+    ########## ADD THE variantID_across_samples ##########
+
+    # get the list of clusters of the variant IDs
+    list_clusters_varIDs = get_list_clusters_from_dict(varID_to_overlapping_varIDs)
+
+    # create a dict that maps each clusterID to the cluster
+    clusterID_to_varIDs = {"cluster%i_%s"%(I, next(iter(varIDs)).split("|")[0]) : varIDs for I, varIDs in enumerate(list_clusters_varIDs)}
+
+    # map each varID to the clusterID
+    varID_to_clusterID = {}
+    for clusterID, varIDs in clusterID_to_varIDs.items():
+        for varID in varIDs: varID_to_clusterID[varID] = clusterID
+
+    # add to the final df
+    SV_CNV["variantID_across_samples"] = SV_CNV.INFO_variantID.apply(lambda x: varID_to_clusterID[x])
+
+    #######################################################
+
+    return SV_CNV
 
 def get_integrated_SV_CNV_smallVars_df_from_run_perSVade_severalSamples(paths_df, cwd, ploidy, pct_overlap, tol_bp):
 
@@ -15253,13 +15410,14 @@ def get_integrated_SV_CNV_smallVars_df_from_run_perSVade_severalSamples(paths_df
     # init dfs
     small_vars_df = pd.DataFrame()
     small_var_annot = pd.DataFrame()
+    coverage_df = pd.DataFrame()
 
     # init dict
     sampleID_to_SV_dataDict = {}
 
 
     samples_to_run = set(paths_df.sampleID)
-    samples_to_run = {"RUN2_H99_Kerstin", "RUN2_H99_1"}
+    #samples_to_run = {"RUN2_H99_Kerstin", "RUN2_H99_1"}
 
     for sampleID in samples_to_run:
         print(sampleID)
@@ -15275,6 +15433,11 @@ def get_integrated_SV_CNV_smallVars_df_from_run_perSVade_severalSamples(paths_df
         # add the small variants annotation
         small_var_annot = small_var_annot.append(pd.read_csv("%s/smallVars_CNV_output/variant_annotation_ploidy%i.tab"%(outdir, ploidy), sep="\t")).drop_duplicates()
 
+        # add the coverage
+        s_coverage_df = pd.read_csv("%s/smallVars_CNV_output/CNV_results/genes_and_regions_coverage.tab"%(outdir), sep="\t")
+        s_coverage_df["sampleID"] = sampleID
+        coverage_df = coverage_df.append(s_coverage_df)
+
         # add data to 
         sampleID_to_SV_dataDict[sampleID] = {"sampleID":sampleID,
                                              "SV_CNV_vcf":"%s/SVcalling_output/SV_and_CNV_variant_calling.vcf"%(outdir),
@@ -15286,17 +15449,24 @@ def get_integrated_SV_CNV_smallVars_df_from_run_perSVade_severalSamples(paths_df
     df_data = pd.DataFrame(sampleID_to_SV_dataDict).transpose()
     file_prefix = "%s/integrated_SV_CNV_calling"%cwd
 
-    SV_CNV, SV_CNV_annot = get_integrated_variants_into_one_df(df_data, file_prefix, replace=True)[2:]
+    SV_CNV, SV_CNV_annot = get_integrated_variants_into_one_df(df_data, file_prefix, replace=True, remove_files=True)[2:]
 
     # add the common variant ID across samples
     outdir_common_variantID_acrossSamples = "%s/getting_common_variantID_acrossSamples"%cwd
     delete_folder(outdir_common_variantID_acrossSamples)
 
-    SV_CNV = get_SV_CNV_df_with_common_variantID_acrossSamples(SV_CNV, outdir_common_variantID_acrossSamples, pct_overlap, tol_bp) 
+    SV_CNV = get_SV_CNV_df_with_common_variantID_acrossSamples(SV_CNV, outdir_common_variantID_acrossSamples, pct_overlap, tol_bp)
+
+    SV_CNV = SV_CNV[[k for k in SV_CNV.keys() if k!="INFO"]]
 
     delete_folder(outdir_common_variantID_acrossSamples)
 
-    return small_vars_df, small_var_annot, SV_CNV, SV_CNV_annot
+    # write dfs
+    save_df_as_tab(small_vars_df, "%s/smallVars_ploidy%i.tab"%(cwd, ploidy))
+    save_df_as_tab(small_var_annot, "%s/smallVars_annot_ploidy%i.tab"%(cwd, ploidy))
+    save_df_as_tab(SV_CNV, "%s/SV_CNV_ploidy%i.tab"%(cwd, ploidy))
+    save_df_as_tab(SV_CNV_annot, "%s/SV_CNV_annot_ploidy%i.tab"%(cwd, ploidy))
+    save_df_as_tab(coverage_df, "%s/merged_coverage.tab"%cwd)
 
 #######################################################################################
 #######################################################################################
