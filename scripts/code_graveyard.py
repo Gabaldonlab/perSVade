@@ -8097,3 +8097,139 @@ def get_bed_df_from_variantID(varID):
         print(r["INFO_SVTYPE"])
         print(r["INFO_BPS_TYPE"])
         raise ValueError("not considered case")
+
+
+
+def get_Gene_Feature_varAnnot_from_VepOutput_r(r, gff_df):
+
+    """Takes a row of the vep output and returns the gene and the feature according to upmost_parent of the gff_df (Gene) and ID (Feature) """
+
+    # define the annotation fields
+    annotation_fields = [k for k in gff_df.keys() if k.startswith("ANNOTATION_")]
+
+    # get the fields where to look
+    fields = ["upmost_parent", "ANNOTATION_ID", "ID", "ANNOTATION_Dbxref_GeneID"] + annotation_fields
+    fields = [f for f in fields if f in gff_df.keys() and f not in {"start", "end", "numeric_idx"}]
+
+    # intergenic vars
+    if r["Gene"]=="-": gene = feature = "-"
+
+    else:
+
+        ######### FIND THE GENE ########
+
+        # get the genes df
+        df_genes = gff_df[gff_df.feature.isin({"gene", "pseudogene"})]
+
+        # find the upmost_parent from the different fields
+        for f in fields:
+
+            # see if the df is here
+            df = df_genes[df_genes[f]==r["Gene"]]
+
+            # once you find a match, return
+            if len(df)>1: 
+                gene = df.iloc[0]["upmost_parent"]
+                break
+
+        ################################
+
+        ######### FIND THE ANNOTATION ######### 
+
+        # get the all the gff for this gene
+        gff_df = gff_df[gff_df.upmost_parent==gene]
+
+        print(gff_df)
+
+        kajdhkhgad
+
+
+
+
+        #######################################
+
+    return pd.Series({"Gene":gene, "Feature":feature})
+
+
+def get_Gene_varAnnot_from_gene(gene, genes_df):
+
+    """Get the gene so that it is in the gff_df"""
+
+    # set the gene as a str
+    gene = str(gene)
+
+    # debug the genes
+    if gene=="-": return "-"
+
+    # get gene of is is in upmost parent
+    if gene in genes_df["upmost_parent"]: return gene
+
+    # try to assign it by geneID_Dbxref
+    elif "geneID_Dbxref" in set(genes_df.keys()) and gene in set(genes_df.geneID_Dbxref): 
+
+        all_upmost_parents = set(genes_df[genes_df.geneID_Dbxref==gene].upmost_parent)
+
+        if len(all_upmost_parents)!=1: raise ValueError("%s can be assigned (through dbxref geneID) to these upmost parents: %s"%(gene, all_upmost_parents))
+
+        return next(iter(all_upmost_parents))
+
+    else:  raise ValueError("%s could not be found in the gff"%gene)
+
+def get_GeneID_from_dbxref(x):
+
+    """returns geneID"""
+
+    all_geneIDs_list = [y.split(":")[1] for y in x.split(",") if y.startswith("GeneID")]
+
+    if len(all_geneIDs_list)==0: return "no_gene"
+    elif len(all_geneIDs_list)==1: return all_geneIDs_list[0]
+    else: raise ValueError("%s is not valid"%all_geneIDs_list)
+
+
+
+def get_sortedBam_with_duplicatesMarked(sorted_bam, threads=4, replace=False, remove_duplicates):
+
+    """This function takes a sorted bam and returns the equivalent with the duplicates marked with picard MarkDuplicates. It also indexes this bam"""
+
+    # define dirs
+    sorted_bam_dupMarked = "%s.MarkDups.bam"%sorted_bam
+    sorted_bam_dupMarked_tmp = "%s.MarkDups.tmp.bam"%sorted_bam
+    sorted_bam_dupMarked_metrics = "%s.MarkDups.metrics"%sorted_bam
+
+    if file_is_empty(sorted_bam_dupMarked) or replace is True:
+        print_if_verbose("marking duplicate reads")
+
+        # define the java memory
+        #javaRamGb = int(get_availableGbRAM(get_dir(sorted_bam))*fractionRAM_to_dedicate) # At Broad, we run MarkDuplicates with 2GB Java heap (java -Xmx2g) and 10GB hard memory limit
+        #javaRamGb = int(get_availableGbRAM(get_dir(sorted_bam))*0.5) # At Broad, we run MarkDuplicates with 2GB Java heap (java -Xmx2g) and 10GB hard memory limit
+        javaRamGb = int(get_availableGbRAM(get_dir(sorted_bam)) - 2) # rule of thumb from GATK
+        #javaRamGb = 4 # this is from a post from 2011, reccommended for a 170Gb RAM
+
+        # define the MAX_RECORDS_IN_RAM
+        MAX_RECORDS_IN_RAM = int(250000*javaRamGb*0.8) # 250,000 reads for each Gb given (for SortSam, I don't know if this will work for Picard tools)
+
+        # define the number of MAX_FILE_HANDLES_FOR_READ_ENDS_MAP
+        max_nfilehandles = int(subprocess.check_output("ulimit -n", shell=True))
+        MAX_FILE_HANDLES_FOR_READ_ENDS_MAP = int(max_nfilehandles*0.5) # a little lower than ulimit -n
+
+        # SORTING_COLLECTION_SIZE_RATIO is 0.25 by default. If I have memory issues I can reduce this number.
+
+        markduplicates_std = "%s.markingDuplicates.std"%sorted_bam
+        print_if_verbose("running MarkDuplicates with %iGb of RAM and %i MAX_FILE_HANDLES_FOR_READ_ENDS_MAP. The std is in %s"%(javaRamGb, MAX_FILE_HANDLES_FOR_READ_ENDS_MAP, markduplicates_std))
+
+        # running with the traditional MarkDuplicates implementation
+        run_cmd("%s -Xmx%ig MarkDuplicates I=%s O=%s M=%s ASSUME_SORT_ORDER=coordinate MAX_FILE_HANDLES_FOR_READ_ENDS_MAP=%i MAX_RECORDS_IN_RAM=%i > %s 2>&1"%(picard_exec, javaRamGb, sorted_bam, sorted_bam_dupMarked_tmp, sorted_bam_dupMarked_metrics, MAX_FILE_HANDLES_FOR_READ_ENDS_MAP, MAX_RECORDS_IN_RAM, markduplicates_std), env=EnvName_picard)
+        #REMOVE_DUPLICATES=Boolean
+
+        remove_file(markduplicates_std)
+
+        # keep
+        os.rename(sorted_bam_dupMarked_tmp, sorted_bam_dupMarked)
+
+    # index the bam with the duplicate reads
+    index_sorted_bam_dupMarked = "%s.bai"%sorted_bam_dupMarked
+    if file_is_empty(index_sorted_bam_dupMarked) or replace is True:
+        index_bam(sorted_bam_dupMarked, threads=threads)
+
+    return sorted_bam_dupMarked
+

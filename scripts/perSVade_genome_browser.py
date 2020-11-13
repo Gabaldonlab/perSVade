@@ -68,6 +68,11 @@ parser.add_argument("--only_affected_genes", dest="only_affected_genes", action=
 parser.add_argument("--vcf_fields_onHover", dest="vcf_fields_onHover", default="all", type=str, help="A comma-sepparated string of the interesting fields of the vcf to show. If you want fields from the 'INFO', set them as 'INFO_<field>'.")
 parser.add_argument("-mchr", "--mitochondrial_chromosome", dest="mitochondrial_chromosome", default="mito_C_glabrata_CBS138", type=str, help="The name of the mitochondrial chromosome. This is important if you have mitochondrial proteins for which to annotate the impact of nonsynonymous variants, as the mitochondrial genetic code is different. This should be the same as in the gff. If there is no mitochondria just put 'no_mitochondria'. If there is more than one mitochindrial scaffold, provide them as comma-sepparated IDs.")
 parser.add_argument("--gff_annotation_fields", dest="gff_annotation_fields", default="upmost_parent,ANNOTATION_product", type=str, help="A comma-sepparated string of the interesting fields of the gff (it can include fields in the annotation by starting with 'ANNOTATION_') to add to the browser. By default, it will draw the upmost_parent of each feature, which is usually the ID of the corresponding gene.")
+parser.add_argument("--interesting_features", dest="interesting_features", default="all", type=str, help="A comma-sepparated string of the interesting features of the gff to draw.")
+
+parser.add_argument("--coverage_range", dest="coverage_range", default="0,2", type=str, help="A comma-sepparated string of the minimum and max coverage.")
+
+
 
 opt = parser.parse_args()
 
@@ -112,8 +117,7 @@ if "bgcolor" not in df.keys():
 df["bgcolor"] = df.bgcolor.apply(lambda x: x.split(","))
 
 # load the gff df
-df_gff = gfun.load_gff3_intoDF(opt.gff)
-
+df_gff = fun.load_gff3_intoDF(opt.gff)
 
 # check that the fields of the gff are as expected
 expected_features = {'pseudogene', 'rRNA', 'tRNA', 'repeat_region', 'chromosome', 'CDS', 'mRNA', 'gene', 'exon', 'centromere', 'ncRNA', 'long_terminal_repeat', 'polyA_site', 'region'} # long_terminal_repeat
@@ -163,9 +167,16 @@ else: opt.vcf_fields_onHover = {"#CHROM", "POS", "INFO_BREAKEND_overlaps_repeats
 # define the gff_annotation_fields. These are extra fields of the gff_df that are written
 gff_annotation_fields = set(opt.gff_annotation_fields.split(","))
 
+# define the interesting features
+if opt.interesting_features=="all": interesting_features = set(df_gff.feature)
+else: interesting_features = set(opt.interesting_features.split(","))
+
+# define  coverage_range
+min_cov, max_cov = [float(x) for x in opt.coverage_range.split(",")]
+
 # get the browser
 filename = "%s/genome_variation_browser.html"%opt.outdir
-gfun.get_genome_variation_browser(df, samples_colors_df, target_regions, target_genes, df_gff, filename, data_dir, opt.reference_genome, threads=opt.threads, sample_group_labels=opt.sample_group_labels.split(","), only_affected_genes=opt.only_affected_genes, vcf_fields_onHover=opt.vcf_fields_onHover, replace=opt.replace, mitochondrial_chromosome=opt.mitochondrial_chromosome, gff_annotation_fields=gff_annotation_fields, fraction_y_domain_by_gene_browser=opt.fraction_y_domain_by_gene_browser)
+gfun.get_genome_variation_browser(df, samples_colors_df, target_regions, target_genes, df_gff, filename, data_dir, opt.reference_genome, threads=opt.threads, sample_group_labels=opt.sample_group_labels.split(","), only_affected_genes=opt.only_affected_genes, vcf_fields_onHover=opt.vcf_fields_onHover, replace=opt.replace, mitochondrial_chromosome=opt.mitochondrial_chromosome, gff_annotation_fields=gff_annotation_fields, fraction_y_domain_by_gene_browser=opt.fraction_y_domain_by_gene_browser, interesting_features=interesting_features, min_cov=min_cov, max_cov=max_cov)
 print("genome variation browser was written into %s"%filename)
 
 

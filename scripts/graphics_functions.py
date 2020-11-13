@@ -90,149 +90,7 @@ def get_value_to_color(values, palette="mako", n=100, type_color="rgb", center=N
 
     return value_to_color, palette_dict
 
-
-def load_gff3_intoDF(gff_path):
-
-    """ Takes the path to a gff and loads it into a df"""
-
-    gff_df_file = "%s.df.tab"%gff_path
-
-    if fun.file_is_empty(gff_df_file):
-
-        # define the number of rows to skip
-        gff_lines = "%s.gff_lines.gff"%gff_path
-        fun.run_cmd("egrep -v '^#' %s > %s"%(gff_path, gff_lines))
-
-        # define the gff fields
-        gff_fields = ["chromosome", "source", "feature", "start", "end", "blank1", "strand", "blank2", "annotation"]
-
-        # load
-        print("loading gff")
-        gff = pd.read_csv(gff_lines, header=None, names=gff_fields, sep="\t")
-
-        # set all possible annotations
-        all_annotations = set.union(*[set([x.split("=")[0] for x in an.split(";")]) for an in gff.annotation])
-
-        def list_to_str(list_x):
-
-            if list_x==[]: return ""
-            else: return list_x[0]
-        
-        for anno in all_annotations:
-
-            # define the field 
-            anno_field = "ANNOTATION_%s"%anno
-
-            # add the normalQ annotation field
-            gff[anno_field] = gff.annotation.apply(lambda x: list_to_str([a.split(anno)[1].lstrip("=") for a in x.split(";") if anno in a]))
-
-            # add the Dbxref sepparated
-            if anno=="Dbxref": 
-
-                # get all the dbxref fields
-                all_Dbxrefs = set.union(*[set([x.split(":")[0] for x in dbxref.split(",")]) for dbxref in gff[anno_field]])
-
-                # go through each dbxref field and add it to the df
-                for dbxref in all_Dbxrefs: 
-
-                    gff["%s_%s"%(anno_field, dbxref)] = gff[anno_field].apply(lambda x: list_to_str([d.split(dbxref)[1].lstrip(":") for d in x.split(",") if dbxref in d]))
-
-        # get the ID
-        gff["ID"] = gff.ANNOTATION_ID
-        gff["Parent"] = gff.ANNOTATION_Parent
-
-        # change the ID so that all of the features are unique, add numbers for non-unique IDs
-        gff["duplicated_ID"] = gff.duplicated(subset="ID", keep=False) # marks all the duplicated IDs with a True
-        gff["numeric_idx"] = list(range(0, len(gff)))
-
-        def getuniqueIDs_gff(row):
-
-            """Takes a row and changes the IDs if they are not unique"""
-            if row["duplicated_ID"] is False: return row["ID"]
-            else: return "%s-%i"%(row["ID"], row["numeric_idx"])
-
-        gff["ID"] = gff.apply(getuniqueIDs_gff, axis=1)
-
-        # check that it is correct
-        if len(gff)!=len(set(gff["ID"])): raise ValueError("IDs are not unique in the gff")
-
-        # set the id as index
-        gff = gff.set_index("ID", drop=False)
-
-        # add the upmost_parent (which should be the geneID)
-        print("getting upmost parent")
-        def get_utmost_parent(row, gff_df):
-
-            """Takes a row and the gff_df and returns the highest parent. The index has to be the ID of the GFF"""
-
-            # when you have found the parent it has no parent, so the ID is the upmost_parent
-            if row["Parent"]=="": return row["ID"]
-
-            # else you go to the parent
-            else: return get_utmost_parent(gff_df.loc[row["Parent"]], gff_df)
-
-        gff["upmost_parent"] = gff.apply(lambda row: get_utmost_parent(row, gff), axis=1)
-        gff = gff.set_index("upmost_parent", drop=False)
-
-        # add the type of upmost_parent
-        df_upmost_parents = gff[gff.ID==gff.upmost_parent]
-
-        # check that the upmost_parents are unique
-        if len(df_upmost_parents)!=len(set(df_upmost_parents.ID)): raise ValueError("upmost parents are not unique")
-
-        # map each upmost_parent to the feature
-        upmost_parent_to_feature = dict(df_upmost_parents.set_index("upmost_parent")["feature"])
-
-        # add the upmost_parent_feature to gff df
-        gff["upmost_parent_feature"] = gff.upmost_parent.apply(lambda x: upmost_parent_to_feature[x])
-
-        # write df
-        gff_df_file_tmp = "%s.tmp"%gff_df_file
-        gff.to_csv(gff_df_file_tmp, sep="\t", index=False, header=True)
-        os.rename(gff_df_file_tmp, gff_df_file)
-
-
-    # load
-    gff = pd.read_csv(gff_df_file, sep="\t")
-
-    return gff
-
-
-def get_Gene_varAnnot_from_gene(gene, genes_df):
-
-    """Get the gene so that it is in the gff_df"""
-
-    # set the gene as a str
-    gene = str(gene)
-
-    # debug the genes
-    if gene=="-": return "-"
-
-    # get gene of is is in upmost parent
-    if gene in genes_df["upmost_parent"]: return gene
-
-    # try to assign it by geneID_Dbxref
-    elif "geneID_Dbxref" in set(genes_df.keys()) and gene in set(genes_df.geneID_Dbxref): 
-
-        all_upmost_parents = set(genes_df[genes_df.geneID_Dbxref==gene].upmost_parent)
-
-        if len(all_upmost_parents)!=1: raise ValueError("%s can be assigned (through dbxref geneID) to these upmost parents: %s"%(gene, all_upmost_parents))
-
-        return next(iter(all_upmost_parents))
-
-    else:  raise ValueError("%s could not be found in the gff"%gene)
-
-def get_GeneID_from_dbxref(x):
-
-    """returns geneID"""
-
-    all_geneIDs_list = [y.split(":")[1] for y in x.split(",") if y.startswith("GeneID")]
-
-    if len(all_geneIDs_list)==0: return "no_gene"
-    elif len(all_geneIDs_list)==1: return all_geneIDs_list[0]
-    else: raise ValueError("%s is not valid"%all_geneIDs_list)
-
-def get_descriptions_affected_features(r, gff_df):
+def get_descriptions_affected_features(r, gff_df, all_ANNOTATION_IDs):
 
     """Taakes a row of an annotation df and returns all the product descriptons of the proteins"""
 
@@ -243,200 +101,23 @@ def get_descriptions_affected_features(r, gff_df):
     if r["Gene"]=="-": return "no_gene"
 
     # get the features as a set
-    features = set(r["Feature"].split(","))
-
-    # get the gff df that matches the features
-    gff_df = gff_df[(gff_df.ANNOTATION_ID.isin(features))]
+    features = set(r["Feature"].split(",")).intersection(all_ANNOTATION_IDs)
+    if len(features)==0: raise ValueError("there are no properly intersecting features")    
 
     # get all the proteins
-    all_products = set(gff_df["ANNOTATION_product"])
-    if len(all_products)!=1: raise ValueError("there are more than 1 product: %s"%all_products)
+    all_products = set(gff_df.loc[features, "ANNOTATION_product"])
+    if len(all_products)!=1: raise ValueError("there are more than 1 product: %s"%features)
 
     product = next(iter(all_products))
 
     return product
-
-def get_gffID_from_vep_df_field(x, field_x, target_gff_fields, gff_df):
-
-    """Get the ID from gff_df among the target_gff_fields"""
-
-    # debug intergenic vars
-    if x=="-": return x
-
-    # define the final gff field
-    final_gff_field = {"Gene":"upmost_parent", "Feature":"ANNOTATION_ID"}[field_x]
-
-    # get all the ANNOTATION_IDs
-    all_final_gff_IDs = set.union(*map(lambda f: set(gff_df[gff_df[f]==x][final_gff_field]), target_gff_fields))
-
-    # debug
-    if field_x=="Gene" and len(all_final_gff_IDs)!=1: 
-
-        print(x, field_x, target_gff_fields, all_final_gff_IDs)
-        raise ValueError("There are more than 1 values.")
-
-    # join them
-    all_final_gff_IDs = ",".join(sorted(all_final_gff_IDs))
-
-    return all_final_gff_IDs
-
-def get_Gene_Feature_varAnnot_from_VepOutput_r(r, gff_df):
-
-    """Takes a row of the vep output and returns the gene and the feature according to upmost_parent of the gff_df (Gene) and ID (Feature) """
-
-    # define the annotation fields
-    annotation_fields = [k for k in gff_df.keys() if k.startswith("ANNOTATION_")]
-
-    # get the fields where to look
-    fields = ["upmost_parent", "ANNOTATION_ID", "ID", "ANNOTATION_Dbxref_GeneID"] + annotation_fields
-    fields = [f for f in fields if f in gff_df.keys() and f not in {"start", "end", "numeric_idx"}]
-
-    # intergenic vars
-    if r["Gene"]=="-": gene = feature = "-"
-
-    else:
-
-        ######### FIND THE GENE ########
-
-        # get the genes df
-        df_genes = gff_df[gff_df.feature.isin({"gene", "pseudogene"})]
-
-        # find the upmost_parent from the different fields
-        for f in fields:
-
-            # see if the df is here
-            df = df_genes[df_genes[f]==r["Gene"]]
-
-            # once you find a match, return
-            if len(df)>1: 
-                gene = df.iloc[0]["upmost_parent"]
-                break
-
-        ################################
-
-        ######### FIND THE ANNOTATION ######### 
-
-        # get the all the gff for this gene
-        gff_df = gff_df[gff_df.upmost_parent==gene]
-
-        print(gff_df)
-
-        kajdhkhgad
-
-
-
-
-        #######################################
-
-    return pd.Series({"Gene":gene, "Feature":feature})
-
-def get_type_object(string):
-
-    """Gets a string and returns the type of obhect"""
-
-    if "." in string and string.replace('.','').isdigit(): return "float"
-    elif string.isdigit(): return "int"
-    else: return "str"
-
-def get_value_as_str_forIDXmapping(val):
-
-    """Gets a value as a string"""
-
-    # type
-    type_object = get_type_object(str(val))
-
-    if pd.isna(val): return np.nan
-    elif type_object=="float" and str(val).endswith(".0"): return str(int(val))
-    elif type_object in {"float", "int"}: return str(val)
-    elif type_object=="str": return str(val)
-    else: raise ValueError("%s can't be parsed by this function"%val)
-
-def get_annotation_dfs_with_added_fields(SV_CNV_annot, small_vars_annot, gff_df):
-
-    """Takes the variant annotation dfs and returns them with added fields"""
-
-    print("adding fields to gff")
-
-    # get the empty variants
-    annot_fields = ["#Uploaded_variation", "Gene", "Feature"]
-    if small_vars_annot is None: small_vars_annot = pd.DataFrame(columns=annot_fields)
-    if SV_CNV_annot is None: SV_CNV_annot = pd.DataFrame(columns=annot_fields)
-
-    # change some fields to strings
-    for f in [x for x in gff_df.keys() if x not in {"start", "end", "numeric_idx"}]: gff_df[f] = gff_df[f].apply(get_value_as_str_forIDXmapping)
-
-    SV_CNV_annot["Gene"] = SV_CNV_annot.Gene.apply(get_value_as_str_forIDXmapping)
-    SV_CNV_annot["Feature"] = SV_CNV_annot.Feature.apply(get_value_as_str_forIDXmapping)
-    small_vars_annot["Gene"] = small_vars_annot.Gene.apply(get_value_as_str_forIDXmapping)
-    small_vars_annot["Feature"] = small_vars_annot.Feature.apply(get_value_as_str_forIDXmapping)
-
-    # find the fields in gff_df that explain the Gene and the feature
-    all_var_annot = small_vars_annot[annot_fields].append(SV_CNV_annot[annot_fields])
-
-    for field in ["Gene", "Feature"]:
-
-        # define all items
-        elements_field = set(all_var_annot[field]).difference({"-"})
-
-        # init macthing_gff_field, which will have to be defined
-        gff_field_to_fraction_mapping = {}
-
-        # init the already matched IDs
-        already_matched_elements = set()
-
-        # go through all the gff fields
-        for gff_field in gff_df.keys():
-
-            # debug
-            if all(pd.isna(gff_df[gff_field])): continue
-
-            # define the elements
-            elements_gff_field = {x for x in set(gff_df[gff_field]) if not pd.isna(x)}
-
-            # define the elements in field and not in the gff
-            elements_in_field_and_in_gff = elements_field.intersection(elements_gff_field)
-
-            # get the fraction
-            fraction_mapping = len(elements_in_field_and_in_gff)/len(elements_field)
-
-            # if there is something mapping
-            if fraction_mapping>0: 
-
-                gff_field_to_fraction_mapping[gff_field] = fraction_mapping
-                already_matched_elements.update(elements_in_field_and_in_gff)
-
-        # debug
-        if elements_field!=already_matched_elements: raise ValueError("some elements can't be mapped for %s"%field)
-
-        # convert to series
-        gff_field_to_fraction_mapping = pd.Series(gff_field_to_fraction_mapping).sort_values(ascending=False)
-
-
-        # define the sorted gff fields. These have the IDX by fraction of priority
-        target_gff_fields = list(gff_field_to_fraction_mapping.index)
-
-        # add the var annotation to the dataframes
-        SV_CNV_annot[field] = SV_CNV_annot[field].apply(get_gffID_from_vep_df_field, field_x=field, target_gff_fields=target_gff_fields, gff_df=gff_df)
-
-        small_vars_annot[field] = small_vars_annot[field].apply(get_gffID_from_vep_df_field, field_x=field, target_gff_fields=target_gff_fields, gff_df=gff_df)
-
-    # add the short vars representation to the annotation
-    small_vars_annot["consequences_set"] = small_vars_annot.Consequence.apply(lambda x: set(x.split(",")))
-    small_vars_annot["string_rep_variant"] = small_vars_annot.apply(get_string_representation_of_var, axis=1)
-
-    # add the gene product description
-    small_vars_annot["Feature_productDescription"] = small_vars_annot.apply(lambda r: get_descriptions_affected_features(r, gff_df), axis=1)
-
-    SV_CNV_annot["Feature_productDescription"] = SV_CNV_annot.apply(lambda r: get_descriptions_affected_features(r, gff_df), axis=1)
-
-    return small_vars_annot, SV_CNV_annot
 
 def get_integrated_vars_df(df, cache_dir, target_regions, target_genes, gff_df):
 
     """Takes the df with the data and returns an integrated dataframe with small_vars, small_vars_annot, SV_CNV, SV_CNV_annot. It will discard any variants that don't overlap target_regions and are not related to target_genes"""
 
     # get the gff
-    gff_df = cp.deepcopy(gff_df)
+    gff_df = cp.deepcopy(gff_df).set_index("ANNOTATION_ID")
 
     ######## GET INTEGRATED DFS ########
 
@@ -448,8 +129,6 @@ def get_integrated_vars_df(df, cache_dir, target_regions, target_genes, gff_df):
     small_vars_annot_file = "%s_small_vars_annot.tab"%file_prefix
     SV_CNV_file = "%s_SV_CNV.tab"%file_prefix
     SV_CNV_annot_file = "%s_SV_CNV_annot.tab"%file_prefix
-
-    need_to_add_function_get_annotation_dfs_with_added_fields_to_the_initialFields
 
     # define the expected files
     expected_files = set()
@@ -497,14 +176,21 @@ def get_integrated_vars_df(df, cache_dir, target_regions, target_genes, gff_df):
         small_vars_annot = small_vars_annot.drop_duplicates()
         SV_CNV_annot = SV_CNV_annot.drop_duplicates()
 
-        # add fields and quality control
-        SV_CNV_annot, small_vars_annot = get_annotation_dfs_with_added_fields(SV_CNV_annot, small_vars_annot, gff_df)
-
         # save each of them
         fun.save_df_as_tab(small_vars, small_vars_file)
         fun.save_df_as_tab(small_vars_annot, small_vars_annot_file)
         fun.save_df_as_tab(SV_CNV, SV_CNV_file)
         fun.save_df_as_tab(SV_CNV_annot, SV_CNV_annot_file)
+
+    # return if empty
+    if len(expected_files)==0: 
+
+        small_vars = pd.DataFrame(columns=["ID"])
+        small_vars_annot = pd.DataFrame(columns=["Gene"])
+        SV_CNV = pd.DataFrame(columns=["ID"])
+        SV_CNV_annot = pd.DataFrame(columns=["Gene"])
+
+        return small_vars, small_vars_annot, SV_CNV, SV_CNV_annot
 
     # load them
     small_vars = fun.get_tab_as_df_or_empty_df(small_vars_file)
@@ -513,6 +199,8 @@ def get_integrated_vars_df(df, cache_dir, target_regions, target_genes, gff_df):
     SV_CNV_annot = fun.get_tab_as_df_or_empty_df(SV_CNV_annot_file)
 
     #######################################
+
+
 
     ########## QUALITY CONTROL ##########
 
@@ -532,6 +220,21 @@ def get_integrated_vars_df(df, cache_dir, target_regions, target_genes, gff_df):
 
     #####################################
 
+    ###### ADD FIELDS ######
+
+    # add the short vars representation to the annotation
+    small_vars_annot["consequences_set"] = small_vars_annot.Consequence.apply(lambda x: set(x.split(",")))
+    small_vars_annot["string_rep_variant"] = small_vars_annot.apply(get_string_representation_of_var, axis=1)
+
+    # add the gene product description
+    print("adding protein description")
+
+    all_ANNOTATION_IDs = set(gff_df.index)
+    small_vars_annot["Feature_productDescription"] = small_vars_annot.apply(lambda r: get_descriptions_affected_features(r, gff_df, all_ANNOTATION_IDs), axis=1)
+
+    SV_CNV_annot["Feature_productDescription"] = SV_CNV_annot.apply(lambda r: get_descriptions_affected_features(r, gff_df, all_ANNOTATION_IDs), axis=1)
+
+    ########################
 
     ###### KEEP ONLY VARIANTS THAT ARE EITHER OVERLAPPING TARGET REGIONS OR CAN BE MAPPED TO GENES ######
 
@@ -671,6 +374,9 @@ def add_gff_traces_as_scatters(fig, gff_df, chrom_to_Xoffset, gff_annotation_fie
     for feat in set(genes_df.feature).difference(set(feature_to_color)): feature_to_color[feat] = rd.choice(possible_colors)
     
     #########################################
+
+    # debug
+    if len(genes_df)==0: return None
 
     # modify the start and the end to get adjusted to the chromosome of procedence
     genes_df["start"] = genes_df.apply(lambda r: r["start"]+chrom_to_Xoffset[r["chromosome"]], axis=1)
@@ -928,9 +634,6 @@ def get_start_and_end_df_sample_r(xlist):
 
     return pd.Series({"start":start, "end":end})
 
-
-
-
 def get_clusters_overlapping_vars_allGenome(df_sample, type_cluster="overlapping_any"):
 
     """This function takes a df_plot for one sample and returns the list of IDs that are clustered"""
@@ -979,8 +682,6 @@ def get_clusters_overlapping_vars_allGenome(df_sample, type_cluster="overlapping
     if all_SVs!=all_SVs_in_cluster: raise ValueError("all SVs should be in clusters")
   
     return list_clusters
-
-
 
 def get_y_position_variants_df_plot(df_plot, sampleID_to_ylevel, offset):
 
@@ -1096,12 +797,37 @@ def get_plot_data_small_vars_r(r, vcf_fields_onHover, chrom_to_Xoffset):
 
     """Gets a row of the small vars df and returns the plot data"""
 
+    # define the graphics based on the type of variant
+    if r["is_protein_altering"] is True and r["overlaps_repeats"] is True:
 
+        color = "teal"
+        symbol = "square"
+        name = "smallVars - protein altering - overlapping repeats"
 
-    # reformat x
-    x = [chrom_to_Xoffset[r["#CHROM"]] + int(pos) for pos in x]
+    elif r["is_protein_altering"] is True and r["overlaps_repeats"] is False:
 
-    # get the hover text
+        color = "dodgerblue"
+        symbol = "square"
+        name = "smallVars - protein altering"
+
+    elif r["is_protein_altering"] is False and r["overlaps_repeats"] is True:
+
+        color = "gray"
+        symbol = "square"
+        name = "smallVars - non protein altering - overlapping repeats"
+
+    elif r["is_protein_altering"] is False and r["overlaps_repeats"] is False:
+
+        color = "black"
+        symbol = "square"
+        name = "smallVars - non protein altering"
+
+    else: raise ValueError("wrong is_protein_altering or overlaps_repeats")
+
+    # reformat x to ad
+    x = [chrom_to_Xoffset[r["#CHROM"]] + int(r["POS"])]
+
+    # get the hover text from the vcf fields
     non_INFO_fields = [f for f in vcf_fields_onHover if not f.startswith("INFO_")]
     INFO_fields = [f for f in vcf_fields_onHover if f.startswith("INFO_")]
 
@@ -1109,7 +835,10 @@ def get_plot_data_small_vars_r(r, vcf_fields_onHover, chrom_to_Xoffset):
     hover_text += "<br><br>INFO:<br>"
     hover_text += "<br>".join(["%s: %s"%(f.split("INFO_")[1], r[f]) for f in INFO_fields if not pd.isna(r[f])])
 
-    return pd.Series({"x":x, "color":color, "marker_symbol":symbol, "type_sv":name, "hover_text":hover_text, "chromosome":r["#CHROM"], "sampleID":r["sampleID"], "ID":r["ID"]})
+    # add the variant annotation
+    hover_text += "<br>variant effects:<br>%s"%(r["var_annotation_str"])
+
+    return pd.Series({"x":x, "color":color, "marker_symbol":symbol, "type_var":name, "hover_text":hover_text, "chromosome":r["#CHROM"], "sampleID":r["sampleID"], "ID":r["ID"]})
 
 
 
@@ -1124,22 +853,9 @@ def get_annotation_info_small_vars_r(r, small_vars_annot):
     is_protein_altering = any(df_annot.is_protein_altering)
     overlaps_repeats = any(df_annot.overlaps_repeats)
 
-    # 
-
-
-
-    print(overlaps_repeats, overlaps_repeats)
-
-
-    adkjhajkh
-
-
-
-
-
-
-
-
+    # get the var_annotation_str, which should include all the annotations for the small vars
+    var_annotation_str = "<br>".join(df_annot.var_annotation_str)
+    
     return pd.Series({"is_protein_altering":is_protein_altering, "var_annotation_str":var_annotation_str, "overlaps_repeats":overlaps_repeats})
 
 
@@ -1181,33 +897,47 @@ def add_smallVars_to_fig(fig, small_vars, small_vars_annot, chrom_to_Xoffset, sa
     # sort fields
     vcf_fields_onHover = sorted(vcf_fields_onHover.intersection(all_vcf_fields))
 
+    # add the var_annotation_str
+    small_vars_annot["var_annotation_str"] = small_vars_annot.Gene.apply(str) + ": " + small_vars_annot.string_rep_variant + ": " +  small_vars_annot.Feature_productDescription
 
-    print(small_vars_annot.Gene)
-
-    adljhjhkda
-
-    # add some interesting fields
+    # add some interesting fields that are related to collapsing the small_vars_annot
     small_vars[["is_protein_altering", "var_annotation_str", "overlaps_repeats"]] = small_vars.apply(get_annotation_info_small_vars_r, small_vars_annot=small_vars_annot, axis=1)
 
-    kjadhjkdhadh
-
-
-
-
-    print(small_vars_annot["is_protein_altering"])
-
-
-    kajdhkhjda
-
-
-
     # get plotting data, with the x
-    #df_plot = 
+    df_plot = small_vars.apply(get_plot_data_small_vars_r, vcf_fields_onHover=vcf_fields_onHover, chrom_to_Xoffset=chrom_to_Xoffset, axis=1)
+
+    # add the y positions NEEDS TO BE REFACTORED TO AVOID OVERLAPS
+    df_plot["y"] = get_y_position_variants_df_plot(df_plot, sampleID_to_ylevel, small_vars_offset)
+
+    # add one trace for each name
+    for type_var in sorted(set(df_plot.type_var)):
+
+        # get df
+        df_var = df_plot[df_plot.type_var==type_var]
+
+        # get the color and symbol
+        color = df_var.color.iloc[0]
+        marker_symbol = df_var.marker_symbol.iloc[0]
+
+        # init all the positions
+        all_x = []
+        all_y = []
+        all_hovers = []
+
+        # go through each line
+        for I, r in df_var.iterrows():
+
+            # add 
+            all_x += (r["x"]+[None])
+            all_y += ([r["y"]]+[None])
+            all_hovers += ([r["hover_text"]]+[None])
+
+        # add line of the feat
+        line = go.Scatter(x=all_x, y=all_y, showlegend=True, mode="markers", line=dict(color=color, width=2, dash=None), opacity=1.0, hoveron="points+fills", name=type_var, text=all_hovers, marker=dict(symbol=marker_symbol)) # dash="dash" # supported markers (cross, circle, x, triangle-up)
+
+        fig.append_trace(line, fig_location[0], fig_location[1])
 
 
-    print(vcf_fields_onHover)
-
-    dakjhjdkdah
 
 def get_closest_3region_bendPOS(r, SV_CNV):
 
@@ -1281,43 +1011,49 @@ def get_df_windows_draw_coverage(SV_CNV, chrom_to_Xoffset, reference_genome, thr
     # initialize with the chromosomal regions (0-based)
     df_windows_chroms = pd.DataFrame({chrom : {"chromosome":chrom, "start":0, "end":chrom_to_len[chrom]} for chrom in chrom_to_Xoffset}).transpose()
 
-    # get a df winows of the SVs (0-based)
-    SV_CNV_END = SV_CNV[~pd.isna(SV_CNV.INFO_END)]
-    SV_CNV_noEND = SV_CNV[pd.isna(SV_CNV.INFO_END)]
-    SV_CNV_noEND["INFO_END"] = SV_CNV_noEND.apply(lambda r: get_closest_3region_bendPOS(r, SV_CNV), axis=1)
-    SV_CNV_noEND["POS"] = SV_CNV_noEND.apply(lambda r: get_closest_5region_bendPOS(r, SV_CNV), axis=1)
-    SV_CNV_all = SV_CNV_END.append(SV_CNV_noEND)
+    if len(SV_CNV)>0:
 
-    df_windows_SVs = SV_CNV_all[["#CHROM", "POS", "INFO_END"]].rename(columns={"#CHROM":"chromosome", "POS":"start", "INFO_END":"end"})
-    df_windows_SVs["start"] -= 1
+        # get a df winows of the SVs (0-based)
+        SV_CNV_END = SV_CNV[~pd.isna(SV_CNV.INFO_END)]
+        SV_CNV_noEND = SV_CNV[pd.isna(SV_CNV.INFO_END)]
+        SV_CNV_noEND["INFO_END"] = SV_CNV_noEND.apply(lambda r: get_closest_3region_bendPOS(r, SV_CNV), axis=1)
+        SV_CNV_noEND["POS"] = SV_CNV_noEND.apply(lambda r: get_closest_5region_bendPOS(r, SV_CNV), axis=1)
+        SV_CNV_all = SV_CNV_END.append(SV_CNV_noEND)
 
-    # set to ints
-    for f in ["start", "end"]: df_windows_SVs[f] = df_windows_SVs[f].apply(int)
+        df_windows_SVs = SV_CNV_all[["#CHROM", "POS", "INFO_END"]].rename(columns={"#CHROM":"chromosome", "POS":"start", "INFO_END":"end"})
+        df_windows_SVs["start"] -= 1
 
-    # map each chromosome to the positions that are breakpoints
-    chrom_to_bpPositions = dict(df_windows_SVs.groupby("chromosome").apply(lambda df_c: set(df_c.start).union(df_c.end)))
+        # set to ints
+        for f in ["start", "end"]: df_windows_SVs[f] = df_windows_SVs[f].apply(int)
 
-    # map each chromosome to the max pos
-    chrom_to_maxPos = {chrom : length-1 for chrom, length in chrom_to_len.items()}
+        # map each chromosome to the positions that are breakpoints
+        chrom_to_bpPositions = dict(df_windows_SVs.groupby("chromosome").apply(lambda df_c: set(df_c.start).union(df_c.end)))
 
-    # init dict
-    final_df_windows_SVs = pd.DataFrame()
+        # map each chromosome to the max pos
+        chrom_to_maxPos = {chrom : length-1 for chrom, length in chrom_to_len.items()}
 
-    # get a df_windows of the df_windows_SVs +- 5' and 3' regions
-    for region in ["5", "3"]: 
+        # init dict
+        final_df_windows_SVs = pd.DataFrame()
 
-        # get a df with the regions
-        df_region = df_windows_SVs.apply(lambda r: fun.get_target_region_row(r, region, chrom_to_bpPositions[r["chromosome"]], chrom_to_maxPos[r["chromosome"]], max_relative_len_neighbors=1), axis=1)
+        # get a df_windows of the df_windows_SVs +- 5' and 3' regions
+        for region in ["5", "3"]: 
 
-        final_df_windows_SVs = final_df_windows_SVs.append(df_region[windows_fields])
+            # get a df with the regions
+            df_region = df_windows_SVs.apply(lambda r: fun.get_target_region_row(r, region, chrom_to_bpPositions[r["chromosome"]], chrom_to_maxPos[r["chromosome"]], max_relative_len_neighbors=1), axis=1)
+
+            final_df_windows_SVs = final_df_windows_SVs.append(df_region[windows_fields])
 
 
-    # add the target
-    final_df_windows_SVs = final_df_windows_SVs.append(df_windows_SVs[windows_fields])
-    if len(final_df_windows_SVs)!=(len(df_windows_SVs)*3): raise ValueError("something went wrong with the neighbors calculus ")
+        # add the target
+        final_df_windows_SVs = final_df_windows_SVs.append(df_windows_SVs[windows_fields])
+        if len(final_df_windows_SVs)!=(len(df_windows_SVs)*3): raise ValueError("something went wrong with the neighbors calculus ")
 
-    # keep all
-    df_windows = df_windows_chroms[windows_fields].append(final_df_windows_SVs[windows_fields]).drop_duplicates()
+        # keep all
+        df_windows = df_windows_chroms[windows_fields].append(final_df_windows_SVs[windows_fields]).drop_duplicates()
+
+    else: df_windows = df_windows_chroms[windows_fields]
+
+    # get index
     df_windows.index = list(range(0, len(df_windows)))
     df_windows["ID"] = df_windows.index
 
@@ -1446,7 +1182,12 @@ def add_coverage_to_fig(df_data, fig, SV_CNV, chrom_to_Xoffset, sampleID_to_ylev
     # define the file
     coverage_all_file = "%s/coverage_df_%s.tab"%(cache_dir, "-".join(df_data.sampleID))
 
-    if fun.file_is_empty(coverage_all_file) or replace is True:
+    # get the chrom to len
+    chr_to_len = fun.get_chr_to_len(reference_genome)
+
+    #if fun.file_is_empty(coverage_all_file) or replace is True:
+
+    if True:
 
         fun.print_if_verbose("getting coverage calculated")
 
@@ -1472,20 +1213,21 @@ def add_coverage_to_fig(df_data, fig, SV_CNV, chrom_to_Xoffset, sampleID_to_ylev
             # get the coverage-per-window
             df_s = fun.get_coverage_per_window_df_without_repeating(reference_genome, r_data["sorted_bam"], windows_bed, replace=replace, run_in_parallel=True, delete_bams=True, threads=threads)
 
+            # add the type of data
+            df_s["chromosome_length"] = df_s.chromosome.apply(lambda c: chr_to_len[c])
+            df_s["fraction_chrom_covered"] = df_s.length / df_s.chromosome_length
+            fractionCovBool_to_typeRegion = {True:"chromosome_fraction", False:"region"}
+            df_s["type_region"] = (df_s.fraction_chrom_covered>=0.04).apply(lambda f: fractionCovBool_to_typeRegion[f])
+
+            # add the relative coverage of the sample
+            median_coverage = fun.get_median_coverage(df_s[df_s.type_region=="chromosome_fraction"], mitochondrial_chromosome)
+            df_s["relative_coverage"] = df_s.mediancov_1 / median_coverage
 
             # add the sample ID
             df_s["sampleID"] = sampleID
 
             # add
             df_coverage = df_coverage.append(df_s)
-
-
-        # add the type of data
-        chr_to_len = fun.get_chr_to_len(reference_genome)
-        df_coverage["chromosome_length"] = df_coverage.chromosome.apply(lambda c: chr_to_len[c])
-        df_coverage["fraction_chrom_covered"] = df_coverage.length / df_coverage.chromosome_length
-        fractionCovBool_to_typeRegion = {True:"chromosome_fraction", False:"region"}
-        df_coverage["type_region"] = (df_coverage.fraction_chrom_covered>=0.04).apply(lambda f: fractionCovBool_to_typeRegion[f])
 
         # write
         fun.save_df_as_tab(df_coverage, coverage_all_file)
@@ -1494,10 +1236,6 @@ def add_coverage_to_fig(df_data, fig, SV_CNV, chrom_to_Xoffset, sampleID_to_ylev
     df_coverage = fun.get_tab_as_df_or_empty_df(coverage_all_file)
 
     ####################################################################
-
-    # add the relative coverage
-    median_coverage = fun.get_median_coverage(df_coverage[df_coverage.type_region=="chromosome_fraction"], mitochondrial_chromosome)
-    df_coverage["relative_coverage"] = df_coverage.mediancov_1 / median_coverage
 
     # get the coverage relative to the background samples
     df_coverage = get_df_coverage_with_coverage_relative_to_bg(df_coverage, sampleID_to_backgroundSamples)
@@ -1556,19 +1294,20 @@ def get_genome_variation_browser(df_data, samples_colors_df, target_regions, tar
     df_data = df_data.set_index("sampleID", drop=False)
 
     # get only the gff features where the parentID is in gene and pseudogene
-    gff_df = gff_df[gff_df.upmost_parent_feature.isin({"gene", "pseudogene"})]
+    #gff_df = gff_df[gff_df.upmost_parent_feature.isin({"gene", "pseudogene"})]
 
     # get all the variant dfs, already filtering out
     small_vars, small_vars_annot, SV_CNV, SV_CNV_annot = get_integrated_vars_df(df_data, cache_dir, target_regions, target_genes, gff_df)
 
     # check that there are some vars to plot
-    if len(small_vars)==0 and len(SV_CNV)==0: raise ValueError("there are no variants to represent.")
+    #if len(small_vars)==0 and len(SV_CNV)==0: raise ValueError("there are no variants to represent.")
 
-    # get the dfs for plotting
-    all_chromosomes = sorted(set(SV_CNV["#CHROM"]).union(set(small_vars["#CHROM"])))
-
+  
     # get the chrom to len
     chrom_to_len = fun.get_chr_to_len(reference_genome)
+
+    # get the chroms for plotting
+    all_chromosomes = sorted(set(chrom_to_len))
 
     # define chromosome offset, which is necessary to keep the xaxis organised
     chrom_to_Xoffset = {}
@@ -1581,7 +1320,8 @@ def get_genome_variation_browser(df_data, samples_colors_df, target_regions, tar
     chrom_to_color, palette_chromosome = get_value_to_color(all_chromosomes, palette="tab10", type_color="hex")
 
     # change the chrName_to_shortName if not provided
-    if chrName_to_shortName=={}: chrName_to_shortName = {c:c.split("_")[0] for c in all_chromosomes}
+    #if chrName_to_shortName=={}: chrName_to_shortName = {c:c.split("_")[0] for c in all_chromosomes}
+    if chrName_to_shortName=={}: chrName_to_shortName = {c:c for c in all_chromosomes}
 
     # keep only df that are not chromosomes
     gff_df = gff_df[gff_df.upmost_parent_feature!="chromosome"]

@@ -178,6 +178,22 @@ conda install -n $R_env_name -c bioconda -y bioconductor-rtracklayer=1.48.0;
 conda install -n $R_env_name -c conda-forge -y r-r.utils=2.9.2;
 conda install -n $R_env_name -c bioconda -y bioconductor-structuralvariantannotation=1.4.0;
 
+
+# create a subenvironment for running CONY
+CONY_env_name="$env_name"_CONY_env
+echo "creating conda env $CONY_env_name"
+
+conda create -y --name $CONY_env_name -c conda-forge r-base=4.0.3
+conda install -n $CONY_env_name -c bioconda -y bioconductor-exomecopy=1.36.0;
+conda install -n $CONY_env_name -c conda-forge -y r-argparser=0.6;
+
+conda install -n $CONY_env_name -c bioconda -y bioconductor-rtracklayer=1.50.0;
+
+
+
+
+
+
 # create a subenvironment to run gridss
 gridss_env_name="$env_name"_gridss_env
 echo "creating conda env $gridss_env_name"
@@ -228,6 +244,7 @@ fi
 wget https://github.com/PapenfussLab/gridss/releases/download/v2.9.2/gridss-2.9.2-gridss-jar-with-dependencies.jar
 wget https://github.com/PapenfussLab/gridss/releases/download/v2.9.2/gridss.sh
 wget https://github.com/PapenfussLab/clove/releases/download/v0.17/clove-0.17-jar-with-dependencies.jar
+wget https://raw.githubusercontent.com/weiyuchung/CONY/master/CONY.R
 
 # give execution permission to all
 chmod u+x *;

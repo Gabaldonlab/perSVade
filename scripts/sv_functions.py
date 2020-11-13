@@ -117,6 +117,7 @@ EnvName_gridss = "%s_gridss_env"%EnvName
 EnvName_picard = "%s_picard_env"%EnvName
 EnvName_ete3 = "%s_ete3_3.0.0_env"%EnvName
 EnvName_RepeatMasker = "%s_RepeatMasker_env"%EnvName
+EnvName_CONY = "%s_CONY_env"%EnvName
 
 # define other envDirs
 picard_EnvDir = "%s/envs/%s"%(CondaDir, EnvName_picard)
@@ -160,6 +161,7 @@ gridss_run = "%s/gridss.sh"%external_software
 gridss_jar = "%s/gridss-2.9.2-gridss-jar-with-dependencies.jar"%external_software
 clove = "%s/clove-0.17-jar-with-dependencies.jar"%external_software
 gztool = "%s/gztool"%external_software
+libraries_CONY = "%s/CONY.R"%external_software
 
 # executables that are in other environments
 picard_exec = "%s/bin/picard"%picard_EnvDir
@@ -192,6 +194,7 @@ ninja_dir = "%s/bin"%RepeatMasker_EnvDir
 create_random_simulatedSVgenome_R = "%s/create_random_simulatedSVgenome.R"%CWD
 create_targeted_simulatedSVgenome_R = "%s/create_targeted_simulatedSVgenome.R"%CWD
 annotate_simpleEvents_gridssVCF_R = "%s/annotate_simpleEvents_gridssVCF.R"%CWD
+run_CONY_R = "%s/run_CONY.R"%CWD
 analyze_svVCF = "%s/generate_files_from_svVCF.R"%CWD
 analyze_svVCF_simple = "%s/generate_files_from_svVCF_simple.R"%CWD
 TRIMMOMATIC = "%s/run_trimmomatic.py"%CWD 
@@ -220,6 +223,14 @@ ALL_MUTATIONS = {'stop_gained', 'intron_variant', 'upstream_gene_variant', '5_pr
 PROT_ALTERRING_MUTATIONS = {'missense_variant', 'start_lost', 'inframe_deletion', 'protein_altering_variant', 'stop_gained', 'inframe_insertion', 'frameshift_variant', 'stop_lost', 'splice_acceptor_variant', 'splice_donor_variant', 'splice_region_variant'}
 
 NON_PROT_ALTERRING_MUTATIONS = ALL_MUTATIONS.difference(PROT_ALTERRING_MUTATIONS)
+
+
+# types of SVs
+SVs_ALL_MUTATIONS = {'coding_sequence_variant_BND', 'upstream_gene_variant_BND', '3_prime_UTR_variant', 'feature_elongation', 'feature_truncation', 'coding_sequence_variant', 'intergenic_variant', 'upstream_gene_variant', '5_prime_UTR_variant', 'transcript_amplification', '5_prime_UTR_variant_BND', 'downstream_gene_variant', 'intron_variant_BND', 'intron_variant', 'intergenic_variant_BND', '3_prime_UTR_variant_BND', 'downstream_gene_variant_BND', 'non_coding_transcript_exon_variant_BND', 'non_coding_transcript_exon_variant'}
+
+SVs_TRANSCRIPT_DISRUPTING_MUTATIONS = {'coding_sequence_variant_BND', 'feature_elongation', 'feature_truncation', 'coding_sequence_variant', 'transcript_amplification', 'intron_variant_BND', 'non_coding_transcript_exon_variant_BND', 'intron_variant', 'non_coding_transcript_exon_variant', '3_prime_UTR_variant', '5_prime_UTR_variant', '5_prime_UTR_variant_BND', '3_prime_UTR_variant_BND'}
+
+SVs_NON_TRANSCRIPT_DISRUPTING_MUTATIONS = SVs_ALL_MUTATIONS.difference(SVs_TRANSCRIPT_DISRUPTING_MUTATIONS)
 
 # variant representation data
 sorted_consequences = ["downstream_gene_variant", "upstream_gene_variant", "3_prime_UTR_variant", "5_prime_UTR_variant", "stop_retained_variant", "synonymous_variant", "missense_variant", "stop_gained", "frameshift_variant"]
@@ -3406,6 +3417,8 @@ def get_coverage_per_window_df_without_repeating(reference_genome, sorted_bam, w
 
     """This function takes a windows file and a bam, and it runs generate_coverage_per_window_file_parallel but only for regions that are not previously calculated"""
 
+
+
     # check if it can be run in parallel
     if parallelization_is_possible(threads) is False: run_in_parallel = False
     print_if_verbose("running get_coverage_per_window_df_without_repeating with %i threads"%threads)
@@ -3413,6 +3426,11 @@ def get_coverage_per_window_df_without_repeating(reference_genome, sorted_bam, w
     # define the query_windows
     query_windows_df = pd.read_csv(windows_file, sep="\t").set_index(["chromosome", "start", "end"], drop=False)
     if len(query_windows_df)==0: return pd.DataFrame()
+
+    print(query_windows_df)
+    
+    # chek the initial length
+    query_df_len = len(query_windows_df)
 
     # define the file were the coverage will be calculated
     calculated_coverage_file = "%s.coverage_per_window.tab"%sorted_bam
@@ -3472,13 +3490,22 @@ def get_coverage_per_window_df_without_repeating(reference_genome, sorted_bam, w
     # load the df
     df_coverage_all = pd.read_csv(calculated_coverage_file, sep="\t")
 
-    # get the correct index
-    df_coverage_all.index = list(range(len(df_coverage_all)))
-
     # drop duplicates
-    df_coverage_all = df_coverage_all.drop_duplicates(subset=["chromosome", "start", "end"], keep='first') 
+    df_coverage_all = df_coverage_all.drop_duplicates(subset=["chromosome", "start", "end"], keep='first')
 
-    return df_coverage_all
+    # set the index to be the chromosome,start,end
+    df_coverage_all = df_coverage_all.set_index(["chromosome", "start", "end"], drop=False)
+
+    # keep as df_coverage_final those that intersect with query_windows_df
+    df_coverage_final = df_coverage_all.loc[query_windows_df.index]
+
+    # get the correct index
+    df_coverage_final.index = list(range(len(df_coverage_final)))
+
+    # debug
+    if query_df_len!=len(df_coverage_final): raise ValueError("the length has changed in the process")
+
+    return df_coverage_final
 
 def get_int(x):
 
@@ -6584,6 +6611,18 @@ def get_is_protein_altering_consequence(consequence):
     # ask
     if len(consequences_set.intersection(PROT_ALTERRING_MUTATIONS))>0: return True
     elif len(consequences_set.difference(NON_PROT_ALTERRING_MUTATIONS))==0: return False
+    else: raise ValueError("%s contains non-described vars"%consequences_set)
+
+def get_is_transcript_disrupting_consequence_SV(consequence):
+
+    """Takes a consequence of a SVs annotations df and returns whether they are transcript disrupting."""
+
+    # get the consequences
+    consequences_set = set(consequence.split(","))
+
+    # define whether the consequences are prot_alterring
+    if len(consequences_set.intersection(SVs_TRANSCRIPT_DISRUPTING_MUTATIONS))>0: return True
+    elif len(consequences_set.difference(SVs_NON_TRANSCRIPT_DISRUPTING_MUTATIONS))==0: return False
     else: raise ValueError("%s contains non-described vars"%consequences_set)
 
 
@@ -10593,7 +10632,7 @@ def remove_smallVarsCNV_nonEssentialFiles(outdir, ploidy):
 
     for f in files_to_remove: remove_file(f)
 
-def get_bam_with_duplicatesMarkedSpark(bam, threads=4, replace=False):
+def get_bam_with_duplicatesMarkedSpark(bam, threads=4, replace=False, remove_duplicates=True):
 
     """
     This function takes a bam file and runs MarkDuplicatesSpark (most efficient when the input bam is NOT coordinate-sorted) returning the bam with the duplicates sorted. It does not compute metrics to make it faster. Some notes about MarkDuplicatesSpark:
@@ -10603,7 +10642,7 @@ def get_bam_with_duplicatesMarkedSpark(bam, threads=4, replace=False):
     - for 30x coverage WGS, it is recconnended to have at least 16Gb
     - by default it takes all the cores
 
-    it reurns the bam with duplicates marked
+    it reurns the bam with duplicates removed
 
     """
 
@@ -10639,12 +10678,16 @@ def get_bam_with_duplicatesMarkedSpark(bam, threads=4, replace=False):
                 remove_file(path)
                 delete_folder(path)
 
+        # define the remove_duplicates options
+        if remove_duplicates is True: remove_duplicates_str = "true"
+        else: remove_duplicates_str = "false"
+
         markduplicates_std = "%s.markingDuplicates.std"%bam
         print_if_verbose("running MarkDuplicates with %iGb of RAM. The std is in %s"%(javaRamGb, markduplicates_std))
 
         try: 
 
-            run_cmd("%s --java-options '-Xms%ig -Xmx%ig' MarkDuplicatesSpark -I %s -O %s --verbosity INFO --tmp-dir %s  --create-output-variant-index false --create-output-bam-splitting-index false --create-output-bam-index false > %s 2>&1"%(gatk, javaRamGb, javaRamGb, bam, bam_dupMarked_tmp, tmpdir, markduplicates_std))
+            run_cmd("%s --java-options '-Xms%ig -Xmx%ig' MarkDuplicatesSpark -I %s -O %s --verbosity INFO --tmp-dir %s  --create-output-variant-index false --create-output-bam-splitting-index false --create-output-bam-index false --remove-all-duplicates %s > %s 2>&1"%(gatk, javaRamGb, javaRamGb, bam, bam_dupMarked_tmp, tmpdir, remove_duplicates_str, markduplicates_std))
 
             print_if_verbose("MarkDuplicatesSpark worked correctly")
 
@@ -10654,11 +10697,13 @@ def get_bam_with_duplicatesMarkedSpark(bam, threads=4, replace=False):
             MarkDuplicatesSpark_log = "%s.MarkDuplicatesSpark_failed.log"%bam
             os.rename(markduplicates_std, MarkDuplicatesSpark_log)
 
+
+
             print_if_verbose("MarkDuplicatesSpark did not work on the current memory configuration. Trying with the normal MarkDuplicates. You can check the failed log of MarkDuplicatesSpark_failed in %s"%MarkDuplicatesSpark_log)
 
             # running with the traditional MarkDuplicates implementation
             bam_dupMarked_metrics = "%s.metrics.txt"%bam_dupMarked_tmp
-            run_cmd("%s -Xms%ig -Xmx%ig MarkDuplicates I=%s O=%s M=%s ASSUME_SORT_ORDER=queryname > %s 2>&1"%(picard_exec, javaRamGb, javaRamGb, bam, bam_dupMarked_tmp, bam_dupMarked_metrics, markduplicates_std), env=EnvName_picard)
+            run_cmd("%s -Xms%ig -Xmx%ig MarkDuplicates I=%s O=%s M=%s ASSUME_SORT_ORDER=queryname REMOVE_DUPLICATES=%s > %s 2>&1"%(picard_exec, javaRamGb, javaRamGb, bam, bam_dupMarked_tmp, bam_dupMarked_metrics, remove_duplicates_str, markduplicates_std), env=EnvName_picard)
             
             remove_file(bam_dupMarked_metrics)
 
@@ -10670,52 +10715,39 @@ def get_bam_with_duplicatesMarkedSpark(bam, threads=4, replace=False):
 
     return bam_dupMarked
 
+def run_CNV_calling_CONY(sorted_bam, reference_genome, outdir, threads, replace):
 
-def get_sortedBam_with_duplicatesMarked(sorted_bam, threads=4, replace=False):
+    """This function takes a sorted bam and runs CONY on it to get the copy-number variation results. It is important that the sorted_bam contains no duplicates."""
 
-    """This function takes a sorted bam and returns the equivalent with the duplicates marked with picard MarkDuplicates. It also indexes this bam"""
+    make_folder(outdir)
 
-    # define dirs
-    sorted_bam_dupMarked = "%s.MarkDups.bam"%sorted_bam
-    sorted_bam_dupMarked_tmp = "%s.MarkDups.tmp.bam"%sorted_bam
-    sorted_bam_dupMarked_metrics = "%s.MarkDups.metrics"%sorted_bam
+    ########## PREPARE DATA FOR CONY RUNNING ########## 
 
-    if file_is_empty(sorted_bam_dupMarked) or replace is True:
-        print_if_verbose("marking duplicate reads")
+    # prepare a data table that contains the 1-based positions for each chromosome
+    chrom_to_len = get_chr_to_len(reference_genome)
+    target_df = pd.DataFrame({c : {"seqname":c, "start":1, "end":length} for c, length in chrom_to_len.items()}).transpose()
+    regions_file = "%s/target_regions.bed1based"%outdir
+    save_df_as_tab(target_df[["seqname", "start", "end"]], regions_file)
 
-        # define the java memory
-        #javaRamGb = int(get_availableGbRAM(get_dir(sorted_bam))*fractionRAM_to_dedicate) # At Broad, we run MarkDuplicates with 2GB Java heap (java -Xmx2g) and 10GB hard memory limit
-        #javaRamGb = int(get_availableGbRAM(get_dir(sorted_bam))*0.5) # At Broad, we run MarkDuplicates with 2GB Java heap (java -Xmx2g) and 10GB hard memory limit
-        javaRamGb = int(get_availableGbRAM(get_dir(sorted_bam)) - 2) # rule of thumb from GATK
-        #javaRamGb = 4 # this is from a post from 2011, reccommended for a 170Gb RAM
+    ###################################################
 
-        # define the MAX_RECORDS_IN_RAM
-        MAX_RECORDS_IN_RAM = int(250000*javaRamGb*0.8) # 250,000 reads for each Gb given (for SortSam, I don't know if this will work for Picard tools)
+    # run CONY
+    cony_std = "%s/running_cony.std"%outdir
+    print_if_verbose("Running CONY. The std is in %s"%cony_std)
 
-        # define the number of MAX_FILE_HANDLES_FOR_READ_ENDS_MAP
-        max_nfilehandles = int(subprocess.check_output("ulimit -n", shell=True))
-        MAX_FILE_HANDLES_FOR_READ_ENDS_MAP = int(max_nfilehandles*0.5) # a little lower than ulimit -n
+    cmd = "%s --reference_genome %s --sorted_bam %s --regions_file %s --libraries_CONY %s"%(run_CONY_R, reference_genome, sorted_bam, regions_file, libraries_CONY)
+    run_cmd(cmd, env=EnvName_CONY)
 
-        # SORTING_COLLECTION_SIZE_RATIO is 0.25 by default. If I have memory issues I can reduce this number.
+    remove_file(cony_std)
 
-        markduplicates_std = "%s.markingDuplicates.std"%sorted_bam
-        print_if_verbose("running MarkDuplicates with %iGb of RAM and %i MAX_FILE_HANDLES_FOR_READ_ENDS_MAP. The std is in %s"%(javaRamGb, MAX_FILE_HANDLES_FOR_READ_ENDS_MAP, markduplicates_std))
 
-        # running with the traditional MarkDuplicates implementation
-        run_cmd("%s -Xmx%ig MarkDuplicates I=%s O=%s M=%s ASSUME_SORT_ORDER=coordinate MAX_FILE_HANDLES_FOR_READ_ENDS_MAP=%i MAX_RECORDS_IN_RAM=%i > %s 2>&1"%(picard_exec, javaRamGb, sorted_bam, sorted_bam_dupMarked_tmp, sorted_bam_dupMarked_metrics, MAX_FILE_HANDLES_FOR_READ_ENDS_MAP, MAX_RECORDS_IN_RAM, markduplicates_std), env=EnvName_picard)
-        #REMOVE_DUPLICATES=Boolean
+    adkjhkaj
 
-        remove_file(markduplicates_std)
 
-        # keep
-        os.rename(sorted_bam_dupMarked_tmp, sorted_bam_dupMarked)
+    libraries_CONY
 
-    # index the bam with the duplicate reads
-    index_sorted_bam_dupMarked = "%s.bai"%sorted_bam_dupMarked
-    if file_is_empty(index_sorted_bam_dupMarked) or replace is True:
-        index_bam(sorted_bam_dupMarked, threads=threads)
 
-    return sorted_bam_dupMarked
+    # run samtools mpileup to get the 
 
 def write_integrated_smallVariantsTable_as_vcf_old(df, filename, ploidy):
 
@@ -14795,6 +14827,8 @@ def get_vcf_df_with_INFO_as_single_fields(df):
 
     """Takes a vcf df and returns a the same one where the INFO content is split acrros extra fields"""
 
+    if len(df)==0: return df
+
     ### INFO COLUMN ####
 
     # add a column that has a dictionary with the info fields
@@ -15400,7 +15434,269 @@ def get_SV_CNV_df_with_common_variantID_acrossSamples(SV_CNV, outdir, pct_overla
 
     return SV_CNV
 
-def get_integrated_SV_CNV_smallVars_df_from_run_perSVade_severalSamples(paths_df, cwd, ploidy, pct_overlap, tol_bp):
+def load_gff3_intoDF(gff_path, replace=False):
+
+    """ Takes the path to a gff and loads it into a df"""
+
+    gff_df_file = "%s.df.tab"%gff_path
+
+    if file_is_empty(gff_df_file) or replace is True:
+
+        # define the number of rows to skip
+        gff_lines = "%s.gff_lines.gff"%gff_path
+        run_cmd("egrep -v '^#' %s > %s"%(gff_path, gff_lines))
+
+        # define the gff fields
+        gff_fields = ["chromosome", "source", "feature", "start", "end", "blank1", "strand", "blank2", "annotation"]
+
+        # load
+        print("loading gff")
+        gff = pd.read_csv(gff_lines, header=None, names=gff_fields, sep="\t")
+
+        # set all possible annotations
+        all_annotations = set.union(*[set([x.split("=")[0] for x in an.split(";")]) for an in gff.annotation])
+
+        def list_to_str(list_x):
+
+            if list_x==[]: return ""
+            else: return list_x[0]
+        
+        for anno in all_annotations:
+
+            # define the field 
+            anno_field = "ANNOTATION_%s"%anno
+
+            # add the normalQ annotation field
+            gff[anno_field] = gff.annotation.apply(lambda x: list_to_str([a.split(anno)[1].lstrip("=") for a in x.split(";") if anno in a]))
+
+            # add the Dbxref sepparated
+            if anno=="Dbxref": 
+
+                # get all the dbxref fields
+                all_Dbxrefs = set.union(*[set([x.split(":")[0] for x in dbxref.split(",")]) for dbxref in gff[anno_field]])
+
+                # go through each dbxref field and add it to the df
+                for dbxref in all_Dbxrefs: 
+
+                    gff["%s_%s"%(anno_field, dbxref)] = gff[anno_field].apply(lambda x: list_to_str([d.split(dbxref)[1].lstrip(":") for d in x.split(",") if dbxref in d]))
+
+        # get the ID
+        gff["ID"] = gff.ANNOTATION_ID
+        gff["Parent"] = gff.ANNOTATION_Parent
+
+        # change the ID so that all of the features are unique, add numbers for non-unique IDs
+        gff["duplicated_ID"] = gff.duplicated(subset="ID", keep=False) # marks all the duplicated IDs with a True
+        gff["numeric_idx"] = list(range(0, len(gff)))
+
+        def getuniqueIDs_gff(row):
+
+            """Takes a row and changes the IDs if they are not unique"""
+            if row["duplicated_ID"] is False: return row["ID"]
+            else: return "%s-%i"%(row["ID"], row["numeric_idx"])
+
+        gff["ID"] = gff.apply(getuniqueIDs_gff, axis=1)
+
+        # check that it is correct
+        if len(gff)!=len(set(gff["ID"])): raise ValueError("IDs are not unique in the gff")
+
+        # set the id as index
+        gff = gff.set_index("ID", drop=False)
+
+        # add the upmost_parent (which should be the geneID)
+        print("getting upmost parent")
+        def get_utmost_parent(row, gff_df):
+
+            """Takes a row and the gff_df and returns the highest parent. The index has to be the ID of the GFF"""
+
+            # when you have found the parent it has no parent, so the ID is the upmost_parent
+            if row["Parent"]=="": return row["ID"]
+
+            # else you go to the parent
+            else: return get_utmost_parent(gff_df.loc[row["Parent"]], gff_df)
+
+        gff["upmost_parent"] = gff.apply(lambda row: get_utmost_parent(row, gff), axis=1)
+        gff = gff.set_index("upmost_parent", drop=False)
+
+        # add the type of upmost_parent
+        df_upmost_parents = gff[gff.ID==gff.upmost_parent]
+
+        # check that the upmost_parents are unique
+        if len(df_upmost_parents)!=len(set(df_upmost_parents.ID)): raise ValueError("upmost parents are not unique")
+
+        # map each upmost_parent to the feature
+        upmost_parent_to_feature = dict(df_upmost_parents.set_index("upmost_parent")["feature"])
+
+        # add the upmost_parent_feature to gff df
+        gff["upmost_parent_feature"] = gff.upmost_parent.apply(lambda x: upmost_parent_to_feature[x])
+
+        # write df
+        gff_df_file_tmp = "%s.tmp"%gff_df_file
+        gff.to_csv(gff_df_file_tmp, sep="\t", index=False, header=True)
+        os.rename(gff_df_file_tmp, gff_df_file)
+
+
+    # load
+    gff = pd.read_csv(gff_df_file, sep="\t")
+
+    return gff
+
+
+def get_type_object(string):
+
+    """Gets a string and returns the type of obhect"""
+
+    if "." in string and string.replace('.','').isdigit(): return "float"
+    elif string.isdigit(): return "int"
+    else: return "str"
+
+def get_value_as_str_forIDXmapping(val):
+
+    """Gets a value as a string"""
+
+    # type
+    type_object = get_type_object(str(val))
+
+    if pd.isna(val): return np.nan
+    elif type_object=="float" and str(val).endswith(".0"): return str(int(val))
+    elif type_object in {"float", "int"}: return str(val)
+    elif type_object=="str": return str(val)
+    else: raise ValueError("%s can't be parsed by this function"%val)
+
+def get_annotation_df_with_GeneFeature_as_gff(annot_df, gff):
+
+    """Takes the variant annotation df and returns them with added fields that are universal to all samples"""
+
+    print_if_verbose("re-writing Gene and Feature")
+
+    # load gff
+    gff_df = load_gff3_intoDF(gff, replace=False)
+
+    # keep only gffs where the upmost parent is a gene
+    gff_df = gff_df[gff_df.upmost_parent_feature.isin({"gene", "pseudogene"})]
+
+    # get empty 
+    annot_fields = ["#Uploaded_variation", "Gene", "Feature"]
+    if len(annot_df)==0: annot_df = pd.DataFrame(columns=annot_fields)
+
+    # change the important fields to strings
+    for f in [x for x in gff_df.keys() if x not in {"start", "end", "numeric_idx"}]: gff_df[f] = gff_df[f].apply(get_value_as_str_forIDXmapping)
+
+    annot_df["Gene"] = annot_df.Gene.apply(get_value_as_str_forIDXmapping)
+    annot_df["Feature"] = annot_df.Feature.apply(get_value_as_str_forIDXmapping)
+   
+    # find the fields in gff_df that explain the Gene and the feature
+    for field in ["Gene", "Feature"]:
+
+        # define all items
+        elements_field = set(annot_df[field]).difference({"-"})
+
+        # init macthing_gff_field, which will have to be defined
+        gff_field_to_fraction_mapping = {}
+
+        # init the already matched IDs
+        already_matched_elements = set()
+
+        ########## FIND ALL THE MATCHING GFF FIELDS ##########
+
+        # go through all the gff fields
+        for gff_field in gff_df.keys():
+
+            # debug
+            if all(pd.isna(gff_df[gff_field])): continue
+
+            # define the elements
+            elements_gff_field = {x for x in set(gff_df[gff_field]) if not pd.isna(x)}
+
+            # define the elements in field and not in the gff
+            elements_in_field_and_in_gff = elements_field.intersection(elements_gff_field)
+
+            # get the fraction
+            fraction_mapping = len(elements_in_field_and_in_gff)/len(elements_field)
+
+            # if there is something mapping
+            if fraction_mapping>0: 
+
+                gff_field_to_fraction_mapping[gff_field] = fraction_mapping
+                already_matched_elements.update(elements_in_field_and_in_gff)
+
+        # debug
+        if elements_field!=already_matched_elements: raise ValueError("some elements can't be mapped for %s"%field)
+
+        ##########################################################
+
+        ########## FIND THE MINIMUM NECESSARY GFF FIELDS ##########
+
+        print_if_verbose("getting the minimum necessary GFF fields")
+
+        # convert to series sorted so that the first elements go first
+        gff_field_to_fraction_mapping = pd.Series(gff_field_to_fraction_mapping).sort_values(ascending=False)
+
+        # init obhects
+        final_gff_fields = []
+        already_matched_elements = set()
+
+        # go through each of the gff fields
+        for gff_field in gff_field_to_fraction_mapping.index:
+
+            # get the elements
+            elements_gff_field = set(gff_df[gff_field])
+
+            # define the elements in field and not in the gff
+            elements_in_field_and_in_gff = elements_field.intersection(elements_gff_field)
+
+            # new elements
+            new_elements = elements_in_field_and_in_gff.difference(already_matched_elements)
+
+            # add the field
+            if len(new_elements)>0: final_gff_fields.append(gff_field)
+
+            # keep
+            already_matched_elements.update(elements_in_field_and_in_gff)
+
+            # if  you already got everything, break
+            if elements_field==already_matched_elements: break
+
+        ###########################################################
+
+        print_if_verbose("integrating")
+
+        # define the     final_gff_field depending on the 
+        target_gff_field = {"Gene":"upmost_parent", "Feature":"ANNOTATION_ID"}[field]
+
+        # create a df that contains the important fields
+        reduced_df_gff = gff_df[[target_gff_field] + final_gff_fields].drop_duplicates()
+
+        # add the intersecting_vals, which are the value of field that can be mapped to the gff_df
+        reduced_df_gff["all_vals_set"] = reduced_df_gff[final_gff_fields].apply(set, axis=1)
+        def get_intersection_sets(setA, setB): return setA.intersection(setB)
+        all_field_vals = set(annot_df[field])
+        reduced_df_gff["intersecting_set"] = reduced_df_gff.all_vals_set.apply(get_intersection_sets, setB=all_field_vals)
+
+        # keep only df with some intersection
+        reduced_df_gff = reduced_df_gff[reduced_df_gff.intersecting_set.apply(len)>0]
+
+        # check that there are no multiple intersecting vals
+        if any(reduced_df_gff["intersecting_set"].apply(len)!=1): raise ValueError("there are some values of gff that map to more than 1 feature")
+
+        # get the set as a string
+        reduced_df_gff["intesecting_val"] = reduced_df_gff.intersecting_set.apply(iter).apply(next)
+
+        # map each originalID to the finalIDs
+        originalID_to_finalID = reduced_df_gff.groupby("intesecting_val").apply(lambda df_or: ",".join(sorted(df_or[target_gff_field])))
+
+        # add the '-'
+        originalID_to_finalID["-"] = "-"
+
+        # check that there are no multiple finalIDs of gene
+        if field=="Gene" and any(originalID_to_finalID.apply(lambda x: "," in x)): raise ValueError("Each gene should be only mapped to one feature")
+
+        # add 
+        annot_df[field] = annot_df[field].apply(lambda x: originalID_to_finalID[x])
+
+    return annot_df
+
+
+def get_integrated_SV_CNV_smallVars_df_from_run_perSVade_severalSamples(paths_df, cwd, ploidy, pct_overlap, tol_bp, gff):
 
     """Takes the same input as run_perSVade_severalSamples and writes the integrated dfs under cwd, adding to the integrated SV_CNV datasets some added fields that indicate that the SVs and CNV are shared among several samples """
 
@@ -15414,7 +15710,6 @@ def get_integrated_SV_CNV_smallVars_df_from_run_perSVade_severalSamples(paths_df
 
     # init dict
     sampleID_to_SV_dataDict = {}
-
 
     samples_to_run = set(paths_df.sampleID)
     #samples_to_run = {"RUN2_H99_Kerstin", "RUN2_H99_1"}
@@ -15450,6 +15745,18 @@ def get_integrated_SV_CNV_smallVars_df_from_run_perSVade_severalSamples(paths_df
     file_prefix = "%s/integrated_SV_CNV_calling"%cwd
 
     SV_CNV, SV_CNV_annot = get_integrated_variants_into_one_df(df_data, file_prefix, replace=True, remove_files=True)[2:]
+
+
+    # add some fields to the annotation dfs
+    print_if_verbose("getting Gene and Feature matching the gff")
+    SV_CNV_annot = get_annotation_df_with_GeneFeature_as_gff(SV_CNV_annot, gff)
+    small_var_annot = get_annotation_df_with_GeneFeature_as_gff(small_var_annot, gff)
+
+    # add whether the SV is protein alterring
+    gff_df = load_gff3_intoDF(gff, replace=False)
+    all_protein_coding_genes = set(gff_df[gff_df.feature.isin({"CDS", "mRNA"})].upmost_parent)
+    SV_CNV_annot["is_protein_coding_gene"] = SV_CNV_annot.Gene.isin(all_protein_coding_genes)
+    SV_CNV_annot["is_transcript_disrupting"] = SV_CNV_annot.Consequence.apply(get_is_transcript_disrupting_consequence_SV)
 
     # add the common variant ID across samples
     outdir_common_variantID_acrossSamples = "%s/getting_common_variantID_acrossSamples"%cwd

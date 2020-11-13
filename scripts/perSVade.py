@@ -116,7 +116,7 @@ parser.add_argument("--range_filtering_benchmark", dest="range_filtering_benchma
 # alignment args
 parser.add_argument("-f1", "--fastq1", dest="fastq1", default=None, help="fastq_1 file. Option required to obtain bam files. It can be 'skip'")
 parser.add_argument("-f2", "--fastq2", dest="fastq2", default=None, help="fastq_2 file. Option required to obtain bam files. It can be 'skip'")
-parser.add_argument("-sbam", "--sortedbam", dest="sortedbam", default=None, help="The path to the sorted bam file, which should have a bam.bai file in the same dir. For example, if your bam file is called 'aligned_reads.bam', there should be an 'aligned_reads.bam.bai' as well. This is mutually exclusive with providing reads. By default, it is assumed that this bam has marked duplicates. If not, you can mark them with the option --markDuplicates_inBam.")
+parser.add_argument("-sbam", "--sortedbam", dest="sortedbam", default=None, help="The path to the sorted bam file, which should have a bam.bai file in the same dir. For example, if your bam file is called 'aligned_reads.bam', there should be an 'aligned_reads.bam.bai' as well. This is mutually exclusive with providing reads. By default, it is assumed that this bam has marked duplicates.")
 
 # machine options
 parser.add_argument("--job_array_mode", dest="job_array_mode", type=str, default="local", help="It specifies in how to run the job arrays for,  --testAccuracy, the downloading of reads if  --close_shortReads_table is auto, and the SV calling for the table in --close_shortReads_table. It can be 'local' (runs one job after the other or 'job_array'. If 'job_array' is specified, this pipeline will generate a file with all the jobs to run, and stop. You will have to run these jobs before stepping into downstream analyses.")
@@ -157,7 +157,6 @@ parser.add_argument("--minAF_smallVars", dest="minAF_smallVars", default="infer"
 parser.add_argument("-mcode", "--mitochondrial_code", dest="mitochondrial_code", default=3, type=int, help="The code of the NCBI mitochondrial genetic code. For yeasts it is 3. You can find the numbers for your species here https://www.ncbi.nlm.nih.gov/Taxonomy/Utils/wprintgc.cgi")
 parser.add_argument("-gcode", "--gDNA_code", dest="gDNA_code", default=1, type=int, help="The code of the NCBI gDNA genetic code. You can find the numbers for your species here https://www.ncbi.nlm.nih.gov/Taxonomy/Utils/wprintgc.cgi . For C. albicans it is 12. ")
 parser.add_argument("--remove_smallVarsCNV_nonEssentialFiles", dest="remove_smallVarsCNV_nonEssentialFiles", action="store_true", default=False, help="Will remove all the varCall files except the integrated final file and the bam file.")
-parser.add_argument("--markDuplicates_inBam", dest="markDuplicates_inBam", action="store_true", default=False, help="Will mark the duplicates in the bam file. This is only necessary if the input of the pipeline is a sorted bam (-sbam) instead of raw reads.")
 parser.add_argument("--replace_var_integration", dest="replace_var_integration", action="store_true", help="Replace all the variant integration steps for smallVariantCalling.")
 parser.add_argument("--generate_alternative_genome", dest="generate_alternative_genome", default=False, action="store_true", help="Generate an alternative genome in smallVariantCalling.")
 parser.add_argument("--skip_cnv_analysis", dest="skip_cnv_analysis", default=False, action="store_true", help="Don't perform the cnv analysis")
@@ -196,9 +195,9 @@ fun.make_folder(opt.outdir)
 # define the final file. and exit if it exists
 final_file = "%s/perSVade_finished_file.txt"%opt.outdir
 if not fun.file_is_empty(final_file): 
-	
-	print("WARNING: %s exists, suggesting that perSVade was already  run in this folder. Remove this file if you want this command to work. Exiting..."%final_file)
-	sys.exit(0)
+    
+    print("WARNING: %s exists, suggesting that perSVade was already  run in this folder. Remove this file if you want this command to work. Exiting..."%final_file)
+    sys.exit(0)
 
 # define the name as the sample as the first 10 characters of the outdir
 name_sample = fun.get_file(opt.outdir)[0:10]
@@ -317,13 +316,13 @@ if opt.gff is not None: correct_gff, gff_with_biotype = fun.get_correct_gff_and_
 # get the repeats table
 if opt.skip_repeat_analysis is False:
 
-	print("getting repeats")
-	repeats_df, repeats_table_file = fun.get_repeat_maskerDF(opt.ref, threads=opt.threads, replace=opt.replace)
+    print("getting repeats")
+    repeats_df, repeats_table_file = fun.get_repeat_maskerDF(opt.ref, threads=opt.threads, replace=opt.replace)
 
 else:
 
-	print("skipping the repeats analysis")
-	fun.write_repeats_table_file(repeats_table_file)
+    print("skipping the repeats analysis")
+    fun.write_repeats_table_file(repeats_table_file)
 
 if opt.StopAfter_repeatsObtention is True:
     print("Stopping after the obtention of repeats")
@@ -376,9 +375,6 @@ if not any([x=="skip" for x in {opt.fastq1, opt.fastq2}]):
         fun.clean_sorted_bam_coverage_per_window_files(sorted_bam)
 
     else: print("Warning: No fastq file given, assuming that you provided a bam file")
-
-    # mark duplicates if neccessary 
-    if opt.markDuplicates_inBam is True: sorted_bam = fun.get_sortedBam_with_duplicatesMarked(sorted_bam, threads=opt.threads, replace=opt.replace)
 
     # check that all the important files exist
     if any([fun.file_is_empty(x) for x in {sorted_bam, index_bam}]): raise ValueError("You need the sorted and indexed bam files in ")
@@ -519,6 +515,23 @@ print("structural variation analysis with perSVade finished")
 #####################################
 
 if opt.skip_SVcalling is False and not any([x=="skip" for x in {opt.fastq1, opt.fastq2}]) and opt.skip_SV_CNV_calling is False:
+
+    # run CNVcalling CONY
+    cony_outdir = "%s/CNV_calling"%opt.outdir
+    fun.run_CNV_calling_CONY(sorted_bam, opt.ref, cony_outdir, opt.threads, opt.replace)
+
+
+
+
+
+
+
+
+
+
+
+
+    finished_CNV_calling
 
     # delete key files if replace_SV_CNVcalling
     if opt.replace_SV_CNVcalling_and_optimisation is True: fun.remove_files_SV_CNVcalling(opt.outdir)
