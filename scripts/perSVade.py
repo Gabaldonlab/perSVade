@@ -518,7 +518,7 @@ if opt.skip_SVcalling is False and not any([x=="skip" for x in {opt.fastq1, opt.
 
     # run CNVcalling CONY
     cony_outdir = "%s/CNV_calling"%opt.outdir
-    fun.run_CNV_calling_CONY(sorted_bam, opt.ref, cony_outdir, opt.threads, opt.replace)
+    fun.run_CNV_calling_CONY(sorted_bam, opt.ref, cony_outdir, opt.threads, opt.replace, opt.mitochondrial_chromosome)
 
 
 

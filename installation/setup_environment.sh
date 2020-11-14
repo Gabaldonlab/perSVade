@@ -178,21 +178,25 @@ conda install -n $R_env_name -c bioconda -y bioconductor-rtracklayer=1.48.0;
 conda install -n $R_env_name -c conda-forge -y r-r.utils=2.9.2;
 conda install -n $R_env_name -c bioconda -y bioconductor-structuralvariantannotation=1.4.0;
 
+# create a subenvironment for running CONY. The last commit of CONY was the 12/06/2017. This is 3 years and 4 months ago., so that I have to install software from a similar age
 
-# create a subenvironment for running CONY
+
+# packages from bioconda:
+
+# bioconductor-iranges=2.8.2  -> 3 years and 5 months -> R 3.3.2 / R 3.3.1
+# bioconductor-exomecopy=1.22.0 -> 3 years and 4 months -> R 3.4.1 / R 3.3.2
+# r-snow=0.4 -> 3 years and 5 months -> R 3.3.2 
+
+# conda-forge
+# r-argparser=0.4 -> 3 years and 2 months -> R 3.3.2
+
+# 
+
 CONY_env_name="$env_name"_CONY_env
 echo "creating conda env $CONY_env_name"
 
-conda create -y --name $CONY_env_name -c conda-forge r-base=4.0.3
-conda install -n $CONY_env_name -c bioconda -y bioconductor-exomecopy=1.36.0;
-conda install -n $CONY_env_name -c conda-forge -y r-argparser=0.6;
-
-conda install -n $CONY_env_name -c bioconda -y bioconductor-rtracklayer=1.50.0;
-
-
-
-
-
+conda create -y --name $CONY_env_name -c bioconda bioconductor-iranges=2.8.2 bioconductor-exomecopy=1.22.0 r-snow=0.4; # this should install r-base=3.3.2, which fits all the dependencies
+conda install -y -n $CONY_env_name -c conda-forge r-argparser=0.4;
 
 # create a subenvironment to run gridss
 gridss_env_name="$env_name"_gridss_env
