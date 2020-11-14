@@ -161,7 +161,6 @@ gridss_run = "%s/gridss.sh"%external_software
 gridss_jar = "%s/gridss-2.9.2-gridss-jar-with-dependencies.jar"%external_software
 clove = "%s/clove-0.17-jar-with-dependencies.jar"%external_software
 gztool = "%s/gztool"%external_software
-libraries_CONY = "%s/CONY.R"%external_software
 
 # executables that are in other environments
 picard_exec = "%s/bin/picard"%picard_EnvDir
@@ -204,6 +203,8 @@ get_trimmed_reads_for_srr_py = "%s/get_trimmed_reads_for_srr.py"%CWD
 run_vep = "%s/run_vep.py"%CWD
 calculate_memory_py = "%s/calculate_memory.py"%CWD
 get_interestingTaxIDs_distanceToTarget_taxID_to_sciName_py = "%s/get_interestingTaxIDs_distanceToTarget_taxID_to_sciName.py"%CWD
+libraries_CONY = "%s/CONY_package_debugged.R "%CWD
+
 
 # old code
 #create_simulatedSVgenome_R = "%s/create_simulatedSVgenome.R"%CWD
@@ -10715,30 +10716,229 @@ def get_bam_with_duplicatesMarkedSpark(bam, threads=4, replace=False, remove_dup
 
     return bam_dupMarked
 
-def run_CNV_calling_CONY(sorted_bam, reference_genome, outdir, threads, replace):
+def get_chromosomal_sorted_bam(sorted_bam, sorted_bam_chr, chromosome, replace, threads):
+
+    """Gets the chromosomal bam and index for sorted_bam"""
+
+    if file_is_empty(sorted_bam_chr) or replace is True:
+
+        sorted_bam_chr_stderr = "%s.generating.stderr"%sorted_bam_chr
+        sorted_bam_chr_tmp = "%s.tmp"%sorted_bam_chr
+
+        run_cmd("%s view -b %s %s > %s 2>%s"%(samtools, sorted_bam, chromosome, sorted_bam_chr_tmp, sorted_bam_chr_stderr))
+
+        remove_file(sorted_bam_chr_stderr)
+
+        # index the bam
+        index_bam(sorted_bam_chr_tmp, threads=threads)
+
+        # renames
+        os.rename("%s.bai"%sorted_bam_chr_tmp, "%s.bai"%sorted_bam_chr)
+        os.rename(sorted_bam_chr_tmp, sorted_bam_chr)
+
+def get_mpileup_file_one_chrom(sorted_bam, replace, reference_genome, min_basecalling_qual=30, min_map_qual=30):
+
+    """Runs samtools mpileup for the sorted bam, returning the file that has the position and the read depth. The bam should be only one chromosome"""
+
+    mpileup_file = "%s.mpileup.txt"%sorted_bam
+
+    if file_is_empty(mpileup_file) or replace is True:
+
+        mpileup_file_tmp = "%s.tmp"
+        mpileup_stderr = "%s.generating.stderr"%mpileup_file
+
+        run_cmd("%s mpileup -f %s --min-MQ %i --min-BQ %i -a %s | cut -f2,4 > %s 2>%s "%(samtools, reference_genome, min_map_qual, min_basecalling_qual, sorted_bam, mpileup_file_tmp, mpileup_stderr))
+
+        remove_file(mpileup_stderr)
+        os.rename(mpileup_file_tmp, mpileup_file)
+
+    return mpileup_file
+
+def run_CNV_calling_CONY_one_chromosome(sorted_bam, reference_genome, outdir, chromosome, replace, window_size, threads,chrom_len, sample_name):
+
+    """ runs CONY on a given chromosome into outdir """
+
+    print_if_verbose("running CONY for %s and sample %s"%(chromosome, sample_name))
+    make_folder(outdir)
+
+    # define the curdir
+    CurDir = get_fullpath(".")
+
+    # change dir to outdir
+    os.chdir(outdir)
+
+    ############### PREPARE CONY DATA ###############
+
+    # get the chromosomal bam
+    sorted_bam_chr = "%s/aligned_reads.sorted.bam"%outdir
+    get_chromosomal_sorted_bam(sorted_bam, sorted_bam_chr, chromosome, replace, threads)
+
+    # get the genome of this chromosome
+    reference_genome_chr = "%s/reference_genome_onlyChr.fa"%outdir
+    chromRecord = [seq for seq in SeqIO.parse(reference_genome, "fasta") if seq.id==chromosome]
+    SeqIO.write(chromRecord, reference_genome_chr, "fasta")
+
+    # define a regions file, which includes the whole chromosome
+    target_df = pd.DataFrame({0 : {"seqname":chromosome, "start":1, "end":chrom_len}}).transpose()
+    regions_file_chr = "%s/target_regions.bed1based"%outdir
+    save_df_as_tab(target_df[["seqname", "start", "end"]], regions_file_chr)
+
+    # define the mpileup per chromosome
+    mpileup_file = get_mpileup_file_one_chrom(sorted_bam_chr, replace, reference_genome_chr, min_basecalling_qual=30, min_map_qual=30) # these are the default CONY parameters
+
+    # create a soft link on the CONY library, which is necessary because there are functions in CONY.R which use this
+    soft_link_files(libraries_CONY, "%s/CONY.R"%outdir)
+
+    #################################################
+
+    ########## RUN CONY ##########
+
+    # define the final file
+    final_file = "%s/CONVY_finished.txt"%outdir
+
+    if file_is_empty(final_file) or replace is True:
+
+        # run CONY
+        cony_std = "%s/running_cony.std"%outdir
+        print_if_verbose("Running CONY. The std is in %s"%cony_std)
+
+        cmd = "%s --reference_genome %s --sorted_bam %s --regions_file %s --libraries_CONY %s --window_size %i --mpileup_file %s --chromosome %s --sample_name %s --outdir %s"%(run_CONY_R, reference_genome_chr, sorted_bam_chr, regions_file_chr, libraries_CONY, window_size, mpileup_file, chromosome, sample_name, outdir)
+        run_cmd(cmd, env=EnvName_CONY)
+
+        remove_file(cony_std)
+
+        # make the final file
+        open(final_file, "w").write("CONY finished")
+
+    # at the end return to the CurDir
+    os.chdir(CurDir)
+
+    #################################
+
+
+    ###### PLOT THE CN ACROSS THE CHROMOSOME ######
+
+    fig = plt.figure(figsize=(5,5))
+
+    CONY.Result.ChrA_C_glabrata_CBS138.outdir_per.SumUp.Single.CNRegionAll.txt
+    CONY.Result.ChrA_C_glabrata_CBS138.outdir_per.SumUp.Single.CNV.txt
+    CONY.Result.ChrA_C_glabrata_CBS138.outdir_per.SumUp.Single.Window.txt
+
+
+
+
+
+    ################################################
+
+
+    takeIntoConsiderationThatSomeChromosomesMayBeCompleteelyLost
+
+def get_sample_name_from_bam(bam):
+
+    """Gets the sample name of a bam file"""
+
+    sample_name = str(subprocess.check_output("%s view -H %s | egrep '^@RG'"%(samtools, bam), shell=True)).split("ID:")[1].split("\\t")[0]
+    
+    return sample_name
+
+def run_CNV_calling_CONY(sorted_bam, reference_genome, outdir, threads, replace, mitochondrial_chromosome, window_size=100):
 
     """This function takes a sorted bam and runs CONY on it to get the copy-number variation results. It is important that the sorted_bam contains no duplicates."""
 
     make_folder(outdir)
 
+    # define the sample name
+    sample_name = get_sample_name_from_bam(sorted_bam)
+
+    # define the inputs of the parallel running of CONY
+    chrom_to_len = get_chr_to_len(reference_genome)
+    inputs_fn = [(sorted_bam, reference_genome, "%s/%s_CONYrun"%(outdir, c), c, replace, window_size, 1, chrom_len, sample_name) for c, chrom_len in chrom_to_len.items()]
+
+    #inputs_fn = [(sorted_bam, reference_genome, "%s/%s_CONYrun"%(outdir, c), c, replace, window_size, 1, chrom_len, sample_name) for c, chrom_len in chrom_to_len.items() if c=="ChrI_C_glabrata_CBS138"] # debug
+
+    # run CONY for each chromosome in parallel
+
+    # run not in parallel
+    list(map(lambda x: run_CNV_calling_CONY_one_chromosome(x[0], x[1], x[2], x[3], x[4], x[5], x[6],x[7], x[8]), inputs_fn))
+
+    kdajkajdhd
+
+
+
+
+    #run_CNV_calling_CONY_one_chromosome(sorted_bam, reference_genome, outdir, chromosome, replace, window_size, threads):
+
     ########## PREPARE DATA FOR CONY RUNNING ########## 
+
+    # create an mpileup file for all chromosomes with mosdepth
+
+
+
+
+
+    available_RAM = get_availableGbRAM()
+
+    delete_folder(gridss_tmpdir); make_folder(gridss_tmpdir)
+    remove_file(gridss_assemblyBAM)
+
+    # define the ram available
+    allocated_ram = get_availableGbRAM(gridss_tmpdir)*fractionRAM_to_dedicate
+    print_if_verbose("running gridss with %iGb of RAM"%allocated_ram)
+
+    # define the heap size, which depends on the cloud or not
+    #jvmheap = "27.5g" # this is the default
+    #jvmheap = "20g" # this works in MN. This can be changed to fit the machine
+    jvmheap = "%ig"%min([31, int(allocated_ram)]) # this is automatically adjusted for the given machine. Note that due to Java's use of Compressed Oops, specifying a max heap size of between 32-48GB effectively reduces the memory available to GRIDSS so is strongly discouraged.
+
+    # define the maxiumum number of threads so that each thread has 8Gb of ram (jvmheap)
+    max_threads = max([1, int(allocated_ram/8 - 1)]) 
+    if threads>max_threads: threads =  max_threads # this is to optimise for the reccommended level of parallelism
+
+
+
+    gridss_run
 
     # prepare a data table that contains the 1-based positions for each chromosome
     chrom_to_len = get_chr_to_len(reference_genome)
-    target_df = pd.DataFrame({c : {"seqname":c, "start":1, "end":length} for c, length in chrom_to_len.items()}).transpose()
+    target_df = pd.DataFrame({c : {"seqname":c, "start":1, "end":length} for c, length in chrom_to_len.items() if c!=mitochondrial_chromosome}).transpose()
     regions_file = "%s/target_regions.bed1based"%outdir
     save_df_as_tab(target_df[["seqname", "start", "end"]], regions_file)
 
     ###################################################
 
-    # run CONY
-    cony_std = "%s/running_cony.std"%outdir
-    print_if_verbose("Running CONY. The std is in %s"%cony_std)
+    # define the final file
+    final_file = "%s/CONVY_finished.txt"%outdir
 
-    cmd = "%s --reference_genome %s --sorted_bam %s --regions_file %s --libraries_CONY %s"%(run_CONY_R, reference_genome, sorted_bam, regions_file, libraries_CONY)
-    run_cmd(cmd, env=EnvName_CONY)
+    if file_is_empty(final_file) or replace is True:
 
-    remove_file(cony_std)
+        # define the curdir
+        CurDir = get_fullpath(".")
+
+        # change the dir to the outdir
+        os.chdir(outdir)
+
+        # run CONY
+        cony_std = "%s/running_cony.std"%outdir
+        print_if_verbose("Running CONY. The std is in %s"%cony_std)
+
+        cmd = "%s --reference_genome %s --sorted_bam %s --regions_file %s --libraries_CONY %s --window_size %i > %s 2>&1"%(run_CONY_R, reference_genome, sorted_bam, regions_file, libraries_CONY, window_size, cony_std)
+        run_cmd(cmd, env=EnvName_CONY)
+
+        remove_file(cony_std)
+
+        # return to the initial dir
+        os.chdir(CurDir)
+
+        # make the final file
+        open(final_file, "w").write("CONY finished")
+
+
+
+    #Error in .Call2("solve_user_SEW", refwidths, start, end, width, translate.negative.coord,  : 
+    #solving row 14: 'allow.nonnarrowing' is FALSE and the supplied end (20100) is > refwidth
+    #Calls: WindowInfo ... narrow -> narrow -> solveUserSEW -> .Call2 -> .Call
+    #In addition: There were 42 warnings (use warnings() to see them)
+
 
 
     adkjhkaj
