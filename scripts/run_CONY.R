@@ -78,7 +78,7 @@ if (length(rownames(usedRD_df))==0) {
 
 # estimate the parameters used to define each of the copies. NCN=5 means that there will be ranges from 1-to-5 CN
 print("running EstPar")
-EstPar(CRDMethod="SumUp", AnaMethod="Single", TargetChr=opt$chromosome, SampleName=opt$sample_name, NCN=5)
+EstPar(CRDMethod="SumUp", AnaMethod="Single", TargetChr=opt$chromosome, SampleName=opt$sample_name, NCN=4)
 
 # run the pipeline
 print("running CONY")

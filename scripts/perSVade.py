@@ -516,9 +516,13 @@ print("structural variation analysis with perSVade finished")
 
 if opt.skip_SVcalling is False and not any([x=="skip" for x in {opt.fastq1, opt.fastq2}]) and opt.skip_SV_CNV_calling is False:
 
+    # define the df_clove
+    outfile_clove = "%s/SVdetection_output/final_gridss_running/gridss_output.vcf.withSimpleEventType.vcf.filtered_default.vcf.bedpe.raw.bedpe.clove.vcf"%opt.outdir
+    df_clove = fun.get_clove_output(outfile_clove)
+
     # run CNVcalling CONY
     cony_outdir = "%s/CNV_calling"%opt.outdir
-    fun.run_CNV_calling_CONY(sorted_bam, opt.ref, cony_outdir, opt.threads, opt.replace, opt.mitochondrial_chromosome)
+    fun.run_CNV_calling_CONY(sorted_bam, opt.ref, cony_outdir, opt.threads, opt.replace, opt.mitochondrial_chromosome, df_clove)
 
 
 
