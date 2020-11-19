@@ -3456,6 +3456,140 @@ def get_bedpe_df_with_added_feats(df_bedpe, df_gridss):
 
 
 
+def run_CNV_calling(sorted_bam, reference_genome, outdir, threads, replace, mitochondrial_chromosome, df_bedpe, df_gridss, window_size=100):
+
+    """This function takes a sorted bam and runs several programs on it to get the copy-number variation results. It is important that the sorted_bam contains no duplicates. It will correct bu GC content, mappability and distance to the telomere. All coverage will be corrected by GC content, mappability and the distance to the telomere, which will be calculated also taking into account breakpoint information. """
+
+    make_folder(outdir)
+
+
+    # define the chrom to len
+    chrom_to_len = get_chr_to_len(reference_genome)
+
+    
+
+    # define the breakend locations
+    chrom_to_bpPositions = get_chrom_to_bpPositions(df_clove, reference_genome)
+    for chrom in chrom_to_bpPositions: chrom_to_bpPositions[chrom].update({0, chrom_to_len[chrom]})
+
+
+
+    # define the sample name
+    sample_name = get_sample_name_from_bam(sorted_bam)
+
+
+    thewholeCNVnator_doesntWork
+
+
+    # run cnvnator
+    outdir_cnvnator = "%s/cnvnator_outdir"%outdir
+    cnvnator_outfile = run_CNVNATOR(sorted_bam, reference_genome, outdir_cnvnator, threads, replace, mitochondrial_chromosome, df_clove, window_size, sample_name, chrom_to_len)
+
+    ################## RUN CONY ##################
+
+
+    # go through each chrom
+    for c, chrom_len in chrom_to_len.items():
+
+        # define the outdir 
+        outdir_chrom = "%s/%s_CONYrun"%(outdir, c)
+
+        # run CONY for this chromosome, this is parallelized
+        run_CNV_calling_CONY_one_chromosome(sorted_bam, reference_genome, outdir_chrom, c, replace, window_size, threads, chrom_len, sample_name, chrom_to_bpPositions[c])
+
+
+    #############################################
+
+    finished_CONYallChroms
+
+
+    kdajkajdhd
+
+
+
+
+    #run_CNV_calling_CONY_one_chromosome(sorted_bam, reference_genome, outdir, chromosome, replace, window_size, threads):
+
+    ########## PREPARE DATA FOR CONY RUNNING ########## 
+
+    # create an mpileup file for all chromosomes with mosdepth
+
+
+
+
+
+    available_RAM = get_availableGbRAM()
+
+    delete_folder(gridss_tmpdir); make_folder(gridss_tmpdir)
+    remove_file(gridss_assemblyBAM)
+
+    # define the ram available
+    allocated_ram = get_availableGbRAM(gridss_tmpdir)*fractionRAM_to_dedicate
+    print_if_verbose("running gridss with %iGb of RAM"%allocated_ram)
+
+    # define the heap size, which depends on the cloud or not
+    #jvmheap = "27.5g" # this is the default
+    #jvmheap = "20g" # this works in MN. This can be changed to fit the machine
+    jvmheap = "%ig"%min([31, int(allocated_ram)]) # this is automatically adjusted for the given machine. Note that due to Java's use of Compressed Oops, specifying a max heap size of between 32-48GB effectively reduces the memory available to GRIDSS so is strongly discouraged.
+
+    # define the maxiumum number of threads so that each thread has 8Gb of ram (jvmheap)
+    max_threads = max([1, int(allocated_ram/8 - 1)]) 
+    if threads>max_threads: threads =  max_threads # this is to optimise for the reccommended level of parallelism
+
+
+
+    gridss_run
+
+    # prepare a data table that contains the 1-based positions for each chromosome
+    chrom_to_len = get_chr_to_len(reference_genome)
+    target_df = pd.DataFrame({c : {"seqname":c, "start":1, "end":length} for c, length in chrom_to_len.items() if c!=mitochondrial_chromosome}).transpose()
+    regions_file = "%s/target_regions.bed1based"%outdir
+    save_df_as_tab(target_df[["seqname", "start", "end"]], regions_file)
+
+    ###################################################
+
+    # define the final file
+    final_file = "%s/CONVY_finished.txt"%outdir
+
+    if file_is_empty(final_file) or replace is True:
+
+        # define the curdir
+        CurDir = get_fullpath(".")
+
+        # change the dir to the outdir
+        os.chdir(outdir)
+
+        # run CONY
+        cony_std = "%s/running_cony.std"%outdir
+        print_if_verbose("Running CONY. The std is in %s"%cony_std)
+
+        cmd = "%s --reference_genome %s --sorted_bam %s --regions_file %s --libraries_CONY %s --window_size %i > %s 2>&1"%(run_CONY_R, reference_genome, sorted_bam, regions_file, libraries_CONY, window_size, cony_std)
+        run_cmd(cmd, env=EnvName_CONY)
+
+        remove_file(cony_std)
+
+        # return to the initial dir
+        os.chdir(CurDir)
+
+        # make the final file
+        open(final_file, "w").write("CONY finished")
+
+
+
+    #Error in .Call2("solve_user_SEW", refwidths, start, end, width, translate.negative.coord,  : 
+    #solving row 14: 'allow.nonnarrowing' is FALSE and the supplied end (20100) is > refwidth
+    #Calls: WindowInfo ... narrow -> narrow -> solveUserSEW -> .Call2 -> .Call
+    #In addition: There were 42 warnings (use warnings() to see them)
+
+
+
+    adkjhkaj
+
+
+    libraries_CONY
+
+
+    # run samtools mpileup to get the 
 def get_genomeGraph_object(genome, df_bedpe, df_gridss_filt, genomeGraph_outfileprefix, replace=False):
 
     """This function takes a bedpe and generates an undirected graph where each position is mapped to the 3' position in the genome. Tandem duplications are not considered as they may get weird loops"""
@@ -8232,4 +8366,56 @@ def get_sortedBam_with_duplicatesMarked(sorted_bam, threads=4, replace=False, re
         index_bam(sorted_bam_dupMarked, threads=threads)
 
     return sorted_bam_dupMarked
+
+
+def get_df_with_GCcontent(df_windows, genome, gcontent_outfile, replace=False):
+
+    """This function takes a df with windows of the genome and adds the gc content for each window, writing a file under gcontent_outfile. It will only do those that have been already measured"""
+
+    print_if_verbose("Getting GC content")
+
+    if file_is_empty(gcontent_outfile) or replace is True:
+
+        # define the initial index
+        initial_index = list(df_windows.index)
+
+        # resort
+        df_windows = df_windows.sort_values(by=["chromosome", "start", "end"]).set_index(["chromosome", "start", "end"], drop=False)
+
+        print_if_verbose("getting GC content for %i new windows"%len(df_windows))
+
+        # get the GC content file for each position
+        gc_content_outfile_perPosition = generate_nt_content_file(genome, replace=replace, target_nts="GC")
+        gc_df = pd.read_csv(gc_content_outfile_perPosition, sep="\t")[["chromosome", "position", "is_in_GC"]].sort_values(by=["chromosome", "position"])
+
+        print(gc_df)
+
+        lkadjladkad
+
+
+        # define a df where each position is one row and it has the start_window as an add
+        df_windows["length"] = df_windows.end - df_windows.start
+        positions = make_flat_listOflists(list(df_windows.apply(lambda r: list(range(r["start"], r["end"])), axis=1)))
+        start_windows = make_flat_listOflists(list(df_windows.apply(lambda r: [r["start"]]*r["length"], axis=1)))
+        end_windows = make_flat_listOflists(list(df_windows.apply(lambda r: [r["end"]]*r["length"], axis=1)))
+        chromosomes = make_flat_listOflists(list(df_windows.apply(lambda r: [r["chromosome"]]*r["length"], axis=1)))
+        df_positions = pd.DataFrame({"position":positions, "chromosome":chromosomes, "start_window":start_windows, "end_window":end_windows})
+
+        # add the positions to the gc df
+        gc_df = gc_df.merge(df_positions, on=["chromosome", "position"], how="right")        
+
+        # calculate the GC content and add to df
+        window_to_gc = gc_df[["chromosome", "start_window", "end_window", "is_in_GC"]].groupby(["chromosome", "start_window", "end_window"]).mean()["is_in_GC"]
+     
+        # get into df_windows
+        df_windows["GCcontent"] = list(window_to_gc.loc[df_windows.index])
+
+        # at the end save the df windows
+        df_windows.index = initial_index
+        save_object(df_windows, gcontent_outfile)
+
+    else: df_windows = load_object(gcontent_outfile)
+
+    return df_windows
+
 

@@ -61,7 +61,18 @@ conda install -c bioconda -y sra-tools=2.10.0 &&
 conda install -c bioconda -y trimmomatic=0.38 &&
 conda install -c bioconda -y parallel-fastq-dump=0.6.3 &&
 conda install -c bioconda -y fastqc=0.11.9 &&
-conda install -c bioconda -y bedops=2.4.39
+conda install -c bioconda -y bedops=2.4.39 &&
+
+conda install -c conda-forge -y python-igraph=0.7.1.post7
+conda install -c bioconda -y genmap=1.3.0
+conda install -c anaconda statsmodels=0.12.0
+
+
+#conda install -c conda-forge -y igraph=0.7.1 && # updates openssl pkgs/main::openssl-1.1.1g-h7b6447c_0 --> conda-forge::openssl-1.1.1g-h516909a_1
+#conda install -c conda-forge -y python-igraph=0.7.1.post7 &&
+
+#conda install -c bioconda cnvpytor=1.0 # a package to run CNV calls. It does not install any R pack
+
 
 
 

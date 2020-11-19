@@ -20,10 +20,12 @@ from Bio import SeqIO
 from Bio.Seq import Seq
 from Bio.SeqRecord import SeqRecord
 import pickle
+import statsmodels.api as statsmodels_api
 import itertools
 import ast
 import copy as cp
 import re
+import logging
 import shutil
 from datetime import date
 import multiprocessing as multiproc
@@ -34,6 +36,7 @@ from sklearn import linear_model
 import time
 from sklearn.metrics import r2_score
 from collections import Counter, defaultdict
+from sklearn.model_selection import KFold
 import collections
 #from ete3 import Tree, NCBITaxa
 from shutil import copyfile
@@ -49,6 +52,7 @@ from matplotlib.collections import PatchCollection
 import scipy.stats as stats
 import psutil
 from sklearn.utils import resample
+import igraph
 
 import plotly.plotly as py
 import plotly.figure_factory as ff
@@ -57,6 +61,8 @@ import plotly.graph_objs as go
 from plotly import tools
 from plotly.offline import init_notebook_mode, plot, iplot # download_plotlyjs
 import cufflinks as cf
+import cnvpytor
+
 
 #### UNIVERSAL FUNCTIONS ####
 
@@ -159,6 +165,9 @@ fasta_generate_regions_py = "%s/bin/fasta_generate_regions.py"%EnvDir
 pigz = "%s/bin/pigz"%EnvDir
 unpigz = "%s/bin/unpigz"%EnvDir
 bedmap = "%s/bin/bedmap"%EnvDir
+cnvpytor_exec = "%s/bin/cnvpytor"%EnvDir
+genmap = "%s/bin/genmap"%EnvDir
+
 
 porechop = "%s/bin/porechop"%EnvDir
 
@@ -3143,53 +3152,6 @@ def generate_nt_content_file(genome, target_nts="GC", replace=False):
 
     return target_nt_content_file
 
-def get_df_with_GCcontent(df_windows, genome, gcontent_outfile, replace=False):
-
-    """This function takes a df with windows of the genome and adds the gc content for each window, writing a file under gcontent_outfile. It will only do those that have been already measured"""
-
-    print_if_verbose("Getting GC content")
-
-    if file_is_empty(gcontent_outfile) or replace is True:
-
-        # define the initial index
-        initial_index = list(df_windows.index)
-
-        # resort
-        df_windows = df_windows.sort_values(by=["chromosome", "start", "end"]).set_index(["chromosome", "start", "end"], drop=False)
-
-        print_if_verbose("getting GC content for %i new windows"%len(df_windows))
-
-        # get the GC content file for each position
-        gc_content_outfile_perPosition = generate_nt_content_file(genome, replace=replace, target_nts="GC")
-        gc_df = pd.read_csv(gc_content_outfile_perPosition, sep="\t")[["chromosome", "position", "is_in_GC"]].sort_values(by=["chromosome", "position"])
-
-
-        # define a df where each position is one row and it has the start_window as an add
-        df_windows["length"] = df_windows.end - df_windows.start
-        positions = make_flat_listOflists(list(df_windows.apply(lambda r: list(range(r["start"], r["end"])), axis=1)))
-        start_windows = make_flat_listOflists(list(df_windows.apply(lambda r: [r["start"]]*r["length"], axis=1)))
-        end_windows = make_flat_listOflists(list(df_windows.apply(lambda r: [r["end"]]*r["length"], axis=1)))
-        chromosomes = make_flat_listOflists(list(df_windows.apply(lambda r: [r["chromosome"]]*r["length"], axis=1)))
-        df_positions = pd.DataFrame({"position":positions, "chromosome":chromosomes, "start_window":start_windows, "end_window":end_windows})
-
-        # add the positions to the gc df
-        gc_df = gc_df.merge(df_positions, on=["chromosome", "position"], how="right")        
-
-        # calculate the GC content and add to df
-        window_to_gc = gc_df[["chromosome", "start_window", "end_window", "is_in_GC"]].groupby(["chromosome", "start_window", "end_window"]).mean()["is_in_GC"]
-     
-        # get into df_windows
-        df_windows["GCcontent"] = list(window_to_gc.loc[df_windows.index])
-
-        # at the end save the df windows
-        df_windows.index = initial_index
-        save_object(df_windows, gcontent_outfile)
-
-    else: df_windows = load_object(gcontent_outfile)
-
-    return df_windows
-
-
 
 def get_distanceToTelomere_chromosome_GCcontent_to_coverage_fn(df_coverage_train, genome, outdir, expected_coverage_per_bp, mitochondrial_chromosome="mito_C_glabrata_CBS138", replace=False):
 
@@ -3426,17 +3388,16 @@ def get_coverage_per_window_df_without_repeating(reference_genome, sorted_bam, w
 
     """This function takes a windows file and a bam, and it runs generate_coverage_per_window_file_parallel but only for regions that are not previously calculated"""
 
-
-
     # check if it can be run in parallel
     if parallelization_is_possible(threads) is False: run_in_parallel = False
     print_if_verbose("running get_coverage_per_window_df_without_repeating with %i threads"%threads)
 
     # define the query_windows
-    query_windows_df = pd.read_csv(windows_file, sep="\t").set_index(["chromosome", "start", "end"], drop=False)
-    if len(query_windows_df)==0: return pd.DataFrame()
+    if open(windows_file).readlines()[0].startswith("chromosome"): query_windows_df = pd.read_csv(windows_file, sep="\t")
+    else: query_windows_df = pd.read_csv(windows_file, sep="\t", header=None, names=["chromosome", "start", "end"])
 
-    print(query_windows_df)
+    query_windows_df = query_windows_df.set_index(["chromosome", "start", "end"], drop=False)
+    if len(query_windows_df)==0: return pd.DataFrame()
     
     # chek the initial length
     query_df_len = len(query_windows_df)
@@ -6574,6 +6535,34 @@ def get_is_overlapping_query_vs_target_region(q, r):
     """This function takes two 'bed'-like regions and returns whether they are overlapping by some extent """
 
     return (q["chromosome"]==r["chromosome"]) and ((r["start"]<=q["start"]<=r["end"]) or (r["start"]<=q["end"]<=r["end"]) or (q["start"]<=r["start"]<=q["end"]) or (q["start"]<=r["end"]<=q["end"]))
+
+
+def get_svtype_to_svfile_from_perSVade_outdir(perSVade_outdir):
+
+    """This function takes from the perSVade outdir the svdict"""
+
+    # define the paths
+    outdir = "%s/SVdetection_output/final_gridss_running"%perSVade_outdir
+    gridss_vcf = "%s/gridss_output.raw.vcf"%outdir # raw
+
+    # this means that it is a cleaned dir
+    if not file_is_empty(gridss_vcf):
+
+         # get the svtype_to_svfile
+        svtype_to_svfile = {svtype : "%s/%s.tab"%(outdir, svtype)  for svtype in {"insertions", "deletions", "tandemDuplications", "translocations", "inversions"}}
+        svtype_to_svfile["remaining"] = "%s/unclassified_SVs.tab"%outdir 
+
+    else: 
+
+        # assume that it is a not cleaned dir
+        gridss_vcf = "%s/gridss_output.vcf.withSimpleEventType.vcf"%outdir # raw
+        #gridss_vcf = "%s/gridss_output.vcf.withSimpleEventType.vcf.filtered_default.vcf"%outdir # filtered
+        svtype_to_svfile = {file.split(".structural_variants.")[1].split(".")[0] : "%s/%s"%(outdir, file) for file in os.listdir(outdir) if ".structural_variants." in file}
+
+    # keep only the ones that exist
+    svtype_to_svfile = {svtype : file for svtype, file in svtype_to_svfile.items() if not file_is_empty(file)}
+
+    return svtype_to_svfile
 
 
 def get_svtype_to_svfile_and_df_gridss_from_perSVade_outdir(perSVade_outdir, reference_genome):
@@ -10832,6 +10821,9 @@ def get_mpileup_file_one_chrom_correctedBySmileyFaceEffect(mpileup_file, threads
     
     """Takes an mpileup file and returns it with the 2nd col transformed, so that it has the effect of position regressed out. It does so by fitting a second degree polynomyal on it"""
 
+
+    this_does_not_workProperly
+
     # define final file
     mpileup_file_correctedCov = "%s.coverage_correctedByPos.tab"%mpileup_file
 
@@ -11059,21 +11051,688 @@ def get_sample_name_from_bam(bam):
     
     return sample_name
 
-def run_CNV_calling_CONY(sorted_bam, reference_genome, outdir, threads, replace, mitochondrial_chromosome, df_clove, window_size=100):
 
-    """This function takes a sorted bam and runs CONY on it to get the copy-number variation results. It is important that the sorted_bam contains no duplicates."""
+def configure_reference_genome_for_CNVnator(reference_genome, threads, root_file, mitochondrial_chromosome):
+
+    """This function will create all the necessary files to create the reference genome file and configure root_file to use it. It is based on this: https://github.com/abyzovlab/CNVpytor/blob/master/examples/AddReferenceGenome.md"""   
+
+    print_if_verbose("configure reference_genome")
+
+    # get the bgzipped reference_genome
+    reference_genome_gz = "%s.reference_genome.gz"%root_file
+    reference_genome_gz_stderr = "%s.generating.stderr"%reference_genome_gz
+    run_cmd("%s %s --stdout > %s 2>%s"%(bgzip, reference_genome, reference_genome_gz, reference_genome_gz_stderr))
+    remove_file(reference_genome_gz_stderr)
+
+    # get the GC mask file. By default it works on 100-bp bins
+    gc_file = "%s.gc.pytor"%root_file
+    gc_file_std = "%s.generating.std"%gc_file
+    run_cmd("%s -root %s -gc %s -make_gc_file > %s 2>&1"%(cnvpytor_exec, gc_file, reference_genome_gz, gc_file_std))
+    remove_file(gc_file_std)
+
+    save_df_as_tab
+    # create dict that has the info
+    """
+    reference_genome_dict = {"custom_ref":{"name":"custom reference genome",
+                                           "species":"custom species",
+                                           "chromosomes":}}
+    """
+
+
+    khadkdha
+
+    print(gc_file)
+    ljhdahkjdad
+
+
+    # get the outdir
+    #outdir = get_dir(root_file)
+
+
+
+    #> cnvpytor -root MGSCv37_gc_file.pytor -gc ~/hg19/mouse.fasta.gz -make_gc_file
+
+
+
+
+def run_CNVNATOR(sorted_bam, reference_genome, outdir, threads, replace, mitochondrial_chromosome, df_clove, window_size, sample_name, chrom_to_len):
+
+    """Gets CNV calls based on CNVnator"""
+
+    print_if_verbose("running CNVnator")
+
+    # define the genome len
+    genome_size = sum(chrom_to_len.values())
+
+    # make the outdir and move there
+    CurDir = get_fullpath(".")
+    make_folder(outdir); os.chdir(outdir)
+
+    # define all chroms
+    all_chromosomes = sorted(chrom_to_len.keys())
+
+    # get the sorted_bam under current dir
+    run_sorted_bam = "%s.bam"%sample_name
+    soft_link_files(sorted_bam, run_sorted_bam)
+    soft_link_files("%s.bai"%sorted_bam, "%s.bai"%run_sorted_bam)
+
+    # define the root file
+    root_file = "%s.pythor"%sample_name
+
+    # configure the reference genome into root_file
+    configure_reference_genome_for_CNVnator(reference_genome, threads, root_file, mitochondrial_chromosome)
+
+
+    addahadghjg
+
+    ###### CONFIGURE REFERENCE GENOME ######
+
+    print_if_verbose("configuring reference genome")
+
+    cnvpytor_std = "%s.addingRefGenome.std"%root_file
+    run_cmd("%s -root %s"%(cnvpytor_exec, root_file))
+
+
+    # we could also add a mask file
+    
+
+
+    ########################################
+
+    # get the reference genome under the current dir
+    run_reference_genome = "reference_genome.fa"
+    copy_file(reference_genome, run_reference_genome)
+    run_cmd("gzip -f %s"%run_reference_genome)
+    run_reference_genome_gz = "%s.gz"%run_reference_genome
+
+    # import the loging
+    logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+    logger = logging.getLogger('cnvpytor')
+
+    # create a new root class
+    app = cnvpytor.Root(root_file, create=True, max_cores=threads)
+
+
+    # import RD signal from bam
+    print_if_verbose("importing RD signals from Bam")
+    app.rd(bamfiles=[run_sorted_bam], chroms=all_chromosomes, reference_filename=run_reference_genome_gz)
+
+    # calculating histograms
+    print_if_verbose("calculate histograms")
+    app.calculate_histograms([window_size], chroms=all_chromosomes)
+
+    # calculatuing partitions
+    print_if_verbose("calculate partitions")
+    app.partition([window_size], chroms=all_chromosomes, use_gc_corr=True, repeats=3, genome_size=genome_size)
+
+    # call CNVs
+    print_if_verbose("calling CNV")
+    calls = app.call([window_size])
+
+
+
+
+
+    print(calls)
+    ldahhkdkjhad
+
+    # at the end move back to CurDir
+    os.chdir(CurDir)
+
+def get_coverage_df_for_windows_of_genome(sorted_bam, reference_genome, outdir, replace, threads, window_size):
+
+    """Returns a coverage df for windows of window_size, saving files under outdir"""
+
+    final_coverage_file = "%s/coverage_per_windows_%ibp.tab"%(outdir, window_size)
+    if file_is_empty(final_coverage_file) or replace is True:
+
+        # first generate the windows file
+        windows_file = "%s.windows%ibp.bed"%(reference_genome, window_size)
+        if file_is_empty(windows_file) or replace is True:
+
+            windows_file_stderr = "%s.generating.stderr"%windows_file
+            windows_file_tmp = "%s.tmp"%windows_file
+
+            print_if_verbose("genearting windows_file. The stderr is in %s"%windows_file_stderr)
+            run_cmd("%s makewindows -g %s.fai -w %i > %s 2>%s"%(bedtools, reference_genome, window_size, windows_file_tmp, windows_file_stderr))
+
+            remove_file(windows_file_stderr)
+            os.rename(windows_file_tmp, windows_file)
+
+        # get coverage calculated
+        coverage_df = get_coverage_per_window_df_without_repeating(reference_genome, sorted_bam, windows_file, replace=replace, run_in_parallel=True, delete_bams=True, threads=threads)
+
+        # save
+        save_df_as_tab(coverage_df, final_coverage_file)
+
+    # load
+    coverage_df = get_tab_as_df_or_empty_df(final_coverage_file)
+
+    return coverage_df
+
+def generate_genome_mappability_file(genome, replace=False, threads=4):
+
+    """Takes a genome in fasta and generates a file indicating the mappability of each position of the genome.
+    This writes a file (output) that contains, for each position (i) in the genome, the value of 1/ (number of 30-mers equal to the one that starts in i, allowing 2 missmatches). If it is 1 it is a uniquely mapped position """
+
+    # first create the index
+    genome_dir = "/".join(genome.split("/")[0:-1])
+    genome_name = genome.split("/")[-1]
+    idx_folder = "%s/%s_genmap_idx"%(genome_dir, genome_name.split(".")[0])
+
+    # define expected files
+    expected_idx_files = ["index.info.concat", "index.lf.drv.sbl", "index.sa.val", "index.txt.limits", "index.lf.drv", "index.info.limits", "index.rev.lf.drp"]
+    if any([file_is_empty("%s/%s"%(idx_folder, x)) for x in expected_idx_files]) or replace is True:
+
+        # remove previously generated indices
+        if os.path.isdir(idx_folder): shutil.rmtree(idx_folder)
+
+        print("Generating index")
+        run_cmd("%s index -F %s -I %s -v"%(genmap, genome, idx_folder))
+
+    # generate map
+    map_folder = "%s/%s_genmap_map"%(genome_dir, genome_name.split(".")[0])
+    map_outfile = "%s/%s.genmap.bed"%(map_folder, genome_name.split(".")[0])
+    if file_is_empty(map_outfile) or replace is True:
+
+        if not os.path.isdir(map_folder): os.mkdir(map_folder)
+
+        print("Generating map")
+        run_cmd("%s map -E 2 -K 30 -I %s -O %s -b --threads %i -v "%(genmap, idx_folder, map_folder, threads))
+
+    # deine the long file
+    map_outfile_long = "%s.long.bed"%map_outfile
+
+    if file_is_empty(map_outfile_long) or replace is True:
+
+        print("getting df in the long format")
+
+        # convert to a file where each position in the genome appears. This is important because genmap generates a file that has only ranges
+        df_map = pd.read_csv(map_outfile, sep="\t", header=None, names=["chromosome", "start", "end", "strand", "map_idx"])
+        df_map["chromosome_real"] = df_map.chromosome.apply(lambda x: x.split()[0])
+
+        # define a list with the positions and the scores for that window
+        df_map["positions_list"] = df_map[["start", "end"]].apply(lambda r: list(range(r["start"], r["end"])), axis=1)
+        df_map["length_range"] = df_map.positions_list.apply(len)
+        df_map["map_idx_list"] = df_map[["length_range", "map_idx"]].apply(lambda r: [r["map_idx"]]*int(r["length_range"]), axis=1)
+        df_map["chromosome_list"] = df_map[["length_range", "chromosome_real"]].apply(lambda r: [r["chromosome_real"]]*int(r["length_range"]), axis=1)
+
+        # get chr_to_len
+        chr_to_len = get_chr_to_len(genome)
+
+        # initialize a dictionary that will store chromosome, position and mappability_score as lists
+        expanded_data_dict = {"chromosome":[], "position":[], "unique_map_score":[]}
+
+        # go through each row of the dataframe and append the lists
+        for chromosome_list, positions_list, map_idx_list in df_map[["chromosome_list", "positions_list", "map_idx_list"]].values:
+
+            expanded_data_dict["chromosome"] += chromosome_list
+            expanded_data_dict["position"] += positions_list
+            expanded_data_dict["unique_map_score"] += map_idx_list
+
+        df_long = pd.DataFrame(expanded_data_dict)
+
+        # add the missing positions with the last windows score
+        for chrom, length_chrom in get_chr_to_len(genome).items():
+
+            # get the df_chrom
+            df_chrom = df_long[df_long.chromosome==chrom]
+
+            # define the missing positions
+            all_positions = set(range(0, length_chrom))
+            missing_positions = sorted(all_positions.difference(set(df_chrom.position)))
+            n_missing_positions = len(missing_positions)
+
+            # add to df_long
+            if n_missing_positions>0:
+
+                # add them with 0 mappability
+                df_missing = pd.DataFrame({"chromosome":[chrom]*n_missing_positions, "position":missing_positions, "unique_map_score":[0.0]*n_missing_positions})
+
+                df_long = df_long.append(df_missing)
+        
+        # sort by chromosome and position
+        df_long = df_long.sort_values(by=["chromosome", "position"])
+
+        # add whether it is uniquely mappable
+        df_long["is_uniquely_mappable"] = (df_long.unique_map_score>=1.0).apply(int)
+
+        # save
+        save_df_as_tab(df_long, map_outfile_long)
+
+    return map_outfile_long
+
+def get_df_with_GCcontent(df_windows, genome, gcontent_outfile, replace=False):
+
+    """This function takes a df with windows of the genome and adds the gc content for each window, writing a file under gcontent_outfile. It will only do those that have been already measured"""
+
+    print_if_verbose("Getting GC content")
+
+    if file_is_empty(gcontent_outfile) or replace is True:
+
+        # define the initial index
+        initial_index = list(df_windows.index)
+        initial_cols = list(df_windows.columns)
+
+        # resort
+        df_windows = df_windows.sort_values(by=["chromosome", "start", "end"])
+
+        print_if_verbose("getting GC content for %i new windows"%len(df_windows))
+
+        # get the GC content file for each position
+        gc_content_outfile_perPosition = generate_nt_content_file(genome, replace=replace, target_nts="GC")
+        gc_df = pd.read_csv(gc_content_outfile_perPosition, sep="\t")[["chromosome", "position", "is_in_GC"]].sort_values(by=["chromosome", "position"])
+
+        # add the ID
+        gc_df["ID"] =  list(range(0, len(gc_df)))
+
+        # add the end
+        gc_df["position_plus1"] = gc_df.position + 1
+
+        # generate a bed with the gc positions
+        gc_positions_bed = "%s.gc_positions.bed"%gcontent_outfile
+        gc_df[gc_df.is_in_GC==1].sort_values(by=["chromosome", "position"])[["chromosome", "position", "position_plus1", "ID"]].to_csv(gc_positions_bed, sep="\t", header=None, index=False)
+
+        # generate the bed with the windows
+        target_windows_bed = "%s.target_windows.bed"%gcontent_outfile
+        df_windows["IDwindow"] = list(range(0, len(df_windows)))
+        df_windows[["chromosome", "start", "end", "IDwindow"]].to_csv(target_windows_bed, sep="\t", header=None, index=False)
+
+        # run bedmap to get a file where each line corresponds to the regions to which each target_windows_bed
+        bedmap_outfile = "%s.bedmap.target_windows_overlappingGC.txt"%gcontent_outfile
+        bedmap_stderr = "%s.stderr"%bedmap_outfile
+
+        print_if_verbose("running bedmap. The stderr is in %s"%bedmap_stderr)
+        run_cmd("%s --fraction-map 1.0 --echo-map-id  --delim '\t' %s %s > %s 2>%s"%(bedmap, target_windows_bed, gc_positions_bed, bedmap_outfile, bedmap_stderr))
+
+        # load bedmap df into df
+        df_windows["overlapping_GC_IDs"] = open(bedmap_outfile, "r").readlines()
+
+        # add the n_GC_positions
+        def get_NaN_to_empty_str(x):
+            if pd.isna(x): return ""
+            else: return x
+
+        all_possibleIDs = set(gc_df.ID.apply(str))
+        def get_set_from_string(x): 
+
+            # define set
+            set_x = set(x.strip().split(";")).difference({""})
+
+            # debug 
+            if len(set_x.difference(all_possibleIDs))>0: raise ValueError("there are unexpected IDs in %s"%set_x)
+
+            return set_x
+
+        df_windows["n_GC_positions"] = df_windows.overlapping_GC_IDs.apply(get_NaN_to_empty_str).apply(get_set_from_string).apply(len)
+
+        # add the GC content
+        df_windows["length"] = df_windows.end - df_windows.start
+        df_windows["GCcontent"] = df_windows.n_GC_positions / df_windows.length
+
+        # debug
+        if any(pd.isna(df_windows.GCcontent)) or any(pd.isna(df_windows.n_GC_positions)) or any(df_windows.GCcontent>1): raise ValueError("Something went went wrong with the GC content calcilation")
+
+        for f in [gc_positions_bed, target_windows_bed, bedmap_outfile, bedmap_stderr]: remove_file(f)
+
+        # at the end save the df windows
+        df_windows.index = initial_index
+        df_windows = df_windows[initial_cols + ["GCcontent"]]
+        save_object(df_windows, gcontent_outfile)
+
+    # load
+    df_windows = load_object(gcontent_outfile)
+
+    return df_windows
+
+def get_df_windows_with_median_mappability(df_windows, reference_genome, mappability_outfile, replace, threads):
+
+    """Takes a df windws and returns it with a field called median_mappability, which is the median mappability for each position of the region. Mappability for a position i is 1 / (how often a 30-mer starting at i occurs in the genome), with up to 2 mismatches."""
+    
+    print_if_verbose("Getting mappability")
+
+    if file_is_empty(mappability_outfile) or replace is True:
+
+        # define the initial index
+        initial_index = list(df_windows.index)
+        initial_cols = list(df_windows.columns)
+
+        # resort
+        df_windows = df_windows.sort_values(by=["chromosome", "start", "end"])
+
+        print_if_verbose("getting mappability for %i new windows"%len(df_windows))
+
+        # get the mappability per position into map_df
+        mappability_per_position_file = generate_genome_mappability_file(reference_genome, replace=replace, threads=threads)
+        map_df = pd.read_csv(mappability_per_position_file, sep="\t")
+
+        # add the ID
+        map_df["ID"] =  list(range(0, len(map_df)))
+
+        # add the end for bedmap
+        map_df["position_plus1"] = map_df.position + 1
+
+        # generate a bed with the map positions and the unique_map_score
+        mappability_bed = "%s.mappability.bed"%mappability_outfile
+        map_df.sort_values(by=["chromosome", "position"])[["chromosome", "position", "position_plus1", "ID", "unique_map_score"]].to_csv(mappability_bed, sep="\t", header=None, index=False)
+
+        # generate the bed with the windows
+        target_windows_bed = "%s.target_windows.bed"%mappability_outfile
+        df_windows["IDwindow"] = list(range(0, len(df_windows)))
+        df_windows[["chromosome", "start", "end", "IDwindow"]].to_csv(target_windows_bed, sep="\t", header=None, index=False)
+
+        # run bedmap to get a file where each line corresponds to the regions to which each target_windows_bed
+        bedmap_outfile = "%s.bedmap.target_windows_overlappingMappability.txt"%mappability_outfile
+        bedmap_stderr = "%s.stderr"%bedmap_outfile
+
+        print_if_verbose("running bedmap. The stderr is in %s"%bedmap_stderr)
+        run_cmd("%s --fraction-map 1.0 --median --delim '\t' %s %s > %s 2>%s"%(bedmap, target_windows_bed, mappability_bed, bedmap_outfile, bedmap_stderr))
+
+        # load bedmap df into df
+        df_windows["median_mappability"] = open(bedmap_outfile, "r").readlines()
+        df_windows["median_mappability"] = df_windows.median_mappability.apply(float)
+
+        # debug
+        if any(pd.isna(df_windows.median_mappability)) or any(df_windows.median_mappability>1): 
+
+            print("These are the NaN regions")
+            print(df_windows[pd.isna(df_windows.median_mappability)][["chromosome", "start", "end"]])
+
+            raise ValueError("Something went went wrong with the mappability calculation")
+
+        # remove files
+        for f in [mappability_bed, target_windows_bed, bedmap_outfile, bedmap_stderr]: remove_file(f)
+
+        # at the end save the df windows
+        df_windows.index = initial_index
+        df_windows = df_windows[initial_cols + ["median_mappability"]]
+        save_df_as_tab(df_windows, mappability_outfile)
+
+    # load
+    df_windows = get_tab_as_df_or_empty_df(mappability_outfile)
+
+    return df_windows
+
+def get_y_corrected_by_x_LOWESS_crossValidation(df, xfield, yfield, outdir, threads, replace):
+
+    """This function takes an x and a y series, returning the y corrected by x. This y corrected is y/(y predicted from LOWESS from x). The index must be unique. The best parameters are taken with 10 fold cross validation"""
 
     make_folder(outdir)
 
-    # define the sample name
-    sample_name = get_sample_name_from_bam(sorted_bam)
+    # check that the index is unique
+    if len(df.index)!=len(set(df.index)): raise ValueError("The index should be unique")
+
+    # get index as list
+    list_index = list(df.index)
+
+    ########## GET THE DF BENCHMARKED DF 10xCV ########## 
+
+    # define the df_benckmarking file
+    df_benchmarking_file = "%s/df_benckmarking.tab"%outdir
+
+    if file_is_empty(df_benchmarking_file) or replace is True:
+        print_if_verbose("getting benchmarking for %s vs %s"%(xfield, yfield))
+
+        # init benchmarking df
+        dict_benchmarking = {}; Idict = 0
+
+        # define parms
+        n_frac = 10
+        n_it = 5
+
+        # iterate through several parameters of the lowess fitting
+        for frac in np.linspace(0.001, 0.3, n_frac): # the fraction of data points used to weight the 
+            for it in range(1, n_it+1): # the number of residual-based reweightings to perform.
+                
+                # init rsquares
+                rsquares_cv = []
+
+                # iterate through 10-fold chross validation 
+                kfold = KFold(10, True, 1)
+                for cvID, (train_idx, test_idx) in enumerate(kfold.split(list_index)):
+                    
+                    # get the data, sorted by x
+                    df_train = df.iloc[train_idx].sort_values(by=[xfield, yfield])
+                    df_test = df.iloc[test_idx].sort_values(by=[xfield, yfield])
+
+                    # get values
+                    xtrain = df_train[xfield].values
+                    ytrain = df_train[yfield].values
+
+                    xtest = df_test[xfield].values
+                    ytest = df_test[yfield].values
+
+                    # get the test yfit based on the train 
+                    ytest_predicted = statsmodels_api.nonparametric.lowess(endog=ytrain, exog=xtrain, frac=frac, it=it, xvals=xtest, is_sorted=True, missing="raise") # return sorted returns values storted by exog
+
+                    if len(ytest_predicted)!=len(ytest): raise ValueError("xtest and ytest are not the same")
+
+                    # calculate the rsquare, making sure it is a float
+                    if any(pd.isna(ytest_predicted)): rsquare = 0.0
+                    else: rsquare = r2_score(ytest, ytest_predicted)
+                    if pd.isna(rsquare): rsquare = 0.0
+
+                    # keep
+                    rsquares_cv.append(rsquare)
+
+                # keep
+                std = np.std(rsquares_cv)
+                mean_rsquare = np.mean(rsquares_cv)
+                dict_benchmarking[Idict] = {"frac":frac, "it":int(it), "mean_rsquare":mean_rsquare, "inverse_std_rsquare":1/std, "std_rsquare":std}; Idict+=1
+
+                print_if_verbose(frac, it, mean_rsquare)
+
+
+        # get as df
+        df_benchmarking = pd.DataFrame(dict_benchmarking).transpose()
+
+        # save
+        save_df_as_tab(df_benchmarking, df_benchmarking_file)
+
+    # load
+    df_benchmarking  = get_tab_as_df_or_empty_df(df_benchmarking_file).sort_values(by=["mean_rsquare", "inverse_std_rsquare"], ascending=False)
+
+    # get the best parameters
+    best_parms_series = df_benchmarking.iloc[0]
+
+    ##################################################### 
+
+    # get the fit data
+
+    print_if_verbose("performing LOWESS regression with best parameters")
+
+    # get sorted df
+    df = df.sort_values(by=[xfield, yfield])
+
+    # when no fit could be obtained, define the corrected_y_values equal to the original ones
+    if best_parms_series.mean_rsquare==0: y_corrected = df[yfield]
+
+    else:
+
+        # get the y predicted with the best parms
+        best_frac = best_parms_series["frac"]
+        best_it = int(best_parms_series["it"])
+        lowess_results = statsmodels_api.nonparametric.lowess(endog=df[yfield], exog=df[xfield], frac=best_frac, it=best_it, xvals=None, is_sorted=True, missing="raise", return_sorted=True) # return sorted returns values storted by exog
+
+        predicted_y_values = pd.Series(lowess_results[:,1], index=df.index)
+        y_corrected = df[yfield] / predicted_y_values
+
+        # debug 
+        if any(pd.isna(predicted_y_values)) or any(pd.isna(y_corrected)): raise ValueError("there should be no NaNs")
+
+        final_rsquare = r2_score(df[yfield], predicted_y_values)
+
+        ##############################
+
+        ######### MAKE PLOTS #########
+
+        fig = plt.figure(figsize=(5,5))
+        plt.plot(df[xfield], df[yfield], "o", alpha=0.2, color="gray", label="raw data")
+        plt.plot(df[xfield], predicted_y_values, "-", color="red", label="LOWESS fit")
+
+        plt.title("Fitting LOWESS with frac=%.3f and it=%i. final R2=%.3f. 10x CV R2=%.3f +- %.3f (SD)\n"%(best_frac, best_it, final_rsquare, best_parms_series["mean_rsquare"], best_parms_series["std_rsquare"]))
+        plt.legend(bbox_to_anchor=(1, 1))
+        plt.xlabel(xfield)
+        plt.ylabel(yfield)
+
+        fig.savefig("%s/coverage.pdf"%(outdir), bbox_inches='tight')
+        plt.close(fig)
+
+        ############################
+
+    # debug
+    if any(pd.isna(y_corrected)): raise ValueError("there should be no NaNs")
+
+    # return in the initial order
+    return y_corrected.loc[list_index]
+
+def make_plots_coverage_parameters(df_cov, plots_dir):
+
+    """This function makes some plots useful."""
+
+    print_if_verbose("making plots coverage")
+
+    #for xfield, yfield in [("start", "coverage"), ("GCcontent", "coverage"), ("median_mappability", "coverage"), ("start", "median_mappability"), ("raw_distance_to_telomere", "coverage"), ("raw_distance_to_telomere", "median_mappability")]:
+    for xfield, yfield in [("raw_distance_to_telomere", "coverage"), ("raw_distance_to_telomere", "median_mappability")]:
+
+        # get fig
+        fig = plt.figure(figsize=(7, 5))
+        ax = sns.scatterplot(x=xfield, y=yfield, hue="chromosome", data=df_cov, alpha=.2)
+        ax.legend(bbox_to_anchor=(1, 1))
+        
+        # save
+        fig.savefig("%s/perChrom_%s_vs_%s.pdf"%(plots_dir, xfield, yfield), bbox_inches='tight')
+        plt.close(fig)
+
+def get_df_coverage_with_corrected_coverage(df_coverage, reference_genome, outdir, replace, threads, mitochondrial_chromosome, coverage_field):
+
+    """This function will take a df_coverage that has coverage_field as a proxy for coverage. It will add <coverage_field> which is a value that will be a ratio between the coverage_field and the coverage_field predicted from a loess regression taking into account mappability, GC content and distance to the telomere across the windows. The resulting value will be centered arround 1.  """
+
+    # check content
+    if any(df_coverage.start>=df_coverage.end): raise ValueError("start can't be after end")
+
+    # add "coverage", which will include coverage_field
+    if "coverage" in set(df_coverage.keys()): raise ValueError("coverage can't be in the df keys")
+    df_coverage["coverage"] = df_coverage[coverage_field]
+
+
+    # add the GC content
+    gcontent_outfile = "%s/df_coverage_with_gccontent.py"%outdir
+    df_coverage = get_df_with_GCcontent(df_coverage, reference_genome, gcontent_outfile, replace=replace)
+
+    # add the median mappability
+    mappability_outfile = "%s/df_coverage_with_mappability.tab"%outdir
+    df_coverage = get_df_windows_with_median_mappability(df_coverage, reference_genome, mappability_outfile, replace, threads)
+
+    # add the raw distance to the telomere, in linear space
+    chr_to_len = get_chr_to_len(reference_genome)
+    df_coverage["middle_position"] = (df_coverage.start + (df_coverage.end - df_coverage.start)/2).apply(int)
+    df_coverage["raw_distance_to_telomere"] = df_coverage.apply(lambda r: min([r["middle_position"], chr_to_len[r["chromosome"]]-r["middle_position"]]), axis=1)
+
+    # define chroms
+    all_chromosomes = set(get_chr_to_len(reference_genome))
+    if mitochondrial_chromosome!="no_mitochondria": mtDNA_chromosomes = set(mitochondrial_chromosome.split(","))
+    else: mtDNA_chromosomes = set()
+    gDNA_chromosomes = all_chromosomes.difference(mtDNA_chromosomes)
+
+    # define a unique index
+    df_coverage.index = list(range(0, len(df_coverage)))
+
+    # init the final df_coverage
+    final_df_coverage = pd.DataFrame()
+
+    # iterate through each genome
+    for type_genome, chroms in [("mtDNA", mtDNA_chromosomes), ("gDNA", gDNA_chromosomes)]:
+        print_if_verbose("investigating %s"%type_genome)
+
+        # get the df coverage of this genome
+        df_cov = df_coverage[df_coverage.chromosome.isin(chroms)]
+        if len(df_cov)==0: continue
+
+        # make some plots with all these values
+        plots_dir = "%s/plots_coverage_%s"%(outdir, type_genome); make_folder(plots_dir)
+        make_plots_coverage_parameters(df_cov, plots_dir)
+
+        # correct by the distance to the telomere
+        kaduhadudgdjajghadhjgadhgd
+        #outdir_distance_to_ = "%s/%s_GCcontent_lowessFitting"%(outdir, type_genome)
+        #df_cov["coverage_corrected_by_GCcontent"] =  get_y_corrected_by_x_LOWESS_crossValidation(df_cov, "GCcontent", "coverage", outdir_GCcontent, threads, replace)
+
+
+        # get coverage corrected by GC content
+        outdir_GCcontent = "%s/%s_GCcontent_lowessFitting"%(outdir, type_genome)
+        df_cov["coverage_corrected_by_GCcontent"] =  get_y_corrected_by_x_LOWESS_crossValidation(df_cov, "GCcontent", "coverage", outdir_GCcontent, threads, replace)
+
+        # get the coverage corrected by mappability
+        outdir_mappability = "%s/%s_Mappability_lowessFitting"%(outdir, type_genome)
+        df_cov["coverage_corrected_by_GCcontent_and_Mappability"] =  get_y_corrected_by_x_LOWESS_crossValidation(df_cov, "median_mappability", "coverage_corrected_by_GCcontent", outdir_mappability, threads, replace)
+
+        # at the end add
+        final_df_coverage = final_df_coverage.append(df_cov)
+
+    kjhadkhdhjhda
+
+    print(final_df_coverage)
+
+    print_if_verbose("corrected_coverage was added to the df")
+ 
+
+
+
+
+def run_CNV_calling(sorted_bam, reference_genome, outdir, threads, replace, mitochondrial_chromosome, df_bedpe, df_gridss, window_size=100):
+
+    """This function takes a sorted bam and runs several programs on it to get the copy-number variation results. It is important that the sorted_bam contains no duplicates. It will correct bu GC content, mappability and distance to the telomere. All coverage will be corrected by GC content, mappability and the distance to the telomere, which will be calculated also taking into account breakpoint information. """
+
+    make_folder(outdir)
+
+    # make a df with windows of the genome
+    df_coverage = get_coverage_df_for_windows_of_genome(sorted_bam, reference_genome, outdir, replace, threads, window_size)
+
+    # add the corrected coverage 
+    df_coverage = get_df_coverage_with_corrected_coverage(df_coverage, reference_genome, outdir, replace, threads, mitochondrial_chromosome, "mediancov_1")
+
+    print(df_coverage)
+
+    jkadhgdhjagagd
+
+    # first generate the windows file
+    windows_file = "%s.windows%ibp.bed"%(reference_genome, window_l)
+    windows_file_stderr = "%s.generating.stderr"%windows_file
+    print_if_verbose("genearting windows_file. The stderr is in %s"%windows_file_stderr)
+    run_cmd("%s makewindows -g %s.fai -w %i > %s 2>%s"%(bedtools, reference_genome, window_l, windows_file, windows_file_stderr))
+    remove_file(windows_file_stderr)
+
+    df_windows = get_df_with_coverage_per_windows_relative_to_neighbor_regions
+
+    destination_dir = "%s.calculating_windowcoverage_windows%ibp"%(outdir, window_size)
+    coverage_df = pd.read_csv(generate_coverage_per_window_file_parallel(reference_genome, destination_dir, sorted_bam, windows_file=bed_windows_to_measure, replace=replace, run_in_parallel=run_in_parallel, delete_bams=delete_bams, threads=threads), sep="\t").rename(columns={"#chrom":"chromosome"}).set_index(["chromosome", "start", "end"], drop=False)
+
+
 
     # define the chrom to len
     chrom_to_len = get_chr_to_len(reference_genome)
 
+
+
     # define the breakend locations
     chrom_to_bpPositions = get_chrom_to_bpPositions(df_clove, reference_genome)
     for chrom in chrom_to_bpPositions: chrom_to_bpPositions[chrom].update({0, chrom_to_len[chrom]})
+
+
+
+    # define the sample name
+    sample_name = get_sample_name_from_bam(sorted_bam)
+
+
+    thewholeCNVnator_doesntWork
+
+
+    # run cnvnator
+    outdir_cnvnator = "%s/cnvnator_outdir"%outdir
+    cnvnator_outfile = run_CNVNATOR(sorted_bam, reference_genome, outdir_cnvnator, threads, replace, mitochondrial_chromosome, df_clove, window_size, sample_name, chrom_to_len)
+
+    ################## RUN CONY ##################
 
 
     # go through each chrom
@@ -11084,6 +11743,9 @@ def run_CNV_calling_CONY(sorted_bam, reference_genome, outdir, threads, replace,
 
         # run CONY for this chromosome, this is parallelized
         run_CNV_calling_CONY_one_chromosome(sorted_bam, reference_genome, outdir_chrom, c, replace, window_size, threads, chrom_len, sample_name, chrom_to_bpPositions[c])
+
+
+    #############################################
 
     finished_CONYallChroms
 
