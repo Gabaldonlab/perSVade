@@ -194,7 +194,6 @@ conda install -n $R_env_name -c bioconda -y bioconductor-structuralvariantannota
 
 CONY_env_name="$env_name"_CONY_env
 echo "creating conda env $CONY_env_name"
-
 conda create -y --name $CONY_env_name -c bioconda bioconductor-iranges=2.8.2 bioconductor-exomecopy=1.22.0 r-snow=0.4; # this should install r-base=3.3.2, which fits all the dependencies
 conda install -y -n $CONY_env_name -c conda-forge r-argparser=0.4;
 

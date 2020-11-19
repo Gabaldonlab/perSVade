@@ -15,6 +15,8 @@ import pickle
 import string
 import shutil 
 from Bio import SeqIO
+from Bio.Seq import Seq
+from Bio.SeqRecord import SeqRecord
 import random
 import sys
 from shutil import copyfile
@@ -209,12 +211,9 @@ print("Running perSVade into %s"%opt.outdir)
 reference_genome_dir = "%s/reference_genome_dir"%(opt.outdir); fun.make_folder(reference_genome_dir)
 new_reference_genome_file = "%s/reference_genome.fasta"%reference_genome_dir
 
-# copy the reference genome were it should
-if fun.file_is_empty(new_reference_genome_file) or opt.replace is True:
-
-    # move the reference genome into the outdir, so that every file is written under outdir
-    fun.soft_link_files(opt.ref, new_reference_genome_file)
-   
+# rewrite the reference genome so that all the chars ar upper
+all_chroms_seqRecords = [SeqRecord(Seq(str(seq.seq).upper()), id=seq.id, description="", name="") for seq in SeqIO.parse(opt.ref, "fasta")]
+SeqIO.write(all_chroms_seqRecords, new_reference_genome_file, "fasta")
 opt.ref = new_reference_genome_file
 
 # check that the mitoChromosomes are in the ref
@@ -516,13 +515,15 @@ print("structural variation analysis with perSVade finished")
 
 if opt.skip_SVcalling is False and not any([x=="skip" for x in {opt.fastq1, opt.fastq2}]) and opt.skip_SV_CNV_calling is False:
 
-    # define the df_clove
-    outfile_clove = "%s/SVdetection_output/final_gridss_running/gridss_output.vcf.withSimpleEventType.vcf.filtered_default.vcf.bedpe.raw.bedpe.clove.vcf"%opt.outdir
-    df_clove = fun.get_clove_output(outfile_clove)
+    # define the df_bedpe and df_gridss
+    df_gridss = fun.get_svtype_to_svfile_and_df_gridss_from_perSVade_outdir(opt.outdir, opt.ref)[1]
 
-    # run CNVcalling CONY
-    cony_outdir = "%s/CNV_calling"%opt.outdir
-    fun.run_CNV_calling_CONY(sorted_bam, opt.ref, cony_outdir, opt.threads, opt.replace, opt.mitochondrial_chromosome, df_clove)
+    outfile_bedpe = "%s/SVdetection_output/final_gridss_running/gridss_output.vcf.withSimpleEventType.vcf.filtered_default.vcf.bedpe"%opt.outdir
+    df_bedpe = fun.get_tab_as_df_or_empty_df(outfile_bedpe)
+
+    # run CNVcalling 
+    cnv_calling_outdir = "%s/CNV_calling"%opt.outdir
+    fun.run_CNV_calling(sorted_bam, opt.ref, cnv_calling_outdir, opt.threads, opt.replace, opt.mitochondrial_chromosome, df_bedpe, df_gridss)
 
 
 
