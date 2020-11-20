@@ -8419,3 +8419,156 @@ def get_df_with_GCcontent(df_windows, genome, gcontent_outfile, replace=False):
     return df_windows
 
 
+def get_y_corrected_by_x_LOWESS_crossValidation(df, xfield, yfield, outdir, threads, replace):
+
+    """This function takes an x and a y series, returning the y corrected by x. This y corrected is y/(y predicted from LOWESS from x). The index must be unique. The best parameters are taken with 10 fold cross validation"""
+
+    make_folder(outdir)
+
+    # keep
+    df = cp.deepcopy(df)
+
+    # check that the index is unique
+    if len(df.index)!=len(set(df.index)): raise ValueError("The index should be unique")
+
+    # get index as list
+    initial_index = list(df.index)
+
+    # sort by the x
+    df = df.sort_values(by=[xfield, yfield])
+
+    ########## GET THE DF BENCHMARKED DF 10xCV ########## 
+
+    # define the df_benckmarking file
+    df_benchmarking_file = "%s/df_benckmarking.tab"%outdir
+
+    if file_is_empty(df_benchmarking_file) or replace is True:
+        print_if_verbose("getting benchmarking for %s vs %s"%(xfield, yfield))
+
+        # init benchmarking df
+        dict_benchmarking = {}; Idict = 0
+
+        # define parms
+        n_frac = 10
+        n_it = 5
+
+        # define all the indices
+        all_idx = set(df.idx)
+
+        # iterate through several parameters of the lowess fitting
+        for frac in np.linspace(0.001, 0.3, n_frac): # the fraction of data points used to weight the 
+            for it in range(1, n_it+1): # the number of residual-based reweightings to perform.
+                
+                # init rsquares
+                rsquares_cv = []
+
+                # iterate through 10-fold chross validation 
+                kfold = KFold(n_splits=10, shuffle=True, random_state=1)
+                kfold = 10
+                for cvID,  in range(1,11):
+
+                    df.iloc[::5, :]
+
+
+                    print(train_idx)
+                    print(test_idx)
+                    print(initial_index)
+
+                    kjahdkjhad
+                    
+                    # get the data, sorted by x
+                    df_train = df.iloc[train_idx].sort_values(by=[xfield, yfield])
+                    df_test = df.iloc[test_idx].sort_values(by=[xfield, yfield])
+
+                    # get values
+                    xtrain = df_train[xfield].values
+                    ytrain = df_train[yfield].values
+
+                    xtest = df_test[xfield].values
+                    ytest = df_test[yfield].values
+
+                    # get the test yfit based on the train 
+                    ytest_predicted = statsmodels_api.nonparametric.lowess(endog=ytrain, exog=xtrain, frac=frac, it=it, xvals=xtest, is_sorted=True, missing="raise") # return sorted returns values storted by exog
+
+                    if len(ytest_predicted)!=len(ytest): raise ValueError("xtest and ytest are not the same")
+
+                    # calculate the rsquare, making sure it is a float
+                    if any(pd.isna(ytest_predicted)): rsquare = 0.0
+                    else: rsquare = r2_score(ytest, ytest_predicted)
+                    if pd.isna(rsquare): rsquare = 0.0
+
+                    # keep
+                    rsquares_cv.append(rsquare)
+
+                # keep
+                std = np.std(rsquares_cv)
+                mean_rsquare = np.mean(rsquares_cv)
+                dict_benchmarking[Idict] = {"frac":frac, "it":int(it), "mean_rsquare":mean_rsquare, "inverse_std_rsquare":1/std, "std_rsquare":std}; Idict+=1
+
+                print_if_verbose(frac, it, mean_rsquare)
+
+
+        # get as df
+        df_benchmarking = pd.DataFrame(dict_benchmarking).transpose()
+
+        # save
+        save_df_as_tab(df_benchmarking, df_benchmarking_file)
+
+    # load
+    df_benchmarking  = get_tab_as_df_or_empty_df(df_benchmarking_file).sort_values(by=["mean_rsquare", "inverse_std_rsquare"], ascending=False)
+
+    # get the best parameters
+    best_parms_series = df_benchmarking.iloc[0]
+
+    ##################################################### 
+
+    # get the fit data
+
+    print_if_verbose("performing LOWESS regression with best parameters")
+
+    # get sorted df
+    df = df.sort_values(by=[xfield, yfield])
+
+    # when no fit could be obtained, define the corrected_y_values equal to the original ones
+    if best_parms_series.mean_rsquare==0: y_corrected = df[yfield]
+
+    else:
+
+        # get the y predicted with the best parms
+        best_frac = best_parms_series["frac"]
+        best_it = int(best_parms_series["it"])
+        lowess_results = statsmodels_api.nonparametric.lowess(endog=df[yfield], exog=df[xfield], frac=best_frac, it=best_it, xvals=None, is_sorted=True, missing="raise", return_sorted=True) # return sorted returns values storted by exog
+
+        predicted_y_values = pd.Series(lowess_results[:,1], index=df.index)
+        y_corrected = df[yfield] / predicted_y_values
+
+        # debug 
+        if any(pd.isna(predicted_y_values)) or any(pd.isna(y_corrected)): raise ValueError("there should be no NaNs")
+
+        final_rsquare = r2_score(df[yfield], predicted_y_values)
+
+        ##############################
+
+        ######### MAKE PLOTS #########
+
+        fig = plt.figure(figsize=(5,5))
+        plt.plot(df[xfield], df[yfield], "o", alpha=0.2, color="gray", label="raw data")
+        plt.plot(df[xfield], predicted_y_values, "-", color="red", label="LOWESS fit")
+
+        plt.title("Fitting LOWESS with frac=%.3f and it=%i. final R2=%.3f. 10x CV R2=%.3f +- %.3f (SD)\n"%(best_frac, best_it, final_rsquare, best_parms_series["mean_rsquare"], best_parms_series["std_rsquare"]))
+        plt.legend(bbox_to_anchor=(1, 1))
+        plt.xlabel(xfield)
+        plt.ylabel(yfield)
+
+        fig.savefig("%s/coverage.pdf"%(outdir), bbox_inches='tight')
+        plt.close(fig)
+
+        ############################
+
+    # debug
+    if any(pd.isna(y_corrected)): raise ValueError("there should be no NaNs")
+
+    # return in the initial order
+    return y_corrected.loc[initial_index]
+
+
