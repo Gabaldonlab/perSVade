@@ -518,12 +518,9 @@ if opt.skip_SVcalling is False and not any([x=="skip" for x in {opt.fastq1, opt.
     # define the df_bedpe and df_gridss
     df_gridss = fun.get_svtype_to_svfile_and_df_gridss_from_perSVade_outdir(opt.outdir, opt.ref)[1]
 
-    outfile_bedpe = "%s/SVdetection_output/final_gridss_running/gridss_output.vcf.withSimpleEventType.vcf.filtered_default.vcf.bedpe"%opt.outdir
-    df_bedpe = fun.get_tab_as_df_or_empty_df(outfile_bedpe)
-
     # run CNVcalling 
     cnv_calling_outdir = "%s/CNV_calling"%opt.outdir
-    fun.run_CNV_calling(sorted_bam, opt.ref, cnv_calling_outdir, opt.threads, opt.replace, opt.mitochondrial_chromosome, df_bedpe, df_gridss)
+    fun.run_CNV_calling(sorted_bam, opt.ref, cnv_calling_outdir, opt.threads, opt.replace, opt.mitochondrial_chromosome, df_gridss)
 
 
 
