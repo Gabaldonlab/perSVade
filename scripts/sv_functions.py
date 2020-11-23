@@ -17,10 +17,13 @@ import sys
 from collections import ChainMap
 import warnings
 from Bio import SeqIO
+from scipy import linalg
+from math import ceil
 from Bio.Seq import Seq
 from Bio.SeqRecord import SeqRecord
 import pickle
 import statsmodels.api as statsmodels_api
+import cylowess 
 import itertools
 import ast
 import copy as cp
@@ -62,7 +65,8 @@ import plotly.graph_objs as go
 from plotly import tools
 from plotly.offline import init_notebook_mode, plot, iplot # download_plotlyjs
 import cufflinks as cf
-import cnvpytor
+
+#import cnvpytor
 
 
 #### UNIVERSAL FUNCTIONS ####
@@ -118,6 +122,9 @@ import seaborn as sns
 
 # get the cwd were all the scripts are 
 CWD = get_fullpath("/".join(__file__.split("/")[0:-1])); sys.path.insert(0, CWD)
+
+# import modules
+import pyloess_Loess as pyloess_fun
 
 # define the EnvDir where the environment is defined
 EnvDir = "/".join(sys.executable.split("/")[0:-2])
@@ -11454,6 +11461,129 @@ def get_df_windows_with_median_mappability(df_windows, reference_genome, mappabi
     return df_windows
 
 
+def get_lowess_fit_y(x, y, frac, iterations=0):
+
+    """This function takes an x and a y and returns a numpy array that has the lowess fit according to window_size. x,y have to be sorted by x"""
+
+    # redefine x and y as floats
+    x = np.array(x, dtype=float)
+    y = np.array(y, dtype=float)
+
+    # get the loess fit
+    lowess_results = cylowess.lowess(endog=y, exog=x, frac=frac, it=iterations)
+    # delta is the: Distance within which to use linear-interpolation instead of weighted regression.
+
+    # unpack
+    sorted_lowess_x = lowess_results[:,0]
+    lowess_y = lowess_results[:,1]
+
+    # debug
+    if x[0]!=sorted_lowess_x[0] or x[-1]!=sorted_lowess_x[-1]: raise ValueError("xvalues are not sorted by x")
+
+    return lowess_y
+
+
+def get_LOWESS_benchmarking_series_CV(kfold, frac, df, xfield, yfield, min_test_points_CV, outdir):
+
+    """This function takes a df with xfield and yfield. It runs kfold cross validation and returns a series with the accuracies """
+
+    # define all the indices
+    all_idx = set(df.index)
+
+    # init rsquares
+    rsquares_cv = []
+
+
+    # this will only work if the unique df is long enough
+    if len(df)>kfold and (frac*len(df))>=3: 
+
+        # iterate through 10-fold chross validation 
+        kfold_object = KFold(n_splits=kfold, random_state=1, shuffle=True)
+        for numeric_train_index, numeric_test_index in kfold_object.split(df.index):
+
+            print_if_verbose("processing data")
+
+            # get the idx test as the index of df
+            test_idx = set(df.iloc[numeric_test_index].index)
+            train_idx = all_idx.difference(test_idx)
+
+            # if there are not enough data points, break
+            if len(test_idx)<min_test_points_CV: break
+
+            # get dfs
+            df_train = df.loc[train_idx].sort_values(by=[xfield, yfield])
+            df_test = df.loc[test_idx].sort_values(by=[xfield, yfield])
+           
+            # get train alues
+            xtrain = df_train[xfield].values
+            ytrain = df_train[yfield].values
+
+            # get the lowess fit on the train data
+            print_if_verbose("running loess")
+            #outprefix = "%s/loess_%.5f"%(outdir, frac)
+            lowess_train_y = get_lowess_fit_y(xtrain, ytrain, frac)
+            print("loess ran")
+
+            # debug if there are NaNs in the lowess interpolation
+            if any(pd.isna(lowess_train_y)): break
+
+            # generate a linear interpolation function between the train results. It will only work for values in the range of the train
+            print_if_verbose("running interpolation")
+            interpolation_function = interp1d(xtrain, lowess_train_y, bounds_error=True, kind="linear", assume_sorted=True)
+
+            # get the test values. Only those where the x is in the range of the train
+            xtest = df_test[xfield].values
+            ytest = df_test[yfield].values
+
+            idx_correct_test = (xtest>min(xtrain)) & (xtest<max(xtrain))
+            xtest = xtest[idx_correct_test]
+            ytest = ytest[idx_correct_test]
+
+            # if there are not enough points, skip
+            if sum(idx_correct_test)<min_test_points_CV: break
+
+            # get the predicted y test by linear interpolation
+            ytest_predicted = interpolation_function(xtest)
+
+            # debug
+            if len(ytest_predicted)!=len(ytest): raise ValueError("xtest and ytest are not the same")
+            if any(pd.isna(ytest_predicted)): raise ValueError("There can't be NaNs")
+
+            # calculate the rsquare, making sure it is a float
+            rsquare = r2_score(ytest, ytest_predicted)
+
+            # debug
+            if pd.isna(rsquare): raise ValueError("The rsquare can't be nan")
+
+            # break trying if there is a 0 rsquare
+            if rsquare<=0: break 
+
+            # keep
+            rsquares_cv.append(rsquare)
+
+    # discard if any rsquares are 0
+    if len(rsquares_cv)!=kfold: 
+
+        mean_rsquare = 0
+        std = 1
+        inverse_std_rsquare = 0
+
+    else:
+
+        mean_rsquare = np.mean(rsquares_cv)
+        std = np.std(rsquares_cv)
+        inverse_std_rsquare = 1/std
+
+
+    print_if_verbose(frac, mean_rsquare)
+
+
+    # get the final series
+    benchmarking_series = pd.Series({"frac":frac, "mean_rsquare":mean_rsquare, "inverse_std_rsquare":inverse_std_rsquare, "std_rsquare":std, "kfold":kfold})
+
+    return benchmarking_series
+    
+
 def get_y_corrected_by_x_LOWESS_crossValidation(df, xfield, yfield, outdir, threads, replace, min_test_points_CV=10):
 
     """This function takes an x and a y series, returning the y corrected by x. This y corrected is y/(y predicted from LOWESS from x). The index must be unique. The best parameters are taken with 10 fold cross validation"""
@@ -11466,13 +11596,14 @@ def get_y_corrected_by_x_LOWESS_crossValidation(df, xfield, yfield, outdir, thre
     # check that the index is unique
     if len(df.index)!=len(set(df.index)): raise ValueError("The index should be unique")
 
-    # get the df that has the collapsed xfields. lowess does not work if there are repeated xfields
-    def get_median_for_xfield_df(df_x): return np.median(df_x[yfield])
-    x_to_y_series = df.groupby(xfield).apply(get_median_for_xfield_df)
-    unique_df = pd.DataFrame({xfield : x_to_y_series.index, yfield : x_to_y_series.values })
+    # define the df_fitting as the one where the yfield is not 0
+    df_fitting = df[df[yfield]>0]
+
+    # check
+    if any(df_fitting[yfield]<=0): raise ValueError("There can't be any 0 values in the unique df")
 
     # sort by the x
-    unique_df = unique_df.sort_values(by=[xfield, yfield])
+    df_fitting = df_fitting.sort_values(by=[xfield, yfield])
 
     ########## GET THE DF BENCHMARKED DF 10xCV ########## 
 
@@ -11482,109 +11613,30 @@ def get_y_corrected_by_x_LOWESS_crossValidation(df, xfield, yfield, outdir, thre
     if file_is_empty(df_benchmarking_file) or replace is True:
         print_if_verbose("getting benchmarking for %s vs %s"%(xfield, yfield))
 
-        # init benchmarking df
-        dict_benchmarking = {}; Idict = 0
-
         # define parms
-        n_frac = 10
-        n_it = 5
+        n_frac = 5
+        kfold = 10
 
         # define all the fractions
-        min_frac = min([1/len(unique_df), 0.05])
-        all_fractions = list(np.linspace(min_frac, 0.1, n_frac)) + list(np.linspace(0.1, 0.5, n_frac))
-
-        # define all the indices
-        all_idx = set(unique_df.index)
+        min_frac = min([1/len(df_fitting), 0.05])
+        all_fractions = list(np.linspace(min_frac, 0.1, n_frac)) + list(np.linspace(0.1+0.01, 0.5, n_frac))
 
         # debug
-        if any(pd.isna(unique_df[xfield])) or any(pd.isna(unique_df[yfield])): raise ValueError("There are NaNs")
+        if any(pd.isna(df_fitting[xfield])) or any(pd.isna(df_fitting[yfield])): raise ValueError("There are NaNs")
 
+        # define the inputs of the benchmarking function
+        inputs_fn = [(kfold, frac, df_fitting, xfield, yfield, min_test_points_CV, outdir) for frac in all_fractions]
 
-        # init whetehr som some_rsquared_found
-        some_rsquared_found = False
+        # get a list of the benchmarking series in parallel
+        with multiproc.Pool(threads) as pool:
 
-        # iterate through several parameters of the lowess fitting
-        for kfold in [10, 5, 3, 2]: # go through several kfolds. If you find a fit with some of them break
-            for frac in all_fractions: # the fraction of data points used to weight the 
-                for it in range(0, n_it+1): # the number of residual-based reweightings to perform.
+            list_benchmarking_series = pool.starmap(get_LOWESS_benchmarking_series_CV, inputs_fn) 
             
-                    # init rsquares
-                    rsquares_cv = []
-
-                    # iterate through 10-fold chross validation 
-                    for cvID in range(kfold):
-
-                        # get the idx test as each kfolth position after cvID
-                        test_idx = set(unique_df.iloc[cvID:].iloc[::kfold, :].index)
-                        train_idx = all_idx.difference(test_idx)
-
-                        # if there are not enough data points, break
-                        if len(test_idx)<min_test_points_CV: break
-
-                        # get dfs
-                        df_train = unique_df.loc[train_idx].sort_values(by=[xfield, yfield])
-                        df_test = unique_df.loc[test_idx].sort_values(by=[xfield, yfield])
-                       
-                        # get train alues
-                        xtrain = df_train[xfield].values
-                        ytrain = df_train[yfield].values
-
-                        # get the lowess fit on the train data
-                        lowess_results_train = statsmodels_api.nonparametric.lowess(endog=ytrain, exog=xtrain, frac=frac, it=it, xvals=None, is_sorted=True, missing="raise", return_sorted=True) # return sorted returns values storted by exog
-
-                        # unpack
-                        lowess_train_x = lowess_results_train[:,0]
-                        lowess_train_y = lowess_results_train[:,1]
-
-                        # debug if there was no LOWESS interpolation
-                        if any(pd.isna(lowess_train_y)): raise ValueError("the output of lowess can't have NaNs")
-
-                        # generate a linear interpolation function between the train results. It will only work for values in the range of the train
-                        interpolation_function = interp1d(lowess_train_x, lowess_train_y, bounds_error=True, kind="linear", assume_sorted=True)
-
-                        # get the test values. Only those where the x is in the range of the train
-                        xtest = df_test[xfield].values
-                        ytest = df_test[yfield].values
-
-                        idx_correct_test = (xtest>=min(lowess_train_x)) & (xtest<=max(lowess_train_x))
-                        xtest = xtest[idx_correct_test]
-                        ytest = ytest[idx_correct_test]
-
-                        # get the predicted y test by linear interpolation
-                        ytest_predicted = interpolation_function(xtest)
- 
-                        # debug
-                        if len(ytest_predicted)!=len(ytest): raise ValueError("xtest and ytest are not the same")
-                        if any(pd.isna(ytest_predicted)): raise ValueError("There can't be NaNs")
-
-                        # calculate the rsquare, making sure it is a float
-                        rsquare = r2_score(ytest, ytest_predicted)
-
-                        # debug
-                        if pd.isna(rsquare): raise ValueError("The rsquare can't be nan")
-
-                        # break trying if there is a 0 rsquare
-                        if rsquare<=0: break 
-
-                        # keep
-                        rsquares_cv.append(rsquare)
-
-                    # discard if any rsquares are 0
-                    if len(rsquares_cv)!=kfold: continue
-
-                    # keep
-                    std = np.std(rsquares_cv)
-                    mean_rsquare = np.mean(rsquares_cv)
-                    dict_benchmarking[Idict] = {"frac":frac, "it":int(it), "mean_rsquare":mean_rsquare, "inverse_std_rsquare":1/std, "std_rsquare":std, "kfold":kfold}; Idict+=1
-
-                    print_if_verbose(frac, it, kfold, mean_rsquare)
-                    some_rsquared_found = True
-
-            # if this kfold already yielded some prediction, skip using smaller kfolds
-            if some_rsquared_found is True: break
+            pool.close()
+            pool.terminate()
 
         # get as df
-        df_benchmarking = pd.DataFrame(dict_benchmarking).transpose()
+        df_benchmarking = pd.DataFrame(list_benchmarking_series)
 
         # save
         save_df_as_tab(df_benchmarking, df_benchmarking_file)
@@ -11594,18 +11646,19 @@ def get_y_corrected_by_x_LOWESS_crossValidation(df, xfield, yfield, outdir, thre
 
     ##################################################### 
 
-    if len(df_benchmarking)==0: 
+    if len(df_benchmarking)==0 or max(df_benchmarking.mean_rsquare)<=0: 
 
         print("WARNING: There is not enough variability or data points to perform a correction of %s on %s. There will be no correction applied"%(yfield, xfield))
         y_corrected = df[yfield]
+        final_rsquare = 0.0
 
     else:
 
         # get the fit data
-        print_if_verbose("performing LOWESS regression with best parameters")
+        print_if_verbose("performing LOWESS regression with best parameters for %s vs %s"%(xfield, yfield))
 
         # get sorted df
-        unique_df = unique_df.sort_values(by=[xfield, yfield])
+        df_fitting = df_fitting.sort_values(by=[xfield, yfield])
 
         # sort df benchmarking to get the max rsquare and minimum std
         max_kfold = max(df_benchmarking.kfold)
@@ -11616,47 +11669,63 @@ def get_y_corrected_by_x_LOWESS_crossValidation(df, xfield, yfield, outdir, thre
 
         # get the y predicted with the best parms
         best_frac = best_parms_series["frac"]
-        best_it = int(best_parms_series["it"])
-        lowess_results = statsmodels_api.nonparametric.lowess(endog=unique_df[yfield], exog=unique_df[xfield], frac=best_frac, it=best_it, xvals=None, is_sorted=True, missing="raise", return_sorted=True) # return sorted returns values storted by exog
-
-        # define the unique_df predicted_y_va
-        unique_df["predicted_yvalues"] = lowess_results[:,1]
+        #outprefix = "%s/final_loess_fitting"%(outdir)
+        df_fitting["predicted_yvalues"] = get_lowess_fit_y(df_fitting[xfield].values, df_fitting[yfield].values, best_frac)
 
         # debug 
-        if any(pd.isna(unique_df.predicted_yvalues)): raise ValueError("there should be no NaNs in the final prediction")
+        if any(pd.isna(df_fitting.predicted_yvalues)): raise ValueError("there should be no NaNs in the final prediction")
 
-        # define the predicted_y_values, a series that has the index of df and the values predicted by unique_df["predicted_yvalues"]
-        xval_to_predicted_yval = dict(unique_df.set_index(xfield).predicted_yvalues)
-        df["predicted_yvalues"] = df[xfield].apply(lambda x: xval_to_predicted_yval[x])
+        # debug if any of the predicted_yvalues is <=0
+        if any(df_fitting.predicted_yvalues<=0): raise ValueError("There can't be any 0 predicted yvalues")
 
         # calculate the final rsquare
-        final_rsquare = r2_score(df[yfield], df.predicted_yvalues)
+        final_rsquare = r2_score(df_fitting[yfield], df_fitting.predicted_yvalues)
+        if pd.isna(final_rsquare): raise ValueError("rsquare can't be NaN")
 
         ##############################
 
         ######### MAKE PLOTS #########
 
-        df_plot = df.sort_values(by=[xfield, yfield])
+        df_plot = df_fitting.sort_values(by=[xfield, yfield])
 
         fig = plt.figure(figsize=(5,5))
-        plt.plot(df_plot[xfield], df_plot[yfield], "o", alpha=0.2, color="gray", label="raw data")
+
+        #plt.plot(df_plot[xfield], df_plot[yfield], "o", alpha=0.2, color="gray", label="raw data")
+        sns.kdeplot(df_plot[[xfield, yfield]], cmap="gist_gray", shade=True)
         plt.plot(df_plot[xfield], df_plot.predicted_yvalues, "-", color="red", label="LOWESS fit")
 
-        plt.title("Fitting LOWESS with frac=%.3f and it=%i. final R2=%.3f. %ix CV R2=%.3f +- %.3f (SD)\n"%(best_frac, best_it, final_rsquare, best_parms_series["kfold"], best_parms_series["mean_rsquare"], best_parms_series["std_rsquare"]))
+        plt.title("Fitting LOWESS with frac=%.3f. final R2=%.3f. %ix CV R2=%.3f +- %.3f (SD)\n"%(best_frac, final_rsquare, best_parms_series["kfold"], best_parms_series["mean_rsquare"], best_parms_series["std_rsquare"]))
         plt.legend(bbox_to_anchor=(1, 1))
         plt.xlabel(xfield)
+        plt.ylim([0, np.percentile(df_plot[yfield], 95)])
         plt.ylabel(yfield)
 
         fig.savefig("%s/coverage.pdf"%(outdir), bbox_inches='tight')
         plt.close(fig)
-
+        
         ############################
+
+        # add the predicted_yvalues to df
+        dfIDX_to_predictedYvalue = dict(df_fitting["predicted_yvalues"])
+        missing_IDXs = set(df.index).difference(set(dfIDX_to_predictedYvalue))
+
+        df_missing = df.loc[missing_IDXs]
+        if any(df_missing[yfield]!=0): raise ValueError("there are some non-0 values missing")
+
+        for idx in missing_IDXs: dfIDX_to_predictedYvalue[idx] = 0.0
+        df["index_series"] = df.index
+        df["predicted_yvalues"] = df.index_series.apply(lambda x: dfIDX_to_predictedYvalue[x])
 
         # get the corrected vals. If there is no prediction just return the raw vals
         def divide_with_noNaN_correction(r):
 
-            if r[yfield]==0 and r["predicted_yvalues"]==0: return 1.0
+            # if the yfield is 0, return it as it is
+            if r[yfield]==0 and r["predicted_yvalues"]==0: return 0.0
+
+            # predicted yvalues can't be 0 unless yfield is also
             elif r["predicted_yvalues"]==0: raise ValueError("predicted_yvalues can't be 0 if yfield is not as well") 
+            
+            # normal division
             else: return r[yfield]/r["predicted_yvalues"]
 
         if final_rsquare>0: y_corrected = df.apply(divide_with_noNaN_correction, axis=1)
@@ -11666,7 +11735,7 @@ def get_y_corrected_by_x_LOWESS_crossValidation(df, xfield, yfield, outdir, thre
         if any(pd.isna(y_corrected)): raise ValueError("there should be no NaNs in y_corrected")
 
     # return in the initial order
-    return y_corrected
+    return y_corrected, final_rsquare
 
 def make_plots_coverage_parameters(df_cov, plots_dir):
 
@@ -11719,6 +11788,56 @@ def get_compromised_ref_breakpoint(r):
 
     else: raise ValueError("The alt %s is  not properly formatted"%r["ALT"])
 
+
+
+def rgb_to_hex(rgb):
+
+    # Helper function to convert colour as RGB tuple to hex string
+
+    rgb = tuple([int(255*val) for val in rgb])
+    return '#' + ''.join([hex(val)[2:] for val in rgb]).upper()
+
+
+def get_value_to_color(values, palette="mako", n=100, type_color="rgb", center=None):
+
+    """TAkes an array and returns the color that each array has. Checj http://seaborn.pydata.org/tutorial/color_palettes.html"""
+
+    # get the colors
+    colors = sns.color_palette(palette, n)
+
+    # change the colors
+    if type_color=="rgb": colors = colors
+    elif type_color=="hex": colors = [rgb_to_hex(c) for c in colors]
+    else: raise ValueError("%s is not valid"%palette)
+
+    # change
+
+    # if they are strings
+    if type(list(values)[0])==str:
+
+        palette_dict = dict(zip(values, colors))
+        value_to_color = palette_dict
+
+    # if they are numbers
+    else:
+
+        # map eaqually distant numbers to colors
+        if center==None:
+            min_palette = min(values)
+            max_palette = max(values)
+        else: 
+            max_deviation = max([abs(fn(values)-center) for fn in [min, max]])
+            min_palette = center - max_deviation
+            max_palette = center + max_deviation
+
+        all_values_palette = list(np.linspace(min_palette, max_palette, n))
+        palette_dict = dict(zip(all_values_palette, colors))
+
+        # get value to color
+        value_to_color = {v : palette_dict[find_nearest(all_values_palette, v)] for v in values}
+
+    return value_to_color, palette_dict
+
 def get_graph_subcomponents_undirected_graph(graph):
 
     """Takes a graph and returns a list of subcomponents' nodes (sets)"""
@@ -11755,127 +11874,177 @@ def get_graph_subcomponents_undirected_graph(graph):
 
     return components_set 
 
-def get_genomeGraph_object(reference_genome, df_gridss, min_AF_homo, min_QUAL, threads, replace):
 
-    """This function takes a reference genome and a df_gridss with the breakpoints. It gererates a graph were each position is one node. 
-    """
+def get_genomeGraph_edges_and_positions_df(reference_genome, df_gridss, min_AF_homo, min_QUAL):
 
-    # define the files
-    prefix = "%s.graph_breakpoints_minQUAL=%.3f_minAFhomo=%.3f"%(reference_genome, min_QUAL, min_AF_homo)
-    genome_graph_file = "%s.edges.txt"%prefix
-    positions_df_file = "%s.df_positions.tab"%prefix
+    """This function returns a positions_df (with graph_node IDs) and a set of vertices that are related to breakpoints will be used to generate a genome graph"""
+    
+    # map each chromosome to an offset
+    chrom_to_lenSeq = get_chr_to_len(reference_genome)
 
-    if any([file_is_empty(x) for x in {genome_graph_file, positions_df_file}]) or replace is True:
-        print_if_verbose("getting genome graph object for %s"%reference_genome)
+    # deffine an offset for each chromosome, which is necessary to keep all the positions of the genome as independent numbers
+    chrom_to_offset = {}
+    current_offset = 0
+    for chrom, seqLen in chrom_to_lenSeq.items():
+        chrom_to_offset[chrom] = current_offset
+        current_offset+=seqLen
+    
+    # create a df with the positions
+    positions_df = pd.DataFrame()
+    for chrom, offset in chrom_to_offset.items():
 
-        # map each chromosome to an offset
-        chrom_to_lenSeq = get_chr_to_len(reference_genome)
+        df_c = pd.DataFrame({"position" : list(range(0, chrom_to_lenSeq[chrom]))})
+        df_c["chromosome"] = chrom
+        df_c["offset"] = offset
+        df_c["graph_node"] = df_c.position + df_c.offset
 
-        # deffine an offset for each chromosome, which is necessary to keep all the positions of the genome as independent numbers
-        chrom_to_offset = {}
-        current_offset = 0
-        for chrom, seqLen in chrom_to_lenSeq.items():
-            chrom_to_offset[chrom] = current_offset
-            current_offset+=seqLen
+        positions_df = positions_df.append(df_c[["chromosome", "position", "graph_node"]])
 
-        # create the undirected graph, meaning that all edges work in both directions
-        genome_graph = igraph.Graph(directed=False)
+    # set the index
+    positions_df = positions_df.set_index("graph_node", drop=False)
 
-        # add one vertex (node) for each position in the genome
-        npositions = sum(chrom_to_lenSeq.values())
-        genome_graph.add_vertices(npositions)
+    # add the plus 1
+    positions_df["position_1based"] = positions_df.position + 1
 
-        # create a df with the positions
-        positions_df = pd.DataFrame()
-        for chrom, offset in chrom_to_offset.items():
+    # initialize the breakpoint edges
+    breakpoint_edges = set() 
+    ref_breakpoints_to_remove = set()
 
-            df_c = pd.DataFrame({"position" : list(range(0, chrom_to_lenSeq[chrom]))})
-            df_c["chromosome"] = chrom
-            df_c["offset"] = offset
-            df_c["graph_node"] = df_c.position + df_c.offset
+    ######### MODIFY EDGES ACCORDING TO df_gridss #########
 
-            positions_df = positions_df.append(df_c[["chromosome", "position", "graph_node"]])
+    if df_gridss is not None:
 
-        # set the index
-        positions_df = positions_df.set_index("graph_node", drop=False)
+        # filter the df_gridss and check that it is unique
+        df_gridss = df_gridss[df_gridss.QUAL>=min_QUAL]
+        if len(set(df_gridss.ID))!=len(df_gridss): raise ValueError("df_gridss.ID should be unique")
 
-        # add the plus 1
-        positions_df["position_1based"] = positions_df.position + 1
+        if len(df_gridss)>0:
 
-        # define the nodes that are the end of chromosomes
-        chromosome_start_nodes = {offset for chrom, offset in chrom_to_offset.items()}
-        chromosome_end_nodes = {(offset + chrom_to_lenSeq[chrom] - 1) for chrom, offset in chrom_to_offset.items()}
-        all_nodes = set(range(npositions))
-
-        # initialize a series with the edges of the adjacent positions
-        all_edges = set(map(lambda pos: (pos, pos+1), all_nodes.difference(chromosome_end_nodes)))
-
-        ######### MODIFY EDGES ACCORDING TO df_gridss #########
-
-        if df_gridss is not None:
-  
-            # filter the df_gridss and check that it is unique
-            df_gridss = df_gridss[df_gridss.QUAL>=min_QUAL]
-            if len(set(df_gridss.ID))!=len(df_gridss): raise ValueError("df_gridss.ID should be unique")
+            # keep only bends that have mates
+            eventID_to_nBends = df_gridss.groupby("eventID_as_clove").apply(len)
+            if any(eventID_to_nBends>2): raise ValueError("there can't be events with more than 2 breakend")
+            eventID_to_nBends = dict(eventID_to_nBends)
+            df_gridss["n_bends"] = df_gridss.eventID_as_clove.apply(lambda x: eventID_to_nBends[x])
+            df_gridss = df_gridss[df_gridss.n_bends==2]
 
             if len(df_gridss)>0:
 
-                # keep only bends that have mates
-                eventID_to_nBends = df_gridss.groupby("eventID_as_clove").apply(len)
-                if any(eventID_to_nBends>2): raise ValueError("there can't be events with more than 2 breakend")
-                eventID_to_nBends = dict(eventID_to_nBends)
-                df_gridss["n_bends"] = df_gridss.eventID_as_clove.apply(lambda x: eventID_to_nBends[x])
-                df_gridss = df_gridss[df_gridss.n_bends==2]
+                # add whether the breakend is homozygous. For homozygous breakends the adjacent edges will be removed
+                df_gridss["is_homo_bend"] = df_gridss.real_AF>=min_AF_homo
 
-                if len(df_gridss)>0:
+                # keep only important fields
+                df_gridss = df_gridss[["#CHROM", "ALT", "POS", "is_homo_bend", "ID", "INFO_MATEID", "real_AF"]]
 
-                    # add whether the breakend is homozygous. For homozygous breakends the adjacent edges will be removed
-                    df_gridss["is_homo_bend"] = df_gridss.real_AF>=min_AF_homo
+                # add the node position 
+                df_gridss = df_gridss.merge(positions_df[["chromosome", "position_1based", "graph_node"]], left_on=["#CHROM", "POS"], right_on=["chromosome", "position_1based"], validate="many_to_one", how="left")
 
-                    # keep only important fields
-                    df_gridss = df_gridss[["#CHROM", "ALT", "POS", "is_homo_bend", "ID", "INFO_MATEID", "real_AF"]]
+                # add the node of the mate
+                ID_to_position = dict(df_gridss.set_index("ID")["graph_node"])
+                df_gridss["mate_graph_node"] = df_gridss.INFO_MATEID.apply(lambda x: ID_to_position[x])
 
-                    # add the node position 
-                    df_gridss = df_gridss.merge(positions_df[["chromosome", "position_1based", "graph_node"]], left_on=["#CHROM", "POS"], right_on=["chromosome", "position_1based"], validate="many_to_one", how="left")
+                # add all the edges related to the breakpoints
+                def get_df_gridss_sorted_edge(r): return sorted([r["graph_node"], r["mate_graph_node"]])
+                df_gridss["sorted_edge"] = df_gridss.apply(get_df_gridss_sorted_edge, axis=1).apply(tuple)
 
-                    # add the node of the mate
-                    ID_to_position = dict(df_gridss.set_index("ID")["graph_node"])
-                    df_gridss["mate_graph_node"] = df_gridss.INFO_MATEID.apply(lambda x: ID_to_position[x])
+                breakpoint_edges = set(df_gridss.sorted_edge)
 
-                    # add all the edges related to the breakpoints
-                    def get_df_gridss_sorted_edge(r): return sorted([r["graph_node"], r["mate_graph_node"]])
-                    df_gridss["sorted_edge"] = df_gridss.apply(get_df_gridss_sorted_edge, axis=1).apply(tuple)
-                    all_edges.update(set(df_gridss.sorted_edge))
+                # for homozygous breakends, remove the corresponding adjacent edges. Make sure that these are no adjacent breakpoints
+                df_gridss["distance_between_nodes"] = (df_gridss.graph_node - df_gridss.mate_graph_node).apply(abs)
+                df_gridss_homo = df_gridss[(df_gridss.is_homo_bend) & (df_gridss.distance_between_nodes>1)]
 
-                    # for homozygous breakends, remove the corresponding adjacent edges. Make sure that these are no adjacent breakpoints
-                    df_gridss["distance_between_nodes"] = (df_gridss.graph_node - df_gridss.mate_graph_node).apply(abs)
-                    df_gridss_homo = df_gridss[(df_gridss.is_homo_bend) & (df_gridss.distance_between_nodes>1)]
+                if len(df_gridss_homo)>0:
 
-                    if len(df_gridss_homo)>0:
+                    # add the compromised reference breakpoint
+                    df_gridss_homo["compromised_ref_breakpoint"] = df_gridss_homo.apply(get_compromised_ref_breakpoint, axis=1)
 
-                        # add the compromised reference breakpoint
-                        df_gridss_homo["compromised_ref_breakpoint"] = df_gridss_homo.apply(get_compromised_ref_breakpoint, axis=1)
+                    ref_breakpoints_to_remove = set(df_gridss_homo.compromised_ref_breakpoint)
 
-                        all_ref_breakpoints_to_remove = set(df_gridss_homo.compromised_ref_breakpoint)
+    #######################################################
 
-                        # check that the compromised ref breakpoints are in all_edges
-                        if len(all_ref_breakpoints_to_remove.difference(all_edges))>0: raise ValueError("not all the compromised reference breakpoints are in all_edges")
+    return positions_df, ref_breakpoints_to_remove, breakpoint_edges, chrom_to_offset, chrom_to_lenSeq
+   
+def get_df_windows_with_distance_to_the_telomere_graph(df_windows, reference_genome, df_gridss, min_AF_homo, min_QUAL, threads, replace, outfile, shortest_distance_to_telomere_field, plot_graph=True):
 
-                        # remove the all_ref_breakpoints_to_remove
-                        all_edges = all_edges.difference(all_ref_breakpoints_to_remove)
+    """
+    This function takes a df_windows and adds a field called shortest_distance_to_telomere_field. This is the shortest distance to the telomere taking into consideration a genome graph that takes df_gridss, min_AF_homo and min_QUAL to build it. The constructed graph only contains the positions from df_windows and those related to breakpoints.
+    """
 
-        #######################################################
+    # define the initial index and cols
+    initial_cols = list(df_windows.columns)
 
-        # add the edges to the graph
+    # add the shortest_distance_to_telomere_field
+    if file_is_empty(outfile)  or replace is True:
+        print_if_verbose("getting genome graph object for %s"%reference_genome)
+
+        ########### DEFINE A DF_POSITIONS WITH ALL RELEVANT POSITIONS ###########
+
+        # get the positions df and the edges of the graph
+        positions_df, ref_breakpoints_to_remove, breakpoint_edges, chrom_to_offset, chrom_to_lenSeq = get_genomeGraph_edges_and_positions_df(reference_genome, df_gridss, min_AF_homo, min_QUAL)
+
+        # define a positions_df of some special nodes to be kept in the final graph
+        chromosome_start_nodes = {offset for chrom, offset in chrom_to_offset.items()}
+        chromosome_end_nodes = {(offset + chrom_to_lenSeq[chrom] - 1) for chrom, offset in chrom_to_offset.items()}
+
+        breakpoint_nodes = set(make_flat_listOflists(ref_breakpoints_to_remove) + make_flat_listOflists(breakpoint_edges))
+
+        extra_graph_nodes = breakpoint_nodes.union(chromosome_start_nodes).union(chromosome_end_nodes)
+        positions_df_extra = positions_df[positions_df.graph_node.isin(extra_graph_nodes)]
+    
+        # get the positions df with only those positions in positions_df
+        positions_df = df_windows.merge(positions_df, left_on=["chromosome", "middle_position"], right_on=["chromosome", "position"], validate="one_to_one")[list(positions_df.columns)]
+
+        # add the extra positions related to the breakpoints
+        positions_df = positions_df.append(positions_df_extra).sort_values(by="graph_node").drop_duplicates()
+
+        #############################################################################
+
+        ############## DEFINE THE EDGES AND THEIR WEIGHTS AS THE DISTANCE BETWEEN THE NODES ##############
+
+        # initialize all the edges as those that are adjacent in the positions df
+        all_edges = set(zip(positions_df.graph_node.iloc[0:-1].values, positions_df.graph_node.iloc[1:].values))
+
+        # remove the edges related to the chromosome boundaries
+        edges_chromosome_boundaries = set.union(*[{(end_node, start_node) for start_node in chromosome_start_nodes} for end_node in chromosome_end_nodes])
+
+        wrong_edges = edges_chromosome_boundaries.union(ref_breakpoints_to_remove)
+        all_edges = list(all_edges.difference(wrong_edges))
+
+        # add the edge weights for the intrachromosomal edges
+        def calc_edge_weight(x): return (x[1]-x[0])
+        all_edge_weights = list(map(calc_edge_weight, all_edges))
+
+        # add the edges and weights for the breakpoint_edges
+        all_edges += list(breakpoint_edges)
+        all_edge_weights += [1]*len(all_edge_weights)
+
+        ##################################################################################################
+
+        ######## CREATE GENOME GRAPH #######
+
+        # map each graph position to a set of unique graph nodes
+        positions_df["minimum_graph_node"] = list(range(0, len(positions_df)))
+        node_to_minNodeID = positions_df.set_index("graph_node")["minimum_graph_node"]
+
+        # change the edges so that they are in the node_to_minNodeID notation
+        def get_edge_accurding_to_node_to_minNodeID(x): return (node_to_minNodeID[x[0]], node_to_minNodeID[x[1]])
+        all_edges = list(map(get_edge_accurding_to_node_to_minNodeID, all_edges))
+
+        # get the graph with the minimum_graph_node parameters
+        genome_graph = igraph.Graph(directed=False)
+        genome_graph.add_vertices(len(positions_df))
         genome_graph.add_edges(all_edges)
-        print_if_verbose("genome graph got")
+
+        # add the weights
+        genome_graph.es['weight'] = all_edge_weights
+
+        ####################################
  
-        ########## CALCULATE THE DISTANCE TO THE CLOSEST TELOMERE ##########
+        ########## ADD METADATA TO THE POSITIONS DF ##########
 
         # add the number of neighbors that each position has
         def get_neighbors(node): return genome_graph.neighbors(node, mode="ALL")
         print_if_verbose("calculating number of neighbors")
-        positions_df["number_neighbors"] = positions_df.graph_node.apply(get_neighbors).apply(len)
+        positions_df["number_neighbors"] = positions_df.minimum_graph_node.apply(get_neighbors).apply(len)
 
         # add whether it is a telomere
         positions_df["is_telomere"] = positions_df.number_neighbors<=1
@@ -11886,56 +12055,88 @@ def get_genomeGraph_object(reference_genome, df_gridss, min_AF_homo, min_QUAL, t
         print_if_verbose("There are %i graph subcomponents"%len(subcomponents_list))
 
         node_to_componentID = pd.concat([pd.Series([Icomp]*len(component_nodes), index=component_nodes) for Icomp, component_nodes in enumerate(subcomponents_list)])
-        positions_df["component_ID"] = positions_df.graph_node.map(node_to_componentID)
+        positions_df["component_ID"] = positions_df.minimum_graph_node.map(node_to_componentID)
         if any(pd.isna(positions_df.component_ID)): raise ValueError("all positions should have a component")
 
+        # map each componentID to the nodes
+        df_components = pd.DataFrame({"componentID":node_to_componentID})
+        df_components["node"] = df_components.index
+
+        def get_nodes_from_componentID_df(df_c): return set(df_c["node"])
+        componentID_to_nodes = df_components.groupby("componentID").apply(get_nodes_from_componentID_df)
+
+        ######################################################################
+
+        ######### ADD DISTANCE TO THE TELOMERE BY shortest_distance_to_telomere_field ###########
+
         # map each graph subcomponent to the telomeric nodes
-        component_ID_to_telomericNodes = dict(positions_df.groupby("component_ID").apply(lambda df_comp: df_comp[df_comp.is_telomere].graph_node.values))
+        component_ID_to_telomericNodes = dict(positions_df.groupby("component_ID").apply(lambda df_comp: df_comp[df_comp.is_telomere].minimum_graph_node.values))
 
         # calculate the distance from each position to the 
         print_if_verbose("calculating shortest distance to the telomere")
         node_to_distanceToTelomere = pd.Series()
         for compID, telomericNodes in component_ID_to_telomericNodes.items():
+            print_if_verbose("component %i/%i"%(compID+1, len(component_ID_to_telomericNodes)))
 
             # get the positions of the component
-            component_nodes = positions_df[positions_df.component_ID==compID].graph_node.values
+            component_nodes = positions_df[positions_df.component_ID==compID].minimum_graph_node.values
+
+            # if there are no telomericNodes, it means that there is a circular chromosome. Pick the first and last parts instead
+            if len(telomericNodes)==0: telomericNodes = np.array([component_nodes[0], component_nodes[-1]])
 
             # get a df with the distance between each node of the component (cols) and the telomeric nodes (index)
-            shortestPath_lengths_df = pd.DataFrame(genome_graph.shortest_paths(source=telomericNodes, target=component_nodes, mode="ALL"), columns=component_nodes, index=telomericNodes) # this may include weights
+            shortestPath_lengths_df = pd.DataFrame(genome_graph.shortest_paths_dijkstra(source=telomericNodes, target=component_nodes, mode="ALL", weights='weight'), columns=component_nodes, index=telomericNodes) # this may include weights
 
             # get a series that has the minimum distance to the telomere for each node
             distance_telomere_series = shortestPath_lengths_df.apply(min, axis=0).apply(int)
+
             node_to_distanceToTelomere = node_to_distanceToTelomere.append(distance_telomere_series)
 
         # add to the df
-        positions_df["graph_shortest_distance_to_telomere"] = positions_df.graph_node.map(node_to_distanceToTelomere)
-        if any(pd.isna(positions_df.graph_shortest_distance_to_telomere)): raise ValueError("all positions should have a distance to the telomere")
+        positions_df[shortest_distance_to_telomere_field] = positions_df.minimum_graph_node.map(node_to_distanceToTelomere)
+        if any(pd.isna(positions_df[shortest_distance_to_telomere_field])): raise ValueError("all positions should have a distance to the telomere")
 
-        ######################################################################
+        #########################################################################################
 
-        # save 
-        print(positions_df, positions_df.keys())
-        save_df_as_tab(positions_df[["chromosome", "position", "graph_node", "number_neighbors", "is_telomere", "component_ID", "graph_shortest_distance_to_telomere"]], positions_df_file)
+        ########## PLOT GRAPH ##########
 
-        # save the edges of the graph
-        genome_graph_file_tmp = "%s.tmp"%genome_graph_file
-        genome_graph.write_edgelist(genome_graph_file_tmp)
-        os.rename(genome_graph_file_tmp, genome_graph_file)
+        if plot_graph is True:
 
-    print_if_verbose("loading graph genome")
+            # plot the graph
+            graph_plotfile = "%s.graph_plot.pdf"%outfile
+            print_if_verbose("plotting graph into %s"%graph_plotfile)
+
+            # define general things
+            genome_graph.vs['label'] = ""
+
+            #genome_graph.vs['label'] =  list(positions_df[shortest_distance_to_telomere_field].apply(str))
+            #genome_graph.vs['label_size'] = 6
+            #genome_graph.es['label'] = all_edge_weights
+            #genome_graph.es['label_size'] = 6
+
+            # get the color according to the clusterID
+            compID_to_color = get_value_to_color(componentID_to_nodes.index, palette="mako", n=len(componentID_to_nodes), type_color="rgb")[0]
+
+            node_colors = list(map(lambda n: compID_to_color[node_to_componentID[n]], positions_df.minimum_graph_node))
+            genome_graph.vs['color'] = node_colors
+            genome_graph.vs['bgcolor'] = node_colors
+
+            genome_graph.es['color'] = list(map(lambda e: compID_to_color[node_to_componentID[e[0]]], all_edges))
+
+            # get plot
+            igraph.plot(genome_graph, graph_plotfile, vertex_size=3)
+
+        ################################
+
+        # merge with the initial windows and save
+        df_windows = df_windows.merge(positions_df[["chromosome", "position", shortest_distance_to_telomere_field]], left_on=["chromosome", "middle_position"], right_on=["chromosome", "position"], validate="one_to_one")[list(df_windows.columns) + [shortest_distance_to_telomere_field]]
+
+        save_df_as_tab(df_windows, outfile)
 
     # load positions df
-    positions_df = get_tab_as_df_or_empty_df(positions_df_file)
+    df_windows = get_tab_as_df_or_empty_df(outfile)
 
-    # load graph
-    genome_graph = igraph.Graph(directed=False)
-    genome_graph.add_vertices(max(positions_df.graph_node))
-
-    df_edges = pd.read_csv(genome_graph_file, sep=" ", header=None, names=["pos1", "pos2"])
-    genome_graph.add_edges(set(df_edges.apply(tuple, axis=1)))
-
-    return genome_graph, df_positions
-
+    return df_windows[initial_cols + [shortest_distance_to_telomere_field]]
 
 def get_df_coverage_with_corrected_coverage(df_coverage, reference_genome, outdir, replace, threads, mitochondrial_chromosome, df_gridss):
 
@@ -11948,11 +12149,6 @@ def get_df_coverage_with_corrected_coverage(df_coverage, reference_genome, outdi
     if "relative_coverage" in set(df_coverage.keys()): raise ValueError("coverage can't be in the df keys")
     median_coverage = get_median_coverage(df_coverage, mitochondrial_chromosome)
     df_coverage["relative_coverage"] = df_coverage["mediancov_1"]/median_coverage
-    
-    # add the raw distance to the telomere, in linear space
-    chr_to_len = get_chr_to_len(reference_genome)
-    df_coverage["middle_position"] = (df_coverage.start + (df_coverage.end - df_coverage.start)/2).apply(int)
-    df_coverage["raw_distance_to_telomere"] = df_coverage.apply(lambda r: min([r["middle_position"], chr_to_len[r["chromosome"]]-r["middle_position"]]), axis=1)
 
     # add the GC content
     gcontent_outfile = "%s/df_coverage_with_gccontent.py"%outdir
@@ -11961,6 +12157,11 @@ def get_df_coverage_with_corrected_coverage(df_coverage, reference_genome, outdi
     # add the median mappability
     mappability_outfile = "%s/df_coverage_with_mappability.tab"%outdir
     df_coverage = get_df_windows_with_median_mappability(df_coverage, reference_genome, mappability_outfile, replace, threads)
+
+    # add the raw distance to the telomere, in linear space
+    chr_to_len = get_chr_to_len(reference_genome)
+    df_coverage["middle_position"] = (df_coverage.start + (df_coverage.end - df_coverage.start)/2).apply(int)
+    df_coverage["raw_distance_to_telomere"] = df_coverage.apply(lambda r: min([r["middle_position"], chr_to_len[r["chromosome"]]-r["middle_position"]-1]), axis=1)
 
     # define chroms
     all_chromosomes = set(get_chr_to_len(reference_genome))
@@ -11978,6 +12179,9 @@ def get_df_coverage_with_corrected_coverage(df_coverage, reference_genome, outdi
     for type_genome, chroms in [("mtDNA", mtDNA_chromosomes), ("gDNA", gDNA_chromosomes)]:
         print_if_verbose("investigating %s"%type_genome)
 
+        # define an outdir for this type of genome
+        outdir_type_genome = "%s/%s"%(outdir, type_genome); make_folder(outdir_type_genome)
+
         # get the df coverage of this genome
         df_cov = df_coverage[df_coverage.chromosome.isin(chroms)]
         if len(df_cov)==0: continue
@@ -11987,31 +12191,91 @@ def get_df_coverage_with_corrected_coverage(df_coverage, reference_genome, outdi
         #make_plots_coverage_parameters(df_cov, plots_dir)
 
         # init the predictor fields of coverage
-        predictor_fields = ["GCcontent", "median_coverage"]
+        predictor_fields = ["GCcontent", "median_mappability"]
 
         ######### ADD THE DISTANCE TO THE TELOMERE ########
 
         # get the genome into a sepparate fasta
-        genome_chroms = "%s/genome_%s.fasta"%(outdir, type_genome)
+        genome_chroms = "%s/genome.fasta"%outdir_type_genome
         SeqIO.write([seq for seq in SeqIO.parse(reference_genome, "fasta") if seq.id in chroms], genome_chroms, "fasta")
 
+        # initialize combinations of breakpoints and homozygous_breakends
+        already_considered_breakpoints_AND_homoBends = set()
+
         # the idea is to keep adding coverage fields with various threshold of quality and AF of homozygous breakends
-        for min_QUAL in np.linspace(min(df_gridss.QUAL), max(df_gridss.QUAL)+1, 10):
+        max_QUAL = np.percentile(df_gridss.QUAL, 90)
+        all_QUALs = list(np.linspace(min(df_gridss.QUAL), max_QUAL, 3)) + [max(df_gridss.QUAL)+1] 
+
+        for min_QUAL in all_QUALs:
 
             # filter the df according to min_QUAL
             df_gridss_filt  = df_gridss[(df_gridss["#CHROM"].isin(chroms))]
 
-            for min_AF_homo in np.linspace(0.3, 1.1, 10):
+            for min_AF_homo in np.linspace(0.3, 1.1, 3):
+                print_if_verbose(min_QUAL, min_AF_homo)
 
-                # create a genome graph that has the breakpoints in df_gridss_filt and homozygous breakends have at least min_AF_homo
-                genome_graph, df_positions = get_genomeGraph_object(genome_chroms, df_gridss_filt, min_AF_homo, min_QUAL, threads, replace)
+                ######### AVOID REDUNDANT GRAPHS #########
 
-                print(df_positions)
+                # define the breakpoints that will be included
+                df_gridss_test = df_gridss_filt[df_gridss_filt.QUAL>=min_QUAL]
+                eventID_to_nBends = dict(df_gridss_test.groupby("eventID_as_clove").apply(len))
+                df_gridss_test["n_bends"] = df_gridss_test.eventID_as_clove.apply(lambda x: eventID_to_nBends[x])
+                df_gridss_test = df_gridss_test[df_gridss_test.n_bends==2]
+                breakpoints = tuple(sorted(set(df_gridss_test.eventID_as_clove)))
 
-                jhsdjkkjhds
-                pass
+                # define the homozygous breakends
+                homoBends = tuple(sorted(df_gridss_test[df_gridss_test.real_AF>=min_AF_homo]["ID"]))
+
+                # define the combination
+                breakpoints_AND_homoBends = (breakpoints, homoBends)
+
+                # debug if this graph is redundant with a previous one
+                if breakpoints_AND_homoBends in already_considered_breakpoints_AND_homoBends: continue
+
+                # keep
+                already_considered_breakpoints_AND_homoBends.add(breakpoints_AND_homoBends)
+
+                #############################################
+
+                # add the distance to the telomere according to a genome graph that has these values
+                outfile = "%s.graph_minQ_%.3f_AFhomo_%.3f.df_cov_withDistToTelomere.tab"%(genome_chroms, min_QUAL, min_AF_homo)
+
+                shortest_distance_to_telomere_field = "graph_shortest_distance_to_telomere_minQ_%.2f_AFhomo_%.2f"%(min_QUAL, min_AF_homo)
+
+                df_cov = get_df_windows_with_distance_to_the_telomere_graph(df_cov, genome_chroms, df_gridss_filt, min_AF_homo, min_QUAL, threads, replace, outfile, shortest_distance_to_telomere_field, plot_graph=False)
+
+                # when there are no breakpoints, validate that the distance to the telomere is the same as the raw distance to the telomere
+                if breakpoints_AND_homoBends==((),()): 
+
+                    if any(df_cov.raw_distance_to_telomere!=df_cov[shortest_distance_to_telomere_field]): raise ValueError("When there are no breakpoints the distance to the telomere should be the same as the raw")
+
+                # keep the field
+                predictor_fields.append(shortest_distance_to_telomere_field)
 
         ###################################################
+
+        # calculate the rsquare for each predictor
+        calculate_rsquares_dir = "%s/calculating_rsquares_each_predictor_%s"%(outdir, type_genome); make_folder(calculate_rsquares_dir)
+        predictor_to_rsquare = pd.Series({p : get_y_corrected_by_x_LOWESS_crossValidation(df_cov, p, "relative_coverage", "%s/%s"%(calculate_rsquares_dir, p), threads, replace)[1] for p in predictor_fields})
+
+        # go through each predictor by order and keep correcting the coverage
+        already_consideredPredictors = [] 
+        for Ipred, (predictor, rsquare) in enumerate(predictor_to_rsquare.sort_values(ascending=False).iteritems()):
+
+
+
+            print(predictor, rsquare)
+
+        continue
+
+
+
+        kdahjhdda
+
+
+        final_rsquare
+        print(df_cov, df_cov.keys())
+        hbadhkgad
 
         # correct by the distance to the telomere
     

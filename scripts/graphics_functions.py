@@ -42,54 +42,6 @@ import sv_functions as fun
 
 #########################################
 
-def rgb_to_hex(rgb):
-
-    # Helper function to convert colour as RGB tuple to hex string
-
-    rgb = tuple([int(255*val) for val in rgb])
-    return '#' + ''.join([hex(val)[2:] for val in rgb]).upper()
-
-
-def get_value_to_color(values, palette="mako", n=100, type_color="rgb", center=None):
-
-    """TAkes an array and returns the color that each array has. Checj http://seaborn.pydata.org/tutorial/color_palettes.html"""
-
-    # get the colors
-    colors = sns.color_palette(palette, n)
-
-    # change the colors
-    if type_color=="rgb": colors = colors
-    elif type_color=="hex": colors = [rgb_to_hex(c) for c in colors]
-    else: raise ValueError("%s is not valid"%palette)
-
-    # change
-
-    # if they are strings
-    if type(list(values)[0])==str:
-
-        palette_dict = dict(zip(values, colors))
-        value_to_color = palette_dict
-
-    # if they are numbers
-    else:
-
-        # map eaqually distant numbers to colors
-        if center==None:
-            min_palette = min(values)
-            max_palette = max(values)
-        else: 
-            max_deviation = max([abs(fn(values)-center) for fn in [min, max]])
-            min_palette = center - max_deviation
-            max_palette = center + max_deviation
-
-        all_values_palette = list(np.linspace(min_palette, max_palette, n))
-        palette_dict = dict(zip(all_values_palette, colors))
-
-        # get value to color
-        value_to_color = {v : palette_dict[fun.find_nearest(all_values_palette, v)] for v in values}
-
-    return value_to_color, palette_dict
-
 def get_descriptions_affected_features(r, gff_df, all_ANNOTATION_IDs):
 
     """Taakes a row of an annotation df and returns all the product descriptons of the proteins"""
@@ -1317,7 +1269,7 @@ def get_genome_variation_browser(df_data, samples_colors_df, target_regions, tar
         current_offset += chrom_to_len[chrom] + 15000
 
     # map each chromosome to a color
-    chrom_to_color, palette_chromosome = get_value_to_color(all_chromosomes, palette="tab10", type_color="hex")
+    chrom_to_color, palette_chromosome = fun.get_value_to_color(all_chromosomes, palette="tab10", type_color="hex")
 
     # change the chrName_to_shortName if not provided
     #if chrName_to_shortName=={}: chrName_to_shortName = {c:c.split("_")[0] for c in all_chromosomes}

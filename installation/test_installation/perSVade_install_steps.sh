@@ -62,10 +62,19 @@ conda install -c bioconda -y trimmomatic=0.38 &&
 conda install -c bioconda -y parallel-fastq-dump=0.6.3 &&
 conda install -c bioconda -y fastqc=0.11.9 &&
 conda install -c bioconda -y bedops=2.4.39 &&
+conda install -c bioconda -y genmap=1.3.0 &&
+conda install -c anaconda -y statsmodels=0.12.0 &&
+conda install -c conda-forge python-igraph=0.8.3 # this updates many things. It may be necessary to stick to python-igraph=0.7.1.post7. This 
 
-conda install -c conda-forge -y python-igraph=0.7.1.post7
-conda install -c bioconda -y genmap=1.3.0
-conda install -c anaconda statsmodels=0.12.0
+conda install -c anaconda -y cython=0.29.21 # this is necessary for the lowess package
+
+
+#conda install -c conda-forge -y python-igraph=0.7.1.post7 # this have errors with the subgraph
+#conda install -c conda-forge -y igraph=0.7.1
+#conda install -c conda-forge -y pycairo=1.20.0 # this is to plot igraph. It updates a lot of things so that it may not be worth
+
+
+
 
 
 #conda install -c conda-forge -y igraph=0.7.1 && # updates openssl pkgs/main::openssl-1.1.1g-h7b6447c_0 --> conda-forge::openssl-1.1.1g-h516909a_1
