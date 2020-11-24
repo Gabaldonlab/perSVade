@@ -9496,3 +9496,407 @@ def get_lowess_fit_y(x, y, frac, outprefix):
     for f in [df_file, Rfile, df_file_with_predicted, std_loess]: remove_file(f)
 
     return df_with_pred.predicted_y.apply(float).values
+
+
+def run_CNV_calling_CONY_one_chromosome(sorted_bam, reference_genome, outdir, chromosome, replace, window_size, threads,chrom_len, sample_name, bp_positions):
+
+    """ runs CONY on a given chromosome into outdir """
+
+    print_if_verbose("running CONY for %s and sample %s"%(chromosome, sample_name))
+    make_folder(outdir)
+
+    # define the curdir
+    CurDir = get_fullpath(".")
+
+    # change dir to outdir
+    os.chdir(outdir)
+
+    ############### PREPARE CONY DATA ###############
+
+    # get the chromosomal bam
+    sorted_bam_chr = "%s/aligned_reads.sorted.bam"%outdir
+    get_chromosomal_sorted_bam(sorted_bam, sorted_bam_chr, chromosome, replace, threads)
+
+    # get the genome of this chromosome
+    reference_genome_chr = "%s/reference_genome_onlyChr.fa"%outdir
+    chromRecord = [seq for seq in SeqIO.parse(reference_genome, "fasta") if seq.id==chromosome]
+    SeqIO.write(chromRecord, reference_genome_chr, "fasta")
+
+    # define a regions file, which includes the whole chromosome
+    target_df = pd.DataFrame({0 : {"seqname":chromosome, "start":1, "end":chrom_len}}).transpose()
+    regions_file_chr = "%s/target_regions.bed1based"%outdir
+    save_df_as_tab(target_df[["seqname", "start", "end"]], regions_file_chr)
+
+    # define the mpileup per chromosome
+    mpileup_file = get_mpileup_file_one_chrom(sorted_bam_chr, replace, reference_genome_chr, min_basecalling_qual=30, min_map_qual=30) # these are the default CONY parameters
+
+    # get mpileup file regressing out the effect of the distance to the telomere
+    mpileup_file = get_mpileup_file_one_chrom_correctedBySmileyFaceEffect(mpileup_file, threads, replace, bp_positions, chrom_len)
+
+
+    # create a soft link on the CONY library, which is necessary because there are functions in CONY.R which use this
+    soft_link_files(libraries_CONY, "%s/CONY.R"%outdir)
+
+    #################################################
+
+    ########## RUN CONY ##########
+
+    # define the final file
+    final_file = "%s/CONVY_finished.txt"%outdir
+
+    if file_is_empty(final_file) or replace is True:
+
+        # run CONY
+        cony_std = "%s/running_cony.std"%outdir
+        print_if_verbose("Running CONY. The std is in %s"%cony_std)
+
+        cmd = "%s --reference_genome %s --sorted_bam %s --regions_file %s --libraries_CONY %s --window_size %i --mpileup_file %s --chromosome %s --sample_name %s --outdir %s > %s 2>&1"%(run_CONY_R, reference_genome_chr, sorted_bam_chr, regions_file_chr, libraries_CONY, window_size, mpileup_file, chromosome, sample_name, outdir, cony_std)
+        run_cmd(cmd, env=EnvName_CONY)
+
+        remove_file(cony_std)
+
+        # make the final file
+        open(final_file, "w").write("CONY finished")
+
+    # at the end return to the CurDir
+    os.chdir(CurDir)
+
+    # load dfs
+    df_perWindow = pd.read_csv("%s/CONY.Result.%s.%s.SumUp.Single.Window.txt"%(outdir, chromosome, sample_name), sep=" ")
+
+    # add fields
+    df_perWindow["AdjRD_relative"] = df_perWindow.AdjRD / np.median(df_perWindow.AdjRD)
+    df_perWindow["relative_CN"] = df_perWindow.CN / 2
+    #################################
+
+
+    ###### PLOT THE CN ACROSS THE CHROMOSOME ######
+    print_if_verbose("plotting CNV...")
+
+    fig = plt.figure(figsize=(20,5))
+    nrows = 1
+
+    # plot each type of coverage
+    plt.subplot(nrows, 1, 1)
+    plt.plot(df_perWindow.start, df_perWindow.AdjRD_relative, color="blue", label="Adjusted Read Depth")
+    plt.plot(df_perWindow.start, df_perWindow.relative_CN, color="red", label="Copy Number CONY", linestyle="--")
+    plt.axhline(1, color="gray", linestyle="--", linewidth=.9)
+    plt.xlabel("start window")
+    plt.ylabel("read depth / Copy Number")
+    plt.title("CNV for %s"%chromosome)
+    plt.legend(bbox_to_anchor=(1, 1))
+
+    # save
+    fig.savefig("%s/coverage_%s.pdf"%(outdir, chromosome))
+    plt.close(fig)
+
+    ################################################
+
+    ######## PLOT INTERACTIVE ########
+
+    # init fig
+    fig = tools.make_subplots(rows=1, cols=1, specs=[[{}]], vertical_spacing=0.0, horizontal_spacing=0.0, subplot_titles=(""), shared_yaxes=True, shared_xaxes=True, print_grid=True)
+
+    # get the relative coverage
+    fig.append_trace(go.Scatter(x=list(df_perWindow.start), y=list(df_perWindow.AdjRD_relative), showlegend=True, mode="lines+markers", marker=dict(symbol="circle", color="blue", size=4), opacity=1, hoveron="points+fills", name="Adjusted read depth", line=dict(color="blue", width=2, dash=None)) , 1, 1) 
+
+    # get the CN
+    fig.append_trace(go.Scatter(x=list(df_perWindow.start), y=list(df_perWindow.relative_CN), showlegend=True, mode="lines", line=dict(color="red", width=2, dash="dash"), opacity=1, hoveron="points+fills", name="CONY CN"), 1, 1) 
+
+    # get figure
+    fig['layout'].update(title="relative coverage and CN %s"%chromosome, margin=go.Margin(l=250, r=250, b=50, t=50), showlegend=True)
+    config={'editable': False}
+    off_py.plot(fig, filename="%s/coverage_%s_interactive.html"%(outdir, chromosome), auto_open=False, config=config)
+
+    ##################################
+
+
+def get_mpileup_file_one_chrom_correctedBySmileyFaceEffect(mpileup_file, threads, replace, bp_positions, chrom_len):
+    
+    """Takes an mpileup file and returns it with the 2nd col transformed, so that it has the effect of position regressed out. It does so by fitting a second degree polynomyal on it"""
+
+
+    this_does_not_workProperly
+
+    # define final file
+    mpileup_file_correctedCov = "%s.coverage_correctedByPos.tab"%mpileup_file
+
+    if file_is_empty(mpileup_file_correctedCov) or replace is True:
+
+        print_if_verbose("getting mpileup file with all possible windows")
+
+        # get a df with all the possible regions between bp_positions
+        df_windows_betweenBPs = get_df_all_windows_between_bp_positions_one_chrom(bp_positions, chrom_len)
+
+        # get the one that has the whole chrom
+        df_windows_betweenBPs = df_windows_betweenBPs[(df_windows_betweenBPs.start==0) & (df_windows_betweenBPs.end==chrom_len)]
+
+        # load mpileup into df
+        df_mpileup = pd.read_csv(mpileup_file, sep="\t", header=None, names=["position", "coverage"]).set_index("position", drop=False)
+
+        # add columsn that add the coverage predicted from a 2d fit of the data
+        coverage_predicted_fromPos_df = df_windows_betweenBPs.apply(get_coverage_regressingOut_position, df_mpileup=df_mpileup, axis=1)
+
+        # get only the regions with a significant prediction and the spearman R of predicted-vs-real being positive and >0.1
+        #coverage_predicted_fromPos_df = coverage_predicted_fromPos_df[(coverage_predicted_fromPos_df.spearman_p<0.05) & (coverage_predicted_fromPos_df.rsquare>0.25) & (coverage_predicted_fromPos_df.coef_c>0)]
+
+        print_if_verbose("getting coverage predicted")
+
+        # if there are no such regions, get the coverage predicted as NaN
+        if len(coverage_predicted_fromPos_df)==0: df_mpileup["coverage_regressingOut_position"] = np.nan
+
+        # if there are some significant predictions, the median of all of them
+        else:  
+
+            # define functions
+            def get_values(r): return r.values
+            def get_non_NaN_vals(r): return r[~pd.isna(r)]
+
+            # get the mpileup df with a series of applys
+            df_mpileup["coverage_regressingOut_position"] = coverage_predicted_fromPos_df[df_mpileup.index].transpose().apply(get_values, axis=1).apply(get_non_NaN_vals).apply(np.median)
+
+
+        # get either the int or the NaN
+        def get_min_as0(x): return max([0, x])
+        df_mpileup["corrected_coverage"] = df_mpileup.apply(get_coverage_or_RegressedOut_coverage, axis=1).apply(int).apply(get_min_as0)
+
+        # save
+        print_if_verbose("saving")
+        save_df_as_tab(df_mpileup, mpileup_file_correctedCov)
+
+    # load the df
+    df_mpileup = get_tab_as_df_or_empty_df(mpileup_file_correctedCov)
+
+    ####### PLOT THE CORRECTED COVERAGE #######
+    print_if_verbose("plotting")
+
+    # define the df plot, one of each 100 positions
+    df_plot = df_mpileup.iloc[::200, :]
+
+    # init fig
+    fig = tools.make_subplots(rows=1, cols=1, specs=[[{}]], vertical_spacing=0.0, horizontal_spacing=0.0, subplot_titles=(""), shared_yaxes=True, shared_xaxes=True, print_grid=True)
+
+    # get the real coverage
+    fig.append_trace(go.Scatter(x=df_plot.position, y=df_plot.coverage, showlegend=True, mode="markers", marker=dict(symbol="circle", color="blue", size=4), opacity=.5, hoveron="points+fills", name="Real coverage") , 1, 1) 
+
+    # get the corrected coverage
+    fig.append_trace(go.Scatter(x=df_plot.position, y=df_plot.corrected_coverage, showlegend=True, mode="markers", marker=dict(symbol="circle", color="red", size=4), opacity=.5, hoveron="points+fills", name="Corrected coverage") , 1, 1) 
+
+    # get figure
+    fig['layout'].update(title="coverage per position", margin=go.Margin(l=250, r=250, b=50, t=50), showlegend=True)
+    config={'editable': False}
+    off_py.plot(fig, filename="%s.interactive_visualization.html"%mpileup_file_correctedCov, auto_open=False, config=config)
+
+
+    ##########################################
+
+    kadhjbdhjadgj
+
+   
+    print(df_mpileup)
+
+    kjhdakadhjhda
+
+
+
+    # get the medians
+    print(df_mpileup["coverage_regressingOut_position"])
+
+    kjdahkjdha
+
+    print(df_mpileup["coverage_predicted"])
+
+    kdajghkadhdaj
+
+    fdrkuhadhk
+
+
+    print(coverage_predicted_fromPos_df)
+
+
+    akjdhjkhadh
+
+
+
+
+    print(coverage_predicted_fromPos_df)
+
+
+    kjhadkjhkjhdajk
+
+
+def get_coverage_regressingOut_position(r, df_mpileup):
+
+    """This function takes a row, which represents a region of a chromosome with a start and an end. It gets the coverage of this row from the df_mpileup. It predicts the coverage from a 2d polynomial fit and returns a series with the predicted coverage, as well as the p value of the prediction. All positions in df_mpileup which are not considered will be got as NaNs."""
+
+    # get the mpileup for the window
+    df_mpileup_window = df_mpileup[(df_mpileup.position>=r["start"]) & (df_mpileup.position<=r["end"])]
+
+    # add the predicted coverage from the position
+    coefs = poly.polyfit(df_mpileup_window.position, df_mpileup_window.coverage, 2)
+    df_mpileup_window["coverage_predicted"] = poly.polyval(df_mpileup_window.position, coefs)
+
+    # check the signifficance of the fit
+    spearman_r, spearman_p = stats.spearmanr(df_mpileup_window.coverage, df_mpileup_window.coverage_predicted, nan_policy="raise")
+
+    # get the rsquare of the fit
+    rsquare = r2_score(df_mpileup_window.coverage, df_mpileup_window.coverage_predicted)
+
+    # get the residual coverage 
+    min_coverage = min(df_mpileup_window.coverage_predicted)
+    df_mpileup_window["resiudal_coverage"] = df_mpileup_window.coverage - df_mpileup_window.coverage_predicted
+    df_mpileup_window["coverage_regressingOut_position"] = min_coverage + df_mpileup_window.resiudal_coverage
+
+    # add the coverage predicted to the mpileup. This will generate NaNs for regions outside the window. This is fine
+    df_mpileup["coverage_regressingOut_position"] = df_mpileup.position.map(df_mpileup_window["coverage_regressingOut_position"])
+
+    # init the final series with the coverage predicted
+    final_series = df_mpileup["coverage_regressingOut_position"]
+
+    # add the important statistics
+    final_series["rsquare"] = rsquare
+    final_series["spearman_p"] = spearman_p
+    final_series["coef_a"] = coefs[2]
+    final_series["coef_b"] = coefs[1]
+    final_series["coef_c"] = coefs[0]
+
+
+    return final_series
+
+def get_coverage_or_RegressedOut_coverage(r):
+
+    """gets coverage_regressingOut_position if it is not NaN"""
+
+    if not pd.isna(r["coverage_regressingOut_position"]): return r["coverage_regressingOut_position"]
+    else: return r["coverage"]
+
+
+
+def get_df_all_windows_between_bp_positions_one_chrom(bp_positions, chrom_len, min_sv_size=min_CNVsize_betweenBPs):
+
+    """Gets a df with all the possible windows between bp_positions. Only windows higher than min_CNVsize_betweenBPs will be considered"""
+
+    # init with the whole chrom
+    dict_data = {0 : {"start":0, "end":chrom_len}}; I = 1
+
+    # get as array
+    bp_positions = np.array(sorted(bp_positions))
+
+    for posA in bp_positions:
+        for posB in bp_positions[bp_positions>=(posA+min_CNVsize_betweenBPs)]:
+
+            dict_data[I] = {"start":posA, "end":posB}; I+=1
+
+
+    df_windows = pd.DataFrame(dict_data).transpose().drop_duplicates().sort_values(by=["start", "end"])
+
+    return df_windows
+
+
+################## CODE GRAVEYARD CONY ################
+
+
+# This script runs CONY on a sorted bam, together with several files that are necessary for a proper running of CONY.
+
+# define environment
+library(argparser, quietly=TRUE)
+
+# print the traceback on exit
+#options(error=function()traceback(2))
+options(warn=1)
+
+# parse cmd line args
+argp = arg_parser("Perfroms CNV calling with CONY for one chromosome")
+
+argp = add_argument(argp, "--reference_genome", help="Path to the reference_genome")
+argp = add_argument(argp, "--sorted_bam", help="The sorted bam with a .bai and removed duplicates")
+argp = add_argument(argp, "--regions_file", help="A 1-based regions_file to analyze, which is a .tab file with seqname, start, end.")
+argp = add_argument(argp, "--mpileup_file", help="The mpileup_file, which contains position, 1-based, and read depth")
+argp = add_argument(argp, "--chromosome", help="The name of the chromosome")
+argp = add_argument(argp, "--sample_name", help="The name of the sample in the sorted_bam")
+argp = add_argument(argp, "--libraries_CONY", help="The path to the CONY.R libraries")
+argp = add_argument(argp, "--outdir", help="Set the current working dir")
+argp = add_argument(argp, "--window_size", default=100, help="The window size on which to run CONY")
+
+opt = parse_args(argp)
+
+
+######## PROCESS INPUTS ########
+
+# activate the libraries
+source(opt$libraries_CONY)
+
+# get the target df
+regions_df = read.table(opt$regions_file, sep="\t", header=TRUE)
+
+# set the outdir
+setwd(opt$outdir)
+
+################################
+
+######## CONY PIPELINE ########
+
+# run WindowInfo, which calculates the information of each window
+print("running WindowInfo")
+CONY.TempRegion = as.data.frame(WindowInfo(target.df=regions_df, RefFaFileName=opt$reference_genome, WindowSize=opt$window_size))
+colnames(CONY.TempRegion) = c("seqname", "start", "end", "width", "nonAmb", "GC")
+
+# change the types of variables 
+CONY.TempRegion$start = as.integer(as.character(CONY.TempRegion$start))
+CONY.TempRegion$end = as.integer(as.character(CONY.TempRegion$end))
+CONY.TempRegion$width = as.integer(as.character(CONY.TempRegion$width))
+CONY.TempRegion$nonAmb = as.numeric(as.character(CONY.TempRegion$nonAmb))
+CONY.TempRegion$GC = as.numeric(as.character(CONY.TempRegion$GC))
+
+#outputs a window information file with 6 columns. It includes the name of chromosome (seqname), start position (start), end position (end), width length (width), percentage of indefinable base (nonAmb), and GC percentage (GC) for
+
+
+print(CONY.TempRegion)
+
+# CalRD: calculate the coverage per windows
+print("running CalRD")
+carRD_df = CalRD(TempRegion=CONY.TempRegion, CRDMethod="SumUp", SampleBamFileName=opt$sorted_bam, MPileCountFileName=opt$mpileup_file,SampleName=opt$sample_name, TargetChr=opt$chromosome, WindowSize=opt$window_size)
+
+jhgdahjad
+
+# adjusting the coverage per GC content and nonAmb
+print("running AdjRD")
+AdjRD(CRDMethod= "SumUp", TargetChr=opt$chromosome, SampleName=opt$sample_name)
+
+# get UsedRD, which is useful to remove the windows with  CN=0 or CN=1
+print("running UsedRD")
+UsedRD(CRDMethod="SumUp", AnaMethod="Single", TargetChr=opt$chromosome, SampleName=opt$sample_name)
+
+# exit if the usedRD did not yield any regions to use
+usedRD_output = paste0("./CONY.3-TempRegion.", opt$chromosome, ".", opt$sample_name, ".SumUp.Single.UsedRD.txt", sep="")
+usedRD_df = read.table(usedRD_output, sep=" ", header=TRUE)
+if (length(rownames(usedRD_df))==0) {
+
+  print("There are no used regions. exiting")
+  quit(status=0)
+
+}
+
+# estimate the parameters used to define each of the copies. NCN=5 means that there will be ranges from 1-to-5 CN
+print("running EstPar")
+EstPar(CRDMethod="SumUp", AnaMethod="Single", TargetChr=opt$chromosome, SampleName=opt$sample_name, NCN=4)
+
+# run the pipeline
+print("running CONY")
+
+# define the fragment length related to the chromosome length (inferred from )
+fragment_len = min(c(as.integer(regions_df$end * 0.05) + 1, 500000))
+
+RunCONY(CRDMethod="SumUp", AnaMethod="Single", TargetChr=opt$chromosome, SampleName=opt$sample_name, RunTime = 300000, BurnN = 5000, RTN = 1000, BCPoint = 20, FragLength=fragment_len)
+
+
+
+# get the result
+print("running the integration of results")
+ComResult(CRDMethod="SumUp", AnaMethod="Single", TargetChr=opt$chromosome, SampleName=opt$sample_name)
+
+###############################
+
+print("CONY worked properly")
+
+#######################################################

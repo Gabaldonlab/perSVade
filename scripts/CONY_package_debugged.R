@@ -117,7 +117,7 @@ write.table(TempRegion, paste("CONY.2-TempRegion.",TargetChr,".",SampleName, "."
 UsedRD=function(CRDMethod=c("PointR","SumUp"), AnaMethod=c("Single","Paired"), TargetChr, SampleName,ControlName){
 
   if(AnaMethod=="Single"){
-    TempRegion= read.table(paste("CONY.2-TempRegion.",TargetChr,".",SampleName, ".", CRDMethod , ".AdjRD.txt", sep=""),header=T) 
+    TempRegion= read.table(paste("CONY.2-TempRegion.",TargetChr,".",SampleName, ".", CRDMethod , ".AdjRD.txt", sep=""),header=T)
     NonInf=which((is.na(TempRegion$AdjRD)==T) | (TempRegion$nonAmb<0.5))
     NonInfRegion=TempRegion[NonInf,]
     write.table(NonInfRegion, paste("CONY.3-NonInfRegion.",TargetChr,".",SampleName, ".", CRDMethod , ".", AnaMethod, ".txt", sep=""),quote = F, sep = " ",row.names = F,col.names =T)
@@ -125,11 +125,14 @@ UsedRD=function(CRDMethod=c("PointR","SumUp"), AnaMethod=c("Single","Paired"), T
     # only discard the NonInf regions if there are any
     if (length(NonInf)>0) { TempRegion = TempRegion[-NonInf,] }
 
-    # continue 
+    # get the CN0 region 
     CN0=which(TempRegion$AdjRD==0)
     CN0Region=TempRegion[CN0,]
     write.table(CN0Region, paste("CONY.3-CN0Region.",TargetChr,".",SampleName, ".", CRDMethod , ".", AnaMethod,".txt", sep=""),quote = F, sep = " ",row.names = F,col.names =T)
-    TempRegion= TempRegion[-CN0,]
+    
+    # only discard the CN0 region if there is any 
+    if (length(CN0)>0) { TempRegion = TempRegion[-CN0,] }
+      
     RD=TempRegion$AdjRD
     target=rep(1,length(RD))
     write.table(cbind(TempRegion,RD, target), paste("CONY.3-TempRegion.",TargetChr,".",SampleName, ".", CRDMethod , ".", AnaMethod ,".UsedRD.txt", sep=""),quote = F, sep = " ",row.names = F,col.names =T)
