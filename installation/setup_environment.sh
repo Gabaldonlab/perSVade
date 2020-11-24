@@ -230,7 +230,6 @@ conda install -n $R_env_name -c bioconda -y bioconductor-structuralvariantannota
 
 # create a subenvironment for running CONY. The last commit of CONY was the 12/06/2017. This is 3 years and 4 months ago., so that I have to install software from a similar age
 
-
 # packages from bioconda:
 
 # bioconductor-iranges=2.8.2  -> 3 years and 5 months -> R 3.3.2 / R 3.3.1

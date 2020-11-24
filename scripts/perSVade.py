@@ -164,6 +164,9 @@ parser.add_argument("--generate_alternative_genome", dest="generate_alternative_
 parser.add_argument("--skip_cnv_analysis", dest="skip_cnv_analysis", default=False, action="store_true", help="Don't perform the cnv analysis")
 
 
+# add the CNV calling args
+parser.add_argument("--window_size_CNVcalling", dest="window_size_CNVcalling", default=1000, type=int, help="The window size in which the genome will be fragmented for CNV calling.")
+
 
 # visualization
 parser.add_argument("--visualization_results", dest="visualization_results", default=False, action="store_true", help="Visualize the results")
@@ -520,7 +523,7 @@ if opt.skip_SVcalling is False and not any([x=="skip" for x in {opt.fastq1, opt.
 
     # run CNVcalling 
     cnv_calling_outdir = "%s/CNV_calling"%opt.outdir
-    fun.run_CNV_calling(sorted_bam, opt.ref, cnv_calling_outdir, opt.threads, opt.replace, opt.mitochondrial_chromosome, df_gridss)
+    fun.run_CNV_calling(sorted_bam, opt.ref, cnv_calling_outdir, opt.threads, opt.replace, opt.mitochondrial_chromosome, df_gridss, opt.window_size_CNVcalling, opt.ploidy)
 
 
 
