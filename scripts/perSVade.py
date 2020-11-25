@@ -165,7 +165,7 @@ parser.add_argument("--skip_cnv_analysis", dest="skip_cnv_analysis", default=Fal
 
 
 # add the CNV calling args
-parser.add_argument("--window_size_CNVcalling", dest="window_size_CNVcalling", default=1000, type=int, help="The window size in which the genome will be fragmented for CNV calling.")
+parser.add_argument("--window_size_CNVcalling", dest="window_size_CNVcalling", default=3000, type=int, help="The window size in which the genome will be fragmented for CNV calling.")
 
 
 # visualization
