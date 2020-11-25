@@ -9793,6 +9793,21 @@ def get_df_all_windows_between_bp_positions_one_chrom(bp_positions, chrom_len, m
     return df_windows
 
 
+
+def consensus_distance_to_telomere_several_graphs(r, good_dist_to_telomere_fields):
+
+    """This functin takes a row of the df_coverage df and returns the distance to the telomere from good_dist_to_telomere that has the closest value in the prediction (lowest ) <field>_abs_residuals"""
+
+    # map each field to the absolute residual
+    field_to_residual = pd.Series(dict(zip(good_dist_to_telomere_fields, map(lambda f: r["%s_abs_residuals"%f], good_dist_to_telomere_fields))))
+
+    # get the lowest residual field
+    lowest_residual_field = field_to_residual.sort_values().index[0]
+
+    # return the coverage of this field
+    return r[lowest_residual_field]
+
+
 ################## CODE GRAVEYARD CONY ################
 
 
@@ -9819,6 +9834,7 @@ argp = add_argument(argp, "--outdir", help="Set the current working dir")
 argp = add_argument(argp, "--window_size", default=100, help="The window size on which to run CONY")
 
 opt = parse_args(argp)
+
 
 
 ######## PROCESS INPUTS ########
@@ -9900,3 +9916,928 @@ ComResult(CRDMethod="SumUp", AnaMethod="Single", TargetChr=opt$chromosome, Sampl
 print("CONY worked properly")
 
 #######################################################
+
+
+
+
+def get_df_coverage_with_corrected_coverage(df_coverage, reference_genome, outdir, replace, threads, mitochondrial_chromosome, df_gridss):
+
+    """This function will take a df_coverage that has coverage_field as a proxy for coverage. It will add <coverage_field> which is a value that will be a ratio between the coverage_field and the coverage_field predicted from a loess regression taking into account mappability, GC content and distance to the telomere across the windows. The resulting value will be centered arround 1.  """
+
+    # define the initial cols
+    initial_cols = list(df_coverage.columns)
+
+    # define the outfile_final
+    outfile_final = "%s/df_coverage_with_corrected_relative_coverage.tab"%outdir
+
+    # define the working dir
+    working_outdir = "%s/working_dir"%outdir; make_folder(working_outdir)
+
+    # define the results and plots dir, where all the plots of the fits will be saved
+    results_dir = "%s/calculating_corrected_coverage"%outdir; make_folder(results_dir)
+    plots_dir = "%s/plots"%results_dir; make_folder(plots_dir)
+
+    # define the rsquares
+    outfile_rsquares = "%s/rsquares_tables.tab"%results_dir
+
+    if file_is_empty(outfile_final) or file_is_empty(outfile_rsquares) or replace is True:
+
+        # check content
+        if any(df_coverage.start>=df_coverage.end): raise ValueError("start can't be after end")
+
+        # add "relative_coverage", which will include coverage_field
+        if "relative_coverage" in set(df_coverage.keys()): raise ValueError("coverage can't be in the df keys")
+        median_coverage = get_median_coverage(df_coverage, mitochondrial_chromosome)
+        df_coverage["relative_coverage"] = df_coverage["mediancov_1"]/median_coverage
+
+        # add the GC content
+        gcontent_outfile = "%s/df_coverage_with_gccontent.py"%working_outdir
+        df_coverage = get_df_with_GCcontent(df_coverage, reference_genome, gcontent_outfile, replace=replace)
+
+        # add the median mappability
+        mappability_outfile = "%s/df_coverage_with_mappability.tab"%working_outdir
+        df_coverage = get_df_windows_with_median_mappability(df_coverage, reference_genome, mappability_outfile, replace, threads)
+
+        # add the raw distance to the telomere, in linear space
+        chr_to_len = get_chr_to_len(reference_genome)
+        df_coverage["middle_position"] = (df_coverage.start + (df_coverage.end - df_coverage.start)/2).apply(int)
+        df_coverage["raw_distance_to_telomere"] = df_coverage.apply(lambda r: min([r["middle_position"], chr_to_len[r["chromosome"]]-r["middle_position"]-1]), axis=1)
+
+        # define chroms
+        all_chromosomes = set(get_chr_to_len(reference_genome))
+        if mitochondrial_chromosome!="no_mitochondria": mtDNA_chromosomes = set(mitochondrial_chromosome.split(","))
+        else: mtDNA_chromosomes = set()
+        gDNA_chromosomes = all_chromosomes.difference(mtDNA_chromosomes)
+
+        # define a unique index
+        df_coverage.index = list(range(0, len(df_coverage)))
+
+        # init the final df_coverage
+        final_df_coverage = pd.DataFrame()
+
+        # init the final df_rsquares
+        final_df_rsquares = pd.DataFrame()
+
+        # iterate through each genome
+        for type_genome, chroms in [("mtDNA", mtDNA_chromosomes), ("gDNA", gDNA_chromosomes)]:
+            print_if_verbose("investigating %s"%type_genome)
+
+            # define an outdir for this type of genome
+            outdir_type_genome = "%s/%s"%(working_outdir, type_genome); make_folder(outdir_type_genome)
+
+            # get the df coverage of this genome
+            df_cov = df_coverage[df_coverage.chromosome.isin(chroms)]
+            if len(df_cov)==0: continue
+
+            # make some plots with all these values
+            #plots_dir = "%s/plots_coverage_%s"%(working_outdir, type_genome); make_folder(plots_dir)
+            #make_plots_coverage_parameters(df_cov, plots_dir)
+
+            # init the predictor fields of coverage
+            predictor_fields = ["GCcontent", "median_mappability"]
+
+            ######### ADD THE DISTANCE TO THE TELOMERE ########
+
+            # initialize the distance_to_the_telomere predictor fields
+            predictor_fields_distToTelomere = []
+
+            # first check whether there is a correlation between distance to the telomere and only calculate correlation if so
+            r_spearman, p_spearman = stats.spearmanr(df_cov.raw_distance_to_telomere, df_cov.relative_coverage, nan_policy="raise")
+
+            if p_spearman<0.05:
+
+                print_if_verbose("considering distance to the telomere")
+
+                # get the genome into a sepparate fasta
+                genome_chroms = "%s/genome.fasta"%outdir_type_genome
+                SeqIO.write([seq for seq in SeqIO.parse(reference_genome, "fasta") if seq.id in chroms], genome_chroms, "fasta")
+
+                # initialize combinations of breakpoints and homozygous_breakends
+                already_considered_breakpoints_AND_homoBends = set()
+
+                # the idea is to keep adding coverage fields with various threshold of quality and AF of homozygous breakends
+                max_QUAL = np.percentile(df_gridss.QUAL, 90)
+                all_QUALs = list(np.linspace(min(df_gridss.QUAL), max_QUAL, 4)) + [max(df_gridss.QUAL)+1] 
+
+                for min_QUAL in all_QUALs:
+
+                    # filter the df according to min_QUAL
+                    df_gridss_filt  = df_gridss[(df_gridss["#CHROM"].isin(chroms))]
+
+                    for min_AF_homo in np.linspace(0.3, 1.1, 5):
+                        print_if_verbose(min_QUAL, min_AF_homo)
+
+                        ######### AVOID REDUNDANT GRAPHS #########
+
+                        # define the breakpoints that will be included
+                        df_gridss_test = df_gridss_filt[df_gridss_filt.QUAL>=min_QUAL]
+                        eventID_to_nBends = dict(df_gridss_test.groupby("eventID_as_clove").apply(len))
+                        df_gridss_test["n_bends"] = df_gridss_test.eventID_as_clove.apply(lambda x: eventID_to_nBends[x])
+                        df_gridss_test = df_gridss_test[df_gridss_test.n_bends==2]
+                        breakpoints = tuple(sorted(set(df_gridss_test.eventID_as_clove)))
+
+                        # define the homozygous breakends
+                        homoBends = tuple(sorted(df_gridss_test[df_gridss_test.real_AF>=min_AF_homo]["ID"]))
+
+                        # define the combination
+                        breakpoints_AND_homoBends = (breakpoints, homoBends)
+
+                        # debug if this graph is redundant with a previous one
+                        if breakpoints_AND_homoBends in already_considered_breakpoints_AND_homoBends: continue
+
+                        # keep
+                        already_considered_breakpoints_AND_homoBends.add(breakpoints_AND_homoBends)
+
+                        #############################################
+
+                        # add the distance to the telomere according to a genome graph that has these values
+                        outfile = "%s.graph_minQ_%.3f_AFhomo_%.3f.df_cov_withDistToTelomere.tab"%(genome_chroms, min_QUAL, min_AF_homo)
+
+                        shortest_distance_to_telomere_field = "graph_shortest_distance_to_telomere_minQ_%.2f_AFhomo_%.2f"%(min_QUAL, min_AF_homo)
+
+                        df_cov = get_df_windows_with_distance_to_the_telomere_graph(df_cov, genome_chroms, df_gridss_filt, min_AF_homo, min_QUAL, threads, replace, outfile, shortest_distance_to_telomere_field, plot_graph=False)
+
+                        # when there are no breakpoints, validate that the distance to the telomere is the same as the raw distance to the telomere
+                        if breakpoints_AND_homoBends==((),()): 
+
+                            if any(df_cov.raw_distance_to_telomere!=df_cov[shortest_distance_to_telomere_field]): raise ValueError("When there are no breakpoints the distance to the telomere should be the same as the raw")
+
+                        # keep the field
+                        predictor_fields.append(shortest_distance_to_telomere_field)
+                        predictor_fields_distToTelomere.append(shortest_distance_to_telomere_field)
+
+            ###################################################
+
+            ######## CALCULATE THE RSQUARE OF EACH PREDICTOR ALONE ########
+
+            # calculate the rsquare for each predictor
+            calculate_rsquares_dir = "%s/calculating_rsquares_each_predictor_%s"%(working_outdir, type_genome); make_folder(calculate_rsquares_dir)
+            predictor_to_rsquare = {}
+            for p in predictor_fields:
+
+                # fit the data
+                lowess_dir_p = "%s/%s"%(calculate_rsquares_dir, p)
+                y_corrected, rsquare, y_abs_residuals = get_y_corrected_by_x_LOWESS_crossValidation(df_cov, p, "relative_coverage", lowess_dir_p, threads, replace)
+
+                # move the plot to plots_dir
+                origin_file = "%s/coverage.pdf"%(lowess_dir_p)
+                dest_file = "%s/single_predictor_%s_%s_coverage.pdf"%(plots_dir, type_genome, get_file(lowess_dir_p))
+                if not file_is_empty(origin_file): copy_file(origin_file, dest_file)
+
+                # add the correction based on the p
+                df_cov["relative_coverage_corrected_by_%s"%p] = y_corrected
+
+                # add the rsquare
+                predictor_to_rsquare[p] = rsquare
+
+            # get as series
+            predictor_to_rsquare = pd.Series(predictor_to_rsquare)
+
+            ################################################################
+
+            ######## PERFORM THE FINAL FITTING ########
+
+            # init the corrected coverage 
+            df_cov["median_relative_coverage"] = np.median(df_cov.relative_coverage)
+            df_cov["corrected_relative_coverage"] = df_cov.relative_coverage / df_cov.median_relative_coverage
+
+            # add the rsquare without predictiopn
+            predictor_to_rsquare["no_prediction"] = r2_score(df_cov.relative_coverage, df_cov.median_relative_coverage)
+
+            # get the coverage corrected including the best fit of each correction
+            if len(predictor_fields_distToTelomere)>0:
+
+                # get the series that contains these fields with max(rsquare)*0.95
+                p_to_rsquare = predictor_to_rsquare[predictor_fields_distToTelomere]
+
+                if max(p_to_rsquare)>0:
+
+                    # get the good rsquare fields
+                    min_good_rsquare = max(p_to_rsquare[p_to_rsquare>0])*0.9
+                    p_to_rsquare = p_to_rsquare[p_to_rsquare>=min_good_rsquare]
+                    good_dist_to_telomere_fields = list(p_to_rsquare.index)
+
+                    # add the predicted from the good_dist_to_telomere_fields. For each position, take the prediction that is closest to 1
+                    df_cov["corrected_relative_coverage"] = df_cov.apply(get_closest_to_1_correction_several_genome_graphs, good_dist_to_telomere_fields=good_dist_to_telomere_fields, axis=1)
+
+                    # calculate the rsquares of the prediction
+                    df_fit = df_cov[df_cov.relative_coverage>0]
+                    predicted_relative_coverage = df_fit.relative_coverage / df_fit.corrected_relative_coverage
+                    predictor_to_rsquare["final_rsquare_round0_from_consensus_distance_to_telomere"] = r2_score(df_fit.relative_coverage, predicted_relative_coverage)
+
+            # correct by the mappability and the GC content
+            extra_predictors = ["GCcontent", "median_mappability"]
+            for pID, (predictor, rsquare) in enumerate(predictor_to_rsquare[extra_predictors].sort_values(ascending=False).iteritems()):
+
+                # correct the coverage 
+                outdir_lowess = "%s/final_corrections_round%i_%s"%(calculate_rsquares_dir, pID+1, predictor)
+                df_cov["corrected_relative_coverage"], rsquare = get_y_corrected_by_x_LOWESS_crossValidation(df_cov, predictor, "corrected_relative_coverage", outdir_lowess, threads, replace)[0:2]
+
+                # add the rsquare
+                predictor_to_rsquare["final_rsquare_round%i_from_%s"%(pID+1, predictor)] = rsquare
+
+                # move the plot to plots_dir
+                origin_file = "%s/coverage.pdf"%(outdir_lowess)
+                dest_file = "%s/final_corrections_%s_round%i_%s_coverage.pdf"%(plots_dir, type_genome,  pID+1, predictor)
+                if not file_is_empty(origin_file): copy_file(origin_file, dest_file)
+
+            # save the predictor_to_rsquare into results
+            df_rsquares = pd.DataFrame({"rsquare":predictor_to_rsquare})
+            df_rsquares["type_fit"] = df_rsquares.index
+            df_rsquares["type_genome"] = type_genome
+
+            #############################################
+
+            # at the end add
+            final_df_coverage = final_df_coverage.append(df_cov)
+            final_df_rsquares = final_df_rsquares.append(df_rsquares)
+
+        # save
+        save_df_as_tab(final_df_coverage, outfile_final)
+        save_df_as_tab(final_df_rsquares, outfile_rsquares)
+
+    # load the dfs
+    df_coverage = get_tab_as_df_or_empty_df(outfile_final)
+    df_rsquares = get_tab_as_df_or_empty_df(outfile_rsquares)
+
+    ############# PLOT COVERAGE #############
+
+    # add an offset position
+    df_plot = df_coverage.sort_values(by=["chromosome", "start", "end"])
+    df_plot["xposition_plot"] = list(range(0, len(df_plot)))
+
+    # init fig
+    fig = tools.make_subplots(rows=1, cols=1, specs=[[{}]], vertical_spacing=0.0, horizontal_spacing=0.0, subplot_titles=(""), shared_yaxes=True, shared_xaxes=True, print_grid=True)
+
+    # init
+    all_x = []
+    all_colors = []
+
+    all_y_rel_cov = []
+    all_y_corrected_rel_cov = []
+    all_y_GCcontent = []
+
+    # go through each chromosome and create vals
+    sorted_chroms = sorted(set(df_plot.chromosome))
+    chrom_to_color = get_value_to_color(sorted_chroms, palette="tab10", n=len(sorted_chroms), type_color="hex")[0]
+    current_offset = 0
+
+    for chrom in sorted_chroms:
+
+        # get plot
+        df_chrom = df_plot[df_plot.chromosome==chrom]
+
+        # add
+        all_x += (list(df_chrom.xposition_plot + current_offset) + [None])
+        all_y_rel_cov += (list(df_chrom.relative_coverage) + [None])
+        all_y_corrected_rel_cov += (list(df_chrom.corrected_relative_coverage) + [None])
+        all_y_GCcontent += (list(df_chrom.GCcontent) + [None])
+
+        current_offset += int(len(df_chrom)/2)
+
+    # get scatters
+
+    # get the relative coverage
+    fig.append_trace(go.Scatter(x=all_x, y=all_y_rel_cov, showlegend=True, mode="lines", opacity=1, hoveron="points+fills", name="Relative coverage", line=dict(color="blue", width=2, dash="dash")) , 1, 1) 
+
+    # add the corrected coverage
+    fig.append_trace(go.Scatter(x=all_x, y=all_y_corrected_rel_cov, showlegend=True, mode="lines", opacity=1, hoveron="points+fills", name="Relative coverage corrected", line=dict(color="red", width=2, dash=None)) , 1, 1) 
+
+    # add the GC content 
+    fig.append_trace(go.Scatter(x=all_x, y=all_y_GCcontent, showlegend=True, mode="lines", opacity=1, hoveron="points+fills", name="GC content", line=dict(color="green", width=2, dash=None)) , 1, 1) 
+
+    # get the CN
+    #fig.append_trace(go.Scatter(x=list(df_perWindow.start), y=list(df_perWindow.relative_CN), showlegend=True, mode="lines", line=dict(color="red", width=2, dash="dash"), opacity=1, hoveron="points+fills", name="CONY CN"), 1, 1) 
+
+    # get figure
+    fig['layout'].update(title="relative and corrected coverage", margin=go.Margin(l=250, r=250, b=50, t=50), showlegend=True)
+    config={'editable': False}
+    off_py.plot(fig, filename="%s/coverage_interactive.html"%(plots_dir), auto_open=False, config=config)
+
+
+    adhbkhjgdagdja
+
+    Scatter
+
+    plottingcoverage
+    #########################################
+
+
+
+    # remove the working dir
+    delete_folder(working_outdir)
+
+    # return 
+    return df_coverage
+     
+
+
+def get_lowess_fit_y(x, y, frac, iterations=3):
+
+    """This function takes an x and a y and returns a numpy array that has the lowess fit according to window_size. x,y have to be sorted by x"""
+
+    # redefine x and y as floats
+    x = np.array(x, dtype=float)
+    y = np.array(y, dtype=float)
+
+    # get the loess fit
+    lowess_results = cylowess.lowess(endog=y, exog=x, frac=frac, it=iterations)
+    # delta is the: Distance within which to use linear-interpolation instead of weighted regression.
+
+    # unpack
+    sorted_lowess_x = lowess_results[:,0]
+    lowess_y = lowess_results[:,1]
+
+    # debug
+    if x[0]!=sorted_lowess_x[0] or x[-1]!=sorted_lowess_x[-1]: raise ValueError("xvalues are not sorted by x")
+
+    return lowess_y
+
+
+def get_LOWESS_benchmarking_series_CV(kfold, frac, df, xfield, yfield, min_test_points_CV, outdir):
+
+    """This function takes a df with xfield and yfield. It runs kfold cross validation and returns a series with the accuracies """
+
+    # define all the indices
+    all_idx = set(df.index)
+
+    # init rsquares
+    rsquares_cv = []
+
+
+    # this will only work if the unique df is long enough
+    if len(df)>kfold and (frac*len(df))>=3: 
+
+        # iterate through 10-fold chross validation 
+        kfold_object = KFold(n_splits=kfold, random_state=1, shuffle=True)
+        for numeric_train_index, numeric_test_index in kfold_object.split(df.index):
+
+            print_if_verbose("processing data")
+
+            # get the idx test as the index of df
+            test_idx = set(df.iloc[numeric_test_index].index)
+            train_idx = all_idx.difference(test_idx)
+
+            # if there are not enough data points, break
+            if len(test_idx)<min_test_points_CV: break
+
+            # get dfs
+            df_train = df.loc[train_idx].sort_values(by=[xfield, yfield])
+            df_test = df.loc[test_idx].sort_values(by=[xfield, yfield])
+           
+            # get train alues
+            xtrain = df_train[xfield].values
+            ytrain = df_train[yfield].values
+
+            # get the lowess fit on the train data
+            print_if_verbose("running loess")
+            #outprefix = "%s/loess_%.5f"%(outdir, frac)
+            lowess_train_y = get_lowess_fit_y(xtrain, ytrain, frac)
+            print("loess ran")
+
+            # debug if there are NaNs in the lowess interpolation
+            if any(pd.isna(lowess_train_y)): break
+
+            # generate a linear interpolation function between the train results. It will only work for values in the range of the train
+            print_if_verbose("running interpolation")
+            interpolation_function = interp1d(xtrain, lowess_train_y, bounds_error=True, kind="linear", assume_sorted=True)
+
+            # get the test values. Only those where the x is in the range of the train
+            xtest = df_test[xfield].values
+            ytest = df_test[yfield].values
+
+            idx_correct_test = (xtest>min(xtrain)) & (xtest<max(xtrain))
+            xtest = xtest[idx_correct_test]
+            ytest = ytest[idx_correct_test]
+
+            # if there are not enough points, skip
+            if sum(idx_correct_test)<min_test_points_CV: break
+
+            # get the predicted y test by linear interpolation
+            ytest_predicted = interpolation_function(xtest)
+
+            # debug
+            if len(ytest_predicted)!=len(ytest): raise ValueError("xtest and ytest are not the same")
+            if any(pd.isna(ytest_predicted)): raise ValueError("There can't be NaNs")
+
+            # calculate the rsquare, making sure it is a float
+            rsquare = r2_score(ytest, ytest_predicted)
+
+            # debug
+            if pd.isna(rsquare): raise ValueError("The rsquare can't be nan")
+
+            # break trying if there is a 0 rsquare
+            if rsquare<=0: break 
+
+            # keep
+            rsquares_cv.append(rsquare)
+
+    # discard if any rsquares are 0
+    if len(rsquares_cv)!=kfold: 
+
+        mean_rsquare = 0
+        std = 1
+        inverse_std_rsquare = 0
+
+    else:
+
+        mean_rsquare = np.mean(rsquares_cv)
+        std = np.std(rsquares_cv)
+        inverse_std_rsquare = 1/std
+
+
+    print_if_verbose(frac, mean_rsquare)
+
+
+    # get the final series
+    benchmarking_series = pd.Series({"frac":frac, "mean_rsquare":mean_rsquare, "inverse_std_rsquare":inverse_std_rsquare, "std_rsquare":std, "kfold":kfold})
+
+    return benchmarking_series
+    
+
+def get_y_corrected_by_x_LOWESS_crossValidation(df, xfield, yfield, outdir, threads, replace, min_test_points_CV=10):
+
+    """This function takes an x and a y series, returning the y corrected by x. This y corrected is y/(y predicted from LOWESS from x). The index must be unique. The best parameters are taken with 10 fold cross validation"""
+
+    make_folder(outdir)
+
+    # keep
+    df = cp.deepcopy(df)[[xfield, yfield]]
+
+    # check that the index is unique
+    if len(df.index)!=len(set(df.index)): raise ValueError("The index should be unique")
+
+    # define the df_fitting as the one where the yfield is not 0
+    df_fitting = df[df[yfield]>0]
+
+    # check
+    if any(df_fitting[yfield]<=0): raise ValueError("There can't be any 0 values in the unique df")
+
+    # sort by the x
+    df_fitting = df_fitting.sort_values(by=[xfield, yfield])
+
+    ########## GET THE DF BENCHMARKED DF 10xCV ########## 
+
+    # define the df_benckmarking file
+    df_benchmarking_file = "%s/df_benckmarking.tab"%outdir
+
+    if file_is_empty(df_benchmarking_file) or replace is True:
+        print_if_verbose("getting benchmarking for %s vs %s"%(xfield, yfield))
+
+        # define parms
+        n_frac = 5
+        kfold = 10
+
+        # define all the fractions
+        min_frac = min([1/len(df_fitting), 0.05])
+        all_fractions = list(np.linspace(min_frac, 0.1, n_frac)) + list(np.linspace(0.1+0.01, 0.5, n_frac))
+
+        # debug
+        if any(pd.isna(df_fitting[xfield])) or any(pd.isna(df_fitting[yfield])): raise ValueError("There are NaNs")
+
+        # define the inputs of the benchmarking function
+        inputs_fn = [(kfold, frac, df_fitting, xfield, yfield, min_test_points_CV, outdir) for frac in all_fractions]
+
+        # get a list of the benchmarking series in parallel
+        with multiproc.Pool(threads) as pool:
+
+            list_benchmarking_series = pool.starmap(get_LOWESS_benchmarking_series_CV, inputs_fn) 
+            
+            pool.close()
+            pool.terminate()
+
+        # get as df
+        df_benchmarking = pd.DataFrame(list_benchmarking_series)
+
+        # save
+        save_df_as_tab(df_benchmarking, df_benchmarking_file)
+
+    # load
+    df_benchmarking  = get_tab_as_df_or_empty_df(df_benchmarking_file)
+
+    ##################################################### 
+
+    if len(df_benchmarking)==0 or max(df_benchmarking.mean_rsquare)<=0: 
+
+        print("WARNING: There is not enough variability or data points to perform a correction of %s on %s. There will be no correction applied"%(yfield, xfield))
+        y_corrected = df[yfield]
+        final_rsquare = 0.0
+        df["predicted_yvalues"] = np.median(df[yfield])
+
+    else:
+
+        # get the fit data
+        print_if_verbose("performing LOWESS regression with best parameters for %s vs %s"%(xfield, yfield))
+
+        # get sorted df
+        df_fitting = df_fitting.sort_values(by=[xfield, yfield])
+
+        # sort df benchmarking to get the max rsquare and minimum std
+        max_kfold = max(df_benchmarking.kfold)
+        df_benchmarking = df_benchmarking[df_benchmarking.kfold==max_kfold].sort_values(by=["mean_rsquare", "inverse_std_rsquare"], ascending=False)
+
+        # get the best parameters
+        best_parms_series = df_benchmarking.iloc[0]
+
+        # get the y predicted with the best parms
+        best_frac = best_parms_series["frac"]
+        #outprefix = "%s/final_loess_fitting"%(outdir)
+        df_fitting["predicted_yvalues"] = get_lowess_fit_y(df_fitting[xfield].values, df_fitting[yfield].values, best_frac)
+
+        # debug 
+        if any(pd.isna(df_fitting.predicted_yvalues)): raise ValueError("there should be no NaNs in the final prediction")
+
+        # debug if any of the predicted_yvalues is <=0
+        if any(df_fitting.predicted_yvalues<=0): raise ValueError("There can't be any 0 predicted yvalues")
+
+        # calculate the final rsquare
+        final_rsquare = r2_score(df_fitting[yfield], df_fitting.predicted_yvalues)
+        if pd.isna(final_rsquare): raise ValueError("rsquare can't be NaN")
+
+        ##############################
+
+        ######### MAKE PLOTS #########
+
+        filename = "%s/coverage.pdf"%(outdir)
+        if file_is_empty(filename) or replace is True:
+
+            filename_tmp = "%s/coverage.tmp.pdf"%(outdir)
+
+            # get the plot
+            df_plot = df_fitting.sort_values(by=[xfield, yfield])
+
+            fig = plt.figure(figsize=(5,5))
+
+            #plt.plot(df_plot[xfield], df_plot[yfield], "o", alpha=0.2, color="gray", label="raw data")
+            sns.kdeplot(df_plot[[xfield, yfield]], cmap="gist_gray", shade=True)
+            plt.plot(df_plot[xfield], df_plot.predicted_yvalues, "-", color="red", label="LOWESS fit")
+
+            plt.title("Fitting LOWESS with frac=%.3f. final R2=%.3f. %ix CV R2=%.3f +- %.3f (SD)\n"%(best_frac, final_rsquare, best_parms_series["kfold"], best_parms_series["mean_rsquare"], best_parms_series["std_rsquare"]))
+            plt.legend(bbox_to_anchor=(1, 1))
+            plt.xlabel(xfield)
+            plt.ylim([0, np.percentile(df_plot[yfield], 95)])
+            plt.ylabel(yfield)
+
+            fig.savefig(filename_tmp, bbox_inches='tight')
+            plt.close(fig)
+
+            os.rename(filename_tmp, filename)
+
+        ############################
+
+        # add the predicted_yvalues to df
+        dfIDX_to_predictedYvalue = dict(df_fitting["predicted_yvalues"])
+        missing_IDXs = set(df.index).difference(set(dfIDX_to_predictedYvalue))
+
+        df_missing = df.loc[missing_IDXs]
+        if any(df_missing[yfield]!=0): raise ValueError("there are some non-0 values missing")
+
+        for idx in missing_IDXs: dfIDX_to_predictedYvalue[idx] = 0.0
+        df["index_series"] = df.index
+        df["predicted_yvalues"] = df.index_series.apply(lambda x: dfIDX_to_predictedYvalue[x])
+
+        # get the corrected vals. If there is no prediction just return the raw vals
+        def divide_with_noNaN_correction(r):
+
+            # if the yfield is 0, return it as it is
+            if r[yfield]==0 and r["predicted_yvalues"]==0: return 0.0
+
+            # predicted yvalues can't be 0 unless yfield is also
+            elif r["predicted_yvalues"]==0: raise ValueError("predicted_yvalues can't be 0 if yfield is not as well") 
+            
+            # normal division
+            else: return r[yfield]/r["predicted_yvalues"]
+
+        if final_rsquare>0: y_corrected = df.apply(divide_with_noNaN_correction, axis=1)
+        else: y_corrected = df[yfield]
+
+        # debug
+        if any(pd.isna(y_corrected)): raise ValueError("there should be no NaNs in y_corrected")
+
+
+    # define the deviations from the prediction
+    y_abs_residuals = (df.predicted_yvalues - df[yfield]).apply(abs)
+
+    # return in the initial order
+    return y_corrected, final_rsquare, y_abs_residuals
+
+
+
+def get_spline_fit(x, y, x_target, order_spline, fraction_smoothing):
+
+    """This function takes an x and a y and returns a numpy array that has the spline fit according to order_spline. It runs the fit for x_target.
+
+    A comment on s:
+
+    Positive smoothing factor used to choose the number of knots. Number of knots will be increased until the smoothing condition is satisfied:
+
+    sum((w[i] * (y[i]-spl(x[i])))**2, axis=0) <= s
+    If None (default), s = len(w) which should be a good value if 1/w[i] is an estimate of the standard deviation of y[i]. If 0, spline will interpolate through all data points.
+
+    -----------------------
+
+    ext==2 means that ther can't be any extrapolation
+
+    """
+
+    # create a df with the x and the y in order to get rid of duplicates
+    x_to_y_unique = pd.DataFrame({"x":x, "y":y}).groupby("x").apply(lambda df_x: np.mean(df_x.y)).sort_index()
+    xfit = np.array(x_to_y_unique.index)
+    yfit = x_to_y_unique.values
+  
+    # get the spline function on x, y
+    #s = len(x)
+    s = int(len(xfit)*fraction_smoothing)
+    spline_function = scipy_interpolate.UnivariateSpline(xfit, yfit, k=order_spline, s=s, ext=2, check_finite=True) # this does not work if there are repeated Xs
+
+    # fit the data
+    y_target_predicted = spline_function(x_target)
+
+    # debug
+    if any(pd.isna(y_target_predicted)): raise ValueError("There should not be NaNs")
+
+    return y_target_predicted
+
+
+def get_SPLINE_benchmarking_series_CV(kfold, order_spline, df, xfield, yfield, min_test_points_CV, outdir, make_plot, fraction_smoothing):
+
+    """This function takes a df with xfield and yfield. It runs kfold cross validation and returns a series with the accuracies """
+
+    # define all the indices
+    all_idx = set(df.index)
+
+    # init rsquares
+    rsquares_cv = []
+
+    # this will only work if the unique df is long enough
+    if len(df)>kfold: 
+
+        # iterate through 10-fold chross validation 
+        kfold_object = KFold(n_splits=kfold, random_state=1, shuffle=True)
+        for cvID, (numeric_train_index, numeric_test_index) in enumerate(kfold_object.split(df.index)):
+
+            # get the idx test as the index of df
+            test_idx = set(df.iloc[numeric_test_index].index)
+            train_idx = all_idx.difference(test_idx)
+
+            # if there are not enough data points, break
+            if len(test_idx)<min_test_points_CV: break
+
+            # get dfs
+            df_train = df.loc[train_idx].sort_values(by=[xfield, yfield])
+            df_test = df.loc[test_idx].sort_values(by=[xfield, yfield])
+           
+            # get train alues
+            xtrain = df_train[xfield].values
+            ytrain = df_train[yfield].values
+
+            # get the test values. Only those where the x is in the range of the train
+            xtest = df_test[xfield].values
+            ytest = df_test[yfield].values
+
+            idx_correct_test = (xtest>=min(xtrain)) & (xtest<=max(xtrain))
+            xtest = xtest[idx_correct_test]
+            ytest = ytest[idx_correct_test]
+
+            # if there are not enough points, skip
+            if sum(idx_correct_test)<min_test_points_CV: break
+
+            # run spline on the
+            ytest_predicted = get_spline_fit(xtrain, ytrain, xtest, order_spline, fraction_smoothing)
+
+            # there should be no <0 values
+            if any(ytest_predicted<=0): break
+
+            # calculate the rsquare
+            rsquare = r2_score(ytest, ytest_predicted)
+
+            # debug
+            if pd.isna(rsquare): raise ValueError("The rsquare can't be nan")
+
+            #### PLOT EVERYTHING UNDER OUTDIR ####
+
+            if make_plot is True:
+
+                fig = plt.figure(figsize=(7,4))
+                plt.plot(xtrain, ytrain, "o", color="gray", label="training")
+                plt.plot(xtest, ytest, "o", color="black", label="testing")
+                plt.plot(xtest, ytest_predicted, "-", color="red", label="testing fit")
+
+                plt.xlabel(xfield)
+                plt.ylabel(yfield)
+                plt.title("r2=%.4f"%rsquare)
+                plt.ylim([0, np.percentile(df[yfield], 90)])
+
+                plt.legend(bbox_to_anchor=(1, 1))
+                filename = "%s/%ixCV_order%i_s%.3f_cv%i.pdf"%(outdir, kfold, order_spline, fraction_smoothing, cvID)
+                #print_if_verbose("saving %s"%filename)
+                fig.savefig(filename)
+                plt.close(fig)
+
+            ###################################
+
+            # keep the rsquare
+            if rsquare<=0: break 
+
+            # keep
+            rsquares_cv.append(rsquare)
+
+    # discard if any rsquares are 0
+    if len(rsquares_cv)!=kfold: 
+
+        mean_rsquare = 0
+        std = 1
+        inverse_std_rsquare = 0
+
+    else:
+
+        mean_rsquare = np.mean(rsquares_cv)
+        std = np.std(rsquares_cv)
+        inverse_std_rsquare = 1/std
+
+
+    print_if_verbose(order_spline, fraction_smoothing, mean_rsquare)
+
+
+    # get the final series
+    benchmarking_series = pd.Series({"order_spline":order_spline, "mean_rsquare":mean_rsquare, "inverse_std_rsquare":inverse_std_rsquare, "std_rsquare":std, "kfold":kfold, "fraction_smoothing":fraction_smoothing})
+
+    return benchmarking_series
+    
+
+def get_y_corrected_by_x_SPLINE_crossValidation(df, xfield, yfield, outdir, threads, replace, min_test_points_CV=10):
+
+    """This function takes an x and a y series, returning the y corrected by x. This y corrected is y/(y predicted from SPILINE from x). The index must be unique. The best parameters are taken with 10 fold cross validation"""
+
+    make_folder(outdir)
+
+    # keep
+    df = cp.deepcopy(df)[[xfield, yfield]]
+
+    # check that the index is unique
+    if len(df.index)!=len(set(df.index)): raise ValueError("The index should be unique")
+
+    # define the df_fitting as the one where the yfield is not 0
+    df_fitting = df[df[yfield]>0]
+
+    # check
+    if any(df_fitting[yfield]<=0): raise ValueError("There can't be any 0 values in the unique df")
+
+    # sort by the x
+    df_fitting = df_fitting.sort_values(by=[xfield, yfield])
+
+    ########## GET THE DF BENCHMARKED DF 10xCV ########## 
+
+    # define the df_benckmarking file
+    df_benchmarking_file = "%s/df_benckmarking.tab"%outdir
+
+    if file_is_empty(df_benchmarking_file) or replace is True:
+        print_if_verbose("getting benchmarking for %s vs %s"%(xfield, yfield))
+
+        # define parms
+        kfold = 10
+
+        # define all the fractions
+        #all_spline_orders = range(1, 6) # it has to be between 1 and 5
+        all_spline_orders = [1, 2] # the spline will just be linear
+
+        # define the fractions smoothing
+        all_fractions_smoothing = np.linspace(1, 8, 50)
+        #all_fractions_smoothing = [1.0]
+        #all_fractions_smoothing = [5]
+
+        # define whether to make plots
+        make_plot = False
+
+        # debug
+        if any(pd.isna(df_fitting[xfield])) or any(pd.isna(df_fitting[yfield])): raise ValueError("There are NaNs")
+
+        # define the inputs of the benchmarking function
+        inputs_fn = make_flat_listOflists([[(kfold, spline_order, df_fitting, xfield, yfield, min_test_points_CV, outdir, make_plot, fraction_smoothing) for spline_order in all_spline_orders] for fraction_smoothing in all_fractions_smoothing])
+
+        # get a list of the benchmarking series in parallel
+        with multiproc.Pool(threads) as pool:
+
+            list_benchmarking_series = pool.starmap(get_SPLINE_benchmarking_series_CV, inputs_fn) 
+            
+            pool.close()
+            pool.terminate()
+
+        # get as df
+        df_benchmarking = pd.DataFrame(list_benchmarking_series)
+
+        # save
+        save_df_as_tab(df_benchmarking, df_benchmarking_file)
+
+    # load
+    df_benchmarking  = get_tab_as_df_or_empty_df(df_benchmarking_file)
+
+    ##################################################### 
+
+    if len(df_benchmarking)==0 or max(df_benchmarking.mean_rsquare)<=0: 
+
+        print("WARNING: There is not enough variability or data points to perform a correction of %s on %s. There will be no correction applied"%(yfield, xfield))
+        y_corrected = df[yfield]
+        final_rsquare = 0.0
+        df["predicted_yvalues"] = np.median(df[yfield])
+
+    else:
+
+        # get the fit data
+        print_if_verbose("performing SPLINE regression with best parameters for %s vs %s"%(xfield, yfield))
+
+        # get sorted df
+        df_fitting = df_fitting.sort_values(by=[xfield, yfield])
+
+        # sort df benchmarking to get the max rsquare and minimum std
+        max_kfold = max(df_benchmarking.kfold)
+        df_benchmarking = df_benchmarking[df_benchmarking.kfold==max_kfold].sort_values(by=["mean_rsquare", "inverse_std_rsquare"], ascending=False)
+
+        # get the best parameters
+        best_parms_series = df_benchmarking.iloc[0]
+
+        # get the y predicted with the best parms
+        best_order_spline = best_parms_series["order_spline"]
+        best_fraction_smoothing = best_parms_series["fraction_smoothing"] 
+        #outprefix = "%s/final_loess_fitting"%(outdir)
+
+        df_fitting["predicted_yvalues"] = get_spline_fit(df_fitting[xfield].values, df_fitting[yfield].values, df_fitting[xfield].values, best_order_spline, best_fraction_smoothing)
+
+        # debug 
+        if any(pd.isna(df_fitting.predicted_yvalues)): raise ValueError("there should be no NaNs in the final prediction")
+
+        # debug if any of the predicted_yvalues is <=0
+        if any(df_fitting.predicted_yvalues<=0): raise ValueError("There can't be any 0 predicted yvalues")
+
+        # calculate the final rsquare
+        final_rsquare = r2_score(df_fitting[yfield], df_fitting.predicted_yvalues)
+        if pd.isna(final_rsquare): raise ValueError("rsquare can't be NaN")
+
+        ##############################
+
+        ######### MAKE PLOTS #########
+
+        filename = "%s/coverage.pdf"%(outdir)
+        if file_is_empty(filename) or replace is True:
+
+            filename_tmp = "%s/coverage.tmp.pdf"%(outdir)
+
+            # get the plot
+            df_plot = df_fitting.sort_values(by=[xfield, yfield])
+
+            fig = plt.figure(figsize=(5,5))
+
+            #plt.plot(df_plot[xfield], df_plot[yfield], "o", alpha=0.2, color="gray", label="raw data")
+            sns.kdeplot(df_plot[[xfield, yfield]], cmap="gist_gray", shade=True)
+            plt.plot(df_plot[xfield], df_plot.predicted_yvalues, "-", color="red", label="LOWESS fit")
+
+            plt.title("Fitting SPLINE with k=%i, s=%.3f. final R2=%.3f. %ix CV R2=%.3f +- %.3f (SD)\n"%(best_order_spline, best_fraction_smoothing, final_rsquare, best_parms_series["kfold"], best_parms_series["mean_rsquare"], best_parms_series["std_rsquare"]))
+            plt.legend(bbox_to_anchor=(1, 1))
+            plt.xlabel(xfield)
+            plt.ylim([0, np.percentile(df_plot[yfield], 95)])
+            plt.ylabel(yfield)
+
+            fig.savefig(filename_tmp, bbox_inches='tight')
+            plt.close(fig)
+
+            os.rename(filename_tmp, filename)
+
+        ############################
+
+        # add the predicted_yvalues to df
+        dfIDX_to_predictedYvalue = dict(df_fitting["predicted_yvalues"])
+        missing_IDXs = set(df.index).difference(set(dfIDX_to_predictedYvalue))
+
+        df_missing = df.loc[missing_IDXs]
+        if any(df_missing[yfield]!=0): raise ValueError("there are some non-0 values missing")
+
+        for idx in missing_IDXs: dfIDX_to_predictedYvalue[idx] = 0.0
+        df["index_series"] = df.index
+        df["predicted_yvalues"] = df.index_series.apply(lambda x: dfIDX_to_predictedYvalue[x])
+
+        # get the corrected vals. If there is no prediction just return the raw vals
+        def divide_with_noNaN_correction(r):
+
+            # if the yfield is 0, return it as it is
+            if r[yfield]==0 and r["predicted_yvalues"]==0: return 0.0
+
+            # predicted yvalues can't be 0 unless yfield is also
+            elif r["predicted_yvalues"]==0: raise ValueError("predicted_yvalues can't be 0 if yfield is not as well") 
+            
+            # normal division
+            else: return r[yfield]/r["predicted_yvalues"]
+
+        if final_rsquare>0: y_corrected = df.apply(divide_with_noNaN_correction, axis=1)
+        else: y_corrected = df[yfield]
+
+        # debug
+        if any(pd.isna(y_corrected)): raise ValueError("there should be no NaNs in y_corrected")
+
+
+    # define the deviations from the prediction
+    y_abs_residuals = (df.predicted_yvalues - df[yfield]).apply(abs)
+
+    # return in the initial order
+    return y_corrected, final_rsquare, y_abs_residuals
+
+
