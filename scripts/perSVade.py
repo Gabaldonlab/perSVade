@@ -165,7 +165,7 @@ parser.add_argument("--skip_cnv_analysis", dest="skip_cnv_analysis", default=Fal
 
 
 # add the CNV calling args
-parser.add_argument("--window_size_CNVcalling", dest="window_size_CNVcalling", default=3000, type=int, help="The window size in which the genome will be fragmented for CNV calling.")
+parser.add_argument("--window_size_CNVcalling", dest="window_size_CNVcalling", default=500, type=int, help="The window size in which the genome will be fragmented for CNV calling.")
 
 
 # visualization
@@ -213,6 +213,7 @@ print("Running perSVade into %s"%opt.outdir)
 # define where the reference genome will be stored
 reference_genome_dir = "%s/reference_genome_dir"%(opt.outdir); fun.make_folder(reference_genome_dir)
 new_reference_genome_file = "%s/reference_genome.fasta"%reference_genome_dir
+
 
 # rewrite the reference genome so that all the chars ar upper
 all_chroms_seqRecords = [SeqRecord(Seq(str(seq.seq).upper()), id=seq.id, description="", name="") for seq in SeqIO.parse(opt.ref, "fasta")]

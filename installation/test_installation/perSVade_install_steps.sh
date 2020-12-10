@@ -63,9 +63,10 @@ conda install -c bioconda -y parallel-fastq-dump=0.6.3 &&
 conda install -c bioconda -y fastqc=0.11.9 &&
 conda install -c bioconda -y bedops=2.4.39 &&
 conda install -c bioconda -y genmap=1.3.0 &&
-conda install -c anaconda -y statsmodels=0.12.0 &&
-conda install -c conda-forge -y python-igraph=0.8.3 && # this updates many things. It may be necessary to stick to python-igraph=0.7.1.post7. This 
 conda install -c anaconda -y cython=0.29.21 # necessary for the conda installation
+
+#conda install -c conda-forge -y python-igraph=0.8.3 && # this updates many things. It may be necessary to stick to python-igraph=0.7.1.post7. This 
+#conda install -c anaconda -y statsmodels=0.12.0 &&
 
 
 #conda install -c bioconda bioconductor-aneufinder=1.16.0 # it updates a couple things
@@ -107,7 +108,7 @@ conda env export --no-builds --from-history -n perSVade_env --file perSVade_env.
 ########################################
 
 # conda install -y gcc_linux-64 &&
-conda install -y gxx_linux-64
+#conda install -y gxx_linux-64
 
 #conda install -c bioconda -y repeatmasker=4.0.9_p2 && # downgrades: gmp 6.2.0-he1b5a44_2 --> 6.1.2-hf484d3e_1000
 #conda install -c bioconda -y repeatmodeler=2.0.1 &&

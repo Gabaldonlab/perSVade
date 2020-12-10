@@ -1,7 +1,5 @@
 #!/usr/bin/env Rscript
 
-# This script runs CONY on a sorted bam, together with several files that are necessary for a proper running of CONY. This is parallelised
-
 # define environment
 library(argparser, quietly=TRUE)
 
@@ -63,8 +61,6 @@ print("running CONY")
 # define the fragment length related to the chromosome length (inferred from )
 fragment_len = as.integer(opt$fragment_len)
 RunCONY(CRDMethod="SumUp", AnaMethod="Single", TargetChr=opt$chromosome, SampleName=opt$sample_name, RunTime = 300000, BurnN = 5000, RTN = 1000, BCPoint = 20, FragLength=fragment_len)
-
-
 
 # get the result
 print("running the integration of results")

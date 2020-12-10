@@ -228,6 +228,7 @@ conda install -n $R_env_name -c bioconda -y bioconductor-rtracklayer=1.48.0;
 conda install -n $R_env_name -c conda-forge -y r-r.utils=2.9.2;
 conda install -n $R_env_name -c bioconda -y bioconductor-structuralvariantannotation=1.4.0;
 
+
 # create a subenvironment for running CONY. The last commit of CONY was the 12/06/2017. This is 3 years and 4 months ago., so that I have to install software from a similar age
 
 # packages from bioconda:
@@ -245,6 +246,15 @@ CONY_env_name="$env_name"_CONY_env
 echo "creating conda env $CONY_env_name"
 conda create -y --name $CONY_env_name -c bioconda bioconductor-iranges=2.8.2 bioconductor-exomecopy=1.22.0 r-snow=0.4; # this should install r-base=3.3.2, which fits all the dependencies
 conda install -y -n $CONY_env_name -c conda-forge r-argparser=0.4;
+
+# create a subenvironment to run HMMCOPY
+HMMcopy_env_name="$env_name"_HMMcopy_env
+echo "creating conda env $HMMcopy_env_name"
+conda create -y --name $HMMcopy_env_name
+conda config --add channels conda-forge
+conda install -y -n $HMMcopy_env_name -c bioconda bioconductor-hmmcopy=1.32.0; # this should install r-base=3.3.2, which fits all the dependencies
+conda install -y -n $HMMcopy_env_name -c conda-forge r-argparser=0.6;
+conda install -n $HMMcopy_env_name -c conda-forge r-kernsmooth=2.23;
 
 # create a subenvironment to run gridss
 gridss_env_name="$env_name"_gridss_env
