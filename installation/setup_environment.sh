@@ -104,7 +104,6 @@ makeblastdb -in RepeatPeps.lib -input_type fasta -dbtype prot;
 # make the database for RepeatMasker
 makeblastdb -in RepeatMasker.lib -input_type fasta -dbtype nucl;
 
-
 ############################################################
 
 ######## GET THE NINJA BINARY ########

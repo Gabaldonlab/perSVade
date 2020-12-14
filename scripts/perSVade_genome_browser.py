@@ -110,7 +110,7 @@ opt.reference_genome = new_reference_genome
 # add the bgcolor as a random palette if not there
 if "bgcolor" not in df.keys(): 
 
-    sample_to_color, palette_sample = gfun.get_value_to_color(set(df.sampleID), palette="Paired", type_color="hex")
+    sample_to_color, palette_sample = fun.get_value_to_color(set(df.sampleID), palette="Paired", type_color="hex")
     df["bgcolor"] = df.sampleID.apply(lambda x: sample_to_color[x])
 
 # get the bgcolor as a list

@@ -41,7 +41,7 @@ perSVade_genome_browser = "%s/perSVade_genome_browser.py"%CWD
 #######
 
 description = """
-Runs perSVade pipeline on an input set of paired end short ends. It is expected to be run on a coda environment and have several dependencies (see https://github.com/Gabaldonlab/perSVade). Some of these dependencies are included in the respository "installation/external_software". These are gridss (tested on version 2.8.1), clove (tested on version 0.17) and NINJA (we installed it from https://github.com/TravisWheelerLab/NINJA/releases/tag/0.95-cluster_only). If you have any trouble with these you can replace them from the source code.
+Runs perSVade pipeline on an input set of paired end short ends. It is expected to be run on a coda environment and have several dependencies (see https://github.com/Gabaldonlab/perSVade). 
 """
               
 parser = argparse.ArgumentParser(description=description, formatter_class=RawTextHelpFormatter)
@@ -55,9 +55,8 @@ parser.add_argument("-p", "--ploidy", dest="ploidy", default=1, type=int, help="
 
 
 # replace CNV_calling
-parser.add_argument("--replace_SV_CNVcalling_and_optimisation", dest="replace_SV_CNVcalling_and_optimisation", action="store_true", help="Replace everything related to the SV and CNV calling.")
+parser.add_argument("--replace_SV_CNVcalling", dest="replace_SV_CNVcalling", action="store_true", help="Replace everything related to the SV and CNV calling.")
 
-parser.add_argument("--replace_only_SV_CNVcalling", dest="replace_only_SV_CNVcalling", action="store_true", help="Replace the running of SV_CNVcalling, but not the coverage thresholds")
 
 parser.add_argument("--replace_FromGridssRun_final_perSVade_run", dest="replace_FromGridssRun_final_perSVade_run", action="store_true", help="Replace from the clove running in the final gridss+clove running")
 
@@ -489,7 +488,7 @@ if opt.testAccuracy is True:
     if opt.close_shortReads_table is None or opt.fast_SVcalling is True: 
         raise ValueError("You have to specify a --close_shortReads_table and not run in --fast_SVcalling to test the accuracy of the pipeline on several datasets (--testAccuracy)")
 
-    fun.report_accuracy_realSVs(opt.close_shortReads_table, opt.ref, "%s/testing_Accuracy"%opt.outdir, real_bedpe_breakpoints, threads=opt.threads, replace=opt.replace, n_simulated_genomes=opt.nsimulations, mitochondrial_chromosome=opt.mitochondrial_chromosome, simulation_ploidies=simulation_ploidies, range_filtering_benchmark=opt.range_filtering_benchmark, nvars=opt.nvars, job_array_mode=opt.job_array_mode, StopAfter_testAccuracy_perSVadeRunning=opt.StopAfter_testAccuracy_perSVadeRunning, skip_cleaning_simulations_files_and_parameters=opt.skip_cleaning_simulations_files_and_parameters, skip_cleaning_outdir=opt.skip_cleaning_outdir, parameters_json_file=opt.parameters_json_file, gff=opt.gff, replace_FromGridssRun_final_perSVade_run=opt.replace_FromGridssRun_final_perSVade_run, fraction_available_mem=opt.fraction_available_mem, replace_SV_CNVcalling_and_optimisation=opt.replace_SV_CNVcalling_and_optimisation, replace_only_SV_CNVcalling=opt.replace_only_SV_CNVcalling)
+    fun.report_accuracy_realSVs(opt.close_shortReads_table, opt.ref, "%s/testing_Accuracy"%opt.outdir, real_bedpe_breakpoints, threads=opt.threads, replace=opt.replace, n_simulated_genomes=opt.nsimulations, mitochondrial_chromosome=opt.mitochondrial_chromosome, simulation_ploidies=simulation_ploidies, range_filtering_benchmark=opt.range_filtering_benchmark, nvars=opt.nvars, job_array_mode=opt.job_array_mode, StopAfter_testAccuracy_perSVadeRunning=opt.StopAfter_testAccuracy_perSVadeRunning, skip_cleaning_simulations_files_and_parameters=opt.skip_cleaning_simulations_files_and_parameters, skip_cleaning_outdir=opt.skip_cleaning_outdir, parameters_json_file=opt.parameters_json_file, gff=opt.gff, replace_FromGridssRun_final_perSVade_run=opt.replace_FromGridssRun_final_perSVade_run, fraction_available_mem=opt.fraction_available_mem, replace_SV_CNVcalling=opt.replace_SV_CNVcalling)
 
 
 # get the golden set
@@ -519,60 +518,22 @@ print("structural variation analysis with perSVade finished")
 
 if opt.skip_SVcalling is False and not any([x=="skip" for x in {opt.fastq1, opt.fastq2}]) and opt.skip_SV_CNV_calling is False:
 
+    # define outdirs
+    cnv_calling_outdir = "%s/CNV_calling"%opt.outdir
+    outdir_var_calling = "%s/SVcalling_output"%opt.outdir
+
+    # remove folders if there is some replacement to be done
+    if opt.replace_SV_CNVcalling is True: 
+        for f in [cnv_calling_outdir, outdir_var_calling]: delete_folder(f)
+
     # define the df_bedpe and df_gridss
     df_gridss = fun.get_svtype_to_svfile_and_df_gridss_from_perSVade_outdir(opt.outdir, opt.ref)[1]
 
     # run CNVcalling 
-    cnv_calling_outdir = "%s/CNV_calling"%opt.outdir
-    fun.run_CNV_calling(sorted_bam, opt.ref, cnv_calling_outdir, opt.threads, opt.replace, opt.mitochondrial_chromosome, df_gridss, opt.window_size_CNVcalling, opt.ploidy)
-
-
-
-
-
-
-
-
-
-
-
-
-    finished_CNV_calling
-
-    # delete key files if replace_SV_CNVcalling
-    if opt.replace_SV_CNVcalling_and_optimisation is True: fun.remove_files_SV_CNVcalling(opt.outdir)
-
-    #### get CNV parameters ####
-
-    # get the default parameters
-    if opt.min_coverage_duplication=="auto" or opt.max_coverage_deletion=="auto" or opt.min_r_pearson_noFlatRegions=="auto" or opt.min_r_spearman_noFlatRegions=="auto":
-
-        auto_min_coverage_duplication, auto_max_coverage_deletion, auto_min_r_pearson_noFlatRegions, auto_min_r_spearman_noFlatRegions = fun.get_automatic_coverage_thresholds(opt.outdir, opt.fast_SVcalling, opt.ploidy, opt.nsimulations, simulation_ploidies, opt.mitochondrial_chromosome, opt.ref, threads=opt.threads, replace=opt.replace)
-
-
-    # set real vars
-    if opt.min_coverage_duplication=="auto": min_coverage_duplication = auto_min_coverage_duplication
-    else: min_coverage_duplication = float(opt.min_coverage_duplication)
-        
-    if opt.max_coverage_deletion=="auto": max_coverage_deletion = auto_max_coverage_deletion
-    else: max_coverage_deletion = float(opt.max_coverage_deletion)
-
-    if opt.min_r_pearson_noFlatRegions=="auto": min_r_pearson_noFlatRegions = auto_min_r_pearson_noFlatRegions
-    else: min_r_pearson_noFlatRegions = float(opt.min_r_pearson_noFlatRegions)
-        
-    if opt.min_r_spearman_noFlatRegions=="auto": min_r_spearman_noFlatRegions = auto_min_r_spearman_noFlatRegions
-    else: min_r_spearman_noFlatRegions = float(opt.min_r_spearman_noFlatRegions)
-
-    ############################
+    df_CNV_coverage = fun.run_CNV_calling(sorted_bam, opt.ref, cnv_calling_outdir, opt.threads, opt.replace, opt.mitochondrial_chromosome, df_gridss, opt.window_size_CNVcalling, opt.ploidy)
 
     # get the variant calling 
-    outdir_var_calling = "%s/SVcalling_output"%opt.outdir
-    print("getting all SVs into one VCF. Regions with a cov>%.3f will be treated as DUP, and regions with cov <%.3f will be treated as DEL. Regions with a correlation between position and coverage >%.3f (pearson) and >%.3f (spearman) will not be considered as CNV, as they may be related to the smiley-face effect."%(min_coverage_duplication, max_coverage_deletion, min_r_pearson_noFlatRegions, min_r_spearman_noFlatRegions))
-
-    # delete only the CNV calling, but not the optimisation
-    if opt.replace_only_SV_CNVcalling is True: fun.delete_folder(outdir_var_calling)
-
-    SV_CNV_vcf = fun.get_vcf_all_SVs_and_CNV(opt.outdir, outdir_var_calling, sorted_bam, opt.ref, opt.ploidy, replace=opt.replace, threads=opt.threads, mitochondrial_chromosome=opt.mitochondrial_chromosome, mito_code=opt.mitochondrial_code, gDNA_code=opt.gDNA_code, max_coverage_deletion=max_coverage_deletion, min_coverage_duplication=min_coverage_duplication, min_r_pearson_noFlatRegions=min_r_pearson_noFlatRegions, min_r_spearman_noFlatRegions=min_r_spearman_noFlatRegions)
+    SV_CNV_vcf = fun.get_vcf_all_SVs_and_CNV(opt.outdir, outdir_var_calling, sorted_bam, opt.ref, opt.ploidy, df_CNV_coverage, opt.window_size_CNVcalling, replace=opt.replace, threads=opt.threads, mitochondrial_chromosome=opt.mitochondrial_chromosome)
 
     print("the SV and CNV calling vcf can be found in %s"%SV_CNV_vcf)
 
@@ -585,7 +546,7 @@ if opt.skip_SVcalling is False and not any([x=="skip" for x in {opt.fastq1, opt.
         print("annotated SV vcf can be found in %s"%SV_CNV_vcf_annotated)
     
     else: print("WARNING: Skipping SV annotation because -gff was not provided.")
-
+    
 #####################################
 #####################################
 #####################################

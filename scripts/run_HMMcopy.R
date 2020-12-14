@@ -27,6 +27,7 @@ argp = add_argument(argp, "--eta", default=50000.0, help="The eta parameters of 
 argp = add_argument(argp, "--gamma", default=3, help="The gamma parameters of the HMMcopy")
 argp = add_argument(argp, "--S", default=0.02930164, help="The S parameters of the HMMcopy")
 argp = add_argument(argp, "--strength", default="1e7", help="The strength parameters of the HMMcopy")
+argp = add_argument(argp, "--fraction_data_correctReadcount", default=0.1, help="The fraction of data points in the input with which to run the correctReadcount function.")
 
 opt = parse_args(argp)
 
@@ -34,7 +35,8 @@ opt = parse_args(argp)
 df_coverage = read.table(opt$coverage_table, sep="\t", header=TRUE)
 
 # add columns that have corrected fields
-df_coverage = correctReadcount(df_coverage)
+samplesize_correctReadcount = as.integer(opt$fraction_data_correctReadcount*length(row.names(df_coverage)))
+df_coverage = correctReadcount(df_coverage, samplesize=samplesize_correctReadcount) 
 
 # get the default parameters to run HMMsegment
 params_HMMsegment = HMMsegment(df_coverage, getparam = TRUE)

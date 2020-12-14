@@ -2593,7 +2593,10 @@ def generate_coverage_per_window_file_parallel(reference_genome, destination_dir
         df_windows = pd.read_csv(windows_file, sep="\t", header=None, names=["chromosome", "start", "end"]).sort_values(by=["chromosome", "start", "end"])
 
         # check that everything is OK
-        if any(df_windows.start>=df_windows.end): raise ValueError("There can't be windows with start>=end")
+        if any(df_windows.start>=df_windows.end): 
+
+            print(df_windows[(df_windows.start>=df_windows.end)])
+            raise ValueError("There can't be windows with start>=end")
 
         # write it
         df_windows.to_csv(windows_file, header=False, index=False, sep="\t")
@@ -3651,7 +3654,7 @@ def get_df_with_coverage_per_windows_relative_to_neighbor_regions(df_windows, be
         bed_file = "%s.%s.bed"%(bed_windows_prefix, region)
         df_region.to_csv(bed_file, sep="\t", header=True, index=False)
 
-        coverage_df = get_coverage_per_window_df_without_repeating(reference_genome, sorted_bam, bed_file, replace=replace, run_in_parallel=run_in_parallel, delete_bams=delete_bams, threads=threads)
+        coverage_df = get_coverage_per_window_df_without_repeating(reference_genome, sorted_bam, bed_file, replace=replace, run_in_parallel=run_in_parallel, delete_bams=delete_bams, threads=threads).drop_duplicates(subset=["chromosome", "start", "end"])
         coverage_df.index = coverage_df.apply(get_IDwindow_df, axis=1)
 
         # make sure that they are unique
@@ -10761,51 +10764,327 @@ def get_mpileup_file_one_chrom(sorted_bam, replace, reference_genome, min_baseca
     return mpileup_file
 
 
-def run_CNV_calling_HMMcopy_one_chromosome(reference_genome, outdir, chromosome, replace, window_size, threads, chrom_len, df_coverage, ploidy, min_number_of_regions_CNVcalling=10):
+def run_HMMcopy(coverage_file, outfile, parms_dict=dict(e=0.9999999, mu=[-0.458558247, -0.215877601, -0.002665686, 0.191051578, 0.347816046, 1.664333241], lambda_val=20, nu=2.1, kappa=[50, 50, 700, 100, 50, 50], m=[-0.458558247, -0.215877601, -0.002665686, 0.191051578, 0.347816046, 1.664333241], eta=50000, gamma=3, S=0.02930164, strength="1e7", fraction_data_correctReadcount=0.1), replace=False):
 
-    """This function takes a df with coverage and a chromosome and returns a df with the copy number for each window of the genome."""
+    """Runs HMMcopy with the different paramters into outfile. It returns the df with the outfile."""
 
-    print_if_verbose("running HMMcopy for %s"%(chromosome))
+    if file_is_empty(outfile) or replace is True:
+
+        # define tmp
+        outfile_tmp = "%s.tmp"%outfile
+        std = "%s.std"%outfile
+
+        # redefine parms
+        mu = ",".join([str(x) for x in parms_dict["mu"]])
+        m = ",".join([str(x) for x in parms_dict["m"]])
+        kappa = ",".join([str(x) for x in parms_dict["kappa"]])
+        e = parms_dict["e"]
+        lambda_val = parms_dict["lambda_val"]
+        nu = parms_dict["nu"]
+        eta = parms_dict["eta"]
+        gamma = parms_dict["gamma"]
+        S = parms_dict["S"]
+        strength = parms_dict["strength"]
+        fraction_data_correctReadcount = parms_dict["fraction_data_correctReadcount"]
+
+        # run cmd
+        cmd = "%s --outfile %s --coverage_table %s --e %s --mu %s --lambda %s --nu %s --kappa %s --m %s --eta %s --gamma %s --S %s --strength %s  --fraction_data_correctReadcount %s > %s 2>&1"%(run_HMMcopy_R, outfile_tmp, coverage_file, e, mu, lambda_val,  nu, kappa, m, eta, gamma, S, strength, fraction_data_correctReadcount, std)
+
+        run_cmd(cmd, env=EnvName_HMMcopy)
+
+        # clean
+        remove_file(std)
+        os.rename(outfile_tmp, outfile)
+
+    # get the df and return
+    df = get_tab_as_df_or_empty_df(outfile)
+
+    # add the CN as in CONY. Note that HMMcopy gets as NaNs the regions with 0 coverage. I set them as 0s
+    state_to_CN = {1:0, 2:1, 3:2, 4:3, 5:4, 6:5}
+
+    def get_CN_as_0(r):
+        if r["reads"]==0: return 0
+        else: return state_to_CN[r["state_CNsegment"]]
+
+    df["CN"] = df.apply(get_CN_as_0, axis=1)
+
+    # add the relative CN
+    df["relative_CN"] = (df.CN / 2)
+ 
+    return df
+
+def get_rsquare_one_chromosome_crossValidated_rsquare_HMMcopy(df_train, df_test, chromosome):
+
+    """This function takes a chromosome and a df train and df test of HMMcopy and returns the rsquare of the fit"""
+
+    # get the dfs of the chromosome
+    df_train = df_train[df_train.chr==chromosome]
+    df_test = df_test[df_test.chr==chromosome]
+
+    # get the function that interpolates position vs copy number
+    interpolation_function = scipy_interpolate.interp1d(df_train.middle_position, df_train.relative_CN, bounds_error=True, kind="linear", assume_sorted=True)
+
+    # get the prediction on the test
+    test_relative_CN = interpolation_function(df_test.middle_position)
+
+    # calculate the rsquare between the test CN and the actual coverage
+    rsquare = r2_score(df_test.reads.values, test_relative_CN)
+
+    # debug
+    if pd.isna(rsquare): raise ValueError("rsquare can't be NaN")
+
+    # get miniumum 0
+    return max([0.0, rsquare])
+
+
+def get_crossValidated_rsquare_HMMcopy_givenParameters(Ip, parameters_dict, outfile_HMMcopy_prefix, training_coverage_files, testing_coverage_dfs):
+
+    """This function takes a parameters dict and returns the R2 of how these parameters work on 5-fold cross validation. coverage_files are a list of matched training and testing files for a balanced cross validation selection. This function will report how good each of the training files works on the testing files. """
+
+    print_if_verbose("checking parameters %i"%Ip)
+
+    # define the rsquares
+    rsquares_list = []
+
+    # go through each cvID
+    for cvID, training_coverage_file in enumerate(training_coverage_files):
+
+        # define the outfile of this CV 
+        outfile_HMMcopy_cvID = "%s.train_cv%i.tab"%(outfile_HMMcopy_prefix, cvID)
+
+        # run hmm copy on the training df
+        df_train = run_HMMcopy(training_coverage_file, outfile_HMMcopy_cvID, parms_dict=parameters_dict, replace=True)
+        remove_file(outfile_HMMcopy_cvID)
+
+        # get the test df
+        df_test = testing_coverage_dfs[cvID]
+
+        # get the rsquares for each chromosome
+        rsquare = np.mean(list(map(lambda c: get_rsquare_one_chromosome_crossValidated_rsquare_HMMcopy(df_train, df_test, c), set(df_train.chr))))
+
+        if rsquare<=0: break
+
+        # keep 
+        rsquares_list.append(rsquare)
+
+    # get the mean and std rsquares
+    if len(rsquares_list)!=len(training_coverage_files):
+        mean_rsquare = 0.0
+        std_rsquare = 1.0
+
+    else:
+        mean_rsquare = max([0.0, np.mean(rsquares_list)])
+        std_rsquare = np.std(rsquares_list)
+
+    return mean_rsquare, std_rsquare
+
+def run_CNV_calling_HMMcopy(outdir, replace, threads, df_coverage, ploidy, reference_genome, mitochondrial_chromosome, min_number_of_regions_CNVcalling=50):
+
+    """This function runs HMMcopy and returns a df with the relative_CN"""
+
+    print_if_verbose("running HMMcopy")
     make_folder(outdir)
 
-    ######### PREPARE THE INPUT DATA #########
+    # define chroms
+    all_chromosomes = set(get_chr_to_len(reference_genome))
+    if mitochondrial_chromosome!="no_mitochondria": mtDNA_chromosomes = set(mitochondrial_chromosome.split(","))
+    else: mtDNA_chromosomes = set()
+    gDNA_chromosomes = all_chromosomes.difference(mtDNA_chromosomes)
 
-    # define a file that has the coverage per region 
-    df_coverage_chrom = df_coverage[df_coverage.chromosome==chromosome].rename(columns={"chromosome":"chr", "GCcontent":"gc", "median_mappability":"map"})
-    df_coverage_chrom["start"] += 1 # it has to be 1-based
+    # initialize the final df
+    final_fields = ["chromosome", "start", "end", "corrected_relative_coverage", "relative_CN"]
+    df_CNperWindow_HMMcopy = pd.DataFrame(columns=final_fields)
 
-    # add fields
-    df_coverage_chrom["reads"] = df_coverage_chrom.corrected_relative_coverage
+    # iterate through each genome
+    for type_genome, chroms in [("gDNA", gDNA_chromosomes), ("mtDNA", mtDNA_chromosomes)]:
 
-    # write as tab
-    coverage_file_chrom = "%s/coverage_chromosome.tab"%outdir
-    HMMcopy_fields = ["chr", "start", "end", "reads", "gc", "map"]
-    save_df_as_tab(df_coverage_chrom[HMMcopy_fields], coverage_file_chrom)
+        # define the outdir of the genome
+        outdir_genome = "%s/%s"%(outdir, type_genome); make_folder(outdir_genome)
 
-    ##########################################
+        # debug
+        if len(chroms)==0: continue
 
-    ##### RUN HMMcopy #####
+        # get the df coverage for this genome
+        df_coverage_genome = df_coverage[df_coverage.chromosome.isin(chroms)]
 
-    # run HMMcopy
-    HMMcopy_std = "%s/running_HMMcopy.std"%outdir
-    print_if_verbose("Running HMMcopy. The std is in %s"%HMMcopy_std)
+        # debug the fact that there are not enough regions. If so set everything to relative_CN==1
+        if len(df_coverage_genome)<min_number_of_regions_CNVcalling: 
 
-    coverage_file_chrom_out = "%s.withCNstate.tab"%coverage_file_chrom
+            # get relative_CN as 1
+            df_CNperWindow_HMMcopy_genome = df_coverage_genome[["chromosome", "start", "end", "corrected_relative_coverage"]]
+            df_CNperWindow_HMMcopy_genome["relative_CN"] = 1.0
 
-    cmd = "%s --outfile %s --coverage_table %s"%(run_HMMcopy_R, coverage_file_chrom_out, coverage_file_chrom)
+        else:
 
-    run_cmd(cmd, env=EnvName_HMMcopy)
+            ######### PREPARE THE INPUT DATA #########
 
-    remove_file(HMMcopy_std)
+            # define a file that has the coverage per region 
+            df_coverage_HMMcopy = df_coverage_genome.rename(columns={"GCcontent":"gc", "median_mappability":"map"})
+            df_coverage_HMMcopy["start"] += 1 # it has to be 1-based
+
+            # add fields
+            df_coverage_HMMcopy["reads"] = df_coverage_HMMcopy.corrected_relative_coverage
+            df_coverage_HMMcopy["chr"] = df_coverage_HMMcopy.chromosome
+
+            # write as tab
+            coverage_file = "%s/coverage_forHMMcopy.tab"%outdir_genome
+            HMMcopy_fields = ["chr", "start", "end", "reads", "gc", "map"]
+            save_df_as_tab(df_coverage_HMMcopy[HMMcopy_fields], coverage_file)
+
+            ##########################################
+
+            ##### DEFINE THE RANGE OF PARAMETERS FOR CROSS-VALIDATION #####
+
+            # these are the parameters:
+
+            """ 
+            - e : Probability of extending a segment, increase to lengthen segments, decrase to shorten segments. Range: (0, 1)
+            - strength: Strength of initial e suggestion, reducing allows e to change, increasing makes e undefiable. Range: [0, Inf)
+            - mu: Suggested median for copy numbers in state, change to readjust classification of states. Range: (-Inf, Inf)
+            - lambda: Suggested precision (inversed variance) for copy numbers in state, increase to reduce overlap between states. Range: [0, Inf)
+            - nu: Suggested degree of freedom between states, increase to reduce overlap between states. Range: [0, Inf)
+            - kappa: Suggested distribution of states. Should sum to 1.
+            - m: Optimal value for mu, difference from corresponding mu value determines elasticity of the mu value. i.e. Set to identical value as mu if you don’t want mu to move much.
+            - eta Mobility of mu, increase to allow more movement. Range: [0, Inf)
+            - gamma Prior shape on lambda, gamma distribution. Effects flexibility of lambda.
+            - S Prior scale on lambda, gamma distribution. Effects flexibility of lambda
+            """
+
+            print_if_verbose("generating all possible parameters")
+
+            # define the ideal coverage of each state
+            ideal_coverage = [0.01, 0.5, 1, 1.5, 2, 2.5]
+
+            # define the default mu
+            default_mu = [-0.458558247, -0.215877601, -0.002665686, 0.191051578, 0.347816046, 1.664333241]
+
+            # create a df with training parameters
+            parameters_dict = {}; Ip=0
+            for e in np.linspace(0.9, 0.9999999, 3):
+                for strength in ["1e3", "1e7", "1e30"]:
+                    for mu_multiplier in [None, 0.1]: 
+                        for lambda_val in [20]:
+                            for nu in [2.1]:
+                                for kappa in [[50, 50, 700, 100, 50, 50]]:
+                                    for m_multiplier in [None, 0.1]: 
+                                        for eta in [50000]:
+                                            for gamma in [3]:
+                                                for S in [0.02930164]:
+                                                    for fraction_data_correctReadcount in [0.2]:
+
+                                                        # define the mu
+                                                        if mu_multiplier is None: mu = default_mu
+                                                        else: mu = [np.log2(max([0.01, c+mu_multiplier])) for c in ideal_coverage]
+
+                                                        # define the m
+                                                        if m_multiplier is None: m = default_mu
+                                                        else: m = [np.log2(max([0.01, c+m_multiplier])) for c in ideal_coverage]
+ 
+                                                        # keep the data
+                                                        parameters_dict[Ip] = dict(e=e, mu=mu, lambda_val=lambda_val, nu=nu, kappa=kappa, m=m, eta=eta, gamma=gamma, S=S, strength=strength, fraction_data_correctReadcount=fraction_data_correctReadcount)
+                                                        Ip+=1
+
+            # get as df
+            parameter_fields = ["e", "mu", "lambda_val", "nu", "kappa", "m", "eta", "gamma", "S", "strength", "fraction_data_correctReadcount"]
+            parameters_df = pd.DataFrame(parameters_dict).transpose().sort_index()
+
+            ################################################################
+
+            ####### FIND THE BEST PARAMETERS #######
+
+            print_if_verbose("finding best parameters out of %i"%len(parameters_df))
+
+            # define the cross validation datasets
+            typeDF_to_cvID_to_df = {t : {cvID : pd.DataFrame() for cvID in range(5)} for t in {"train", "test"}}
+
+            for chrom in chroms:
+
+                # get the df with the coverage
+                df_coverage_HMMcopy_chrom = df_coverage_HMMcopy[df_coverage_HMMcopy.chr==chrom][HMMcopy_fields]
+
+                # add the midle position
+                df_coverage_HMMcopy_chrom["middle_position"] = df_coverage_HMMcopy_chrom.start + (df_coverage_HMMcopy_chrom.end-df_coverage_HMMcopy_chrom.start)/2
+
+                # go through CV of each chromosome
+                kfold_object = KFold(n_splits=5, random_state=1, shuffle=True)
+                for cvID, (numeric_train_index, numeric_test_index) in enumerate(kfold_object.split(df_coverage_HMMcopy_chrom.index)):
+
+                    # get the dfs
+                    train_df = df_coverage_HMMcopy_chrom.iloc[numeric_train_index]
+                    test_df = df_coverage_HMMcopy_chrom.iloc[numeric_test_index]
+
+                    # get the test df that is within the bounds of train_df
+                    test_df = test_df[(test_df.middle_position>=min(train_df.middle_position)) & (test_df.middle_position<=max(train_df.middle_position))]
+
+                    # add to the dfs
+                    typeDF_to_cvID_to_df["train"][cvID] = typeDF_to_cvID_to_df["train"][cvID].append(train_df)
+                    typeDF_to_cvID_to_df["test"][cvID] = typeDF_to_cvID_to_df["test"][cvID].append(test_df)
 
 
-    print(coverage_file_chrom_out)
-    khjadhdkgakhdag
+            # write the training datasets into outdir outdir_genome
+            training_coverage_files = []
+            for cvID in range(5): 
+
+                # get file
+                df = typeDF_to_cvID_to_df["train"][cvID]
+                training_coverage_file = "%s/training_df_cv%i.tab"%(outdir_genome, cvID)
+                save_df_as_tab(df, training_coverage_file)
+
+                # keep
+                training_coverage_files.append(training_coverage_file)
+
+            # get a list with the testing dfs
+            testing_coverage_dfs = [typeDF_to_cvID_to_df["test"][cvID] for cvID in range(5)]
+
+            # get a list with the R2 of each parameter set from cross validation
+            list_inputs = [(Ip, parameters_dict[Ip], "%s/HMMcopy_parms%i.tab"%(outdir_genome, Ip), training_coverage_files, testing_coverage_dfs) for Ip in parameters_df.index]
+
+            with multiproc.Pool(threads) as pool:
+                list_rsquares_and_stds = pool.starmap(get_crossValidated_rsquare_HMMcopy_givenParameters, list_inputs) 
+
+                pool.close()
+                pool.terminate()
+
+            # add the lists in the df
+            parameters_df["cv_rsquare_mean"] = [x[0] for x in list_rsquares_and_stds]
+            parameters_df["cv_rsquare_std"] = [x[1] for x in list_rsquares_and_stds]
+            parameters_df["cv_rsquare_inverse_std"] = 1/parameters_df.cv_rsquare_std
+
+            # get the best parameters
+            best_parameters_row = parameters_df.sort_values(by=["cv_rsquare_mean", "cv_rsquare_inverse_std"], ascending=False).iloc[0]
+
+            print_if_verbose("The best parameters have an R2=%.3f +- %.3f (SD)"%(best_parameters_row["cv_rsquare_mean"], best_parameters_row["cv_rsquare_std"]))
+
+            best_parameters_dict = dict(best_parameters_row[parameter_fields])
+
+            ###########################################
+
+            ####### RUN WITH BEST PARAMETERS AND ARRANGE df_CNperWindow_HMMcopy_genome #########
+
+            print_if_verbose("running with best parameters")
+
+            # run HMMcopy with the best parameters
+            best_parameters_outfile = "%s/HMMcopy_output_best_parms.tab"%outdir_genome
+            df_HMMcopy_best = run_HMMcopy(coverage_file, best_parameters_outfile, replace=replace, parms_dict=best_parameters_dict)
+
+            # change the start to be 0-based
+            df_HMMcopy_best["start"] = df_HMMcopy_best.start - 1
+
+            # define the final output
+            df_CNperWindow_HMMcopy_genome = df_HMMcopy_best
+            df_CNperWindow_HMMcopy_genome["corrected_relative_coverage"] = df_CNperWindow_HMMcopy_genome.reads
+            df_CNperWindow_HMMcopy_genome["chromosome"] = df_CNperWindow_HMMcopy_genome.chr
+
+            #####################################################################################
+
+        # keep
+        df_CNperWindow_HMMcopy = df_CNperWindow_HMMcopy.append(df_CNperWindow_HMMcopy_genome[final_fields])
+
+        # remove
+        delete_folder(outdir_genome)
 
 
-    #######################
-
-
+    return df_CNperWindow_HMMcopy
 
 def run_CNV_calling_CONY_one_chromosome(reference_genome, outdir, chromosome, replace, window_size, threads, chrom_len, sample_name, df_coverage, ploidy, min_number_of_regions_CNVcalling=10):
 
@@ -10934,6 +11213,9 @@ def run_CNV_calling_CONY_one_chromosome(reference_genome, outdir, chromosome, re
 
     ##################################
 
+    # change the start to be back to 0
+    df_perWindow["start"] =  df_perWindow["start"] - 1
+
     # return the df_CNV
     return df_perWindow
 
@@ -10985,9 +11267,6 @@ def configure_reference_genome_for_CNVnator(reference_genome, threads, root_file
 
 
     #> cnvpytor -root MGSCv37_gc_file.pytor -gc ~/hg19/mouse.fasta.gz -make_gc_file
-
-
-
 
 def run_CNVNATOR(sorted_bam, reference_genome, outdir, threads, replace, mitochondrial_chromosome, df_clove, window_size, sample_name, chrom_to_len):
 
@@ -11447,10 +11726,6 @@ def get_value_to_color(values, palette="mako", n=100, type_color="rgb", center=N
         value_to_color = {v : palette_dict[find_nearest(all_values_palette, v)] for v in values}
 
     return value_to_color, palette_dict
-
-
-
-
 
 def get_lowess_fit_y(x, y, xtarget, frac, iterations, fill_value_interpolation):
 
@@ -12002,207 +12277,244 @@ def run_fraction_Nbases_window_genome(r, chrom_to_seq):
     # return divided by width
     return n_Ns/r["width"]
 
-def run_CNV_calling(sorted_bam, reference_genome, outdir, threads, replace, mitochondrial_chromosome, df_gridss, window_size, ploidy):
+
+def get_chrom_to_Xoffset_plot(reference_genome):
+
+    """Rteurns a dict mapping each chromosome to an X offset"""
+
+    # get all chroms
+    chrom_to_len = get_chr_to_len(reference_genome)
+    all_chromosomes = sorted(chrom_to_len)
+
+
+    chrom_to_Xoffset = {}
+    current_offset = 0
+    for chrom in all_chromosomes:
+        chrom_to_Xoffset[chrom] = current_offset
+        current_offset += chrom_to_len[chrom] + 15000
+
+    return all_chromosomes, chrom_to_Xoffset
+
+def get_df_CNV_with_metadata_from_df_coverage(df_coverage, df_CNV):
+
+    """This function takes a df coverage and a df_CNV and returns a series with metadata from the df_CNV to the df_coverage"""
+
+    # sort
+    df_CNV = df_CNV.sort_values(by=["chromosome", "start", "end"])
+
+    # add IDs
+    df_CNV["CNVid"] = list(range(len(df_CNV)))
+    df_CNV.index = df_CNV.CNVid
+
+    # define a function that returns all the metadata for one window
+    def get_metadata_for_df_CNV_r(r):
+
+        # get the coverage related to this window
+        df_cov = df_coverage[(df_coverage.chromosome==r["chromosome"]) & (df_coverage.start>=r["start"]) & (df_coverage.end<=r["end"])]
+
+        # check that it makes sense
+        if min(df_cov.start)!=r["start"] or max(df_cov.end)!=r["end"]: raise ValueError("invalid parsing")
+
+        # get several things
+        median_coverage = np.median(df_cov.relative_coverage)
+        median_coverage_corrected = np.median(df_cov.corrected_relative_coverage)
+        median_relative_CN_CONY = np.median(df_cov.relative_CN_CONY)
+        median_relative_CN_HMMcopy = np.median(df_cov.relative_CN_HMMcopy)
+
+        # return as a series
+        final_series = pd.Series({"median_coverage" : np.median(df_cov.relative_coverage),
+                                  "median_coverage_corrected" : np.median(df_cov.corrected_relative_coverage),
+                                  "median_relative_CN_CONY" : np.median(df_cov.relative_CN_CONY),
+                                  "median_relative_CN_HMMcopy" : np.median(df_cov.relative_CN_HMMcopy)})
+
+        return final_series
+
+    df_CNV[["median_coverage", "median_coverage_corrected", "median_relative_CN_CONY", "median_relative_CN_HMMcopy"]] = df_CNV.apply(get_metadata_for_df_CNV_r, axis=1)
+
+    # add whether it is a duplication or a deletion
+    def get_type_CNV_from_coverageState(x):
+        if x<1.0: return "DEL"
+        elif x>1.0: return "DUP"
+        else: raise ValueError("invalid coverage")
+
+    df_CNV["SVTYPE"] = df_CNV.merged_relative_CN.apply(get_type_CNV_from_coverageState)
+
+    return df_CNV
+
+def run_CNV_calling(sorted_bam, reference_genome, outdir, threads, replace, mitochondrial_chromosome, df_gridss, window_size, ploidy, plot_correlation=False):
 
     """This function takes a sorted bam and runs several programs on it to get the copy-number variation results. It is important that the sorted_bam contains no duplicates. It will correct bu GC content, mappability and distance to the telomere. All coverage will be corrected by GC content, mappability and the distance to the telomere, which will be calculated also taking into account breakpoint information. """
 
     make_folder(outdir)
 
-    # make a df with windows of the genome
-    df_coverage = get_coverage_df_for_windows_of_genome(sorted_bam, reference_genome, outdir, replace, threads, window_size)
-
-    # add the 'corrected_relative_coverage' by mappability, GC content and distance to the telomere
-    df_coverage = get_df_coverage_with_corrected_coverage(df_coverage, reference_genome, outdir, replace, threads, mitochondrial_chromosome, df_gridss)
-
-    # add the fraction of N bases
-    chrom_to_seq = {seq.id : str(seq.seq).upper() for seq in SeqIO.parse(reference_genome, "fasta")}
-    df_coverage["width"] = (df_coverage.end - df_coverage.start).apply(int)
-    df_coverage["fraction_N_bases"] = df_coverage.apply(run_fraction_Nbases_window_genome, chrom_to_seq=chrom_to_seq, axis=1)
-
-    ######## RUN CONY ########
-
-    # get chrom to len
-    chrom_to_len = get_chr_to_len(reference_genome)
-
-    # define the sample name
-    sample_name = get_sample_name_from_bam(sorted_bam)
-
-    # run CONY for each chromosome
-    df_CNperWindow_CONY_file = "%s/df_CNperWindow_CONY.tab"%outdir
-
-    if file_is_empty(df_CNperWindow_CONY_file) or replace is True:
-
-        df_CNperWindow_CONY = pd.concat([run_CNV_calling_CONY_one_chromosome(reference_genome, "%s/%s_CONYrun"%(outdir, c), c, replace, window_size, threads, chrom_len, sample_name, df_coverage, ploidy) for c, chrom_len in chrom_to_len.items()])
-
-        save_df_as_tab(df_CNperWindow_CONY, df_CNperWindow_CONY_file)
-
-    df_CNperWindow_CONY = get_tab_as_df_or_empty_df(df_CNperWindow_CONY_file)
-
-    ##########################
-
-
-    ####### RUN HMMCOPY, SIMILARLY TO A RECENT C. glabrata PAPER #######
-
-    # This is based on "Understand the genomic diversity and evolution of fungal pathogen Candida glabrata by genome-wide analysis of genetic variations"
-
-
-    EnvName_HMMcopy
-
-    df_CNperWindow_HMMcopy = pd.concat([run_CNV_calling_HMMcopy_one_chromosome(reference_genome, "%s/%s_HMMcopy_run"%(outdir, c), c, replace, window_size, threads, chrom_len, df_coverage, ploidy) for c, chrom_len in chrom_to_len.items()])
-
-
-
-
-    ####################################################################
-
-
-    askjhdajak
-
-    print(df_coverage.corrected_relative_coverage)
-
-    jkadhgdhjagagd
-
-    # first generate the windows file
-    windows_file = "%s.windows%ibp.bed"%(reference_genome, window_l)
-    windows_file_stderr = "%s.generating.stderr"%windows_file
-    print_if_verbose("genearting windows_file. The stderr is in %s"%windows_file_stderr)
-    run_cmd("%s makewindows -g %s.fai -w %i > %s 2>%s"%(bedtools, reference_genome, window_l, windows_file, windows_file_stderr))
-    remove_file(windows_file_stderr)
-
-    df_windows = get_df_with_coverage_per_windows_relative_to_neighbor_regions
-
-    destination_dir = "%s.calculating_windowcoverage_windows%ibp"%(outdir, window_size)
-    coverage_df = pd.read_csv(generate_coverage_per_window_file_parallel(reference_genome, destination_dir, sorted_bam, windows_file=bed_windows_to_measure, replace=replace, run_in_parallel=run_in_parallel, delete_bams=delete_bams, threads=threads), sep="\t").rename(columns={"#chrom":"chromosome"}).set_index(["chromosome", "start", "end"], drop=False)
-
-
-
-    # define the chrom to len
-    chrom_to_len = get_chr_to_len(reference_genome)
-
-
-
-    # define the breakend locations
-    chrom_to_bpPositions = get_chrom_to_bpPositions(df_clove, reference_genome)
-    for chrom in chrom_to_bpPositions: chrom_to_bpPositions[chrom].update({0, chrom_to_len[chrom]})
-
-
-
-    
-
-
-    thewholeCNVnator_doesntWork
-
-
-    # run cnvnator
-    outdir_cnvnator = "%s/cnvnator_outdir"%outdir
-    cnvnator_outfile = run_CNVNATOR(sorted_bam, reference_genome, outdir_cnvnator, threads, replace, mitochondrial_chromosome, df_clove, window_size, sample_name, chrom_to_len)
-
-    ################## RUN CONY ##################
-
-
-    # go through each chrom
-    for c, chrom_len in chrom_to_len.items():
-
-        # define the outdir 
-        outdir_chrom = "%s/%s_CONYrun"%(outdir, c)
-
-        # run CONY for this chromosome, this is parallelized
-        run_CNV_calling_CONY_one_chromosome(sorted_bam, reference_genome, outdir_chrom, c, replace, window_size, threads, chrom_len, sample_name, chrom_to_bpPositions[c])
-
-
-    #############################################
-
-    finished_CONYallChroms
-
-
-    kdajkajdhd
-
-
-
-
-    #run_CNV_calling_CONY_one_chromosome(sorted_bam, reference_genome, outdir, chromosome, replace, window_size, threads):
-
-    ########## PREPARE DATA FOR CONY RUNNING ########## 
-
-    # create an mpileup file for all chromosomes with mosdepth
-
-
-
-
-
-    available_RAM = get_availableGbRAM()
-
-    delete_folder(gridss_tmpdir); make_folder(gridss_tmpdir)
-    remove_file(gridss_assemblyBAM)
-
-    # define the ram available
-    allocated_ram = get_availableGbRAM(gridss_tmpdir)*fractionRAM_to_dedicate
-    print_if_verbose("running gridss with %iGb of RAM"%allocated_ram)
-
-    # define the heap size, which depends on the cloud or not
-    #jvmheap = "27.5g" # this is the default
-    #jvmheap = "20g" # this works in MN. This can be changed to fit the machine
-    jvmheap = "%ig"%min([31, int(allocated_ram)]) # this is automatically adjusted for the given machine. Note that due to Java's use of Compressed Oops, specifying a max heap size of between 32-48GB effectively reduces the memory available to GRIDSS so is strongly discouraged.
-
-    # define the maxiumum number of threads so that each thread has 8Gb of ram (jvmheap)
-    max_threads = max([1, int(allocated_ram/8 - 1)]) 
-    if threads>max_threads: threads =  max_threads # this is to optimise for the reccommended level of parallelism
-
-
-
-    gridss_run
-
-    # prepare a data table that contains the 1-based positions for each chromosome
-    chrom_to_len = get_chr_to_len(reference_genome)
-    target_df = pd.DataFrame({c : {"seqname":c, "start":1, "end":length} for c, length in chrom_to_len.items() if c!=mitochondrial_chromosome}).transpose()
-    regions_file = "%s/target_regions.bed1based"%outdir
-    save_df_as_tab(target_df[["seqname", "start", "end"]], regions_file)
-
-    ###################################################
-
     # define the final file
-    final_file = "%s/CONVY_finished.txt"%outdir
+    final_CNV_file = "%s/final_CNVcalling.tab"%outdir
 
-    if file_is_empty(final_file) or replace is True:
+    if file_is_empty(final_CNV_file) or replace is True:
 
-        # define the curdir
-        CurDir = get_fullpath(".")
+        # make a df with windows of the genome
+        df_coverage = get_coverage_df_for_windows_of_genome(sorted_bam, reference_genome, outdir, replace, threads, window_size)
 
-        # change the dir to the outdir
-        os.chdir(outdir)
+        # add the 'corrected_relative_coverage' by mappability, GC content and distance to the telomere
+        df_coverage = get_df_coverage_with_corrected_coverage(df_coverage, reference_genome, outdir, replace, threads, mitochondrial_chromosome, df_gridss)
 
-        # run CONY
-        cony_std = "%s/running_cony.std"%outdir
-        print_if_verbose("Running CONY. The std is in %s"%cony_std)
+        # add the fraction of N bases
+        chrom_to_seq = {seq.id : str(seq.seq).upper() for seq in SeqIO.parse(reference_genome, "fasta")}
+        df_coverage["width"] = (df_coverage.end - df_coverage.start).apply(int)
+        df_coverage["fraction_N_bases"] = df_coverage.apply(run_fraction_Nbases_window_genome, chrom_to_seq=chrom_to_seq, axis=1)
 
-        cmd = "%s --reference_genome %s --sorted_bam %s --regions_file %s --libraries_CONY %s --window_size %i > %s 2>&1"%(run_CONY_R, reference_genome, sorted_bam, regions_file, libraries_CONY, window_size, cony_std)
-        run_cmd(cmd, env=EnvName_CONY)
+        ######## RUN CONY ########
 
-        remove_file(cony_std)
+        # get chrom to len
+        chrom_to_len = get_chr_to_len(reference_genome)
 
-        # return to the initial dir
-        os.chdir(CurDir)
+        # define the sample name
+        sample_name = get_sample_name_from_bam(sorted_bam)
 
-        # make the final file
-        open(final_file, "w").write("CONY finished")
+        # run CONY for each chromosome
+        df_CNperWindow_CONY_file = "%s/df_CNperWindow_CONY.tab"%outdir
+
+        if file_is_empty(df_CNperWindow_CONY_file) or replace is True:
+
+            df_CNperWindow_CONY = pd.concat([run_CNV_calling_CONY_one_chromosome(reference_genome, "%s/%s_CONYrun"%(outdir, c), c, replace, window_size, threads, chrom_len, sample_name, df_coverage, ploidy) for c, chrom_len in chrom_to_len.items()])
+
+            save_df_as_tab(df_CNperWindow_CONY, df_CNperWindow_CONY_file)
+
+        df_CNperWindow_CONY = get_tab_as_df_or_empty_df(df_CNperWindow_CONY_file).rename(columns={"seqname":"chromosome"})
+
+        ##########################
+
+        ####### RUN HMMCOPY, SIMILARLY TO A RECENT C. glabrata PAPER #######
+
+        # This is based on "Understand the genomic diversity and evolution of fungal pathogen Candida glabrata by genome-wide analysis of genetic variations"
+
+        HMMcopy_outdir = "%s/HMMcopy_run"%outdir
+        df_CNperWindow_HMMcopy_file = "%s/df_CNperWindow_HMMcopy_final.tab"%outdir
+
+        if file_is_empty(df_CNperWindow_HMMcopy_file) or replace is True:
+
+            df_CNperWindow_HMMcopy = run_CNV_calling_HMMcopy(HMMcopy_outdir, replace, threads, df_coverage, ploidy, reference_genome, mitochondrial_chromosome)
+
+            save_df_as_tab(df_CNperWindow_HMMcopy, df_CNperWindow_HMMcopy_file)
+
+        df_CNperWindow_HMMcopy = get_tab_as_df_or_empty_df(df_CNperWindow_HMMcopy_file)
+
+        ####################################################################
+
+        # add to df coverage
+        df_coverage = df_coverage.merge(df_CNperWindow_CONY[["chromosome", "start", "end", "relative_CN"]], on=["chromosome", "start", "end"], left_index=False, right_index=False, how="left", validate="one_to_one").rename(columns={"relative_CN":"relative_CN_CONY"})
+
+        df_coverage = df_coverage.merge(df_CNperWindow_HMMcopy[["chromosome", "start", "end", "relative_CN"]], on=["chromosome", "start", "end"], left_index=False, right_index=False, how="left", validate="one_to_one").rename(columns={"relative_CN":"relative_CN_HMMcopy"})
 
 
+        print_if_verbose("plotting predictions")
 
-    #Error in .Call2("solve_user_SEW", refwidths, start, end, width, translate.negative.coord,  : 
-    #solving row 14: 'allow.nonnarrowing' is FALSE and the supplied end (20100) is > refwidth
-    #Calls: WindowInfo ... narrow -> narrow -> solveUserSEW -> .Call2 -> .Call
-    #In addition: There were 42 warnings (use warnings() to see them)
+        ######### PLOT CORRELATION #########
+
+        if plot_correlation is True:
+
+            print_if_verbose("plotting predictions")
+
+            # define a plot df
+            df_plot = cp.deepcopy(df_coverage)
+
+            # get the plot and jitter
+            df_plot = df_plot.sort_values(by=["relative_CN_HMMcopy", "relative_CN_CONY"])
+            df_plot["relative_CN_HMMcopy"] = df_plot.relative_CN_HMMcopy + np.random.uniform(-1, 1, len(df_plot))*0.2
+            df_plot["relative_CN_CONY"] = df_plot.relative_CN_CONY + np.random.uniform(-1, 1, len(df_plot))*0.2
+
+            fig = plt.figure(figsize=(5,5))
+
+            plt.plot(df_plot["relative_CN_HMMcopy"], df_plot["relative_CN_CONY"], "o", alpha=0.01, color="gray", label="CN by each program")
+            #sns.kdeplot(df_plot[["relative_CN_HMMcopy", "relative_CN_CONY"]], cmap="gist_gray", shade=True)
+
+            max_val = max([max(df_plot.relative_CN_HMMcopy), max(df_plot.relative_CN_CONY)])
+            lims = [0, max_val]
+
+            plt.legend(bbox_to_anchor=(1, 1))
+            plt.xlim(lims)
+            plt.ylim(lims)
+            plt.xlabel("CN predicted by HMMcopy")
+            plt.ylabel("CN predicted by CONY")
+
+            # add line
+            plt.plot(np.linspace(0, max_val, 3), np.linspace(0, max_val, 3), "--", color="red", linewidth=.9)
+
+            filename = "%s/CNtwoPrograms.pdf"%(outdir)
+            fig.savefig(filename, bbox_inches='tight')
+            plt.close(fig)
+
+        ####################################
+
+        ############ MERGE PREDICTIONS ###########
+
+        print_if_verbose("merging predictions")
+        
+        # get the most conservative relative_CN
+        def get_closest_to_relative_CN(r): return find_nearest(r, 1.0)
+        df_coverage["merged_relative_CN"] = df_coverage[["relative_CN_CONY", "relative_CN_HMMcopy"]].apply(get_closest_to_relative_CN, axis=1)
+
+        print_if_verbose("There are %i/%i windows of the genome under CNV"%(sum(df_coverage.merged_relative_CN!=1.0), len(df_coverage)))
+
+        # get the df with the events of CNV
+        df_coverage = df_coverage.sort_values(by=["chromosome", "start", "end"])
+        df_coverage["windowID"] = list(range(len(df_coverage))) 
+        df_coverage = df_coverage.set_index("windowID", drop=False)
+
+        df_CNV = pd.DataFrame()
+        for chrom in sorted(set(df_coverage.chromosome)):
+            for CNstate in set(df_coverage.merged_relative_CN).difference({1.0}):
+
+                # get the df of this chromosome under this specific CNstate
+                df_chrom_CN = df_coverage[(df_coverage.merged_relative_CN==CNstate) & (df_coverage.chromosome==chrom)]
+                if len(df_chrom_CN)==0: continue
+
+                # define the CNVid, which is an ID for adjacent windows
+                CNVids = []
+                previous_wID = df_chrom_CN.index[0] - 1
+                previous_CNVid = 0
+                for wID, r in df_chrom_CN.iterrows():
+
+                    # the window is the same
+                    if wID==(previous_wID+1): CNVid = previous_CNVid                    
+
+                    # it is a new window
+                    else: CNVid = previous_CNVid + 1
+
+                    # keep
+                    CNVids.append(CNVid)
+
+                    # define the previous things
+                    previous_CNVid = CNVid
+                    previous_wID = wID
+
+                # add to the df
+                df_chrom_CN["CNVid"] = CNVids
+
+                # get a df 
+                df_chrom_CN = df_chrom_CN.groupby("CNVid").apply(lambda df_cn: pd.Series({"chromosome":chrom, "merged_relative_CN":CNstate, "start":min(df_cn.start), "end":max(df_cn.end)}))
+
+                # keep
+                df_CNV = df_CNV.append(df_chrom_CN)
 
 
+        # add metadata
+        df_CNV = get_df_CNV_with_metadata_from_df_coverage(df_coverage, df_CNV)
 
-    adkjhkaj
+        ############################################
 
+        # clean
+        files_folders_remove = [HMMcopy_outdir] + ["%s/%s_CONYrun"%(outdir, c) for c in chrom_to_len]
+        for f in files_folders_remove: delete_folder(f)
 
-    libraries_CONY
+        # save
+        save_df_as_tab(df_CNV, final_CNV_file)
 
+    # load
+    df_CNV = get_tab_as_df_or_empty_df(final_CNV_file)
 
-    # run samtools mpileup to get the 
-
+    return df_CNV
+    
 def write_integrated_smallVariantsTable_as_vcf_old(df, filename, ploidy):
 
     """This function takes a df table with the ouptut of VEP and writes a vcf only with the variants (no annotation)"""
@@ -14274,9 +14586,12 @@ def get_coverage_df_windows_with_within_windows_statistics(df_windows, outdir, s
     df_subwindows = get_df_subwindows_from_df_windows(df_windows, n_subwindows=20)
     initial_len_subwindows = len(df_subwindows)
 
+    # debug
+    if any(df_subwindows.start>=df_subwindows.end): raise ValueError("there can't be any windows with start>=end")
+
     # get the  coverage of the subwindows
     windows_file = "%s/subwindows.bed"%outdir
-    df_subwindows.to_csv(windows_file, sep="\t", header=True, index=False)
+    df_subwindows[["chromosome", "start", "end"]].to_csv(windows_file, sep="\t", header=True, index=False)
     df_subwindows_coverage = get_coverage_per_window_df_without_repeating(reference_genome, sorted_bam, windows_file, replace=replace, run_in_parallel=True, delete_bams=False, threads=threads)
 
     print_if_verbose("merging with subwindows")
@@ -14415,7 +14730,7 @@ def get_bestID_from_df_CNV_cluster(clustered_nuericIDs, df_CNV):
     """This function takes a df_CNV and the clusteredIDs. It returns the best clusterID"""
 
     # get the df with the lcuster IDs
-    df = df_CNV.loc[clustered_nuericIDs].sort_values(by=["type_CNVcall_int", "typeBPs_int", "QUAL", "AF", "length"], ascending=False)
+    df = df_CNV.loc[clustered_nuericIDs].sort_values(by=["type_CNVcall_int", "length"], ascending=False)
 
     return df.ID.iloc[0]
 
@@ -14431,14 +14746,12 @@ def get_list_clusters_overlapping_df_CNV(outdir, df_CNV, pct_overlap, threads):
     # checks
     if len(set(df_CNV.SVTYPE).difference({"DUP", "DEL"}))>0: raise ValueError("SVTYPE is not properly formated")
     if len(set(df_CNV.type_CNVcall).difference({"gridssClove", "coverage"}))>0: raise ValueError("type_CNVcall is not properly formated")
-    if len(set(df_CNV.typeBPs).difference({"RealBPs", "wholeChrom", "oneRealBP", "FilteredOutBPs"}))>0: raise ValueError("typeBPs is not properly formated")
 
     # get the ID_to_overlappingIDs
 
     # add the combination of chromosome and SVtype. This will be used in the bedtools intersect to get the correct IDs
     df_CNV["chromosome_SVTYPE"] = df_CNV.chromosome + "_" + df_CNV.SVTYPE
 
-   
     # write a bed with the intersecting IDs
     bed_cnv_regions = "%s/df_CNV.bed"%outdir
     df_CNV[["chromosome_SVTYPE", "start", "end", "numericID"]].to_csv(bed_cnv_regions, sep="\t", header=False, index=False)
@@ -14492,14 +14805,8 @@ def get_nonRedundant_CNVcalls_coverage(outdir, df_CNV, df_vcf_forCNV, threads, r
     df_CNV = cp.deepcopy(df_CNV)
     df_vcf_forCNV = cp.deepcopy(df_vcf_forCNV)
 
-    # add the quality and AF, which are useful for the sorting of redundant variants
-    df_CNV["QUAL"] = df_CNV.QUAL_mean
-    df_CNV["AF"] = df_CNV.real_AF_min
-    df_vcf_forCNV["QUAL"] = 1000000000
-    df_vcf_forCNV["AF"] = 1.0
-
     # define all called SVs
-    fields = ["ID", "chromosome", "start", "end", "SVTYPE", "type_CNVcall", "typeBPs", "QUAL", "AF"]
+    fields = ["ID", "chromosome", "start", "end", "SVTYPE", "type_CNVcall"]
     all_df_CNV = df_CNV[fields].append(df_vcf_forCNV[fields]).sort_values(by=["SVTYPE", "chromosome", "start", "end"])
 
     # sort as bed
@@ -14522,9 +14829,6 @@ def get_nonRedundant_CNVcalls_coverage(outdir, df_CNV, df_vcf_forCNV, threads, r
     type_CNVcall_to_int = {"gridssClove":1, "coverage":0}
     all_df_CNV["type_CNVcall_int"] = all_df_CNV.type_CNVcall.apply(lambda x: type_CNVcall_to_int[x])
 
-    typeBPs_to_int = {"RealBPs":3, "wholeChrom":2, "oneRealBP":1, "FilteredOutBPs":0}
-    all_df_CNV["typeBPs_int"] = all_df_CNV.typeBPs.apply(lambda x: typeBPs_to_int[x])
-
     all_df_CNV["length"] = all_df_CNV.end - all_df_CNV.start
 
     # get the best IDs from each cluster
@@ -14537,113 +14841,6 @@ def get_nonRedundant_CNVcalls_coverage(outdir, df_CNV, df_vcf_forCNV, threads, r
     df_CNV_NR["QUAL"] = "."
 
     return df_CNV_NR[initial_fields]
-
-def get_breakend_IDs_df_CNV_r(r, df_gridss, chrom_to_len):
-
-    """Takes a row of the df_CNV and returns a list with the breakend IDs. There should be only two breakends. If the brekends are the chromosome ends, they should be related with None"""
-
-    # get the ID for each location by closest position
-    bendIDs = []
-    for pos in [r["start"], r["end"]]:
-
-        # chromosome ends
-        if pos in {0, chrom_to_len[r["chromosome"]]}: bendID = None
-
-        # breakends
-        else:
-
-            # get the df_gridss that is closest to the pos. There should only be 1
-            df_bend = df_gridss[(df_gridss["#CHROM"]==r["chromosome"]) & (df_gridss.POS==(pos+1))]
-
-            # debug
-            if len(df_bend)!=1: raise ValueError("there shuld only be one breakend")
-
-            # keep
-            bendID = df_bend.iloc[0]["ID"]
-
-        bendIDs.append(bendID)
-
-    return bendIDs
-
-def get_df_CNV_with_metadata(df_CNV, df_gridss, chrom_to_len):
-
-    """This function takes a df_CNV and add some metadata, for each field """
-
-    # debug
-    if len(df_CNV)==0: return df_CNV
-
-    # get index
-    df_gridss = cp.deepcopy(df_gridss)
-    df_gridss = df_gridss.set_index("ID", drop=False)
-    if len(df_gridss)!=len(set(df_gridss.index)): raise ValueError("ID has to be unique")
-
-    # get the breakend IDs as a list
-    df_CNV["breakend_IDs"] = df_CNV.apply(lambda r: get_breakend_IDs_df_CNV_r(r, df_gridss, chrom_to_len), axis=1)
-
-    # define the initial fields
-    initial_fields = list(df_CNV.keys())
-
-    # split df into wholeChrom or BP-based
-    df_CNV_wholeChrom = df_CNV[df_CNV.typeBPs=="wholeChrom"]
-    if not all(df_CNV_wholeChrom.breakend_IDs.apply(lambda x: all([y is None for y in x]))): raise ValueError("something went wrong with the wholeChrom definition")
-
-    df_CNV_bends = df_CNV[df_CNV.typeBPs!="wholeChrom"]
-
-    # add the breakend IDs in df_CNV_wholeChrom
-    df_CNV_wholeChrom["BREAKENDIDs"] = "wholeChrom"
-
-    ######### ADD METADATA FROM THE MAPPED BREAKENDS #########
-
-    # init the metadata fields
-    metadata_fields = []
-
-    # add the fields metadata
-    for estimate_fn_name, estimate_fn in [("min", min), ("max", max), ("mean", np.mean)]:
-
-        # go throug each field
-        for quant_field in ["allele_frequency", "allele_frequency_SmallEvent", "real_AF", "length_inexactHomology", "length_microHomology", "QUAL"]:
-
-            # keep field
-            field = "%s_%s"%(quant_field, estimate_fn_name)
-            metadata_fields.append(field)
-
-            # add to df
-            df_CNV_bends[field] = df_CNV_bends.breakend_IDs.apply(lambda x: estimate_fn([df_gridss.loc[bendID, quant_field] for bendID in x if not bendID is None]))
-
-    # add the brekends as a string
-    df_CNV_bends["BREAKENDIDs"] = df_CNV_bends.breakend_IDs.apply(lambda x: ",".join([bendID for bendID in x if not bendID is None]))
-
-    ##########################################################
-
-    # map each chromosome to the best_score
-
-    # add the best quantitative fields to df_CNV_wholeChrom
-    for f in metadata_fields:
-
-        # get the maximum fields
-        if any([f.startswith(x) for x in {"allele_frequency", "allele_frequency_SmallEvent", "real_AF", "QUAL"}]): 
-
-            # assign a different field depending on the emptyness
-            if len(df_CNV_bends)>0: df_CNV_wholeChrom[f] = max(df_CNV_bends[f])
-
-            else: df_CNV_wholeChrom[f] = 1000.0
-
-        # get the minimum fields
-        elif any([f.startswith(x) for x in {"length_inexactHomology", "length_microHomology"}]): 
-
-            # assign a different field depending on the emptyness
-            if len(df_CNV_bends)>0: df_CNV_wholeChrom[f] = min(df_CNV_bends[f])
-
-            else: df_CNV_wholeChrom[f] = 0.0
-
-        else: raise ValueError("%s is not valid"%f)
-
-
-    # keep both dfs
-    final_fields = initial_fields + ["BREAKENDIDs"] + metadata_fields
-    df_CNV = df_CNV_bends[final_fields].append(df_CNV_wholeChrom[final_fields])
-
-    return df_CNV
 
 def get_df_gridss_chrom_to_positions(df_gridss, chrom_to_len):
 
@@ -15053,297 +15250,6 @@ def get_df_gridss_removing_redundant_lowConfidenceBPs(df_gridss, outdir, threads
     return df_gridss[initial_fields]
 
 
-
-def get_CNV_calling_with_coverageBased_added(df_vcf, outdir, sorted_bam, reference_genome, df_clove, df_gridss, ploidy, replace=False, threads=4, mitochondrial_chromosome="mito_C_glabrata_CBS138", max_coverage_deletion=0.01, min_coverage_duplication=1.8, min_sv_size=50, min_r_pearson_noFlatRegions=0.2, min_r_spearman_noFlatRegions=0.2):
-
-    """This function gets a df_vcf with calls of CNV (<DUP> or <DEL>) based on coverage. It generates a bed with the query regions, which include genes and any region that is surrounded by breakpoints (this also includes whole chromosomes). """
-
-    print_if_verbose("calculating CNV based on coverage and breakpoints")
-
-    # keep objects
-    df_clove = cp.deepcopy(df_clove)
-    df_vcf = cp.deepcopy(df_vcf)
-
-    # define the fields
-    vcf_fields = ["#CHROM", "POS", "ID", "REF", "ALT", "QUAL", "FILTER", "INFO", "FORMAT"]
-                                                                                                                          
-    # add the IDs set
-    df_clove["IDs_set"] = df_clove.ID.apply(lambda x: set(re.split("\+|\-", x)))
-    check_that_cloveIDs_are_in_gridss_df(df_clove, df_gridss)
-
-    # add to the df_gridss the type_BEND
-    all_cloveIDs = set.union(*df_clove.IDs_set)
-    bool_to_text = {True : "highConfidence", False: "lowConfidence"}
-    df_gridss["type_BEND"] = df_gridss.eventID_as_clove.isin(all_cloveIDs).apply(lambda x: bool_to_text[x])
-
-    # make outdir
-    make_folder(outdir)
-
-    # define files
-    raw_cnv_file = "%s/all_CNV_events.tab"%outdir
-    merged_vcf_file = "%s/merged_SV_and_CNV.tab"%outdir
-
-    if file_is_empty(merged_vcf_file) or replace is  True:
-
-        # get the chrom to len
-        chrom_to_len = get_chr_to_len(reference_genome)
-
-        # calculate median cov
-        destination_dir = "%s.calculating_windowcoverage"%sorted_bam
-        coverage_df = pd.read_csv(generate_coverage_per_window_file_parallel(reference_genome, destination_dir, sorted_bam, windows_file="none", replace=replace, run_in_parallel=True, delete_bams=False), sep="\t")
-        median_coverage = get_median_coverage(coverage_df, mitochondrial_chromosome)
-
-        # sort by type_BEND and QUAL
-        type_BEND_to_int = {"highConfidence":0, "lowConfidence":1}
-        df_gridss["type_BEND_int"] = df_gridss.type_BEND.apply(lambda x: type_BEND_to_int[x])
-
-        df_gridss = df_gridss.sort_values(by=["#CHROM", "POS", "type_BEND_int", "QUAL"])
-
-        # discard duplicates, marking the first as False, so that we keep the best breakpoint at each position
-        df_gridss = df_gridss[~(df_gridss.duplicated(subset=["#CHROM", "POS"], keep="first"))]
-
-        # discard gridss breakpoints that are close to high-confidence breakpoints, also removing those that are redundant from the low-confidence cathegory. Any two low
-        df_gridss  = get_df_gridss_removing_redundant_lowConfidenceBPs(df_gridss, outdir, threads, chrom_to_len, replace, overlap_bp=min_sv_size)
-
-        if file_is_empty(raw_cnv_file) or replace is True:
-            print_if_verbose("getting raw CNV calls")
-
-            ######### DEFINE THE QUERY REGIONS #########
-
-            # define the filename
-            query_df_filename = "%s/query_regions_CNV.bed"%outdir
-            if file_is_empty(query_df_filename) or replace is True:
-                print_if_verbose("calculating potential regions")
-
-                # initialize all IDs
-                query_regions_dict = {}
-
-                # get the chrom_to_bpPositions high confidence 
-                chrom_to_bpPositions_real = get_df_gridss_chrom_to_positions(df_gridss[df_gridss.type_BEND=="highConfidence"], chrom_to_len)
-                for chrom in chrom_to_bpPositions_real: chrom_to_bpPositions_real[chrom].update({0, chrom_to_len[chrom]})
-
-                # get the chrom_to_bpPositions for low confidence
-                df_gridss_lowConfidence = get_df_gridss_low_confidence_reasonable_breakpoints(df_gridss, ploidy, min_coverage_duplication, max_coverage_deletion, min_sv_size, chrom_to_len, reference_genome, sorted_bam, outdir, replace, threads, median_coverage)
-
-                print_if_verbose("there are %i/%i positions that are low confidence and may be related to CNV"%(len(df_gridss_lowConfidence), sum(df_gridss.type_BEND=="lowConfidence")))
-
-                chrom_to_bpPositions_filteredOut = get_df_gridss_chrom_to_positions(df_gridss_lowConfidence, chrom_to_len)
-
-                # go through each chromose, keeping the IDs that are together
-                for chrom in chrom_to_len:
-                    print_if_verbose(chrom)
-
-                    # get the two sets
-                    if chrom in chrom_to_bpPositions_real: bpPositions_real = chrom_to_bpPositions_real[chrom]
-                    else: bpPositions_real = set()
-
-                    if chrom in chrom_to_bpPositions_filteredOut: bpPositions_filteredOut = chrom_to_bpPositions_filteredOut[chrom]
-                    else: bpPositions_filteredOut = set()
-
-                    # get as a np.array
-                    bpPositions_set = bpPositions_real.union(bpPositions_filteredOut)
-                    bpPositions = np.array(sorted(bpPositions_set))
-
-                    # go through each combination of them
-                    for bpPosA in bpPositions:
-                        for bpPosB in bpPositions[bpPositions>bpPosA]:
-
-                            # define the length
-                            len_region = bpPosB - bpPosA
-
-                            # skip if the length is less than min_sv_size
-                            if len_region<min_sv_size: continue
-
-                            # define the region_type
-                            if bpPosA==0 and bpPosB==chrom_to_len[chrom]: region_type = "wholeChrom"
-                            elif bpPosA in bpPositions_real and bpPosB in bpPositions_real: region_type = "RealBPs"
-                            elif (bpPosA in bpPositions_real and bpPosB in bpPositions_filteredOut) or (bpPosB in bpPositions_real and bpPosA in bpPositions_filteredOut): region_type = "oneRealBP"
-                            elif bpPosA in bpPositions_filteredOut and bpPosB in bpPositions_filteredOut: region_type = "FilteredOutBPs"
-                            else: raise ValueError("there is an error with the breakpoints")
-
-                            # define the ID of the region
-                            ID = "%s:%i-%i|%s"%(chrom, bpPosA, bpPosB, region_type)
-                            query_regions_dict[ID] = {"chromosome":chrom, "start":bpPosA, "end":bpPosB, "ID":ID}
-
-                # get the df
-                print_if_verbose("gettting df")
-                query_df = pd.DataFrame(query_regions_dict).transpose()[["chromosome", "start", "end", "ID"]].sort_values(by=["chromosome", "start", "end"])
-                query_df = query_df.drop_duplicates()
-
-                # save
-                print_if_verbose("saving")
-                query_df_filename_tmp = "%s.tmp"%query_df_filename
-                query_df.to_csv(query_df_filename_tmp, sep="\t", header=True, index=False)
-                os.rename(query_df_filename_tmp, query_df_filename)
-
-            # load
-            query_df = pd.read_csv(query_df_filename, sep="\t")
-            total_n_regions = len(query_df)
-
-            # debug
-            if any((query_df.end-query_df.start)<min_sv_size): raise ValueError("there are regions that are shorter than min_sv_size")
-
-            # keep the interesting query regions after some coverage testings
-            query_df = get_potentially_CNV_query_df(query_df, sorted_bam, reference_genome, outdir, threads, replace, max_coverage_deletion, min_coverage_duplication, mitochondrial_chromosome, median_coverage)
-
-            query_df = query_df[["chromosome", "start", "end", "ID"]]
-
-            # debug 
-            #query_df = query_df.iloc[0:100]
-
-            ############################################
-
-            ######### GET THE REGIONS UNDER CNV #########
-            print_if_verbose("getting actual regions under CNV")
-
-            # add the coverage of neighbor regions to query_df
-            bed_windows_prefix = "%s/calculating_cov_neighbors_queryRegions"%outdir
-            query_df = get_df_with_coverage_per_windows_relative_to_neighbor_regions(query_df, bed_windows_prefix, reference_genome, sorted_bam, df_clove, median_coverage, replace=replace, run_in_parallel=True, delete_bams=False, threads=threads)
-            # remember that the coverage relative to neighbors is meaningless for whole chromosomes (or those vars that cover >90% of the chromosome)
-
-
-            # just keep the regions where the coverage is according
-            query_df = query_df[(query_df.relative_coverage_target>=min_coverage_duplication) | (query_df.relative_coverage_target<=max_coverage_deletion) ]
-            print_if_verbose("There are %i/%i that might have CNV. Testing with CI-95pct..."%(len(query_df), total_n_regions))
-
-            # continue if df is not empty
-            if len(query_df)>0:
-
-                # get a query_df with the coverage statistics of windows within them
-                query_df = get_coverage_df_windows_with_within_windows_statistics(query_df, outdir, sorted_bam, reference_genome, median_coverage, replace=replace, threads=threads)
-
-                # save
-                all_potential_regions_file = "%s/all_potential_regions_CNV.tab"%outdir 
-                query_df.to_csv(all_potential_regions_file, sep="\t", index=False, header=True)
-
-                # the notFlat coverage is indicated by spearman r and pearson r
-                query_df["notFlatCoverage"] = ((query_df.spearman_p<0.05) | (query_df.pearson_p<0.05)) & (query_df.abs_pearson_r>=min_r_pearson_noFlatRegions) & (query_df.abs_spearman_r>=min_r_spearman_noFlatRegions)
-
-                query_df["is_duplication"] = (query_df.mean95CI_lower_rel_coverage_relative>=min_coverage_duplication) & (query_df.median95CI_lower_rel_coverage_relative>=min_coverage_duplication) & (query_df.mean95CI_lower_rel_coverage>=min_coverage_duplication) & (query_df.median95CI_lower_rel_coverage>=min_coverage_duplication)
-                
-                query_df["is_deletion"] = (query_df.mean95CI_higher_rel_coverage_relative<=max_coverage_deletion) & (query_df.median95CI_higher_rel_coverage_relative<=max_coverage_deletion) & (query_df.mean95CI_higher_rel_coverage<=max_coverage_deletion) & (query_df.median95CI_higher_rel_coverage<=max_coverage_deletion)
-
-                # prints
-                print_if_verbose("There are %i/%i regions with signs of duplication"%(sum(query_df.is_duplication), len(query_df)))
-                print_if_verbose("There are %i/%i regions with signs of deletion"%(sum(query_df.is_deletion), len(query_df)))
-
-                # save
-                df_CNV = query_df[~(query_df.notFlatCoverage) & ((query_df.is_duplication) | (query_df.is_deletion))]
-
-            else: df_CNV = pd.DataFrame(columns=["is_duplication", "is_deletion", "ID"])
-
-            raw_cnv_file_tmp = "%s.tmp"%raw_cnv_file
-            df_CNV.to_csv(raw_cnv_file_tmp, sep="\t", index=False, header=True)
-            os.rename(raw_cnv_file_tmp, raw_cnv_file)
-
-            #################################################
-
-        ############ GET RID OF REDUNDANT EVENTS ############
-
-        # load df
-        df_CNV = pd.read_csv(raw_cnv_file, sep="\t")
-
-        # add the SVTYPE
-        bool_to_text = {True:"DUP", False:"DEL"}
-        df_CNV["SVTYPE"] = df_CNV.is_duplication.apply(lambda x: bool_to_text[x])
-
-        # get the vcf formatted as df_CNV
-        df_vcf_forCNV = df_vcf[df_vcf.ALT.isin({"<DUP>", "<TDUP>", "<DEL>"})].rename(columns={"POS":"start", "#CHROM":"chromosome"}).set_index("ID", drop=False)
-        df_vcf_forCNV["end"] = df_vcf_forCNV.INFO.apply(lambda x: [int(y.split("END=")[1]) for y in x.split(";") if y.startswith("END")][0])
-
-        # add the svtype
-        svtype_to_DUPDEL = {"TDUP":"DUP", "DUP":"DUP", "DEL":"DEL"}
-        df_vcf_forCNV["SVTYPE"] = df_vcf_forCNV.INFO.apply(lambda x: [svtype_to_DUPDEL[y.split("SVTYPE=")[1]] for y in x.split(";") if y.startswith("SVTYPE")][0])
-
-        # add the type of SVcall
-        df_vcf_forCNV["type_CNVcall"] = "gridssClove"
-        df_CNV["type_CNVcall"] = "coverage"
-
-        # get the type of BPs
-        df_vcf_forCNV["typeBPs"] = "RealBPs"
-        df_CNV["typeBPs"] = df_CNV.ID.apply(lambda x: x.split("|")[-1])
-
-        # add gridss metadata
-        df_CNV = get_df_CNV_with_metadata(df_CNV, df_gridss, chrom_to_len)
-
-        # get only non-redundant CNVs
-        df_CNV.index = list(range(0, len(df_CNV)))
-        df_CNV = get_nonRedundant_CNVcalls_coverage(outdir, df_CNV, df_vcf_forCNV, threads, replace, pct_overlap=0.8)
-
-        nDups = sum(df_CNV.SVTYPE=="DUP")
-        nDels = sum(df_CNV.SVTYPE=="DEL")
-        print_if_verbose("There are %i DUPs and %i DELs that do not ovelap any variants already inferred by GRIDSS+CLOVE"%(nDups, nDels))
-
-        #####################################################
-
-        ###### FORMAT AS VCF ######
-
-        # define fields
-        data_fields = ["chromosome", "start", "end", "ID", "SVTYPE", "INFO", "median95CI_lower_rel_coverage", "median95CI_higher_rel_coverage", "median95CI_lower_rel_coverage_relative", "median95CI_higher_rel_coverage_relative", "abs_spearman_r", "abs_pearson_r", "spearman_p", "pearson_p"]
-
-        # get the coverage calculation for the input vcf TAN,DUP,DEL
-
-        if len(df_vcf_forCNV)==0: df_vcf_forCNV_final = pd.DataFrame(columns=data_fields)
-        
-        else:   
-
-            df_vcf_forCNV_final  = df_vcf_forCNV.set_index("ID", drop=False)
-            bed_windows_prefix = "%s/calculating_cov_neighbors_SV-based_vcf"%outdir
-            df_vcf_forCNV_final = get_df_with_coverage_per_windows_relative_to_neighbor_regions(df_vcf_forCNV_final, bed_windows_prefix, reference_genome, sorted_bam, df_clove, median_coverage, replace=replace, run_in_parallel=True, delete_bams=False, threads=threads)
-            df_vcf_forCNV_final = get_coverage_df_windows_with_within_windows_statistics(df_vcf_forCNV_final, outdir, sorted_bam, reference_genome, median_coverage, replace=replace, threads=threads)
-
-            # change the SVTYPE to follow INFO. This is important to get TDUPs back in place
-            df_vcf_forCNV_final["SVTYPE"] = df_vcf_forCNV_final.INFO.apply(lambda x: [y.split("SVTYPE=")[1] for y in x.split(";") if y.startswith("SVTYPE")][0])
-
-        # initialize the final vcf
-        if len(df_CNV)==0: df_CNV = pd.DataFrame(columns=data_fields)
-
-        else:
-
-            # add the fields
-            df_CNV["region_type"] = df_CNV.ID.apply(lambda x: x.split("|")[1])
-            df_CNV["coords_string"] = df_CNV.ID.apply(lambda x: x.split("|")[0])
-            df_CNV["ID"] = "coverage" + df_CNV.SVTYPE +  "|" + df_CNV.coords_string
-            df_CNV["INFO"] = df_CNV.apply(lambda r: "END=%i;SVTYPE=%s;BPS_TYPE=%s;BREAKENDIDs=%s"%(r["end"], r["SVTYPE"], r["region_type"], r["BREAKENDIDs"]), axis=1)
-
-        # initialize merge with the info fields
-        df_vcf_final = df_CNV[data_fields].append(df_vcf_forCNV_final[data_fields])
-
-        # add the INFO
-        if len(df_vcf_final)==0: df_vcf_final["INFO"] = ""
-        else:   
-
-            df_vcf_final["INFO"] = df_vcf_final.apply(lambda r: "%s;RELCOVERAGE=%.4f,%.4f;RELCOVERAGE_NEIGHBOR=%.4f,%.4f;REGION_ABS_SPEARMANR=%.4f;REGION_ABS_PEARSONR=%.4f;REGION_SPEARMANP=%.4f;REGION_PEARSONP=%.4f"%(r["INFO"], r["median95CI_lower_rel_coverage"], r["median95CI_higher_rel_coverage"], r["median95CI_lower_rel_coverage_relative"], r["median95CI_higher_rel_coverage_relative"], r["abs_spearman_r"], r["abs_pearson_r"], r["spearman_p"], r["pearson_p"]), axis=1)
-
-        # add the ALT
-        df_vcf_final["ALT"] = "<" + df_vcf_final.SVTYPE + ">"
-
-        # add empty fields
-        for f in  ["REF", "QUAL", "FILTER", "FORMAT"]: df_vcf_final[f] = "."
-
-        # rename fields
-        df_vcf_final = df_vcf_final.rename(columns={"chromosome":"#CHROM", "start":"POS"})[vcf_fields]
-
-        # append the initial vcf 
-        df_vcf_noCNV = df_vcf[~(df_vcf.ALT.isin({"<DUP>", "<TDUP>", "<DEL>"}))]
-        df_vcf_final = df_vcf_final[vcf_fields].append(df_vcf_noCNV[vcf_fields])
-
-        ##########################
-
-        # delete bams        
-        clean_chromosomal_bam_files(sorted_bam, reference_genome)
-     
-        # write
-        merged_vcf_file_tmp = "%s.tmp"%merged_vcf_file
-        df_vcf_final.to_csv(merged_vcf_file_tmp, sep="\t", index=False, header=True)
-        os.rename(merged_vcf_file_tmp, merged_vcf_file)
-
-    # load
-    df_vcf_final = pd.read_csv(merged_vcf_file, sep="\t")
-
-    return  df_vcf_final[vcf_fields]
-
-
 def get_correct_POS_in1based(r):
 
     """Takes a row of df_vcf SV calling and returns the 1- based position. Only the ACTG ones will not be considered"""
@@ -15453,6 +15359,9 @@ def get_correct_INFO_with_bendIDs_and_bendStats(r, df_gridss):
 
         if len(set(breakend_IDs))!=len(breakend_IDs): raise ValueError("there should be one breakend per position")
 
+    # in the CNV ones there are no breakend IDs, so you should just without breakendIDs
+    elif r["ID"].split("|")[0] in  {"coverageDEL", "coverageDUP"}: breakend_IDs = ["."]
+
     else: raise ValueError("info is not valid. This is it:\n-------\n %s\n-------\n"%info)
 
     # add them to info
@@ -15463,7 +15372,7 @@ def get_correct_INFO_with_bendIDs_and_bendStats(r, df_gridss):
     ######### ADD THE BREKEND STATS BASED ON THE BREAKPOINTS #########
 
     # for whole chromosomes, just keep the best
-    if breakend_IDs!=["wholeChrom"]: 
+    if breakend_IDs!=["wholeChrom"] and breakend_IDs!=["."]: 
 
         # get the quantitative fields
         gridss_quantitative_fields=["allele_frequency", "allele_frequency_SmallEvent", "real_AF", "length_inexactHomology", "length_microHomology", "QUAL", "length_event", "len_inserted_sequence"]
@@ -15517,8 +15426,110 @@ def clean_sorted_bam_coverage_per_window_files(sorted_bam):
 
         if path.startswith("%s.coverage_per_window."%sorted_bam): remove_file(path)
 
-def get_vcf_all_SVs_and_CNV(perSVade_outdir, outdir, sorted_bam, reference_genome, ploidy, replace=False, threads=4, mitochondrial_chromosome="mito_C_glabrata_CBS138", mito_code=3, gDNA_code=1, max_coverage_deletion=0.01, min_coverage_duplication=1.8, min_r_pearson_noFlatRegions=0.2, min_r_spearman_noFlatRegions=0.2):
 
+def get_df_vcf_with_df_CNV_coverage_added_nonRedundant(sorted_bam, reference_genome, mitochondrial_chromosome, df_vcf, df_CNV, outdir, df_gridss, df_clove, threads, replace, window_size_CNVcalling):
+
+    """This function merges the df_vcf with the coverage-based prediction, removing redudnant events."""
+
+    # define the final file
+    df_vcf_final_file = "%s/vcf_merged_CNVcalling_SVcalling.vcf"%outdir
+
+    if file_is_empty(df_vcf_final_file) or replace is True:
+
+        # define fields
+        data_fields = ["chromosome", "start", "end", "ID", "SVTYPE", "INFO", "median95CI_lower_rel_coverage", "median95CI_higher_rel_coverage", "median95CI_lower_rel_coverage_relative", "median95CI_higher_rel_coverage_relative", "abs_spearman_r", "abs_pearson_r", "spearman_p", "pearson_p"]
+
+        vcf_fields = ["#CHROM", "POS", "ID", "REF", "ALT", "QUAL", "FILTER", "INFO", "FORMAT"]
+
+        # calculate median cov
+        destination_dir = "%s.calculating_windowcoverage"%sorted_bam
+        coverage_df = pd.read_csv(generate_coverage_per_window_file_parallel(reference_genome, destination_dir, sorted_bam, windows_file="none", replace=replace, run_in_parallel=True, delete_bams=True), sep="\t")
+        median_coverage = get_median_coverage(coverage_df, mitochondrial_chromosome)
+
+        ########### GET RID OF REDUNDANT EVENTS AND ADD FIELDS ###########
+
+        # add the ID
+        df_CNV["ID"] = "coverage" + df_CNV.SVTYPE + "|" + df_CNV.chromosome + ":" + df_CNV.start.apply(str) + "-" + df_CNV.end.apply(str)
+
+        # get the df_vcf related to CNV
+        df_vcf_forCNV = df_vcf[df_vcf.ALT.isin({"<DUP>", "<TDUP>", "<DEL>"})].rename(columns={"POS":"start", "#CHROM":"chromosome"}).set_index("ID", drop=False)
+        df_vcf_forCNV["end"] = df_vcf_forCNV.INFO.apply(lambda x: [int(y.split("END=")[1]) for y in x.split(";") if y.startswith("END")][0])
+
+        # add the svtype
+        svtype_to_DUPDEL = {"TDUP":"DUP", "DUP":"DUP", "DEL":"DEL"}
+        df_vcf_forCNV["SVTYPE"] = df_vcf_forCNV.INFO.apply(lambda x: [svtype_to_DUPDEL[y.split("SVTYPE=")[1]] for y in x.split(";") if y.startswith("SVTYPE")][0])
+
+        # add the type of SVcall
+        df_vcf_forCNV["type_CNVcall"] = "gridssClove"
+        df_CNV["type_CNVcall"] = "coverage"
+
+        # get only non-redundant CNVs
+        df_CNV.index = list(range(0, len(df_CNV)))
+        df_CNV = get_nonRedundant_CNVcalls_coverage(outdir, df_CNV, df_vcf_forCNV, threads, replace, pct_overlap=0.8)
+
+        ################################################################
+
+        ###### FORMAT AS VCF ######
+
+        # get the coverage calculation for the input vcf TAN,DUP,DEL
+        if len(df_vcf_forCNV)==0: df_vcf_forCNV_final = pd.DataFrame(columns=data_fields)
+        
+        else:   
+
+            df_vcf_forCNV_final  = df_vcf_forCNV.set_index("ID", drop=False)
+
+            bed_windows_prefix = "%s/calculating_cov_neighbors_SV-based_vcf"%outdir
+            df_vcf_forCNV_final = get_df_with_coverage_per_windows_relative_to_neighbor_regions(df_vcf_forCNV_final, bed_windows_prefix, reference_genome, sorted_bam, df_clove, median_coverage, replace=replace, run_in_parallel=True, delete_bams=True, threads=threads)
+            df_vcf_forCNV_final = get_coverage_df_windows_with_within_windows_statistics(df_vcf_forCNV_final, outdir, sorted_bam, reference_genome, median_coverage, replace=replace, threads=threads)
+
+            # change the SVTYPE to follow INFO. This is important to get TDUPs back in place
+            df_vcf_forCNV_final["SVTYPE"] = df_vcf_forCNV_final.INFO.apply(lambda x: [y.split("SVTYPE=")[1] for y in x.split(";") if y.startswith("SVTYPE")][0])
+
+        # add the INFO to and remaining data_fields to df_CNV
+        if len(df_CNV)==0: df_CNV = pd.DataFrame(columns=data_fields)
+        else:
+
+            # add the field
+            df_CNV["INFO"] = df_CNV.apply(lambda r: "END=%i;SVTYPE=%s;merged_relative_CN=%.3f;median_coverage_corrected=%.3f;median_relative_CN_CONY=%.3f;median_relative_CN_HMMcopy=%.3f"%(r["end"], r["SVTYPE"], r["merged_relative_CN"], r["median_coverage_corrected"], r["median_relative_CN_CONY"], r["median_relative_CN_HMMcopy"]), axis=1)
+
+            # add the coverage fields
+            bed_windows_prefix = "%s/calculating_cov_neighbors_CNV_vcf"%outdir
+            df_CNV = get_df_with_coverage_per_windows_relative_to_neighbor_regions(df_CNV, bed_windows_prefix, reference_genome, sorted_bam, df_clove, median_coverage, replace=replace, run_in_parallel=True, delete_bams=True, threads=threads)
+            df_CNV = get_coverage_df_windows_with_within_windows_statistics(df_CNV, outdir, sorted_bam, reference_genome, median_coverage, replace=replace, threads=threads)
+
+        # initialize the final df
+        df_vcf_final = df_CNV[data_fields].append(df_vcf_forCNV_final[data_fields])
+
+        # add the INFO
+        if len(df_vcf_final)==0: df_vcf_final["INFO"] = ""
+        else:   
+
+            df_vcf_final["INFO"] = df_vcf_final.apply(lambda r: "%s;RELCOVERAGE=%.4f,%.4f;RELCOVERAGE_NEIGHBOR=%.4f,%.4f;REGION_ABS_SPEARMANR=%.4f;REGION_ABS_PEARSONR=%.4f;REGION_SPEARMANP=%.4f;REGION_PEARSONP=%.4f"%(r["INFO"], r["median95CI_lower_rel_coverage"], r["median95CI_higher_rel_coverage"], r["median95CI_lower_rel_coverage_relative"], r["median95CI_higher_rel_coverage_relative"], r["abs_spearman_r"], r["abs_pearson_r"], r["spearman_p"], r["pearson_p"]), axis=1)
+
+        # add the ALT
+        df_vcf_final["ALT"] = "<" + df_vcf_final.SVTYPE + ">"
+
+        # add empty fields
+        for f in  ["REF", "QUAL", "FILTER", "FORMAT"]: df_vcf_final[f] = "."
+
+        # rename fields
+        df_vcf_final = df_vcf_final.rename(columns={"chromosome":"#CHROM", "start":"POS"})[vcf_fields]
+
+        # append the initial vcf 
+        df_vcf_noCNV = df_vcf[~(df_vcf.ALT.isin({"<DUP>", "<TDUP>", "<DEL>"}))]
+        df_vcf_final = df_vcf_final[vcf_fields].append(df_vcf_noCNV[vcf_fields])
+
+        ##########################
+
+        # save
+        save_df_as_tab(df_vcf_final[vcf_fields], df_vcf_final_file)
+
+    # load
+    df_vcf_final = get_tab_as_df_or_empty_df(df_vcf_final_file).sort_values(by=["#CHROM", "POS"])
+
+    return df_vcf_final
+
+def get_vcf_all_SVs_and_CNV(perSVade_outdir, outdir, sorted_bam, reference_genome, ploidy, df_CNV_coverage, window_size_CNVcalling, replace=False, threads=4, mitochondrial_chromosome="mito_C_glabrata_CBS138"):
 
     """This function generates a vcf that has all the variants and CNV"""
 
@@ -15544,6 +15555,8 @@ def get_vcf_all_SVs_and_CNV(perSVade_outdir, outdir, sorted_bam, reference_genom
         # get files from output
         svtype_to_svfile, df_gridss = get_svtype_to_svfile_and_df_gridss_from_perSVade_outdir(perSVade_outdir, reference_genome)
 
+        ######## GET THE VCF OF SVs ########
+
         if len(svtype_to_svfile)==0:  
 
             vcf_fields = ["#CHROM", "POS", "ID", "REF", "ALT", "QUAL", "FILTER", "INFO", "FORMAT"]
@@ -15560,34 +15573,28 @@ def get_vcf_all_SVs_and_CNV(perSVade_outdir, outdir, sorted_bam, reference_genom
             # get a vcf df, that comes from all vcfs
             df_vcf = pd.concat([get_vcf_df_for_svDF(svDF, svtype, reference_genome, df_gridss) for svtype, svDF in svtype_to_svDF.items() if svtype in {"tandemDuplications", "deletions", "inversions", "translocations", "insertions", "remaining"}])
 
-            # get a vcf with the coverage-based calling
-            outdir_CNV = "%s/calculating_CNVcoverage"%outdir
-            df_vcf = get_CNV_calling_with_coverageBased_added(df_vcf, outdir_CNV, sorted_bam, reference_genome, df_clove, df_gridss, ploidy, replace=replace, threads=threads, mitochondrial_chromosome=mitochondrial_chromosome, max_coverage_deletion=max_coverage_deletion, min_coverage_duplication=min_coverage_duplication, min_r_pearson_noFlatRegions=min_r_pearson_noFlatRegions, min_r_spearman_noFlatRegions=min_r_spearman_noFlatRegions, min_sv_size=min_CNVsize_betweenBPs)
+        ####################################
 
-            # add a tag to the ID, that makes it unique
-            df_vcf[["ID", "INFO"]] = df_vcf.apply(get_correctID_and_INFO_df_vcf_SV_CNV, axis=1)
+        # add the df_CNV_coverage
+        df_vcf = get_df_vcf_with_df_CNV_coverage_added_nonRedundant(sorted_bam, reference_genome, mitochondrial_chromosome, df_vcf, df_CNV_coverage, outdir, df_gridss, df_clove, threads, replace, window_size_CNVcalling)
 
-            # check that all IDs are unique
-            if len(df_vcf)!=len(set(df_vcf.ID)): 
+        # add a tag to the ID, that makes it unique
+        df_vcf[["ID", "INFO"]] = df_vcf.apply(get_correctID_and_INFO_df_vcf_SV_CNV, axis=1)
 
-                ID_to_ntimes = {ID:ntimes for ID, ntimes in Counter(df_vcf.ID).items() if ntimes>1}
-                print("These are repetaed IDs:\n\n", ID_to_ntimes)
-                print("This is the vcf with the repeated IDs: %s/merged_SV_and_CNV.tab"%(outdir_CNV))
+        # check that it is unique
+        if len(df_vcf)!=len(set(df_vcf.ID)): raise ValueError("IDs are not unique")
 
-                raise ValueError("IDs are not unique")
+        # add the POS and END that are correct, these should be 1-based. Note that they wont match the ID
+        df_vcf["POS"] = df_vcf.apply(get_correct_POS_in1based, axis=1)
 
-            # add the POS and END that are correct, these should be 1-based. Note that they wont match the ID
-            df_vcf["POS"] = df_vcf.apply(get_correct_POS_in1based, axis=1)
 
-            # add to the END + 1
-            chr_to_len = get_chr_to_len(reference_genome)
-            df_vcf["INFO"] = df_vcf.apply(lambda r: get_correct_INFO_withEND_in1based(r, chr_to_len), axis=1)
+        # add to the END + 1
+        chr_to_len = get_chr_to_len(reference_genome)
+        df_vcf["INFO"] = df_vcf.apply(lambda r: get_correct_INFO_withEND_in1based(r, chr_to_len), axis=1)
+        
+        # add the breakend IDs and the metadata info
+        df_vcf["INFO"] = df_vcf.apply(lambda r: get_correct_INFO_with_bendIDs_and_bendStats(r, df_gridss), axis=1)
 
-            # add the breakend IDs and 
-            df_vcf["INFO"] = df_vcf.apply(lambda r: get_correct_INFO_with_bendIDs_and_bendStats(r, df_gridss), axis=1)
-
-        # clean
-        delete_folder(outdir_CNV)
 
         # write vcf
         vcf_SVcalling_tmp = "%s.tmp"%vcf_SVcalling
@@ -15596,12 +15603,8 @@ def get_vcf_all_SVs_and_CNV(perSVade_outdir, outdir, sorted_bam, reference_genom
         open(vcf_SVcalling_tmp, "w").write(header_lines + "\n" + vcf_lines)
         os.rename(vcf_SVcalling_tmp, vcf_SVcalling)
 
-    # clean
-    clean_sorted_bam_coverage_per_window_files(sorted_bam)
-
     return vcf_SVcalling
     
-
 def clean_vep_output_files(run_vep_outfile):
 
     """Takes the --outfile passed to run_vep and cleans it"""
@@ -15664,596 +15667,6 @@ def check_that_cloveIDs_are_in_gridss_df(df_clove, df_gridss):
     if len(missing_IDs)>0: raise ValueError("%s can't be found in df_gridss"%missing_IDs)
 
     print_if_verbose("all clove IDs are in df_gridss")
-
-def get_df_clove_from_sorted_bam(sorted_bam, outdir, parameters_jsonfile, reference_genome, mitochondrial_chromosome, replace, threads):
-
-    """This function runs gridss+clove into outdir and returns the df_clove. It uses parameters_jsonfile"""
-
-    # get median coverage
-    median_coverage = get_defaultWay_median_coverage(sorted_bam, reference_genome, mitochondrial_chromosome, replace=replace, threads=threads)
-
-    # define the parameters
-    gridss_blacklisted_regions, gridss_maxcoverage, gridss_filters_dict, max_rel_coverage_to_consider_del, min_rel_coverage_to_consider_dup = get_parameters_from_json(parameters_jsonfile)
-
-    # get the insert size
-    median_insert_size, median_insert_size_sd  = get_insert_size_distribution(sorted_bam, replace=replace, threads=threads)
-
-    # run gridss and clove
-    outdir_gridss_final = "%s/gridssClove_running_optimumParms"%outdir; make_folder(outdir_gridss_final)
-
-    sv_dict, df_gridss = run_gridssClove_given_filters(sorted_bam, reference_genome, outdir_gridss_final, median_coverage, replace=replace, threads=threads, gridss_blacklisted_regions=gridss_blacklisted_regions, gridss_VCFoutput="", gridss_maxcoverage=gridss_maxcoverage, median_insert_size=median_insert_size, median_insert_size_sd=median_insert_size_sd, gridss_filters_dict=gridss_filters_dict, run_in_parallel=True, max_rel_coverage_to_consider_del=max_rel_coverage_to_consider_del, min_rel_coverage_to_consider_dup=min_rel_coverage_to_consider_dup, replace_FromGridssRun=replace)
-
-    # write the df_gridss to a file
-    df_gridss_file = "%s/df_gridss.tab"%outdir_gridss_final
-    save_df_as_tab(df_gridss, df_gridss_file)
-
-    # get the df_clove
-    clove_outfile = "%s/gridss_output.vcf.withSimpleEventType.vcf.filtered_default.vcf.bedpe.raw.bedpe.clove.vcf"%outdir_gridss_final
-    df_clove = get_clove_output(clove_outfile)
-
-
-    # check
-    check_that_cloveIDs_are_in_gridss_df(df_clove, df_gridss)
-  
-    return df_clove, clove_outfile, median_coverage, df_gridss_file
-
-def get_sorted_bam_from_simulation_outdir(simulation_outdir, ploidy):
-
-    """Gets the simulation bam from the outdir"""
-
-        # define all bams
-    bams = [f for f in os.listdir(simulation_outdir) if f.startswith("aligned_reads") and f.endswith(".sorted")]
-
-    # define possible bams
-    if ploidy=="haploid": possible_bams = [b for b in bams if len(b.split("."))==3]
-    else: possible_bams = [b for b in bams if ploidy in b]
-
-    # debug
-    if len(possible_bams)!=1: raise ValueError("error in bam obtention")
-
-    # get the bam
-    sorted_bam = "%s/%s"%(simulation_outdir, possible_bams[0])
-
-    return sorted_bam
-
-
-def get_predicted_CN_df_cnv_r(r):
-
-    """Takes a row of a df_cnv and returns the CN"""
-
-    if r["is_duplication"] and not r["is_deletion"]: return 2
-    elif r["is_deletion"] and not r["is_duplication"]: return 0
-    elif not r["is_deletion"] and not r["is_duplication"]: return 1
-    elif r["is_deletion"] and r["is_duplication"]: return -1
-    else: raise ValueError("something went wrong")
-
-def get_type_event_df_CNV_r(r):
-
-    """Takes a row of the cnv r and returns which type of event it is"""
-
-    # negative event
-    if r["predicted_CN"]==1:
-
-        if r["CN"]==r["predicted_CN"]: return "TN"
-        else: return "FN"
-
-    # positive event
-    elif r["predicted_CN"]!=1:
-
-        if r["CN"]==r["predicted_CN"]: return "TP"
-        else: return "FP"
-
-    raise ValueError("you should not get here")
-
-
-def get_precision_recall_and_Fvalue(nevents, TP, FP, FN):
-
-    """Gets the accuracy measurements"""
-
-    # calculate accuracy measurements
-    if nevents==0: precision=1.0; recall=1.0
-    else:
-        if TP==0 and FP==0: precision =  0.0
-        else: precision = TP/(TP + FP)
-
-        if TP==0 and FN==0: recall = 0.0
-        else: recall = TP/(TP + FN)
-        
-    if precision<=0.0 or recall<=0.0: Fvalue = 0.0
-    else: Fvalue = (2*precision*recall)/(precision+recall)
-
-    return precision, recall, Fvalue
-
-def get_accuracy_measures_df_CNV(df_cnv, min_coverage_duplication, max_coverage_deletion, min_r_pearson_noFlatRegions, min_r_spearman_noFlatRegions):
-
-    """Takes a set of parameters to filter a df_cnv and returs a series with them and the accuracy measures"""
-
-    # define whether it is flat coverage
-    df_cnv["notFlatCoverage"] = ((df_cnv.spearman_p<0.05) | (df_cnv.pearson_p<0.05)) & (df_cnv.abs_pearson_r>=min_r_pearson_noFlatRegions) & (df_cnv.abs_spearman_r>=min_r_spearman_noFlatRegions)
-
-    # add the duplications            
-    df_cnv["is_duplication"] = (df_cnv.mean95CI_lower_rel_coverage_relative>=min_coverage_duplication) & (df_cnv.median95CI_lower_rel_coverage_relative>=min_coverage_duplication) & (df_cnv.mean95CI_lower_rel_coverage>=min_coverage_duplication) & (df_cnv.median95CI_lower_rel_coverage>=min_coverage_duplication) & ~(df_cnv.notFlatCoverage)
-    
-    # get the deletions        
-    df_cnv["is_deletion"] = (df_cnv.mean95CI_higher_rel_coverage_relative<=max_coverage_deletion) & (df_cnv.median95CI_higher_rel_coverage_relative<=max_coverage_deletion) & (df_cnv.mean95CI_higher_rel_coverage<=max_coverage_deletion) & (df_cnv.median95CI_higher_rel_coverage<=max_coverage_deletion) & ~(df_cnv.notFlatCoverage)
-
-    # define the predicted CN
-    df_cnv["predicted_CN"] = df_cnv.apply(get_predicted_CN_df_cnv_r, axis=1)
-
-    # define the statistics
-    df_cnv["type_event"] = df_cnv.apply(get_type_event_df_CNV_r, axis=1)
-
-    nevents = len(df_cnv)
-    TP = sum(df_cnv.type_event=="TP")
-    FP = sum(df_cnv.type_event=="FP")
-    FN = sum(df_cnv.type_event=="FN")
-    TN = sum(df_cnv.type_event=="TN")
-
-    # check that they sum
-    if sum([TP, FP, FN, TN])!=nevents: raise ValueError("the statistics do not match")
-    precision, recall, Fvalue = get_precision_recall_and_Fvalue(nevents, TP, FP, FN)
-
-    return pd.Series({"min_coverage_duplication":min_coverage_duplication, "max_coverage_deletion":max_coverage_deletion , "min_r_pearson_noFlatRegions":min_r_pearson_noFlatRegions , "min_r_spearman_noFlatRegions":min_r_spearman_noFlatRegions , "precision":precision , "recall":recall , "Fvalue":Fvalue})
-
-def get_best_row_in_df_benchmark(df_benchmark, list_field_best_fn):
-
-    """Takes the best row of a df_benchmarking series. It should be done in a way that this function will iterate through list_field_best_fn and exit when you have reached 1"""
-
-    # go through each type of filters, taking the one that has the value with the best function
-    for field, best_fn in list_field_best_fn:
-
-        # get the df benchmark
-        df_benchmark = df_benchmark[df_benchmark[field]==best_fn(df_benchmark[field])]
-
-        # if there is only one, return 
-        if len(df_benchmark)==1: return df_benchmark.iloc[0]
-
-    raise ValueError("there should have been a set of functions with the best filters possible")
-
-def get_best_coverage_thresholds_knownSVs_df_train(df_train, threads, replace, reference_genome, mitochondrial_chromosome):
-
-    """Try an array of parameters on several training dfs and return a series with the least conservative filters (and the resulting accuracy measures). It will return the filters that are best for both CNV calling and breakpoint identification"""
-
-    # get several parameters of df_train, that are always the same
-    r = df_train.iloc[0]
-    ploidy = r["ploidy"]
-    unique_simID = r["unique_simID"]
-    outdir_cnv = r["outdir_cnv"]
-    sorted_bam = r["sorted_bam"]
-
-    # define the file
-    df_benchmark_CNVcalling_file = "%s/training_df_benchmark_CNVcalling.tab"%outdir_cnv
-
-    if file_is_empty(df_benchmark_CNVcalling_file) or replace is True:
-        print_if_verbose("getting the best parameters from training %s. On %i threads"%(unique_simID, threads))
-
-        ########### GET PARAMETERS ###########
-
-        # check that the index is unique
-        df_train.index = list(range(0, len(df_train)))
-
-        # make general calculations
-        fraction_var, fraction_ref = get_fractions_reads_for_ploidy(ploidy)
-        expected_AF = fraction_var
-
-        # define boundaries of the parameters
-        max_max_coverage_deletion = 1.1 - expected_AF  
-        min_min_coverage_duplication = 1 + expected_AF*0.6
-
-        # define the parms
-        n_coverage_filts = 10
-        n_r_filts = 10
-
-        # get the combinations of parameters
-        inputs_fn_CNVcalling_accuracy = []
-        for min_coverage_duplication in np.linspace(min_min_coverage_duplication, 3, n_coverage_filts):
-            for max_coverage_deletion in np.linspace(0, max_max_coverage_deletion, n_coverage_filts):
-                for min_r_pearson_noFlatRegions in np.linspace(0, 0.5, n_r_filts):
-                    for min_r_spearman_noFlatRegions in np.linspace(0, 0.5, n_r_filts):
-
-                        # keep the inputs to optimise
-                        inputs_fn_CNVcalling_accuracy.append([df_train, min_coverage_duplication, max_coverage_deletion, min_r_pearson_noFlatRegions, min_r_spearman_noFlatRegions])
-
-        #####################################
-
-        ######## GET ACCURACY CNV CALLING ########
-        if file_is_empty(df_benchmark_CNVcalling_file) or replace is True:
-
-            # get the accuracy measures of CNV calling
-            with multiproc.Pool(threads) as pool:
-                list_accuracy_measures = pool.starmap(get_accuracy_measures_df_CNV, inputs_fn_CNVcalling_accuracy) 
-                    
-                pool.close()
-                pool.terminate()
-
-            # no parallel
-            #list_accuracy_measures = list(map(lambda x: inputs_fn_CNVcalling_accuracy(x[0], x[1], x[2], x[3], x[4]), inputs_fn_accuracy_measures))
-
-            # get as df
-            df_benchmark_CNVcalling = pd.DataFrame(list_accuracy_measures)
-
-            # save
-            df_benchmark_CNVcalling_file_tmp = "%s.tmp"%df_benchmark_CNVcalling_file
-            df_benchmark_CNVcalling.to_csv(df_benchmark_CNVcalling_file_tmp, sep="\t", index=False, header=True)
-            os.rename(df_benchmark_CNVcalling_file_tmp, df_benchmark_CNVcalling_file)
-
-        ##########################################
-
-    # load dfs
-    df_benchmark_CNVcalling = pd.read_csv(df_benchmark_CNVcalling_file, sep="\t")
-
-    # get the best combination of filters. The least conservative among CNV calling and BP identification
-    list_field_best_fn_CNVcalling = [("Fvalue", max), ("max_coverage_deletion", max), ("min_coverage_duplication", min), ("min_r_pearson_noFlatRegions", max), ("min_r_spearman_noFlatRegions", max)]
-    best_filters_series_CNVcalling = get_best_row_in_df_benchmark(df_benchmark_CNVcalling,list_field_best_fn_CNVcalling)
-
-
-    ######### GET INTEGRATED BEST FILTERS #########
-
-    # get floats
-    for f in ["min_coverage_duplication", "max_coverage_deletion"]: df_benchmark_CNVcalling[f] =  df_benchmark_CNVcalling[f].apply(float)
-
-    # get the best_filters_series.
-    final_min_r_pearson_noFlatRegions = best_filters_series_CNVcalling["min_r_pearson_noFlatRegions"]
-    final_min_r_spearman_noFlatRegions = best_filters_series_CNVcalling["min_r_spearman_noFlatRegions"]
-    final_min_coverage_duplication = best_filters_series_CNVcalling["min_coverage_duplication"]
-    final_max_coverage_deletion = best_filters_series_CNVcalling["max_coverage_deletion"]
-
-    # get the best filters
-    r_final_CNVcalling = df_benchmark_CNVcalling[(df_benchmark_CNVcalling.min_r_pearson_noFlatRegions==final_min_r_pearson_noFlatRegions) & (df_benchmark_CNVcalling.min_r_spearman_noFlatRegions==final_min_r_spearman_noFlatRegions) & (df_benchmark_CNVcalling.min_coverage_duplication==final_min_coverage_duplication) & (df_benchmark_CNVcalling.max_coverage_deletion==final_max_coverage_deletion)].iloc[0]
-
-
-    best_filters_series = pd.Series({"min_r_pearson_noFlatRegions":final_min_r_pearson_noFlatRegions,
-                                     "min_r_spearman_noFlatRegions":final_min_r_spearman_noFlatRegions,
-                                     "min_coverage_duplication":final_min_coverage_duplication,
-                                     "max_coverage_deletion":final_max_coverage_deletion,
-                                     "CNVcalling_precision":r_final_CNVcalling["precision"],
-                                     "CNVcalling_recall":r_final_CNVcalling["recall"],
-                                     "CNVcalling_Fvalue":r_final_CNVcalling["Fvalue"]})
-
-
-    #############################################
-
-    return best_filters_series
-
-
-def get_accuracy_dict_df_CNV_predicted_vs_known(df_predicted, df_known):
-
-    """This function takes a df with predicted CN and known CN, and returns a dict with the relevant data"""
-
-    # keep dfs
-    df_known = cp.deepcopy(df_known)
-    df_predicted = cp.deepcopy(df_predicted)
-
-    # add index to known (only keep CNV events)
-    df_known  = df_known[df_known.CN.isin({0, 2})]
-    df_known["id_CNV"] = df_known.chromosome + "_" + df_known.start.apply(str) + "_" + df_known.end.apply(str) + "_" + df_known.CN.apply(str) 
-
-    # define the comparison fields
-    equal_fields = ["chromosome", "CN"]
-    approximate_fields  =["start", "end"]
-    chromField_to_posFields = {"chromosome":{"start": "start", "end": "end"}}
-
-    # return the precision and recall
-    if len(df_predicted)==0: return {"precision":0.0, "recall":0.0, "Fvalue":0.0}
-
-    # add to df_predicted the id_CNV, if matching any
-    df_predicted["ids_CNV"] = df_predicted.apply(lambda rp: set(df_known[df_known.apply(lambda rk: get_is_matching_predicted_and_known_rows(rk, rp, equal_fields, approximate_fields, chromField_to_posFields), axis=1)]["id_CNV"]), axis=1)
-
-
-    # define the positives
-    TP = sum(df_predicted.ids_CNV.apply(len)>0)
-    FP = sum(df_predicted.ids_CNV.apply(len)==0)
-
-    # define the FN
-    all_known_IDs = set(df_known.id_CNV)
-    all_predicted_IDs = set.union(*df_predicted.ids_CNV)
-    FN = len(all_known_IDs.difference(all_predicted_IDs))
-
-    # define the nevents
-    nevents = TP + FP + FN
-
-    # calculate accuracy measurements
-    if nevents==0: precision=1.0; recall=1.0
-    else:
-        if TP==0 and FP==0: precision =  0.0
-        else: precision = TP/(TP + FP)
-        recall = TP/(TP + FN)
-        
-    if precision<=0.0 or recall<=0.0: Fvalue = 0.0
-    else: Fvalue = (2*precision*recall)/(precision+recall)
-
-    return {"precision":precision, "recall":recall, "Fvalue":Fvalue}
-
-def get_best_coverage_thresholds_CV_simulations(df_CNV, reference_genome, mitochondrial_chromosome, benchmarking_df_file, ploidy, replace=False, threads=4):
-
-    """Takes a df were each row is one variant in one simulation. It goes through each unique simulation ID (combination of simID and ploidy) and calculates the best parameters. Then it claculates how the parameters work for the other simulations, when tested under the get_CNV_calling_with_coverageBased_added. It will return the set of best parameters, as those that have the highest minimum Fvalue """
-
-    if file_is_empty(benchmarking_df_file) or replace is True:
-        print_if_verbose("cross-benchmarking for CNV optimisation of parameters")
-
-        # get all simulations
-        all_simulations = sorted(set(df_CNV.unique_simID))
-
-        # write the cnv to a file
-        df_CNV_file = "%s/df_CNV_allKnownRegions.tab"%(get_dir(benchmarking_df_file))
-        print_if_verbose("writing df_CNV into %s"%df_CNV_file)
-        df_CNV.to_csv(df_CNV_file, sep="\t", header=True, index=False)
-
-        # initialize benchmarking_df
-        benchmarking_df = pd.DataFrame()
-        Ibench = 0
-
-        # go through each combination of them 
-        for sim_train in all_simulations:
-
-            # get df
-            df_train = df_CNV[df_CNV.unique_simID==sim_train]
-
-            # debug the fact that there are nonCNV dataframes
-            if len(df_train[df_train.CN!=1])==0: raise ValueError("there is a training df that has no CNV")
-
-            # get the best parameters, together with the expected accuracy
-            best_params_train = get_best_coverage_thresholds_knownSVs_df_train(df_train, threads, replace, reference_genome, mitochondrial_chromosome)
-
-            print_if_verbose("These are the best parameters for %s:"%sim_train)
-            print_if_verbose(best_params_train)
-
-            # go through each test_simulation
-            for sim_test in all_simulations:
-
-                # get the df
-                df_test = df_CNV[df_CNV.unique_simID==sim_test]
-
-                # debug the fact that there are nonCNV dataframes
-                if len(df_test[df_test.CN!=1])==0: raise ValueError("there is a test df that has no CNV")
-
-                # get general things about the df_test
-                r_test = df_test.iloc[0]
-                outdir_test = "%s/testing_CNV_from_%s"%(r_test["outdir_cnv"], sim_train)
-                make_folder(outdir_test)
-
-                sorted_bam_test = r_test["sorted_bam"]
-                df_clove_test = get_clove_output(r_test["clove_outfile"])
-                df_gridss_test = get_tab_as_df_or_empty_df(r_test["df_gridss_file"])                
-
-                # get an empty vcf
-                vcf_fields = ["#CHROM", "POS", "ID", "REF", "ALT", "QUAL", "FILTER", "INFO", "FORMAT"]
-                df_vcf_empty = pd.DataFrame(columns=vcf_fields)
-
-                # get the finally predicted 
-                df_vcf_CNV_predicted = get_CNV_calling_with_coverageBased_added(df_vcf_empty, outdir_test, sorted_bam_test, reference_genome, df_clove_test, df_gridss_test, ploidy, replace=replace, threads=threads, mitochondrial_chromosome=mitochondrial_chromosome, max_coverage_deletion=best_params_train["max_coverage_deletion"], min_coverage_duplication=best_params_train["min_coverage_duplication"], min_r_pearson_noFlatRegions=best_params_train["min_r_pearson_noFlatRegions"], min_r_spearman_noFlatRegions=best_params_train["min_r_spearman_noFlatRegions"], min_sv_size=min_CNVsize_betweenBPs)
-
-                # get the df with chromosome, start, end
-                df_CNV_predicted = df_vcf_CNV_predicted[df_vcf_CNV_predicted.ALT.isin(({"<DUP>", "<DEL>"}))]
-                alt_to_CN = {"<DUP>" : 2, "<DEL>" : 0} 
-                df_CNV_predicted["CN"] = df_CNV_predicted.ALT.apply(lambda alt: alt_to_CN[alt]) 
-
-                # change names
-                df_CNV_predicted["end"] = df_CNV_predicted.INFO.apply(lambda info: [int(x.split("=")[1]) for x in info.split(";") if x.startswith("END=")][0])
-                df_CNV_predicted = df_CNV_predicted.rename(columns={"#CHROM":"chromosome", "POS":"start"})
-
-
-                # get the accuracy for all CNVs
-                accuracy_dict_all = get_accuracy_dict_df_CNV_predicted_vs_known(df_CNV_predicted, df_test)
-
-                # get the accuracy for those that have RealBPs
-                df_CNV_predicted_RealBPs = df_CNV_predicted[df_CNV_predicted.INFO.apply(lambda info: "BPS_TYPE=RealBPs" in info)]
-                accuracy_dict_RealBPs = get_accuracy_dict_df_CNV_predicted_vs_known(df_CNV_predicted_RealBPs, df_test)
-
-                print_if_verbose("accuracy all BPs:", accuracy_dict_all)
-                print_if_verbose("accuracy real BPs:", accuracy_dict_RealBPs)
-
-                # add to df
-                r_accuracy = pd.Series({"train_ID" : sim_train, 
-                                        "test_ID" : sim_test, 
-
-                                        "max_coverage_deletion":best_params_train["max_coverage_deletion"],
-                                        "min_coverage_duplication":best_params_train["min_coverage_duplication"],
-                                        "min_r_pearson_noFlatRegions":best_params_train["min_r_pearson_noFlatRegions"],
-                                        "min_r_spearman_noFlatRegions":best_params_train["min_r_spearman_noFlatRegions"],
-
-                                        "precision_all":accuracy_dict_all["precision"],
-                                        "recall_all":accuracy_dict_all["recall"],
-                                        "Fvalue_all":accuracy_dict_all["Fvalue"],
-
-                                        "precision_RealBPs":accuracy_dict_RealBPs["precision"],
-                                        "recall_RealBPs":accuracy_dict_RealBPs["recall"],
-                                        "Fvalue_RealBPs":accuracy_dict_RealBPs["Fvalue"]})
-
-                benchmarking_df = benchmarking_df.append(pd.DataFrame({Ibench:r_accuracy}).transpose())
-                Ibench += 1
-
-        # save df
-        benchmarking_df_file_tmp = "%s.tmp"%benchmarking_df_file
-        benchmarking_df.to_csv(benchmarking_df_file_tmp, sep="\t", header=True, index=False)
-        os.rename(benchmarking_df_file_tmp, benchmarking_df_file)
-
-
-    # load df
-    benchmarking_df = pd.read_csv(benchmarking_df_file, sep="\t")
-
-    # get the best train ID
-    df_square_best = benchmarking_df[["train_ID", "test_ID", "Fvalue_all"]].pivot(index='train_ID', columns='test_ID', values="Fvalue_all")
-
-    train_ID_to_accuracy_df = df_square_best.apply(lambda r: pd.Series({"min_Fscore":min(r), "mean_Fscore":np.mean(r), "max_Fscore":max(r), "inverse_std_Fscore": 1/np.std(r), "median_Fscore":np.median(r)}) , axis=1).sort_values(by=["min_Fscore", "inverse_std_Fscore", "mean_Fscore", "median_Fscore", "max_Fscore"])
-
-    best_train_ID = train_ID_to_accuracy_df.iloc[-1].name
-
-    # get the best df
-    best_benchmarking_df = benchmarking_df[benchmarking_df.train_ID==best_train_ID]
-    best_r = best_benchmarking_df.iloc[0]
-
-    # write the best parameters
-    best_benchmarking_df_file = "%s.best_train_parameters.tab"%benchmarking_df_file
-    best_benchmarking_df.to_csv(best_benchmarking_df_file, sep="\t", header=True, index=False)
-    print_if_verbose("The accuracy on testing datasets is written in %s"%best_benchmarking_df_file)
-
-    return best_r["min_coverage_duplication"], best_r["max_coverage_deletion"], best_r["min_r_pearson_noFlatRegions"], best_r["min_r_spearman_noFlatRegions"]
-
-
-def get_random_regions_df_skipping_regions(df_skip, reference_genome, bed_file, replace=False, threads=4):
-
-    """This function draws some random windows of the genome and keeps those that don't overlap df_skip"""
-
-    bed_fields = ["chromosome", "start", "end"]
-
-    if file_is_empty(bed_file) or replace is True:
-        print_if_verbose("getting random regions")
-
-        # get the regions to skip into a bed
-        regions_to_skip_bed = "%s.region_to_skip.bed"%bed_file
-        df_skip[bed_fields].to_csv(regions_to_skip_bed, sep="\t", index=False, header=False)
-
-        # map each chromosome to a set of positions, 10% of them
-        chrom_to_len = get_chr_to_len(reference_genome)
-        chrom_to_positions = {chrom : np.linspace(0, length, min([length-10, 10])) for chrom, length in chrom_to_len.items()}
-
-        # go through each position
-        dict_bed = {}; Ibed = 0
-        for chrom, positions in chrom_to_positions.items():
-
-            # go through combinations of positions
-            for posA in positions:
-                for posB in positions[positions>posA]:
-
-                    dict_bed[Ibed] = {"chromosome":chrom, "start":posA, "end":posB}
-                    Ibed += 1
-
-        # get the bed
-        df_bed_random = pd.DataFrame(dict_bed).transpose()
-        random_regions_bed = "%s.random_regions.bed"%bed_file
-        df_bed_random["start"] = df_bed_random.start.apply(int)
-        df_bed_random["end"] = df_bed_random.end.apply(int)
-        df_bed_random[bed_fields].to_csv(random_regions_bed, sep="\t", index=False, header=False)
-
-        # get the final bedfile, the one that does not intersect
-        bed_file_tmp  = "%s.tmp"%bed_file
-        bed_file_stderr = "%s.generating.stderr"%bed_file_tmp
-
-        print_if_verbose("running bedtools subtract. The stderr is in %s"%bed_file_stderr)
-        run_cmd("%s subtract -a %s -b %s > %s 2>%s"%(bedtools, random_regions_bed, regions_to_skip_bed, bed_file_tmp, bed_file_stderr))
-
-        remove_file(bed_file_stderr)
-        os.rename(bed_file_tmp, bed_file)
-
-    df_no_overlap = pd.read_csv(bed_file, sep="\t", header=None, names=bed_fields)
-
-    return df_no_overlap
-
-def get_automatic_coverage_thresholds(outdir_perSVade, fast_SVcalling, ploidy, nsimulations, simulation_ploidies, mitochondrial_chromosome, reference_genome, threads=4, replace=False):
-
-    """This function takes the outdir of perSVade and the fastSV calling, calculates the coverage for all the simulations and defines the optimum coverage thresholds for CNV detection"""
-
-
-    # for fast svcalling, it just depends on the ploidy
-    if fast_SVcalling is True:
-
-        min_coverage_duplication = 1 + (ploidy*0.6) 
-        max_coverage_deletion = 1 - (ploidy*0.99)
-        min_r_pearson_noFlatRegions = 0.2
-        min_r_spearman_noFlatRegions = 0.2
-
-    # else find something that is optimised with all the simulations performed. The idea is to check several breakpoints and take the one with the maximum Fvalue
-    else:
-
-        # initialize df_CNV, which will contain one region for each CNV, and the coverage measures
-        df_CNV = pd.DataFrame()
-
-        # define outdir optimisation
-        outdir_optimisation = "%s/SVdetection_output/parameter_optimisation"%outdir_perSVade
-
-        # get the parameters that define the optimum running for all simulations
-        parameters_jsonfile = "%s/SVdetection_output/final_gridss_running/perSVade_parameters.json"%outdir_perSVade
-
-        # define the benchmarking_df_file
-        benchmarking_df_file = "%s/CNV_optimisation_df_benchmarking.tab"%outdir_optimisation
-
-        if file_is_empty(benchmarking_df_file) or replace is True:
-      
-            # go throigh each simulation (these are technical replicates of the pipeline)
-            for simulation_ID in range(1, nsimulations+1):
-
-                # get an outdir where all the simulations of this ID will be stored
-                simulation_outdir = "%s/simulation_%i"%(outdir_optimisation, simulation_ID)
-
-                # go through each of the target ploidies and generate the resulting bam files:
-                for ploidy_sim in simulation_ploidies:
-
-                    # make an outdir for the CNV optimisation
-                    outdir_cnv = "%s/CNVoptimisation_%s"%(simulation_outdir, ploidy_sim); make_folder(outdir_cnv)
-
-                    # define the simulation bam
-                    sorted_bam = get_sorted_bam_from_simulation_outdir(simulation_outdir, ploidy_sim)
-                    
-                    # load several regions dfs
-                    outdir_vars = "%s/final_simulated_SVs"%simulation_outdir
-                    df_TAN = pd.read_csv("%s/tandemDuplications.tab"%outdir_vars, sep="\t")
-                    df_DEL = pd.read_csv("%s/deletions.tab"%outdir_vars, sep="\t")
-                    df_INV = pd.read_csv("%s/inversions.tab"%outdir_vars, sep="\t")
-                    df_INS = pd.read_csv("%s/insertions.tab"%outdir_vars, sep="\t").rename(columns={"ChrA":"Chr", "StartA":"Start", "EndA":"End"})[["Chr", "Start", "End", "Copied", "ID"]]
-
-                    # get the CN and the copy-number variation df
-                    df_TAN["CN"] = 2
-                    df_DEL["CN"] = 0
-                    df_INV["CN"] = 1
-                    df_INS["CN"] = df_INS.Copied.apply(lambda x: {True:2, False:1}[x])
-                    df_cnv = pd.concat([d[["Chr", "Start", "End", "CN", "ID"]] for d in [df_TAN, df_DEL, df_INV, df_INS]])
-                    df_cnv = df_cnv.rename(columns={"Chr":"chromosome", "Start":"start", "End":"end"})
-
-                    # keep only those with a length above min_CNVsize_betweenBPs
-                    df_cnv = df_cnv[(df_cnv.end - df_cnv.start)>=min_CNVsize_betweenBPs]
-
-                    # if there are no CNV, skip it
-                    if len(df_cnv)==0: continue
-
-                    # add a set of regions that are CN=1, only those with >min_CNVsize_betweenBPs bp
-                    df_regions_to_avoid = df_cnv[df_cnv.CN!=1]
-                    bed_file_CN1 = "%s/regions_CN1.bed"%outdir_cnv
-                    df_CN1 = get_random_regions_df_skipping_regions(df_regions_to_avoid, reference_genome, bed_file_CN1, threads=threads, replace=replace)
-
-                    df_CN1["length"] = df_CN1.end - df_CN1.start
-                    df_CN1 = df_CN1[df_CN1.length>=min_CNVsize_betweenBPs]
-                    df_CN1["CN"] = 1
-                    df_CN1["ID"] = list(range(0, len(df_CN1)))
-                    df_CN1["ID"] = "random_nonCNV_" + df_CN1.ID.apply(str)
-
-                    df_cnv = df_cnv.append(df_CN1[["chromosome", "start", "end", "CN", "ID"]])
-
-                    # get the df_clove
-                    df_clove, clove_outfile, median_coverage, df_gridss_file = get_df_clove_from_sorted_bam(sorted_bam, outdir_cnv, parameters_jsonfile, reference_genome, mitochondrial_chromosome, replace, threads)
-
-                    # get the coverage per window
-                    bed_windows_prefix = "%s/calculating_cov_neighbors"%outdir_cnv
-                    df_cnv = get_df_with_coverage_per_windows_relative_to_neighbor_regions(df_cnv, bed_windows_prefix, reference_genome, sorted_bam, df_clove, median_coverage, replace=replace, run_in_parallel=True, delete_bams=False, threads=threads)
-
-                    # add the per-window statistics
-                    df_cnv = get_coverage_df_windows_with_within_windows_statistics(df_cnv, outdir_cnv, sorted_bam, reference_genome, median_coverage, replace=replace, threads=threads)
-
-                    # append to df
-                    df_cnv["simulation_ID"] = simulation_ID
-                    df_cnv["ploidy"] = ploidy_sim
-                    df_cnv["sorted_bam"] = sorted_bam
-                    df_cnv["median_coverage"] = median_coverage
-                    df_cnv["outdir_cnv"] = outdir_cnv
-                    df_cnv["clove_outfile"] = clove_outfile
-                    df_cnv["df_gridss_file"] = df_gridss_file
-                    df_CNV = df_CNV.append(df_cnv)
-
-                    # clean chromosomal bams
-                    clean_chromosomal_bam_files(sorted_bam, reference_genome)
-
-            # debug
-            if len(df_CNV[df_CNV.CN!=1])==0: raise ValueError("there are no regions to benchmark. You may change the min_CNVsize_betweenBPs to improve this")
-
-            # add fields
-            df_CNV["unique_simID"] = "sim" + df_CNV.simulation_ID.apply(str) + "_" + df_CNV.ploidy
-
-
-        # get the best parameters, according to cross-validation
-        min_coverage_duplication, max_coverage_deletion, min_r_pearson_noFlatRegions, min_r_spearman_noFlatRegions = get_best_coverage_thresholds_CV_simulations(df_CNV, reference_genome, mitochondrial_chromosome, benchmarking_df_file, ploidy, replace=replace, threads=threads)
-
-    return min_coverage_duplication, max_coverage_deletion, min_r_pearson_noFlatRegions, min_r_spearman_noFlatRegions
-
 
 def get_real_value_from_string(string):
 

@@ -152,14 +152,16 @@ def get_integrated_vars_df(df, cache_dir, target_regions, target_genes, gff_df):
 
     #######################################
 
-
-
     ########## QUALITY CONTROL ##########
 
     annot_fields = ["#Uploaded_variation", "Gene", "Feature"]
 
+    # debug the fact that there are no vars
+    if len(small_vars_annot)==0: small_vars_annot = pd.DataFrame(columns=annot_fields)
+    if len(SV_CNV_annot)==0: SV_CNV_annot = pd.DataFrame(columns=annot_fields)
+
     # make sure that there are no multiallelic records
-    if any(small_vars["ALT"].apply(lambda x: "," in x)): raise ValueError("There should not be multiallelic records in the vcf")
+    if len(small_vars)>0 and any(small_vars["ALT"].apply(lambda x: "," in x)): raise ValueError("There should not be multiallelic records in the vcf")
 
     # multiallelics doible check
     all_var_annot = small_vars_annot[annot_fields].append(SV_CNV_annot[annot_fields])
@@ -175,16 +177,16 @@ def get_integrated_vars_df(df, cache_dir, target_regions, target_genes, gff_df):
     ###### ADD FIELDS ######
 
     # add the short vars representation to the annotation
-    small_vars_annot["consequences_set"] = small_vars_annot.Consequence.apply(lambda x: set(x.split(",")))
-    small_vars_annot["string_rep_variant"] = small_vars_annot.apply(get_string_representation_of_var, axis=1)
+    if len(small_vars_annot)>0:
+        small_vars_annot["consequences_set"] = small_vars_annot.Consequence.apply(lambda x: set(x.split(",")))
+        small_vars_annot["string_rep_variant"] = small_vars_annot.apply(get_string_representation_of_var, axis=1)
 
     # add the gene product description
     print("adding protein description")
 
     all_ANNOTATION_IDs = set(gff_df.index)
-    small_vars_annot["Feature_productDescription"] = small_vars_annot.apply(lambda r: get_descriptions_affected_features(r, gff_df, all_ANNOTATION_IDs), axis=1)
-
-    SV_CNV_annot["Feature_productDescription"] = SV_CNV_annot.apply(lambda r: get_descriptions_affected_features(r, gff_df, all_ANNOTATION_IDs), axis=1)
+    if len(small_vars_annot)>0: small_vars_annot["Feature_productDescription"] = small_vars_annot.apply(lambda r: get_descriptions_affected_features(r, gff_df, all_ANNOTATION_IDs), axis=1)
+    if len(SV_CNV_annot)>0: SV_CNV_annot["Feature_productDescription"] = SV_CNV_annot.apply(lambda r: get_descriptions_affected_features(r, gff_df, all_ANNOTATION_IDs), axis=1)
 
     ########################
 
