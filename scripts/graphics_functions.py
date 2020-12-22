@@ -375,7 +375,6 @@ def add_gff_traces_as_scatters(fig, gff_df, chrom_to_Xoffset, gff_annotation_fie
     genes_df["good_level"] = good_levels_list
     fun.print_if_verbose("adding features")
 
-
     #  go through each feature
     for feat in set(genes_df.feature):
 
@@ -402,7 +401,7 @@ def add_gff_traces_as_scatters(fig, gff_df, chrom_to_Xoffset, gff_annotation_fie
             # define the hover text
             hovertext = "<b>%s%s"%(direction_text, r["ID"])
             for f in gff_annotation_fields: 
-                if not pd.isna(r[f]): hovertext += "-%s:%s"%(f, r[f])
+                if f in r.keys() and not pd.isna(r[f]): hovertext += "-%s:%s"%(f, r[f])
 
             hovertext += "%s</b>"%direction_text
 

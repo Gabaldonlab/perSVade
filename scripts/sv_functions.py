@@ -245,7 +245,7 @@ libraries_CONY = "%s/CONY_package_debugged.R "%CWD
 ####################################
 
 # types of small variants
-ALL_MUTATIONS = {'stop_gained', 'intron_variant', 'upstream_gene_variant', '5_prime_UTR_variant', 'inframe_insertion', 'synonymous_variant', 'non_coding_transcript_exon_variant', 'intergenic_variant', 'protein_altering_variant', 'coding_sequence_variant', 'downstream_gene_variant', '3_prime_UTR_variant', 'missense_variant', 'splice_region_variant', 'splice_acceptor_variant', 'inframe_deletion', 'stop_lost', 'non_coding_transcript_variant', 'start_retained_variant', 'frameshift_variant', 'stop_retained_variant', 'start_lost', 'incomplete_terminal_codon_variant', 'splice_donor_variant'}
+ALL_MUTATIONS = {'stop_gained', 'intron_variant', 'upstream_gene_variant', '5_prime_UTR_variant', 'inframe_insertion', 'synonymous_variant', 'non_coding_transcript_exon_variant', 'intergenic_variant', 'protein_altering_variant', 'coding_sequence_variant', 'downstream_gene_variant', '3_prime_UTR_variant', 'missense_variant', 'splice_region_variant', 'splice_acceptor_variant', 'inframe_deletion', 'stop_lost', 'non_coding_transcript_variant', 'start_retained_variant', 'frameshift_variant', 'stop_retained_variant', 'start_lost', 'incomplete_terminal_codon_variant', 'splice_donor_variant', '-'}
 
 PROT_ALTERRING_MUTATIONS = {'missense_variant', 'start_lost', 'inframe_deletion', 'protein_altering_variant', 'stop_gained', 'inframe_insertion', 'frameshift_variant', 'stop_lost', 'splice_acceptor_variant', 'splice_donor_variant', 'splice_region_variant'}
 
@@ -253,9 +253,9 @@ NON_PROT_ALTERRING_MUTATIONS = ALL_MUTATIONS.difference(PROT_ALTERRING_MUTATIONS
 
 
 # types of SVs
-SVs_ALL_MUTATIONS = {'coding_sequence_variant_BND', 'upstream_gene_variant_BND', '3_prime_UTR_variant', 'feature_elongation', 'feature_truncation', 'coding_sequence_variant', 'intergenic_variant', 'upstream_gene_variant', '5_prime_UTR_variant', 'transcript_amplification', '5_prime_UTR_variant_BND', 'downstream_gene_variant', 'intron_variant_BND', 'intron_variant', 'intergenic_variant_BND', '3_prime_UTR_variant_BND', 'downstream_gene_variant_BND', 'non_coding_transcript_exon_variant_BND', 'non_coding_transcript_exon_variant'}
+SVs_ALL_MUTATIONS = {'coding_sequence_variant_BND', 'upstream_gene_variant_BND', '3_prime_UTR_variant', 'feature_elongation', 'feature_truncation', 'coding_sequence_variant', 'intergenic_variant', 'upstream_gene_variant', '5_prime_UTR_variant', 'transcript_amplification', '5_prime_UTR_variant_BND', 'downstream_gene_variant', 'intron_variant_BND', 'intron_variant', 'intergenic_variant_BND', '3_prime_UTR_variant_BND', 'downstream_gene_variant_BND', 'non_coding_transcript_exon_variant_BND', 'non_coding_transcript_exon_variant', 'transcript_ablation', '-', "inframe_insertion", "frameshift_variant"}
 
-SVs_TRANSCRIPT_DISRUPTING_MUTATIONS = {'coding_sequence_variant_BND', 'feature_elongation', 'feature_truncation', 'coding_sequence_variant', 'transcript_amplification', 'intron_variant_BND', 'non_coding_transcript_exon_variant_BND', 'intron_variant', 'non_coding_transcript_exon_variant', '3_prime_UTR_variant', '5_prime_UTR_variant', '5_prime_UTR_variant_BND', '3_prime_UTR_variant_BND'}
+SVs_TRANSCRIPT_DISRUPTING_MUTATIONS = {'coding_sequence_variant_BND', 'feature_elongation', 'feature_truncation', 'coding_sequence_variant', 'transcript_amplification', 'transcript_ablation', 'intron_variant_BND', 'non_coding_transcript_exon_variant_BND', 'intron_variant', 'non_coding_transcript_exon_variant', '3_prime_UTR_variant', '5_prime_UTR_variant', '5_prime_UTR_variant_BND', '3_prime_UTR_variant_BND', "inframe_insertion", "frameshift_variant"}
 
 SVs_NON_TRANSCRIPT_DISRUPTING_MUTATIONS = SVs_ALL_MUTATIONS.difference(SVs_TRANSCRIPT_DISRUPTING_MUTATIONS)
 
@@ -403,7 +403,7 @@ fractionRAM_to_dedicate = 0.5
 fraction_available_mem = None
 
 # the minimum size of CNVs to be considered
-min_CNVsize_betweenBPs = 500
+min_CNVsize_coverageBased = 300
 
 svtype_to_color={"tandemDuplications": "gray", "deletions": "black", "inversions": "blue", "translocations": "olive", "insertions": "red", "remaining":"magenta", "integrated":"c"}
 
@@ -6868,7 +6868,7 @@ def get_compatible_real_bedpe_breakpoints(close_shortReads_table, reference_geno
             print_if_verbose("getting vars for %s"%ID)
 
             # define the cmd. This is a normal perSvade.py run with the vars of the previous dir  
-            cmd = "python %s -r %s --threads %i --outdir %s  --mitochondrial_chromosome %s --fast_SVcalling --previous_repeats_table %s --min_CNVsize_betweenBPs %i"%(perSVade_py, reference_genome, threads, outdir_gridssClove, mitochondrial_chromosome, previous_repeats_table, min_CNVsize_betweenBPs)
+            cmd = "python %s -r %s --threads %i --outdir %s  --mitochondrial_chromosome %s --fast_SVcalling --previous_repeats_table %s --min_CNVsize_coverageBased %i"%(perSVade_py, reference_genome, threads, outdir_gridssClove, mitochondrial_chromosome, previous_repeats_table, min_CNVsize_coverageBased)
 
             # add arguments depending on the pipeline
             if replace is True: cmd += " --replace"
@@ -10156,7 +10156,7 @@ def report_accuracy_realSVs(close_shortReads_table, reference_genome, outdir, re
                 if file_is_empty(final_file) or replace is True:# or file_is_empty(parameters_file):
 
                     # define the cmd. This is a normal perSvade.py run with the vars of the previous dir  
-                    cmd = "python %s -r %s --threads %i --outdir %s --nvars %i --nsimulations %i --simulation_ploidies %s --range_filtering_benchmark %s --mitochondrial_chromosome %s -f1 %s -f2 %s --previous_repeats_table %s --skip_cleaning_outdir --min_CNVsize_betweenBPs %i"%(perSVade_py, reference_genome, threads, outdir_runID, nvars, n_simulated_genomes, ",".join(simulation_ploidies), range_filtering_benchmark, mitochondrial_chromosome, r1, r2, previous_repeats_table, min_CNVsize_betweenBPs)
+                    cmd = "python %s -r %s --threads %i --outdir %s --nvars %i --nsimulations %i --simulation_ploidies %s --range_filtering_benchmark %s --mitochondrial_chromosome %s -f1 %s -f2 %s --previous_repeats_table %s --skip_cleaning_outdir --min_CNVsize_coverageBased %i"%(perSVade_py, reference_genome, threads, outdir_runID, nvars, n_simulated_genomes, ",".join(simulation_ploidies), range_filtering_benchmark, mitochondrial_chromosome, r1, r2, previous_repeats_table, min_CNVsize_coverageBased)
 
                     # add arguments depending on the pipeline
                     if replace is True: cmd += " --replace"
@@ -10637,12 +10637,72 @@ def remove_smallVarsCNV_nonEssentialFiles(outdir, ploidy):
 
                              }
 
-
             if f not in files_to_keep: files_to_remove.append(file)
 
     for f in files_to_remove: remove_file(f)
 
-def get_bam_with_duplicatesMarkedSpark(bam, threads=4, replace=False, remove_duplicates=True):
+
+
+def remove_smallVarsCNV_nonEssentialFiles_severalPloidies(outdir, ploidies):
+
+    """Removes all the files in outdir that are not essential. The outdir has to be the one of the VarCall outdir."""
+
+    print_if_verbose("cleaning outdir of small vars")
+
+    # initialize the files to remove
+    files_to_remove = ["%s/CNV_results/gene_to_coverage_genes.tab"%outdir, # the genes coverage
+                       "%s/CNV_results/gene_to_coverage_regions.tab"%outdir # the regions coverage
+                       ]
+
+    # init the files to keep
+    files_to_keep = set()
+
+    # add the files from the small vars
+    for ploidy in ploidies:
+
+        # add the bcftools
+        bcftools_dir = "%s/bcftools_ploidy%i_out"%(outdir, ploidy)
+        HC_dir = "%s/HaplotypeCaller_ploidy%i_out"%(outdir, ploidy)
+        fb_dir = "%s/freebayes_ploidy%i_out"%(outdir, ploidy)
+
+        # go through each dir
+        for vcfDir in [bcftools_dir, HC_dir, fb_dir]:
+
+            if os.path.isdir(vcfDir):
+                for file in os.listdir(vcfDir):
+
+                    if file not in {"output.raw.vcf", "output.filt.vcf"}: files_to_remove.append("%s/%s"%(vcfDir, file))
+
+        files_to_keep.update({"merged_vcfs_allVars_ploidy%i.vcf"%ploidy,
+                              "variant_annotation_ploidy%i.tab"%ploidy,
+                              "variant_calling_ploidy%i.tab"%ploidy,
+
+                             "variants_atLeast1PASS_ploidy%i.vcf"%ploidy,
+                             "variants_atLeast2PASS_ploidy%i.vcf"%ploidy,
+                             "variants_atLeast3PASS_ploidy%i.vcf"%ploidy,
+
+                             "variants_atLeast1PASS_ploidy%i_alternative_genome.fasta"%ploidy,
+                             "variants_atLeast2PASS_ploidy%i_alternative_genome.fasta"%ploidy,
+                             "variants_atLeast3PASS_ploidy%i_alternative_genome.fasta"%ploidy,
+
+                             "variants_atLeast1PASS_ploidy%i.withMultiAlt.vcf"%ploidy,
+                             "variants_atLeast2PASS_ploidy%i.withMultiAlt.vcf"%ploidy,
+                             "variants_atLeast3PASS_ploidy%i.withMultiAlt.vcf"%ploidy,
+
+                             "variant_calling_stats_ploidy%i_called.tab"%ploidy,
+                             "variant_calling_stats_ploidy%i_PASS.tab"%ploidy})
+
+    # go through the files in the outdir and just keep the essential ones
+    for f in os.listdir(outdir):
+        file = "%s/%s"%(outdir, f)
+
+        # only set to remove if the file is not in files_to_keep
+        if os.path.isfile(file) and f not in files_to_keep: files_to_remove.append(file)
+
+    for f in files_to_remove: remove_file(f)
+
+
+def get_bam_with_duplicatesMarkedSpark(bam, threads=4, replace=False, remove_duplicates=False):
 
     """
     This function takes a bam file and runs MarkDuplicatesSpark (most efficient when the input bam is NOT coordinate-sorted) returning the bam with the duplicates sorted. It does not compute metrics to make it faster. Some notes about MarkDuplicatesSpark:
@@ -10764,7 +10824,7 @@ def get_mpileup_file_one_chrom(sorted_bam, replace, reference_genome, min_baseca
     return mpileup_file
 
 
-def run_HMMcopy(coverage_file, outfile, parms_dict=dict(e=0.9999999, mu=[-0.458558247, -0.215877601, -0.002665686, 0.191051578, 0.347816046, 1.664333241], lambda_val=20, nu=2.1, kappa=[50, 50, 700, 100, 50, 50], m=[-0.458558247, -0.215877601, -0.002665686, 0.191051578, 0.347816046, 1.664333241], eta=50000, gamma=3, S=0.02930164, strength="1e7", fraction_data_correctReadcount=0.1), replace=False):
+def run_HMMcopy(coverage_file, outfile, parms_dict=dict(e=0.9999999, mu=[-0.458558247, -0.215877601, -0.002665686, 0.191051578, 0.347816046, 1.664333241], lambda_val=20, nu=2.1, kappa=[50, 50, 700, 100, 50, 50], m=[-0.458558247, -0.215877601, -0.002665686, 0.191051578, 0.347816046, 1.664333241], eta=50000, gamma=3, S=0.02930164, strength="1e7"), replace=False):
 
     """Runs HMMcopy with the different paramters into outfile. It returns the df with the outfile."""
 
@@ -10785,10 +10845,9 @@ def run_HMMcopy(coverage_file, outfile, parms_dict=dict(e=0.9999999, mu=[-0.4585
         gamma = parms_dict["gamma"]
         S = parms_dict["S"]
         strength = parms_dict["strength"]
-        fraction_data_correctReadcount = parms_dict["fraction_data_correctReadcount"]
 
         # run cmd
-        cmd = "%s --outfile %s --coverage_table %s --e %s --mu %s --lambda %s --nu %s --kappa %s --m %s --eta %s --gamma %s --S %s --strength %s  --fraction_data_correctReadcount %s > %s 2>&1"%(run_HMMcopy_R, outfile_tmp, coverage_file, e, mu, lambda_val,  nu, kappa, m, eta, gamma, S, strength, fraction_data_correctReadcount, std)
+        cmd = "%s --outfile %s --coverage_table %s --e %s --mu %s --lambda %s --nu %s --kappa %s --m %s --eta %s --gamma %s --S %s --strength %s > %s 2>&1"%(run_HMMcopy_R, outfile_tmp, coverage_file, e, mu, lambda_val,  nu, kappa, m, eta, gamma, S, strength, std)
 
         run_cmd(cmd, env=EnvName_HMMcopy)
 
@@ -10922,13 +10981,20 @@ def run_CNV_calling_HMMcopy(outdir, replace, threads, df_coverage, ploidy, refer
             df_coverage_HMMcopy = df_coverage_genome.rename(columns={"GCcontent":"gc", "median_mappability":"map"})
             df_coverage_HMMcopy["start"] += 1 # it has to be 1-based
 
-            # add fields
+            # add fields necessary to run HMMcopy
             df_coverage_HMMcopy["reads"] = df_coverage_HMMcopy.corrected_relative_coverage
             df_coverage_HMMcopy["chr"] = df_coverage_HMMcopy.chromosome
+            df_coverage_HMMcopy["cor.gc"] = df_coverage_HMMcopy.reads
+            df_coverage_HMMcopy["cor.map"] = df_coverage_HMMcopy.reads
+
+            def get_copy_or_NaN(x):
+                if x==0.0: return np.nan
+                else: return np.log2(x)
+            df_coverage_HMMcopy["copy"] = df_coverage_HMMcopy["cor.map"].apply(get_copy_or_NaN)
 
             # write as tab
             coverage_file = "%s/coverage_forHMMcopy.tab"%outdir_genome
-            HMMcopy_fields = ["chr", "start", "end", "reads", "gc", "map"]
+            HMMcopy_fields = ["chr", "start", "end", "reads", "gc", "map", "cor.gc", "cor.map", "copy"]
             save_df_as_tab(df_coverage_HMMcopy[HMMcopy_fields], coverage_file)
 
             ##########################################
@@ -10970,22 +11036,21 @@ def run_CNV_calling_HMMcopy(outdir, replace, threads, df_coverage, ploidy, refer
                                         for eta in [50000]:
                                             for gamma in [3]:
                                                 for S in [0.02930164]:
-                                                    for fraction_data_correctReadcount in [0.2]:
 
-                                                        # define the mu
-                                                        if mu_multiplier is None: mu = default_mu
-                                                        else: mu = [np.log2(max([0.01, c+mu_multiplier])) for c in ideal_coverage]
+                                                    # define the mu
+                                                    if mu_multiplier is None: mu = default_mu
+                                                    else: mu = [np.log2(max([0.01, c+mu_multiplier])) for c in ideal_coverage]
 
-                                                        # define the m
-                                                        if m_multiplier is None: m = default_mu
-                                                        else: m = [np.log2(max([0.01, c+m_multiplier])) for c in ideal_coverage]
- 
-                                                        # keep the data
-                                                        parameters_dict[Ip] = dict(e=e, mu=mu, lambda_val=lambda_val, nu=nu, kappa=kappa, m=m, eta=eta, gamma=gamma, S=S, strength=strength, fraction_data_correctReadcount=fraction_data_correctReadcount)
-                                                        Ip+=1
+                                                    # define the m
+                                                    if m_multiplier is None: m = default_mu
+                                                    else: m = [np.log2(max([0.01, c+m_multiplier])) for c in ideal_coverage]
+
+                                                    # keep the data
+                                                    parameters_dict[Ip] = dict(e=e, mu=mu, lambda_val=lambda_val, nu=nu, kappa=kappa, m=m, eta=eta, gamma=gamma, S=S, strength=strength)
+                                                    Ip+=1
 
             # get as df
-            parameter_fields = ["e", "mu", "lambda_val", "nu", "kappa", "m", "eta", "gamma", "S", "strength", "fraction_data_correctReadcount"]
+            parameter_fields = ["e", "mu", "lambda_val", "nu", "kappa", "m", "eta", "gamma", "S", "strength"]
             parameters_df = pd.DataFrame(parameters_dict).transpose().sort_index()
 
             ################################################################
@@ -11815,6 +11880,9 @@ def get_LOWESS_benchmarking_series_CV(kfold, frac, it, df, xfield, yfield, min_t
             # if there are NaNs, break the cross-validation
             if any(pd.isna(ytest_predicted)): break
 
+            # if there are any 0 predicted values, break the cross-validation
+            if any(ytest_predicted<=0): break
+
             # debug
             if len(ytest_predicted)!=len(ytest): raise ValueError("xtest and ytest are not the same")
             if any(pd.isna(ytest_predicted)): raise ValueError("There can't be NaNs")
@@ -11941,16 +12009,22 @@ def get_y_corrected_by_x_LOWESS_crossValidation(df, xfield, yfield, outdir, thre
         best_it = int(best_parms_series["it"])
         #outprefix = "%s/final_loess_fitting"%(outdir)
 
-
         # get the final fitting from training based on the df_fitting, but testing on the real df. The interpolation 
         fill_value_interpolation = "extrapolate"
         df["predicted_yvalues"] = get_lowess_fit_y(df_fitting[xfield].values, df_fitting[yfield].values, df[xfield].values, best_frac, best_it, fill_value_interpolation)
+
+        # correct the predicted_yvalues so that if they are negative thet'd be set to 0 given that the input is also negative
+        def get_predicted_yvalues(r):
+            if r["predicted_yvalues"]<=0.0 and r[yfield]==0.0: return 0.0
+            else: return r["predicted_yvalues"]
+
+        df["predicted_yvalues"] = df.apply(get_predicted_yvalues, axis=1)
 
         # debug 
         if any(pd.isna(df.predicted_yvalues)): raise ValueError("there should be no NaNs in the final prediction")
 
         # debug if any of the predicted_yvalues is <=0
-        if any(df.predicted_yvalues<=0): raise ValueError("There can't be any 0 predicted yvalues")
+        if any(df.predicted_yvalues<0): raise ValueError("There can't be any negative values or less predicted yvalues")
 
         # calculate the final rsquare
         final_rsquare = r2_score(df[yfield], df.predicted_yvalues)
@@ -14584,7 +14658,7 @@ def get_coverage_df_windows_with_within_windows_statistics(df_windows, outdir, s
 
     # build a df with windows, where each window comes from dividing 
     df_subwindows = get_df_subwindows_from_df_windows(df_windows, n_subwindows=20)
-    initial_len_subwindows = len(df_subwindows)
+    initial_len_subwindows = cp.deepcopy(len(df_subwindows))
 
     # debug
     if any(df_subwindows.start>=df_subwindows.end): raise ValueError("there can't be any windows with start>=end")
@@ -14592,10 +14666,10 @@ def get_coverage_df_windows_with_within_windows_statistics(df_windows, outdir, s
     # get the  coverage of the subwindows
     windows_file = "%s/subwindows.bed"%outdir
     df_subwindows[["chromosome", "start", "end"]].to_csv(windows_file, sep="\t", header=True, index=False)
-    df_subwindows_coverage = get_coverage_per_window_df_without_repeating(reference_genome, sorted_bam, windows_file, replace=replace, run_in_parallel=True, delete_bams=False, threads=threads)
+    df_subwindows_coverage = get_coverage_per_window_df_without_repeating(reference_genome, sorted_bam, windows_file, replace=replace, run_in_parallel=True, delete_bams=False, threads=threads).drop_duplicates(subset=["chromosome", "start", "end"])
 
     print_if_verbose("merging with subwindows")
-    df_subwindows = df_subwindows.merge(df_subwindows_coverage, on=["chromosome", "start", "end"], how="left")
+    df_subwindows = df_subwindows.merge(df_subwindows_coverage, on=["chromosome", "start", "end"], how="left", validate="many_to_one")
     if len(df_subwindows)!=initial_len_subwindows or any(pd.isna(df_subwindows.mediancov_1)): 
         print(df_subwindows)
         print(initial_len_subwindows)
@@ -14630,7 +14704,8 @@ def get_coverage_df_windows_with_within_windows_statistics(df_windows, outdir, s
     df_final = df_final.merge(df_windows.set_index("ID", drop=True), left_index=True, right_index=True, validate="one_to_one") 
 
     # check that the IDs are correct
-    if initial_IDs!=set(df_final.ID): raise ValueError("something went wrong from the IDs.")
+    missing_IDs_fromInitial = initial_IDs.difference(set(df_final.ID))
+    if initial_IDs!=set(df_final.ID): raise ValueError("something went wrong from the IDs. These are missing IDs from the initial: %s"%missing_IDs_fromInitial)
 
     #### ADD FIELDS ####
 
@@ -14767,7 +14842,7 @@ def get_list_clusters_overlapping_df_CNV(outdir, df_CNV, pct_overlap, threads):
 
     # load as df, which already has the same order as df_CNV
     df_bedmap = pd.read_csv(bedmap_outfile, sep="\t", header=None, names=["overlapping_IDs"])
-    df_bedmap["overlapping_IDs_set"] = df_bedmap.overlapping_IDs.apply(lambda x: {int(y) for y in x.split(";")})
+    df_bedmap["overlapping_IDs_set"] = df_bedmap.overlapping_IDs.apply(str).apply(lambda x: {int(y) for y in x.split(";")})
 
     # define
     ID_to_overlappingIDs = dict(df_bedmap["overlapping_IDs_set"])
@@ -15128,128 +15203,6 @@ def get_bestID_from_df_gridss_lowConf_cluster(clustered_numericIDs, df_lowConf):
     return df.numericID.iloc[0]
 
 
-def get_df_gridss_removing_redundant_lowConfidenceBPs(df_gridss, outdir, threads, chrom_to_len, replace, overlap_bp=100):
-
-    """Takes a df_gridss and returns it after removing those low-confidence breakends that are close (<=overlap_bp bp to high-confidence BPs). It also removes those gridss breakpoints that are close to themselves"""
-
-    print_if_verbose("running get_df_gridss_removing_redundant_lowConfidenceBPs")
-
-
-    # define the initial fields
-    initial_fields = list(df_gridss.keys())
-
-    # add a numeric ID
-    df_gridss["numericID"] = list(range(0, len(df_gridss)))
-
-    # add fields
-    df_gridss["start_bed"] = df_gridss["POS"]
-    df_gridss["end_bed"] = df_gridss["POS"]
-
-    # sort 
-    df_gridss = df_gridss.sort_values(by=["#CHROM", "start_bed", "end_bed"])
-
-    # define high and low confidence dfs
-    df_highConf = df_gridss[df_gridss.type_BEND=="highConfidence"]
-    df_lowConf = df_gridss[df_gridss.type_BEND=="lowConfidence"]
-
-    # define the initial length
-    initial_len_df_lowConf = len(df_lowConf)
-
-    # define the bed files
-    bed_fields = ["#CHROM", "start_bed", "end_bed", "numericID"]
-    
-    ########## KEEP THE LOW CONFIDENCE BP THAT DON'T OVERLAP HIGH CONFIDENCE IDs ##########
-
-    # define the bedmap file
-    bedmap_outfile = "%s/mapping_lowConfidence_to_highConfidence_breakends.txt"%outdir
-
-    if file_is_empty(bedmap_outfile) or replace is True:
-
-        # get the as bed files
-        bed_highConf = "%s/high_confidence_breakends.bed"%outdir
-        bed_lowConf = "%s/low_confidence_breakends.bed"%outdir
-
-        df_highConf[bed_fields].to_csv(bed_highConf, sep="\t", index=False, header=False)
-        df_lowConf[bed_fields].to_csv(bed_lowConf, sep="\t", index=False, header=False)
-
-        # run bedmap only mapping all highConfidence against the low confidence, and only keep those that have at least one match. The output will have one line per each low confidence map
-
-        bedmap_outfile_tmp = "%s.tmp"%bedmap_outfile
-        bedmap_stderr = "%s.generating.stderr"%bedmap_outfile
-        run_cmd("%s --range %i --delim '\t' --count %s %s > %s 2>%s"%(bedmap, overlap_bp, bed_lowConf, bed_highConf, bedmap_outfile_tmp, bedmap_stderr))
-
-        remove_file(bedmap_stderr)
-        os.rename(bedmap_outfile_tmp, bedmap_outfile)
-
-    # load file as df and add IDs
-    df_n_highConf_overlap = pd.read_csv(bedmap_outfile, sep="\t", header=None, names=["n_overlapping_highConfidence"])
-
-    df_n_highConf_overlap["numericID"] = list(df_lowConf.numericID)
-
-    # define the non-overlapping IDs of the low confidence df
-    non_overlapping_highConf_lowConfidence_IDs = set(df_n_highConf_overlap[df_n_highConf_overlap.n_overlapping_highConfidence==0].numericID)
-
-    df_lowConf = df_lowConf[df_lowConf.numericID.isin(non_overlapping_highConf_lowConfidence_IDs)]
-
-    ######################################################################################
-
-    ####### KEEP NON-REDUDNAT BPs #######
-
-    # define outfile
-    bedmap_outfile_lowConf = "%s/mapping_lowConfidence_to_themselves_breakends.txt"%outdir
-
-    if file_is_empty(bedmap_outfile_lowConf) or replace is True:
-
-        # get the as bed files
-        bed_lowConf = "%s/low_confidence_breakends_filt.bed"%outdir
-        df_lowConf[bed_fields].to_csv(bed_lowConf, sep="\t", index=False, header=False)
-        
-        # run bedmap mapping low confidence to themselves, in order to get an ID_to_overlappingIDs
-
-        bedmap_outfile_lowConf_tmp = "%s.tmp"%bedmap_outfile_lowConf
-        bedmap_stderr = "%s.generating.stderr"%bedmap_outfile_lowConf
-        run_cmd("%s --range %i --delim '\t' --echo-map-id %s > %s 2>%s"%(bedmap, overlap_bp, bed_lowConf, bedmap_outfile_lowConf_tmp, bedmap_stderr))
-
-        remove_file(bedmap_stderr)
-        os.rename(bedmap_outfile_lowConf_tmp, bedmap_outfile_lowConf)
-
-    # get as df
-    df_bedmap_lowConf = pd.read_csv(bedmap_outfile_lowConf, sep="\t", header=None, names=["overlapping_IDs"])
-    df_bedmap_lowConf["overlapping_IDs_set"] = df_bedmap_lowConf.overlapping_IDs.apply(lambda x: {int(y) for y in x.split(";")})
-
-    # add the index
-    df_bedmap_lowConf["numericID"] = list(df_lowConf.numericID)
-
-    # define
-    ID_to_overlappingIDs = dict(df_bedmap_lowConf.set_index("numericID")["overlapping_IDs_set"])
-
-    # get the list of clusters
-    print_if_verbose("getting lists of clusters")
-    list_clusters = get_list_clusters_from_dict(ID_to_overlappingIDs)
-
-    # check
-    all_IDs = set(df_lowConf.numericID)
-    all_IDs_in_cluster = set.union(*list_clusters)
-    if all_IDs!=all_IDs_in_cluster: raise ValueError("all IDs should be in clusters")
-
-    print_if_verbose("list_clusters_overlapping_df_CNV already ran. There are %i clusters and %i breakends"%(len(list_clusters), len(all_IDs)))    
-
-    # get the best ID for each cluster
-    df_lowConf = df_lowConf.set_index("numericID", drop=False)
-    best_NR_bend_numericIDs = set(map( (lambda x: get_bestID_from_df_gridss_lowConf_cluster(x, df_lowConf) ), list_clusters))
-
-    #####################################
-
-    interesting_numericIDs = set(df_highConf.numericID).union(best_NR_bend_numericIDs)
-    print_if_verbose("There are %i/%i breakends not overlapping high confidence IDs by <%i bp and also non-redundant between them"%(len(interesting_numericIDs), len(df_gridss), overlap_bp))
-
-    # define all interesting breakends
-    df_gridss = df_gridss[df_gridss.numericID.isin(interesting_numericIDs)]
-    if len(interesting_numericIDs)!=len(df_gridss): raise ValueError("something went wrong with the NR generation")
-
-    return df_gridss[initial_fields]
-
-
 def get_correct_POS_in1based(r):
 
     """Takes a row of df_vcf SV calling and returns the 1- based position. Only the ACTG ones will not be considered"""
@@ -15492,6 +15445,10 @@ def get_df_vcf_with_df_CNV_coverage_added_nonRedundant(sorted_bam, reference_gen
             # add the field
             df_CNV["INFO"] = df_CNV.apply(lambda r: "END=%i;SVTYPE=%s;merged_relative_CN=%.3f;median_coverage_corrected=%.3f;median_relative_CN_CONY=%.3f;median_relative_CN_HMMcopy=%.3f"%(r["end"], r["SVTYPE"], r["merged_relative_CN"], r["median_coverage_corrected"], r["median_relative_CN_CONY"], r["median_relative_CN_HMMcopy"]), axis=1)
 
+            # filter out SVs that have a size below min_CNVsize_coverageBased
+            df_CNV["length_CNV"] = df_CNV.end - df_CNV.start
+            df_CNV = df_CNV[df_CNV.length_CNV>=min_CNVsize_coverageBased]
+
             # add the coverage fields
             bed_windows_prefix = "%s/calculating_cov_neighbors_CNV_vcf"%outdir
             df_CNV = get_df_with_coverage_per_windows_relative_to_neighbor_regions(df_CNV, bed_windows_prefix, reference_genome, sorted_bam, df_clove, median_coverage, replace=replace, run_in_parallel=True, delete_bams=True, threads=threads)
@@ -15548,8 +15505,11 @@ def get_vcf_all_SVs_and_CNV(perSVade_outdir, outdir, sorted_bam, reference_genom
         # define the outdir
         outdir_gridss_final = "%s/SVdetection_output/final_gridss_running"%perSVade_outdir
 
-        # get the clove output
+        # define the clove outfile
         outfile_clove = "%s/gridss_output.vcf.withSimpleEventType.vcf.filtered_default.vcf.bedpe.raw.bedpe.clove.vcf"%outdir_gridss_final
+        if file_is_empty(outfile_clove): outfile_clove = "%s/clove_output.vcf"%outdir_gridss_final
+
+        # get the clove df
         df_clove = get_clove_output(outfile_clove)
 
         # get files from output
@@ -15829,6 +15789,66 @@ def remove_files_SV_CNVcalling(outdir):
     for f in files_to_remove: delete_file_or_folder("%s/%s"%(parameter_optimisation_dir, f))
 
 
+def get_small_variant_calling_withCNstate(varcall_file, df_CNV_coverage, replace=False):
+
+    """This function rewrites varcall_file by adding a column called relative_CN. This includes which is the relative CN state of each variant. """
+
+    print_if_verbose("Adding CNstate to small variant calling")
+
+    # define a function that returns if the varcall_file contains the final "relative_CN" field
+    def varcall_file_has_relative_CN(varcall_file): return "relative_CN" in str(subprocess.check_output("head -n 1 %s"%varcall_file, shell=True))
+
+    # only repeat if relative_CN is not in varcall_file
+    if not varcall_file_has_relative_CN(varcall_file) or replace is True:
+        print_if_verbose("Adding CNstate to small variant calling")
+
+        # load the variant calling df
+        df_varcall = get_tab_as_df_or_empty_df(varcall_file).sort_values(by=["#CHROM", "POS"])
+        initial_fields_varcall = list(df_varcall.keys())
+
+        # define an outdir for the intersection processing
+        outdir_adding_relativeCN = "%s.adding_relativeCN"%varcall_file; make_folder(outdir_adding_relativeCN)
+
+        # create a file with the regions under CNV
+        df_CNV_coverage["numericID"] = list(range(len(df_CNV_coverage)))
+        df_CNV_coverage["bed_ID"] = df_CNV_coverage.numericID.apply(str) + "|" + df_CNV_coverage.merged_relative_CN.apply(str)
+        cnv_bed = "%s/cnv_regions.bed"%outdir_adding_relativeCN
+        df_CNV_coverage[["chromosome", "start", "end", "bed_ID"]].sort_values(by=["chromosome", "start", "end"]).to_csv(cnv_bed, sep="\t", index=False, header=False)
+
+        # create a file with the variants
+        df_varcall["start_bed"] = df_varcall.POS - 1
+        df_varcall["end_bed"] = df_varcall.start_bed + 1
+        variants_bed = "%s/variants.bed"%outdir_adding_relativeCN
+        df_varcall[["#CHROM", "start_bed", "end_bed", "#Uploaded_variation"]].to_csv(variants_bed, sep="\t", index=False, header=False)
+
+        # run bedmap to get the IDs of the CNVs that overlap each of the variants_bed
+        bedmap_outfile = "%s/bedmap_outfile.txt"%outdir_adding_relativeCN
+        bedmap_stderr = "%s/bedmap_stderr.txt"%outdir_adding_relativeCN
+
+        print_if_verbose("running bedmap. The stderr is in %s"%bedmap_stderr)
+        run_cmd("%s --delim '\t' --range %i --echo-map-id %s %s > %s 2>%s"%(bedmap, min_CNVsize_coverageBased, variants_bed, cnv_bed, bedmap_outfile, bedmap_stderr))
+
+        # add to df
+        def get_relative_CN_from_mappedID(mapID):
+            mapID = mapID.strip()
+            if pd.isna(mapID) or mapID=="": return 1.0
+            else: return max([float(x.split("|")[1]) for x in mapID.split(";")])
+
+        df_varcall["relative_CN"] = pd.Series(open(bedmap_outfile, "r").readlines(), index=df_varcall.index).apply(get_relative_CN_from_mappedID)
+
+        # debug
+        if any(pd.isna(df_varcall.relative_CN)): raise ValueError("relative_CN can't be NaN")
+
+        # delete the outdir
+        delete_folder(outdir_adding_relativeCN)
+
+        # save
+        varcall_file_tmp = "%s.tmp"%varcall_file
+        save_df_as_tab(df_varcall[initial_fields_varcall + ["relative_CN"]], varcall_file_tmp)
+        os.rename(varcall_file_tmp, varcall_file)
+
+    else: print_if_verbose("relative_CN was already added")
+
 #######################################################################################
 #######################################################################################
 #######################################################################################
@@ -15916,6 +15936,10 @@ def run_jobarray_file_MN4_greasy(jobs_filename, name, time="12:00:00", queue="bs
     max_nodes = int((njobs*threads_per_job)/48)
     requested_nodes = min([nodes, max_nodes])
 
+    # define the number of tasks
+    max_ntasks = int((requested_nodes*48)/threads_per_job)
+    ntasks = min([njobs, max_ntasks])
+
     # define the arguments
     arguments = [ "#!/bin/sh",
                   "#SBATCH --error=%s"%stderr_file,
@@ -15926,7 +15950,7 @@ def run_jobarray_file_MN4_greasy(jobs_filename, name, time="12:00:00", queue="bs
                   "#SBATCH --time=%s"%time,
                   "#SBATCH --qos=%s"%queue,
                   "#SBATCH --cpus-per-task=%i"%threads_per_job,
-                  "#SBATCH --ntasks=%i"%requested_nodes,
+                  "#SBATCH --ntasks=%i"%ntasks,
                   "",
                   "module load greasy",
                   "export GREASY_LOGFILE=%s;"%(greasy_logfile),
@@ -16052,7 +16076,7 @@ def get_integrated_variants_into_one_df(df, file_prefix, replace=False, remove_f
 
     return small_vars, small_vars_annot, SV_CNV, SV_CNV_annot
 
-def run_perSVade_severalSamples(paths_df, cwd, common_args, threads=4, sampleID_to_parentIDs={}, samples_to_run=set(), repeat=False, job_array_mode="job_array", ploidy=1, get_integrated_dfs=True):
+def run_perSVade_severalSamples(paths_df, cwd, common_args, threads=4, sampleID_to_parentIDs={}, samples_to_run=set(), repeat=False, job_array_mode="job_array", ploidy=1, get_integrated_dfs=True, repeat_job_running=False):
 
  
     """
@@ -16081,6 +16105,7 @@ def run_perSVade_severalSamples(paths_df, cwd, common_args, threads=4, sampleID_
     # define the samples_to_run
     if len(samples_to_run)==0: samples_to_run = set(paths_df.sampleID)
 
+
     # get the info of all the reads and samples
     all_cmds = []
 
@@ -16101,6 +16126,11 @@ def run_perSVade_severalSamples(paths_df, cwd, common_args, threads=4, sampleID_
         # define the files that shoud be not empty in order not to run this code
         #success_files = ["%s/smallVars_CNV_output/variant_annotation_ploidy%i.tab"%(outdir, ploidy)]
         success_files = ["%s/perSVade_finished_file.txt"%(outdir)]
+
+        # if repeat job running is true, remove the success_files
+        if repeat_job_running is True: 
+            for f in success_files: remove_file(f)
+
                    
         # define the cmd          
         cmd = "%s -f1 %s -f2 %s -o %s --ploidy %i %s"%(perSVade_py, reads1, reads2, outdir, ploidy, common_args)
@@ -16161,7 +16191,7 @@ def get_bed_df_from_variantID(varID):
         startA = int(posA.split(":")[1])
         endA = startA + 1
 
-        startB = endB = int(posB.split(":")[1])
+        startB = int(posB.split(":")[1])
         endB = startB + 1
 
         type_overlap = "pos" # this means that only the position should be mapping
@@ -16183,6 +16213,29 @@ def get_bed_df_from_variantID(varID):
         # here the A region is copied or pasted into a B breakend. This means that the type_overlap is different
         dict_bed = {0 : {"chromosome":chromA, "start":startA, "end":endA, "ID":varID+"-A", "type_overlap":"both"},
                     1 : {"chromosome":chromB, "start":startB, "end":endB, "ID":varID+"-B", "type_overlap":"pos"}}
+
+    elif svtype in {"TRA"}:
+
+        posA, posB = varID.split("|")[1].split("<>")
+
+        chromA = "TRA_%s"%(posA.split(":")[0])
+        chromB = "TRA_%s"%(posB.split(":")[0])
+
+        # get positions as the minimum non-0 position 
+        locationsA = {int(x) for x in posA.split(":")[1].split("-")}.difference({0})
+        locationsB = {int(x) for x in posB.split(":")[1].split("-")}.difference({0})
+
+        startA = min(locationsA)
+        endA = startA + 1
+
+        startB = min(locationsB)
+        endB = startB + 1
+
+        type_overlap = "pos" # this means that only the position should be mapping
+
+        dict_bed = {0 : {"chromosome":chromA, "start":startA, "end":endA, "ID":varID+"-A", "type_overlap":type_overlap},
+                    1 : {"chromosome":chromB, "start":startB, "end":endB, "ID":varID+"-B", "type_overlap":type_overlap}}
+
 
     else: raise ValueError("%s has not been parsed"%varID)
 
@@ -16531,7 +16584,8 @@ def get_annotation_df_with_GeneFeature_as_gff(annot_df, gff):
         target_gff_field = {"Gene":"upmost_parent", "Feature":"ANNOTATION_ID"}[field]
 
         # create a df that contains the important fields
-        reduced_df_gff = gff_df[[target_gff_field] + final_gff_fields].drop_duplicates()
+        interesting_fields_gff_df = sorted(set([target_gff_field] + final_gff_fields))
+        reduced_df_gff = gff_df[interesting_fields_gff_df].drop_duplicates()
 
         # add the intersecting_vals, which are the value of field that can be mapped to the gff_df
         reduced_df_gff["all_vals_set"] = reduced_df_gff[final_gff_fields].apply(set, axis=1)
@@ -16555,7 +16609,10 @@ def get_annotation_df_with_GeneFeature_as_gff(annot_df, gff):
         originalID_to_finalID["-"] = "-"
 
         # check that there are no multiple finalIDs of gene
-        if field=="Gene" and any(originalID_to_finalID.apply(lambda x: "," in x)): raise ValueError("Each gene should be only mapped to one feature")
+        if field=="Gene" and any(originalID_to_finalID.apply(lambda x: "," in x)): 
+
+            print(set(originalID_to_finalID))
+            raise ValueError("Each gene should be only mapped to one feature")
 
         # add 
         annot_df[field] = annot_df[field].apply(lambda x: originalID_to_finalID[x])
@@ -16563,84 +16620,144 @@ def get_annotation_df_with_GeneFeature_as_gff(annot_df, gff):
     return annot_df
 
 
-def get_integrated_SV_CNV_smallVars_df_from_run_perSVade_severalSamples(paths_df, cwd, ploidy, pct_overlap, tol_bp, gff):
+def get_integrated_SV_CNV_smallVars_df_from_run_perSVade_severalSamples(paths_df, cwd, ploidy, pct_overlap, tol_bp, gff, run_ploidy2_ifHaploid=False, tol_bp_diploidRegions=100):
 
     """Takes the same input as run_perSVade_severalSamples and writes the integrated dfs under cwd, adding to the integrated SV_CNV datasets some added fields that indicate that the SVs and CNV are shared among several samples """
 
-    # create files that are necessary
-    VarCallOutdirs = "%s/VarCallOutdirs"%cwd; make_folder(VarCallOutdirs)
+    # define the final filesfiles
+    coverage_df_file = "%s/merged_coverage.tab"%cwd
+    small_vars_df_file = "%s/smallVars_ploidy%i.tab"%(cwd, ploidy)
+    SV_CNV_file = "%s/SV_CNV_ploidy%i.tab"%(cwd, ploidy)
+    SV_CNV_file_simple = "%s/SV_CNV_ploidy%i.simple.tab"%(cwd, ploidy)
+    SV_CNV_annot_file = "%s/SV_CNV_annot_ploidy%i.tab"%(cwd, ploidy)
 
-    # init dfs
-    small_vars_df = pd.DataFrame()
-    small_var_annot = pd.DataFrame()
-    coverage_df = pd.DataFrame()
+    if run_ploidy2_ifHaploid is True: small_var_annot_file = "%s/smallVars_annot_ploidy1and2.tab"%cwd
+    else: small_var_annot_file = "%s/smallVars_annot_ploidy%i.tab"%(cwd, ploidy)
 
-    # init dict
-    sampleID_to_SV_dataDict = {}
+    if run_ploidy2_ifHaploid is True: small_vars_df_ploidy2_file = "%s/smallVars_ploidy2.tab"%cwd
 
-    samples_to_run = set(paths_df.sampleID)
-    #samples_to_run = {"RUN2_H99_Kerstin", "RUN2_H99_1"}
+    ######### GET THE SIMPLY MERGED DFS ##########
 
-    for sampleID in samples_to_run:
-        print(sampleID)
+    # get the simple dataframes
+    if any([file_is_empty(f) for f in [coverage_df_file, small_vars_df_file, small_var_annot_file, SV_CNV_file_simple, SV_CNV_annot_file]]):
 
-        # create an outdir
-        outdir = "%s/%s_VarCallresults"%(VarCallOutdirs, sampleID); make_folder(outdir)
+        print_if_verbose("merging files")
 
-        # add the small vars
-        s_small_vars_df = pd.read_csv("%s/smallVars_CNV_output/variant_calling_ploidy%i.tab"%(outdir, ploidy), sep="\t")
-        s_small_vars_df["sampleID"] = sampleID
-        small_vars_df = small_vars_df.append(s_small_vars_df)
+        # debug+
+        if run_ploidy2_ifHaploid is True and ploidy!=1: raise ValueError("run_ploidy2_ifHaploid can't be true if ploidiy!=1")
 
-        # add the small variants annotation
-        small_var_annot = small_var_annot.append(pd.read_csv("%s/smallVars_CNV_output/variant_annotation_ploidy%i.tab"%(outdir, ploidy), sep="\t")).drop_duplicates()
+        # create files that are necessary
+        VarCallOutdirs = "%s/VarCallOutdirs"%cwd; make_folder(VarCallOutdirs)
 
-        # add the coverage
-        s_coverage_df = pd.read_csv("%s/smallVars_CNV_output/CNV_results/genes_and_regions_coverage.tab"%(outdir), sep="\t")
-        s_coverage_df["sampleID"] = sampleID
-        coverage_df = coverage_df.append(s_coverage_df)
+        # init dfs
+        small_vars_df = pd.DataFrame()
+        small_var_annot = pd.DataFrame()
+        coverage_df = pd.DataFrame()
+        if run_ploidy2_ifHaploid is True: small_vars_df_ploidy2 = pd.DataFrame()
 
-        # add data to 
-        sampleID_to_SV_dataDict[sampleID] = {"sampleID":sampleID,
-                                             "SV_CNV_vcf":"%s/SVcalling_output/SV_and_CNV_variant_calling.vcf"%(outdir),
-                                             "SV_CNV_var_annotation":"%s/SVcalling_output/SV_and_CNV_variant_calling.vcf_annotated_VEP.tab"%(outdir)
-                                             }
+        # init dict
+        sampleID_to_SV_dataDict = {}
+
+        samples_to_run = set(paths_df.sampleID)
+        #samples_to_run = {"Cg1_CBS138", "Cg2_921192_2"}
+
+        for sampleID in samples_to_run:
+            print(sampleID)
+
+            # create an outdir
+            outdir = "%s/%s_VarCallresults"%(VarCallOutdirs, sampleID); make_folder(outdir)
+
+            # add the small vars
+            s_small_vars_df = pd.read_csv("%s/smallVars_CNV_output/variant_calling_ploidy%i.tab"%(outdir, ploidy), sep="\t")
+            s_small_vars_df["sampleID"] = sampleID
+            small_vars_df = small_vars_df.append(s_small_vars_df)
+
+            # add the ploidy 2 small vars
+            if run_ploidy2_ifHaploid is True:
+
+                s_small_vars_df_ploidy2 = pd.read_csv("%s/smallVars_CNV_output/variant_calling_ploidy2.tab"%outdir, sep="\t")
+                s_small_vars_df_ploidy2["sampleID"] = sampleID
+                small_vars_df_ploidy2 = small_vars_df_ploidy2.append(s_small_vars_df_ploidy2)
+
+            # add the small variants annotation
+            if run_ploidy2_ifHaploid is True: ploidies_small_var_annot = [1,2]
+            else: ploidies_small_var_annot = [ploidy]
+
+            for p in ploidies_small_var_annot:
+
+                small_var_annot = small_var_annot.append(pd.read_csv("%s/smallVars_CNV_output/variant_annotation_ploidy%i.tab"%(outdir, p), sep="\t")).drop_duplicates()
+
+            # add the coverage
+            s_coverage_df = pd.read_csv("%s/smallVars_CNV_output/CNV_results/genes_and_regions_coverage.tab"%(outdir), sep="\t")
+            s_coverage_df["sampleID"] = sampleID
+            coverage_df = coverage_df.append(s_coverage_df)
+
+            # add data to 
+            sampleID_to_SV_dataDict[sampleID] = {"sampleID":sampleID,
+                                                 "SV_CNV_vcf":"%s/SVcalling_output/SV_and_CNV_variant_calling.vcf"%(outdir),
+                                                 "SV_CNV_var_annotation":"%s/SVcalling_output/SV_and_CNV_variant_calling.vcf_annotated_VEP.tab"%(outdir)
+                                                 }
+
+        # check
+        if run_ploidy2_ifHaploid is True:
+            if any(pd.isna(small_vars_df.relative_CN)): raise ValueError("there can't be NaNs in small_vars_df")
+            if any(pd.isna(small_vars_df_ploidy2.relative_CN)): raise ValueError("there can't be NaNs in small_vars_df_ploidy2")
+
+        # get the integrated SV_CNV dfs
+        df_data = pd.DataFrame(sampleID_to_SV_dataDict).transpose()
+        file_prefix = "%s/integrated_SV_CNV_calling"%cwd
+
+        SV_CNV, SV_CNV_annot = get_integrated_variants_into_one_df(df_data, file_prefix, replace=True, remove_files=True)[2:]
 
 
-    # get the integrated SV_CNV dfs
-    df_data = pd.DataFrame(sampleID_to_SV_dataDict).transpose()
-    file_prefix = "%s/integrated_SV_CNV_calling"%cwd
+        # add some fields to the annotation dfs
+        print_if_verbose("getting Gene and Feature matching the gff")
+        SV_CNV_annot = get_annotation_df_with_GeneFeature_as_gff(SV_CNV_annot, gff)
+        small_var_annot = get_annotation_df_with_GeneFeature_as_gff(small_var_annot, gff)
 
-    SV_CNV, SV_CNV_annot = get_integrated_variants_into_one_df(df_data, file_prefix, replace=True, remove_files=True)[2:]
+        # add whether the SV is protein alterring
+        gff_df = load_gff3_intoDF(gff, replace=False)
+        all_protein_coding_genes = set(gff_df[gff_df.feature.isin({"CDS", "mRNA"})].upmost_parent)
+        SV_CNV_annot["is_protein_coding_gene"] = SV_CNV_annot.Gene.isin(all_protein_coding_genes)
+        SV_CNV_annot["is_transcript_disrupting"] = SV_CNV_annot.Consequence.apply(get_is_transcript_disrupting_consequence_SV)
+
+        # write dfs
+        save_df_as_tab(small_vars_df, small_vars_df_file)
+        save_df_as_tab(small_var_annot, small_var_annot_file)
+        save_df_as_tab(SV_CNV, SV_CNV_file_simple)
+        save_df_as_tab(SV_CNV_annot, SV_CNV_annot_file)
+        if run_ploidy2_ifHaploid is True: save_df_as_tab(small_vars_df_ploidy2, small_vars_df_ploidy2_file) 
+        save_df_as_tab(coverage_df, coverage_df_file)
 
 
-    # add some fields to the annotation dfs
-    print_if_verbose("getting Gene and Feature matching the gff")
-    SV_CNV_annot = get_annotation_df_with_GeneFeature_as_gff(SV_CNV_annot, gff)
-    small_var_annot = get_annotation_df_with_GeneFeature_as_gff(small_var_annot, gff)
+    ###########################################################
 
-    # add whether the SV is protein alterring
-    gff_df = load_gff3_intoDF(gff, replace=False)
-    all_protein_coding_genes = set(gff_df[gff_df.feature.isin({"CDS", "mRNA"})].upmost_parent)
-    SV_CNV_annot["is_protein_coding_gene"] = SV_CNV_annot.Gene.isin(all_protein_coding_genes)
-    SV_CNV_annot["is_transcript_disrupting"] = SV_CNV_annot.Consequence.apply(get_is_transcript_disrupting_consequence_SV)
+    ######### GET THE COMMON DF OF SVs #########
 
-    # add the common variant ID across samples
-    outdir_common_variantID_acrossSamples = "%s/getting_common_variantID_acrossSamples"%cwd
-    delete_folder(outdir_common_variantID_acrossSamples)
+    if file_is_empty(SV_CNV_file):
 
-    SV_CNV = get_SV_CNV_df_with_common_variantID_acrossSamples(SV_CNV, outdir_common_variantID_acrossSamples, pct_overlap, tol_bp)
+        print("adding the common variant ID")
 
-    SV_CNV = SV_CNV[[k for k in SV_CNV.keys() if k!="INFO"]]
+        # loading SV_CNV simple
+        SV_CNV = get_tab_as_df_or_empty_df(SV_CNV_file_simple)
 
-    delete_folder(outdir_common_variantID_acrossSamples)
+        # add the common variant ID across samples
+        outdir_common_variantID_acrossSamples = "%s/getting_common_variantID_acrossSamples"%cwd
+        delete_folder(outdir_common_variantID_acrossSamples)
 
-    # write dfs
-    save_df_as_tab(small_vars_df, "%s/smallVars_ploidy%i.tab"%(cwd, ploidy))
-    save_df_as_tab(small_var_annot, "%s/smallVars_annot_ploidy%i.tab"%(cwd, ploidy))
-    save_df_as_tab(SV_CNV, "%s/SV_CNV_ploidy%i.tab"%(cwd, ploidy))
-    save_df_as_tab(SV_CNV_annot, "%s/SV_CNV_annot_ploidy%i.tab"%(cwd, ploidy))
-    save_df_as_tab(coverage_df, "%s/merged_coverage.tab"%cwd)
+        SV_CNV = get_SV_CNV_df_with_common_variantID_acrossSamples(SV_CNV, outdir_common_variantID_acrossSamples, pct_overlap, tol_bp)
+
+        # keep relevant files
+        SV_CNV = SV_CNV[[k for k in SV_CNV.keys() if k!="INFO"]]
+
+        delete_folder(outdir_common_variantID_acrossSamples)
+
+        # keep
+        save_df_as_tab(SV_CNV, SV_CNV_file)
+
+    #############################################
+
+  
 
 #######################################################################################
 #######################################################################################

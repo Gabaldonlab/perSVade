@@ -124,7 +124,6 @@ if not opt.gff is None: correct_gff, gff_with_biotype = fun.get_correct_gff_and_
   
 # First create some files that are important for any program
 
-
 # Create a reference dictionary
 fun.create_sequence_dict(opt.ref, replace=opt.replace)
 
@@ -134,6 +133,19 @@ fun.index_genome(opt.ref, replace=opt.replace)
 # define the sorted bam
 sorted_bam = opt.sortedbam
 print("running VarCall for %s"%sorted_bam)
+
+
+######### DEBUG THE FACT THAT THE VARIANT ANNOTATION IS ALREADY DONE ##########
+
+# define the final file
+variantAnnotation_table = "%s/variant_annotation_ploidy%i.tab"%(opt.outdir, opt.ploidy)
+if opt.gff is not None and not fun.file_is_empty(variantAnnotation_table) and opt.replace is False: 
+
+    print("WARNING: There is already a variant annotation file, indicating that the pipeline was already ran. Remove %s if you want to run again. Exiting..."%variantAnnotation_table)
+    sys.exit(0)
+
+###############################################################################
+
 
 #####################################
 ############### CNV #################
@@ -410,7 +422,6 @@ if opt.gff is None:
 else:
 
     ######### RUN VEP AND GENERATE ANNOTATION TABLE #########
-    variantAnnotation_table = "%s/variant_annotation_ploidy%i.tab"%(opt.outdir, opt.ploidy)
     if fun.file_is_empty(variantAnnotation_table) or opt.replace is True:
 
         # run vep in parallel
@@ -429,7 +440,13 @@ else:
 
         df_vep['is_snp'] = (df_vep["ref"].apply(len)==1) & (df_vep["ref"]!="-") & (df_vep["alt"].apply(len)==1) & (df_vep["alt"]!="-")
 
+        def get_nan_to_str(cons):
+            if pd.isna(cons): return "-"
+            else: return cons
+        df_vep["Consequence"] = df_vep.Consequence.apply(get_nan_to_str)
+
         df_vep["consequences_set"] = df_vep.Consequence.apply(lambda x: set(str(x).split(",")))
+
         df_vep["is_protein_altering"] = df_vep.Consequence.apply(fun.get_is_protein_altering_consequence)
 
         # generate a table that has all the variant annotation info

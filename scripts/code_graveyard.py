@@ -13886,3 +13886,198 @@ def get_breakend_IDs_df_CNV_r(r, df_gridss, chrom_to_len):
 
     return bendIDs
 
+#################### OLD HMM COPY CODE ###########################
+
+#!/usr/bin/env Rscript
+
+# This script runs hmmcopy on an input table were there is the coverage per bins of the genome
+
+# define environment
+library(argparser, quietly=TRUE)
+library(HMMcopy)
+
+# print the traceback on exit
+#options(error=function()traceback(2))
+options(warn=1)
+
+# parse cmd line args
+argp = arg_parser("Perfroms CNV calling with HMMcopy for one chromosome")
+
+argp = add_argument(argp, "--coverage_table", help="A table with the input files")
+argp = add_argument(argp, "--outfile", help="The outfile where to write the outdirs")
+
+# parameters
+argp = add_argument(argp, "--e", default=0.9999999, help="The e parameters of the HMMcopy")
+argp = add_argument(argp, "--mu", default="-0.458558247,-0.215877601,-0.002665686,0.191051578,0.347816046,1.664333241", help="The mu parameters of the HMMcopy")
+argp = add_argument(argp, "--lambda", default=20, help="The lambda parameters of the HMMcopy")
+argp = add_argument(argp, "--nu", default=2.1, help="The nu parameters of the HMMcopy")
+argp = add_argument(argp, "--kappa", default="50,50,700,100,50,50", help="The kappa parameters of the HMMcopy")
+argp = add_argument(argp, "--m", default="-0.458558247,-0.215877601,-0.002665686,0.191051578,0.347816046,1.664333241", help="The m parameters of the HMMcopy")
+argp = add_argument(argp, "--eta", default=50000.0, help="The eta parameters of the HMMcopy")
+argp = add_argument(argp, "--gamma", default=3, help="The gamma parameters of the HMMcopy")
+argp = add_argument(argp, "--S", default=0.02930164, help="The S parameters of the HMMcopy")
+argp = add_argument(argp, "--strength", default="1e7", help="The strength parameters of the HMMcopy")
+argp = add_argument(argp, "--fraction_data_correctReadcount", default=0.1, help="The fraction of data points in the input with which to run the correctReadcount function.")
+
+opt = parse_args(argp)
+
+# load df
+df_coverage = read.table(opt$coverage_table, sep="\t", header=TRUE)
+
+# add columns that have corrected fields
+samplesize_correctReadcount = as.integer(opt$fraction_data_correctReadcount*length(row.names(df_coverage)))
+df_coverage = correctReadcount(df_coverage, samplesize=samplesize_correctReadcount) 
+
+# get the default parameters to run HMMsegment
+params_HMMsegment = HMMsegment(df_coverage, getparam = TRUE)
+
+# define the parameters according to the inputs
+params_HMMsegment$strength = as.numeric(opt$strength)
+params_HMMsegment$e = opt$e
+params_HMMsegment$mu = as.numeric(strsplit(opt$mu, ",")[[1]])
+params_HMMsegment$lambda = opt$lambda
+params_HMMsegment$nu = opt$nu
+params_HMMsegment$kappa = as.numeric(strsplit(opt$kappa, ",")[[1]])
+params_HMMsegment$m = as.numeric(strsplit(opt$m, ",")[[1]])
+params_HMMsegment$eta = opt$eta
+params_HMMsegment$gamma = opt$gamma
+params_HMMsegment$S = opt$S
+
+# classify into copy number variation even
+CN_segments = HMMsegment(df_coverage, params_HMMsegment)
+
+# add the segments
+df_coverage$state_CNsegment = CN_segments$state # this goes from 1 to 6
+
+# write
+write.table(df_coverage, opt$outfile, sep="\t", col.names=TRUE, quote=FALSE, row.names=FALSE)
+
+print("HMM copy worked well")
+
+
+
+##################################################################
+
+
+
+def get_df_gridss_removing_redundant_lowConfidenceBPs(df_gridss, outdir, threads, chrom_to_len, replace, overlap_bp=100):
+
+    """Takes a df_gridss and returns it after removing those low-confidence breakends that are close (<=overlap_bp bp to high-confidence BPs). It also removes those gridss breakpoints that are close to themselves"""
+
+    print_if_verbose("running get_df_gridss_removing_redundant_lowConfidenceBPs")
+
+
+    # define the initial fields
+    initial_fields = list(df_gridss.keys())
+
+    # add a numeric ID
+    df_gridss["numericID"] = list(range(0, len(df_gridss)))
+
+    # add fields
+    df_gridss["start_bed"] = df_gridss["POS"]
+    df_gridss["end_bed"] = df_gridss["POS"]
+
+    # sort 
+    df_gridss = df_gridss.sort_values(by=["#CHROM", "start_bed", "end_bed"])
+
+    # define high and low confidence dfs
+    df_highConf = df_gridss[df_gridss.type_BEND=="highConfidence"]
+    df_lowConf = df_gridss[df_gridss.type_BEND=="lowConfidence"]
+
+    # define the initial length
+    initial_len_df_lowConf = len(df_lowConf)
+
+    # define the bed files
+    bed_fields = ["#CHROM", "start_bed", "end_bed", "numericID"]
+    
+    ########## KEEP THE LOW CONFIDENCE BP THAT DON'T OVERLAP HIGH CONFIDENCE IDs ##########
+
+    # define the bedmap file
+    bedmap_outfile = "%s/mapping_lowConfidence_to_highConfidence_breakends.txt"%outdir
+
+    if file_is_empty(bedmap_outfile) or replace is True:
+
+        # get the as bed files
+        bed_highConf = "%s/high_confidence_breakends.bed"%outdir
+        bed_lowConf = "%s/low_confidence_breakends.bed"%outdir
+
+        df_highConf[bed_fields].to_csv(bed_highConf, sep="\t", index=False, header=False)
+        df_lowConf[bed_fields].to_csv(bed_lowConf, sep="\t", index=False, header=False)
+
+        # run bedmap only mapping all highConfidence against the low confidence, and only keep those that have at least one match. The output will have one line per each low confidence map
+
+        bedmap_outfile_tmp = "%s.tmp"%bedmap_outfile
+        bedmap_stderr = "%s.generating.stderr"%bedmap_outfile
+        run_cmd("%s --range %i --delim '\t' --count %s %s > %s 2>%s"%(bedmap, overlap_bp, bed_lowConf, bed_highConf, bedmap_outfile_tmp, bedmap_stderr))
+
+        remove_file(bedmap_stderr)
+        os.rename(bedmap_outfile_tmp, bedmap_outfile)
+
+    # load file as df and add IDs
+    df_n_highConf_overlap = pd.read_csv(bedmap_outfile, sep="\t", header=None, names=["n_overlapping_highConfidence"])
+
+    df_n_highConf_overlap["numericID"] = list(df_lowConf.numericID)
+
+    # define the non-overlapping IDs of the low confidence df
+    non_overlapping_highConf_lowConfidence_IDs = set(df_n_highConf_overlap[df_n_highConf_overlap.n_overlapping_highConfidence==0].numericID)
+
+    df_lowConf = df_lowConf[df_lowConf.numericID.isin(non_overlapping_highConf_lowConfidence_IDs)]
+
+    ######################################################################################
+
+    ####### KEEP NON-REDUDNAT BPs #######
+
+    # define outfile
+    bedmap_outfile_lowConf = "%s/mapping_lowConfidence_to_themselves_breakends.txt"%outdir
+
+    if file_is_empty(bedmap_outfile_lowConf) or replace is True:
+
+        # get the as bed files
+        bed_lowConf = "%s/low_confidence_breakends_filt.bed"%outdir
+        df_lowConf[bed_fields].to_csv(bed_lowConf, sep="\t", index=False, header=False)
+        
+        # run bedmap mapping low confidence to themselves, in order to get an ID_to_overlappingIDs
+
+        bedmap_outfile_lowConf_tmp = "%s.tmp"%bedmap_outfile_lowConf
+        bedmap_stderr = "%s.generating.stderr"%bedmap_outfile_lowConf
+        run_cmd("%s --range %i --delim '\t' --echo-map-id %s > %s 2>%s"%(bedmap, overlap_bp, bed_lowConf, bedmap_outfile_lowConf_tmp, bedmap_stderr))
+
+        remove_file(bedmap_stderr)
+        os.rename(bedmap_outfile_lowConf_tmp, bedmap_outfile_lowConf)
+
+    # get as df
+    df_bedmap_lowConf = pd.read_csv(bedmap_outfile_lowConf, sep="\t", header=None, names=["overlapping_IDs"])
+    df_bedmap_lowConf["overlapping_IDs_set"] = df_bedmap_lowConf.overlapping_IDs.apply(lambda x: {int(y) for y in x.split(";")})
+
+    # add the index
+    df_bedmap_lowConf["numericID"] = list(df_lowConf.numericID)
+
+    # define
+    ID_to_overlappingIDs = dict(df_bedmap_lowConf.set_index("numericID")["overlapping_IDs_set"])
+
+    # get the list of clusters
+    print_if_verbose("getting lists of clusters")
+    list_clusters = get_list_clusters_from_dict(ID_to_overlappingIDs)
+
+    # check
+    all_IDs = set(df_lowConf.numericID)
+    all_IDs_in_cluster = set.union(*list_clusters)
+    if all_IDs!=all_IDs_in_cluster: raise ValueError("all IDs should be in clusters")
+
+    print_if_verbose("list_clusters_overlapping_df_CNV already ran. There are %i clusters and %i breakends"%(len(list_clusters), len(all_IDs)))    
+
+    # get the best ID for each cluster
+    df_lowConf = df_lowConf.set_index("numericID", drop=False)
+    best_NR_bend_numericIDs = set(map( (lambda x: get_bestID_from_df_gridss_lowConf_cluster(x, df_lowConf) ), list_clusters))
+
+    #####################################
+
+    interesting_numericIDs = set(df_highConf.numericID).union(best_NR_bend_numericIDs)
+    print_if_verbose("There are %i/%i breakends not overlapping high confidence IDs by <%i bp and also non-redundant between them"%(len(interesting_numericIDs), len(df_gridss), overlap_bp))
+
+    # define all interesting breakends
+    df_gridss = df_gridss[df_gridss.numericID.isin(interesting_numericIDs)]
+    if len(interesting_numericIDs)!=len(df_gridss): raise ValueError("something went wrong with the NR generation")
+
+    return df_gridss[initial_fields]
+
