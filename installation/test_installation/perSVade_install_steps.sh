@@ -63,8 +63,8 @@ conda install -c bioconda -y parallel-fastq-dump=0.6.3 &&
 conda install -c bioconda -y fastqc=0.11.9 &&
 conda install -c bioconda -y bedops=2.4.39 &&
 conda install -c bioconda -y genmap=1.3.0 &&
-
 conda install -c anaconda -y cython=0.29.21 # necessary for the cylowess running
+conda install -c anaconda -y xlrd=1.2.0
 
 #conda install -c conda-forge -y python-igraph=0.8.3 && # this updates many things. It may be necessary to stick to python-igraph=0.7.1.post7. This 
 

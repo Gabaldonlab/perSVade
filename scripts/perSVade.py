@@ -81,7 +81,7 @@ parser.add_argument("--fast_SVcalling", dest="fast_SVcalling", action="store_tru
 
 
 # set the minimum SVsize
-parser.add_argument("--min_CNVsize_betweenBPs", dest="min_CNVsize_betweenBPs", default=500, type=int, help="The minimum size of a CNV inferred brtween breakpoints in the perSVade running.")
+parser.add_argument("--min_CNVsize_coverageBased", dest="min_CNVsize_coverageBased", default=300, type=int, help="The minimum size of a CNV inferred from coverage.")
 
 # pipeline skipping options 
 parser.add_argument("--skip_SVcalling", dest="skip_SVcalling", action="store_true", default=False, help="Do not run SV calling.")
@@ -142,12 +142,6 @@ parser.add_argument("--min_chromosome_len", dest="min_chromosome_len", default=1
 # the fraction of available memory
 parser.add_argument("--fraction_available_mem", dest="fraction_available_mem", default=None, help="The fraction of RAM that is being allocated to this perSVade run. In several steps, this pipeline needs to calculate the available memory (using psutil.virtual_memory()). This returns all the available memory in the computer. If you are running on a fraction of the computers' resources, this calculation is overestimating the available RAM. In such case you can provide the fraction available through this argument. By default, it will calculate the available ram by filling the memory, which may give errors.")
 
-# coverage CNV
-parser.add_argument("--min_coverage_duplication", dest="min_coverage_duplication", default="auto", help="The minimum rel. coverage to call a duplicated region. If set to auto, it will be calculated from optimisation")
-parser.add_argument("--max_coverage_deletion", dest="max_coverage_deletion", default="auto", help="The maximum rel. coverage to call a deleted region. If set to auto, it will be calculated from optimisation")
-parser.add_argument("--min_r_pearson_noFlatRegions", dest="min_r_pearson_noFlatRegions", default="auto", help="The minimum pearson correlation that there should be between position and coverage in a region for being considered as a duplication.")
-parser.add_argument("--min_r_spearman_noFlatRegions", dest="min_r_spearman_noFlatRegions", default="auto", help="The minimum spearman correlation that there should be between position and coverage in a region for being considered as a duplication.")
-
 # small VarCall and CNV args
 parser.add_argument("--run_smallVarsCNV", dest="run_smallVarsCNV", action="store_true", default=False, help="Will call small variants and CNV.")
 parser.add_argument("-gff", "--gff-file", dest="gff", default=None, help="path to the GFF3 annotation of the reference genome. Make sure that the IDs are completely unique for each 'gene' tag. This is necessary for both the CNV analysis (it will look at genes there) and the annotation of the variants.")
@@ -164,7 +158,7 @@ parser.add_argument("--skip_cnv_analysis", dest="skip_cnv_analysis", default=Fal
 
 
 # add the CNV calling args
-parser.add_argument("--window_size_CNVcalling", dest="window_size_CNVcalling", default=500, type=int, help="The window size in which the genome will be fragmented for CNV calling.")
+parser.add_argument("--window_size_CNVcalling", dest="window_size_CNVcalling", default=100, type=int, help="The window size in which the genome will be fragmented for CNV calling.")
 
 
 # visualization
@@ -175,6 +169,10 @@ parser.add_argument("--pooled_sequencing", dest="pooled_sequencing", action="sto
 
 # verbosity
 parser.add_argument("--verbose", dest="verbose", action="store_true", default=False, help="Whether to print a verbose output. This is important if there are any errors in the run.")
+
+# run diploid configuration for ploidy==1
+parser.add_argument("--run_ploidy2_ifHaploid", dest="run_ploidy2_ifHaploid", action="store_true", default=False, help="If ploidy==1, run also in diploid configuration. This is useful because there may be diploid mutations in duplicated regions.")
+
 
 # repeat obtention
 parser.add_argument("--consider_repeats_smallVarCall", dest="consider_repeats_smallVarCall", action="store_true", default=False, help="If --run_smallVarsCNV, this option will imply that each small  variant will have an annotation of whether it overlaps a repeat region.")
@@ -212,7 +210,6 @@ print("Running perSVade into %s"%opt.outdir)
 # define where the reference genome will be stored
 reference_genome_dir = "%s/reference_genome_dir"%(opt.outdir); fun.make_folder(reference_genome_dir)
 new_reference_genome_file = "%s/reference_genome.fasta"%reference_genome_dir
-
 
 # rewrite the reference genome so that all the chars ar upper
 all_chroms_seqRecords = [SeqRecord(Seq(str(seq.seq).upper()), id=seq.id, description="", name="") for seq in SeqIO.parse(opt.ref, "fasta")]
@@ -291,8 +288,8 @@ fun.printing_verbose_mode = opt.verbose
 # defin the fraction of available mem
 fun.fraction_available_mem = opt.fraction_available_mem
 
-# define the min_CNVsize_betweenBPs
-fun.min_CNVsize_betweenBPs = opt.min_CNVsize_betweenBPs
+# define the min_CNVsize_coverageBased
+fun.min_CNVsize_coverageBased = opt.min_CNVsize_coverageBased
 
 # redefine the real threads
 real_available_threads = fun.get_available_threads(opt.outdir)
@@ -516,7 +513,8 @@ print("structural variation analysis with perSVade finished")
 ###### SV and CNV ANNOTATION ########
 #####################################
 
-if opt.skip_SVcalling is False and not any([x=="skip" for x in {opt.fastq1, opt.fastq2}]) and opt.skip_SV_CNV_calling is False:
+run_SV_CNV_calling = (opt.skip_SVcalling is False and not any([x=="skip" for x in {opt.fastq1, opt.fastq2}]) and opt.skip_SV_CNV_calling is False)
+if run_SV_CNV_calling is True:
 
     # define outdirs
     cnv_calling_outdir = "%s/CNV_calling"%opt.outdir
@@ -524,8 +522,11 @@ if opt.skip_SVcalling is False and not any([x=="skip" for x in {opt.fastq1, opt.
 
     # remove folders if there is some replacement to be done
     if opt.replace_SV_CNVcalling is True: 
-        for f in [cnv_calling_outdir, outdir_var_calling]: delete_folder(f)
+        for f in [cnv_calling_outdir, outdir_var_calling]: fun.delete_folder(f)
 
+    # make folders
+    for f in [cnv_calling_outdir, outdir_var_calling]: fun.make_folder(f)
+    
     # define the df_bedpe and df_gridss
     df_gridss = fun.get_svtype_to_svfile_and_df_gridss_from_perSVade_outdir(opt.outdir, opt.ref)[1]
 
@@ -546,7 +547,7 @@ if opt.skip_SVcalling is False and not any([x=="skip" for x in {opt.fastq1, opt.
         print("annotated SV vcf can be found in %s"%SV_CNV_vcf_annotated)
     
     else: print("WARNING: Skipping SV annotation because -gff was not provided.")
-    
+
 #####################################
 #####################################
 #####################################
@@ -564,12 +565,11 @@ if opt.run_smallVarsCNV:
     outdir_varcall = "%s/smallVars_CNV_output"%opt.outdir
 
     # define the basic cmd
-    varcall_cmd = "%s -r %s --threads %i --outdir %s -p %i -sbam %s --caller %s --coverage %i --mitochondrial_chromosome %s --mitochondrial_code %i --gDNA_code %i --minAF_smallVars %s"%(varcall_cnv_pipeline, opt.ref, opt.threads, outdir_varcall, opt.ploidy, sorted_bam, opt.caller, opt.coverage, opt.mitochondrial_chromosome, opt.mitochondrial_code, opt.gDNA_code, opt.minAF_smallVars)
+    varcall_cmd = "%s -r %s --threads %i --outdir %s -sbam %s --caller %s --coverage %i --mitochondrial_chromosome %s --mitochondrial_code %i --gDNA_code %i --minAF_smallVars %s"%(varcall_cnv_pipeline, opt.ref, opt.threads, outdir_varcall, sorted_bam, opt.caller, opt.coverage, opt.mitochondrial_chromosome, opt.mitochondrial_code, opt.gDNA_code, opt.minAF_smallVars)
 
     # add options
     if opt.replace is True: varcall_cmd += " --replace"
     if opt.gff is not None: varcall_cmd += " -gff %s"%opt.gff
-    if opt.remove_smallVarsCNV_nonEssentialFiles is True: varcall_cmd += " --remove_smallVarsCNV_nonEssentialFiles"
     if opt.StopAfter_smallVarCallSimpleRunning is True: varcall_cmd += " --StopAfter_smallVarCallSimpleRunning"
     if opt.replace_var_integration is True: varcall_cmd += " --replace_var_integration"
     if opt.pooled_sequencing is True: varcall_cmd += " --pooled_sequencing"
@@ -577,15 +577,29 @@ if opt.run_smallVarsCNV:
     if opt.generate_alternative_genome is True: varcall_cmd += " --generate_alternative_genome"
     if opt.skip_cnv_analysis is True: varcall_cmd += " --skip_cnv_analysis"
 
-    # run
-    if __name__ == '__main__': fun.run_cmd(varcall_cmd)
+    # define which ploidies to run
+    if opt.ploidy==1 and opt.run_ploidy2_ifHaploid is False: ploidies_varcall = [1]
+    if opt.ploidy==1 and opt.run_ploidy2_ifHaploid is True: ploidies_varcall = [1, 2]
+    else: ploidies_varcall = [opt.ploidy]
 
+    # run for each ploidy
+    for ploidy_varcall in ploidies_varcall:
+
+    	# run the variant calling command
+        varcall_cmd += " -p %i"%ploidy_varcall
+        if __name__ == '__main__': fun.run_cmd(varcall_cmd)
+
+        # regenerate the variant calling file according to run_SV_CNV_calling
+        if run_SV_CNV_calling is True: fun.get_small_variant_calling_withCNstate("%s/variant_calling_ploidy%i.tab"%(outdir_varcall, ploidy_varcall), df_CNV_coverage, replace=opt.replace)
+  
     # define the small variants vcf
     small_vars_vcf = "%s/variants_atLeast1PASS_ploidy%i.vcf"%(outdir_varcall, opt.ploidy)
 
     # define the variant annotation
     small_vars_var_annotation = "%s/variant_annotation_ploidy%i.tab"%(outdir_varcall, opt.ploidy)
 
+    # clean the varcall dir if specified
+    if opt.remove_smallVarsCNV_nonEssentialFiles is True: fun.remove_smallVarsCNV_nonEssentialFiles_severalPloidies(outdir_varcall, ploidies_varcall)
 
 #####################################
 #####################################
@@ -635,5 +649,4 @@ if opt.skip_cleaning_outdir is False: fun.clean_perSVade_outdir(opt.outdir)
 open(final_file, "w").write("perSVade_finished finished...")
 
 print("perSVade Finished correctly")
-
 
