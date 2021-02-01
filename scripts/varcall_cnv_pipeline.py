@@ -75,6 +75,7 @@ parser.add_argument("-c", "--coverage", dest="coverage", default=20, type=int, h
 parser.add_argument("-mchr", "--mitochondrial_chromosome", dest="mitochondrial_chromosome", default="mito_C_glabrata_CBS138", type=str, help="The name of the mitochondrial chromosome. This is important if you have mitochondrial proteins for which to annotate the impact of nonsynonymous variants, as the mitochondrial genetic code is different. This should be the same as in the gff. If there is no mitochondria just put 'no_mitochondria'")
 parser.add_argument("-mcode", "--mitochondrial_code", dest="mitochondrial_code", default=3, type=int, help="The code of the NCBI mitochondrial genetic code. For yeasts it is 3. You can find the numbers for your species here https://www.ncbi.nlm.nih.gov/Taxonomy/Utils/wprintgc.cgi")
 parser.add_argument("-gcode", "--gDNA_code", dest="gDNA_code", default=1, type=int, help="The code of the NCBI gDNA genetic code. You can find the numbers for your species here https://www.ncbi.nlm.nih.gov/Taxonomy/Utils/wprintgc.cgi . For C. albicans it is 12. ")
+parser.add_argument("--window_freebayes_bp", dest="window_freebayes_bp", default=10000, type=int, help="The window (in bp) in which freebayes regions are split to. If you increase this number the splitting will be in larger chunks of the genome.")
 
 # CNV args
 parser.add_argument("--skip_cnv_analysis", dest="skip_cnv_analysis", action="store_true", default=False, help="Skipp the running of the CNV pipeline, which outputs the number of copies that each gene has according to coverage. The gene ID's are based on the GFF3 files that have been provided in -gff")
@@ -294,7 +295,7 @@ if "freebayes" in opt.caller or opt.caller == "all":
     outdir_freebayes = "%s/freebayes_ploidy%i_out"%(opt.outdir, opt.ploidy)
 
     # run freebayes in normal configuratiom, in parallel for each chromosome
-    freebayes_filtered = fun.run_freebayes_parallel_regions(outdir_freebayes, opt.ref, sorted_bam, opt.ploidy, opt.coverage, replace=opt.replace, threads=opt.threads, pooled_sequencing=opt.pooled_sequencing) 
+    freebayes_filtered = fun.run_freebayes_parallel_regions(outdir_freebayes, opt.ref, sorted_bam, opt.ploidy, opt.coverage, replace=opt.replace, threads=opt.threads, pooled_sequencing=opt.pooled_sequencing, window_fb=opt.window_freebayes_bp) 
 
     # keep
     filtered_vcf_results.append(freebayes_filtered)

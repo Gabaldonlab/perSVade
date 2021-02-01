@@ -4456,7 +4456,7 @@ def run_freebayes_for_region(region, outvcf_folder, ref, sorted_bam, ploidy, cov
     # return the vcfs
     return outvcf
 
-def run_freebayes_parallel_regions(outdir_freebayes, ref, sorted_bam, ploidy, coverage, threads=4, replace=False, pooled_sequencing=False):
+def run_freebayes_parallel_regions(outdir_freebayes, ref, sorted_bam, ploidy, coverage, threads=4, replace=False, pooled_sequencing=False, window_fb=10000):
 
     """It parallelizes over the provided threads of the system"""
 
@@ -4470,7 +4470,6 @@ def run_freebayes_parallel_regions(outdir_freebayes, ref, sorted_bam, ploidy, co
         print_if_verbose("running freebayes in parallel with %i threads"%(threads))
 
         # define the regions file
-        window_fb = 10000
         regions_file = "%s/regions_genome_%ibp.tab"%(outdir_freebayes, window_fb)
         regions_file_stderr = "%s.generating.stderr"%regions_file
         print_if_verbose("getting regions for freebayes run in parallel. The stderr is in %s"%regions_file_stderr)
@@ -4484,49 +4483,85 @@ def run_freebayes_parallel_regions(outdir_freebayes, ref, sorted_bam, ploidy, co
         # make a dir to store the vcfs
         regions_vcfs_dir = "%s/regions_vcfs"%outdir_freebayes; make_folder(regions_vcfs_dir)
 
-        # define the inputs of the function
-        inputs_fn = [(region, regions_vcfs_dir, ref, sorted_bam, ploidy, coverage, replace, pooled_sequencing) for region in regions]
-
-        # initialize the pool class with the available CPUs --> this is asyncronous parallelization
-        with multiproc.Pool(threads) as pool:
-
-            # run in parallel the freebayes generation for all the 
-            regions_vcfs = pool.starmap(run_freebayes_for_region, inputs_fn)
-
-            # close the pool
-            pool.close()
-            pool.terminate()
-
-        # go through each of the chromosomal vcfs and append to a whole df
-        print_if_verbose("appending all vcfs of the individual regions together")
+        # init the df that will have all these vcfs and also the header lines
         all_df = pd.DataFrame()
         all_header_lines = []
-        for Iregion, vcf in enumerate(regions_vcfs):
-            print_if_verbose("Working on region %i/%i"%(Iregion+1, len(regions_vcfs)))
 
-            # load the df keeping the header lines
-            header_lines = [l for l in open(vcf, "r") if l.startswith("##")]
-            df = pd.read_csv(vcf, sep="\t", header = len(header_lines))
+        ############ FEED THE ALL_DF #############
 
-            # define the vcf header
-            vcf_header = ["#CHROM", "POS", "ID", "REF", "ALT", "QUAL", "FILTER", "INFO", "FORMAT"]
-            sample_header = [c for c in df.columns if c not in vcf_header][0]
-            vcf_header.append(sample_header)
+        size_chunk = 100 # this has to be constant
+        for Ic, chunk_regions in enumerate(chunks(regions, size_chunk)):
+            print_if_verbose("working on chunk %i/%i"%(Ic, int(len(regions)/size_chunk)))
 
-            # keep header that is unique
-            all_header_lines.append("".join([line for line in header_lines if line.split("=")[0] not in {"##reference", "##commandline", "##fileDate"}]))
-            
-            # append to the previous df
-            all_df = all_df.append(df[vcf_header], sort=True)
+            # get the df of this chunk
+            all_df_chunk_file = "%s/regions_chunk%i_all_df_concatenated.tab"%(regions_vcfs_dir, Ic)
+            all_header_lines_chunk_file = "%s/regions_chunk%i_header_lines.py"%(regions_vcfs_dir, Ic)
+            if file_is_empty(all_df_chunk_file) or replace is True:
 
-        # sort and remove duplicate entries
-        all_df = all_df.sort_values(by=["#CHROM", "POS"]).drop_duplicates(subset=["#CHROM", "POS", "REF", "ALT"])
+                # restart the folder
+                regions_vcfs_dir_chunk = "%s/regions_chunk%i"%(regions_vcfs_dir, Ic)
+                make_folder(regions_vcfs_dir_chunk)
+
+                # define the inputs of the function
+                inputs_fn = [(region, regions_vcfs_dir_chunk, ref, sorted_bam, ploidy, coverage, replace, pooled_sequencing) for region in chunk_regions]
+
+                # initialize the pool class with the available CPUs --> this is asyncronous parallelization
+                with multiproc.Pool(threads) as pool:
+
+                    # run in parallel the freebayes generation for all the 
+                    regions_vcfs = pool.starmap(run_freebayes_for_region, inputs_fn)
+
+                    # close the pool
+                    pool.close()
+                    pool.terminate()
+
+                # go through each of the chromosomal vcfs and append to a whole df
+                print_if_verbose("appending all vcfs of the individual regions together")
+                all_header_lines_chunk = []
+                all_df_chunk = pd.DataFrame()
+                for Iregion, vcf in enumerate(regions_vcfs):
+                    print_if_verbose("Working on region %i/%i"%(Iregion+1, len(regions_vcfs)))
+
+                    # load the df keeping the header lines
+                    header_lines = [l for l in open(vcf, "r") if l.startswith("##")]
+                    df = pd.read_csv(vcf, sep="\t", header = len(header_lines))
+
+                    # define the vcf header
+                    vcf_header = ["#CHROM", "POS", "ID", "REF", "ALT", "QUAL", "FILTER", "INFO", "FORMAT"]
+                    sample_header = [c for c in df.columns if c not in vcf_header][0]
+                    vcf_header.append(sample_header)
+
+                    # keep header that is unique
+                    all_header_lines_chunk.append("".join([line for line in header_lines if line.split("=")[0] not in {"##reference", "##commandline", "##fileDate"}]))
+                    
+                    # append to the previous df
+                    all_df_chunk = all_df_chunk.append(df[vcf_header], sort=True)
+
+                # delete unnecessary files
+                delete_folder(regions_vcfs_dir_chunk)
+
+                # save
+                save_object(all_header_lines_chunk, all_header_lines_chunk_file)
+                save_df_as_tab(all_df_chunk, all_df_chunk_file)
+
+            # load files
+            all_header_lines_chunk = load_object(all_header_lines_chunk_file)
+            all_df_chunk = get_tab_as_df_or_empty_df(all_df_chunk_file)
+
+            # add to the final dfs
+            all_header_lines += all_header_lines_chunk
+            all_df = all_df.append(all_df_chunk)
+
+        ##########################################
 
         # check that all headers are the same
         if len(set(all_header_lines))!=1: 
             print_if_verbose("These are the header lines: ", set(all_header_lines))
             print_if_verbose("There are %i unique headers"%len(set(all_header_lines)))
             raise ValueError("Not all headers are the same in the individual chromosomal vcfs. This may indicate a problem with parallelization of freebayes")
+
+        # sort and remove duplicate entries
+        all_df = all_df.sort_values(by=["#CHROM", "POS"]).drop_duplicates(subset=["#CHROM", "POS", "REF", "ALT"])
 
         # write the file
         open(freebayes_output_tmp, "w").write(all_header_lines[0] + all_df[vcf_header].to_csv(sep="\t", index=False, header=True))
@@ -15265,7 +15300,7 @@ def get_x_as_string(x):
 
 def get_correct_INFO_with_bendIDs_and_bendStats(r, df_gridss):
 
-    """Takes a row of the final df_CNV and returns the INFO with the breakend information and the """
+    """Takes a row of the final df_CNV and returns the INFO with the breakend information and the best breakend IDs"""
 
     # copy dfs
     r = cp.deepcopy(r)
@@ -15289,26 +15324,48 @@ def get_correct_INFO_with_bendIDs_and_bendStats(r, df_gridss):
 
     elif "BREAKPOINTIDs" in info.keys():
 
-        # define the positions where the breakend should be found
-        if "END" in info: positions_breakends = [(r["#CHROM"], r["POS"]), (r["#CHROM"], info["END"])]
-        else: positions_breakends = [(r["#CHROM"], r["POS"])]
-
         # define the interesting df_gridss
         breakpoint_IDs = set(info["BREAKPOINTIDs"].split(","))
-        df_gridss = df_gridss[df_gridss.eventID_as_clove.isin(breakpoint_IDs)]
+        df_gridss = df_gridss[(df_gridss.eventID_as_clove.isin(breakpoint_IDs)) & (df_gridss["#CHROM"]==r["#CHROM"])]
         if len(df_gridss)==0: raise ValueError("there should only be one ID")
 
-        # go through each breakend position and find the breakends
-        breakend_IDs = []
-        for chrom, pos in positions_breakends: 
+        # define the positions where the breakend should be found
+        if "END" in info: 
 
-            # get the df with the chromosome
-            df_c = df_gridss[df_gridss["#CHROM"]==chrom]
+            # sort df_gridss by pos
+            df_gridss = df_gridss.sort_values(by="POS")
 
-            # get the nearest position (with the highest quality possible)
-            bendID_df = df_c[df_c.POS==find_nearest(df_c.POS, pos)].sort_values(by=["QUAL"], ascending=False)
-            bendID = bendID_df.ID.iloc[0]
-            breakend_IDs.append(bendID)
+            # if there are two positions, find the breakpoint that best matches the POS-to-end regime
+            def get_score_breakpoint_matchingVariant(df_bp):
+
+                # if there is only one breakend, return a negative score
+                if len(df_bp)==1: return -1
+
+                # if there are two breakends return the inverted mean distance to the start and end
+                elif len(df_bp)==2: 
+                    first_pos = df_bp.iloc[0].POS
+                    second_pos =  df_bp.iloc[1].POS
+                    return 1 /(np.mean([abs(r["POS"]-first_pos), abs(info["END"]-second_pos)]) + 1)
+
+                else: raise ValueError("df_bp should have 1 or 2 breakends")
+
+            bpointID_to_score = df_gridss.groupby("eventID_as_clove").apply(get_score_breakpoint_matchingVariant)
+
+            best_breakpoint = bpointID_to_score[bpointID_to_score==max(bpointID_to_score)].index[0]
+
+            # keep the breakend IDs of the best breakpoints
+            best_bp_df_gridss = df_gridss[df_gridss.eventID_as_clove==best_breakpoint].sort_values(by="POS")
+            if len(best_bp_df_gridss)!=2: raise ValueError("There should be 2 breakpoints in %s"%best_bp_df_gridss)
+
+            # define the breakend IDs
+            breakend_IDs = [best_bp_df_gridss.ID.iloc[0], best_bp_df_gridss.ID.iloc[1]]
+
+        else: 
+
+            # if there is only one position, find the closest in df_gridss and with the highest QUAL
+            bendID_df = df_gridss[df_gridss.POS==find_nearest(df_gridss.POS, r["POS"])].sort_values(by=["QUAL"], ascending=False)
+
+            breakend_IDs = [bendID_df.ID.iloc[0]]
 
         if len(set(breakend_IDs))!=len(breakend_IDs): raise ValueError("there should be one breakend per position")
 
@@ -15933,7 +15990,7 @@ def run_jobarray_file_MN4_greasy(jobs_filename, name, time="12:00:00", queue="bs
     njobs = len(open(jobs_filename, "r").readlines())
 
     # define the requested nodes. Each node has 48 threads
-    max_nodes = int((njobs*threads_per_job)/48)
+    max_nodes = max([int((njobs*threads_per_job)/48), 1])
     requested_nodes = min([nodes, max_nodes])
 
     # define the number of tasks
@@ -16214,6 +16271,23 @@ def get_bed_df_from_variantID(varID):
         dict_bed = {0 : {"chromosome":chromA, "start":startA, "end":endA, "ID":varID+"-A", "type_overlap":"both"},
                     1 : {"chromosome":chromB, "start":startB, "end":endB, "ID":varID+"-B", "type_overlap":"pos"}}
 
+    # complex inverted duplication. A region is duplicated, inverted and inserted into another region of the genome
+    elif svtype in {"CVD"}:
+
+        # get the region A nd the posB
+        regionA, posB = varID.split("|")[1:]
+
+        chromA = "%s_%s"%(svtype, regionA.split(":")[0])
+        startA, endA = [int(x) for x in regionA.split(":")[1].split("-")]
+
+        chromB = "%s_%s"%(svtype, posB.split(":")[0])
+        startB = int(posB.split(":")[1])
+        endB = startB + 1
+
+        # here the A region is copied, inverted and pasted into a B breakend. This means that the type_overlap is different
+        dict_bed = {0 : {"chromosome":chromA, "start":startA, "end":endA, "ID":varID+"-A", "type_overlap":"both"},
+                    1 : {"chromosome":chromB, "start":startB, "end":endB, "ID":varID+"-B", "type_overlap":"pos"}}
+
     elif svtype in {"TRA"}:
 
         posA, posB = varID.split("|")[1].split("<>")
@@ -16393,7 +16467,7 @@ def load_gff3_intoDF(gff_path, replace=False):
             if anno=="Dbxref": 
 
                 # get all the dbxref fields
-                all_Dbxrefs = set.union(*[set([x.split(":")[0] for x in dbxref.split(",")]) for dbxref in gff[anno_field]])
+                all_Dbxrefs = set.union(*[set([x.split(":")[0] for x in dbxref.split(",")]) for dbxref in gff[anno_field]]).difference({""})
 
                 # go through each dbxref field and add it to the df
                 for dbxref in all_Dbxrefs: 
@@ -16619,10 +16693,13 @@ def get_annotation_df_with_GeneFeature_as_gff(annot_df, gff):
 
     return annot_df
 
+def get_integrated_SV_CNV_smallVars_df_from_run_perSVade_severalSamples(paths_df, cwd, ploidy, pct_overlap, tol_bp, gff, run_ploidy2_ifHaploid=False, generate_integrated_gridss_dataset=False, SV_CNV_called=True):
 
-def get_integrated_SV_CNV_smallVars_df_from_run_perSVade_severalSamples(paths_df, cwd, ploidy, pct_overlap, tol_bp, gff, run_ploidy2_ifHaploid=False, tol_bp_diploidRegions=100):
+    """Takes the same input as run_perSVade_severalSamples and writes the integrated dfs under cwd, adding to the integrated SV_CNV datasets some added fields that indicate that the SVs and CNV are shared among several samples.
 
-    """Takes the same input as run_perSVade_severalSamples and writes the integrated dfs under cwd, adding to the integrated SV_CNV datasets some added fields that indicate that the SVs and CNV are shared among several samples """
+    If generate_integrated_gridss_vcf is True it will generate an integrated gridss dataset that has all breakends and a field called "PASSed_filters" indicating if the breakend passed the filters .
+
+    SV_CNV_called indicates whether SV_CNV were called"""
 
     # define the final filesfiles
     coverage_df_file = "%s/merged_coverage.tab"%cwd
@@ -16630,24 +16707,29 @@ def get_integrated_SV_CNV_smallVars_df_from_run_perSVade_severalSamples(paths_df
     SV_CNV_file = "%s/SV_CNV_ploidy%i.tab"%(cwd, ploidy)
     SV_CNV_file_simple = "%s/SV_CNV_ploidy%i.simple.tab"%(cwd, ploidy)
     SV_CNV_annot_file = "%s/SV_CNV_annot_ploidy%i.tab"%(cwd, ploidy)
+    integrated_gridss_df = "%s/integrated_gridss_df_ploidy%i.tab"%(cwd, ploidy)
 
     if run_ploidy2_ifHaploid is True: small_var_annot_file = "%s/smallVars_annot_ploidy1and2.tab"%cwd
     else: small_var_annot_file = "%s/smallVars_annot_ploidy%i.tab"%(cwd, ploidy)
 
     if run_ploidy2_ifHaploid is True: small_vars_df_ploidy2_file = "%s/smallVars_ploidy2.tab"%cwd
 
+    # define dirs
+    VarCallOutdirs = "%s/VarCallOutdirs"%cwd
+
+    # define the expected files
+    if SV_CNV_called is True: expected_files = [coverage_df_file, small_vars_df_file, small_var_annot_file, SV_CNV_file_simple, SV_CNV_annot_file]
+    else: expected_files = [coverage_df_file, small_vars_df_file, small_var_annot_file]
+
     ######### GET THE SIMPLY MERGED DFS ##########
 
     # get the simple dataframes
-    if any([file_is_empty(f) for f in [coverage_df_file, small_vars_df_file, small_var_annot_file, SV_CNV_file_simple, SV_CNV_annot_file]]):
+    if any([file_is_empty(f) for f in expected_files]):
 
         print_if_verbose("merging files")
 
         # debug+
         if run_ploidy2_ifHaploid is True and ploidy!=1: raise ValueError("run_ploidy2_ifHaploid can't be true if ploidiy!=1")
-
-        # create files that are necessary
-        VarCallOutdirs = "%s/VarCallOutdirs"%cwd; make_folder(VarCallOutdirs)
 
         # init dfs
         small_vars_df = pd.DataFrame()
@@ -16703,29 +16785,36 @@ def get_integrated_SV_CNV_smallVars_df_from_run_perSVade_severalSamples(paths_df
             if any(pd.isna(small_vars_df.relative_CN)): raise ValueError("there can't be NaNs in small_vars_df")
             if any(pd.isna(small_vars_df_ploidy2.relative_CN)): raise ValueError("there can't be NaNs in small_vars_df_ploidy2")
 
-        # get the integrated SV_CNV dfs
-        df_data = pd.DataFrame(sampleID_to_SV_dataDict).transpose()
-        file_prefix = "%s/integrated_SV_CNV_calling"%cwd
+        if SV_CNV_called is True:
 
-        SV_CNV, SV_CNV_annot = get_integrated_variants_into_one_df(df_data, file_prefix, replace=True, remove_files=True)[2:]
+            # get the integrated SV_CNV dfs
+            df_data = pd.DataFrame(sampleID_to_SV_dataDict).transpose()
+            file_prefix = "%s/integrated_SV_CNV_calling"%cwd
+
+            SV_CNV, SV_CNV_annot = get_integrated_variants_into_one_df(df_data, file_prefix, replace=True, remove_files=True)[2:]
 
 
         # add some fields to the annotation dfs
         print_if_verbose("getting Gene and Feature matching the gff")
-        SV_CNV_annot = get_annotation_df_with_GeneFeature_as_gff(SV_CNV_annot, gff)
+        if SV_CNV_called is True: SV_CNV_annot = get_annotation_df_with_GeneFeature_as_gff(SV_CNV_annot, gff)
         small_var_annot = get_annotation_df_with_GeneFeature_as_gff(small_var_annot, gff)
 
         # add whether the SV is protein alterring
-        gff_df = load_gff3_intoDF(gff, replace=False)
-        all_protein_coding_genes = set(gff_df[gff_df.feature.isin({"CDS", "mRNA"})].upmost_parent)
-        SV_CNV_annot["is_protein_coding_gene"] = SV_CNV_annot.Gene.isin(all_protein_coding_genes)
-        SV_CNV_annot["is_transcript_disrupting"] = SV_CNV_annot.Consequence.apply(get_is_transcript_disrupting_consequence_SV)
+        if SV_CNV_called is True:
+
+            gff_df = load_gff3_intoDF(gff, replace=False)
+            all_protein_coding_genes = set(gff_df[gff_df.feature.isin({"CDS", "mRNA"})].upmost_parent)
+            SV_CNV_annot["is_protein_coding_gene"] = SV_CNV_annot.Gene.isin(all_protein_coding_genes)
+            SV_CNV_annot["is_transcript_disrupting"] = SV_CNV_annot.Consequence.apply(get_is_transcript_disrupting_consequence_SV)
 
         # write dfs
         save_df_as_tab(small_vars_df, small_vars_df_file)
         save_df_as_tab(small_var_annot, small_var_annot_file)
-        save_df_as_tab(SV_CNV, SV_CNV_file_simple)
-        save_df_as_tab(SV_CNV_annot, SV_CNV_annot_file)
+
+        if SV_CNV_called is True:
+            save_df_as_tab(SV_CNV, SV_CNV_file_simple)
+            save_df_as_tab(SV_CNV_annot, SV_CNV_annot_file)
+
         if run_ploidy2_ifHaploid is True: save_df_as_tab(small_vars_df_ploidy2, small_vars_df_ploidy2_file) 
         save_df_as_tab(coverage_df, coverage_df_file)
 
@@ -16734,7 +16823,7 @@ def get_integrated_SV_CNV_smallVars_df_from_run_perSVade_severalSamples(paths_df
 
     ######### GET THE COMMON DF OF SVs #########
 
-    if file_is_empty(SV_CNV_file):
+    if file_is_empty(SV_CNV_file) and SV_CNV_called is True:
 
         print("adding the common variant ID")
 
@@ -16756,6 +16845,47 @@ def get_integrated_SV_CNV_smallVars_df_from_run_perSVade_severalSamples(paths_df
         save_df_as_tab(SV_CNV, SV_CNV_file)
 
     #############################################
+
+
+    ####### GET THE INTEGRATED GRIDSS DF ######
+
+    if generate_integrated_gridss_dataset is True and file_is_empty(integrated_gridss_df) and SV_CNV_called is True:
+
+        print("generating integrated gridss df")
+
+        samples_to_run = set(paths_df.sampleID)
+        #samples_to_run = {"Cg1_CBS138", "Cg2_921192_2"}
+
+        # init
+        df_gridss_all = pd.DataFrame()
+
+        for sampleID in samples_to_run:
+            print(sampleID)
+
+            # get the outdir
+            outdir = "%s/%s_VarCallresults/SVdetection_output/final_gridss_running"%(VarCallOutdirs, sampleID); make_folder(outdir)
+
+            # get the gridss vcfs
+            gridss_vcf_raw = get_df_and_header_from_vcf("%s/gridss_output.raw.vcf"%outdir)[0]
+            gridss_vcf_filt = get_df_and_header_from_vcf("%s/gridss_output.filt.vcf"%outdir)[0]
+
+            # change names
+            sample_name_vcf = gridss_vcf_raw.columns[-1]
+            gridss_vcf_raw = gridss_vcf_raw.rename(columns={sample_name_vcf:"DATA"})
+            gridss_vcf_filt = gridss_vcf_filt.rename(columns={sample_name_vcf:"DATA"})
+
+            # add whether it passed the filters
+            pass_variants = set(gridss_vcf_filt.ID)
+            gridss_vcf_raw["PASSed_filters"] = gridss_vcf_raw.ID.isin(pass_variants)
+            gridss_vcf_raw["sampleID"] = sampleID
+
+            # keep
+            df_gridss_all = df_gridss_all.append(gridss_vcf_raw)
+
+        # save
+        save_df_as_tab(df_gridss_all, integrated_gridss_df)
+
+    ###########################################
 
   
 

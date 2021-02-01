@@ -85,9 +85,8 @@ parser.add_argument("--min_CNVsize_coverageBased", dest="min_CNVsize_coverageBas
 
 # pipeline skipping options 
 parser.add_argument("--skip_SVcalling", dest="skip_SVcalling", action="store_true", default=False, help="Do not run SV calling.")
-
-parser.add_argument("--skip_SV_CNV_calling", dest="skip_SV_CNV_calling", action="store_true", default=False, help="Do not run the SV and CNV calling.")
-
+parser.add_argument("--skip_SV_CNV_calling", dest="skip_SV_CNV_calling", action="store_true", default=False, help="Do not run the integration of SV and CNV calling into a final vcf")
+parser.add_argument("--skip_CNV_calling", dest="skip_CNV_calling", action="store_true", default=False, help="Do not run the calling of CNV based on coverage. This is reccommended if you have samples with smiley face in coverage in a fragmented genome, which does not allow for a proper normalisation of coverage.")
 
 # options of the long reads-based benchmarking
 parser.add_argument("--goldenSet_dir", dest="goldenSet_dir", type=str, default=None, help="This is the path to a directory that has some oxford nanopore reads (should end with'long_reads.fasta') and some  short paired end reads (ending with '1.fastq.gz' and '2.fastq.gz'). These are assumed to be from the exact same sample. If provided, perSVade will call SVs from it using the --nanopore configuration of svim and validate each of the 'real' (if provided), 'uniform' and 'fast' versions from the short reads on it. If you state 'auto', it will look for samples of your --target_taxID in the SRA that are suited. We already provide some automated finding of reads in the SRA for several taxIDs: 3702 (Arabidopsis_thaliana). All the jobs will be run in an squeue as specified by --job_array_mode.")
@@ -122,7 +121,6 @@ parser.add_argument("-sbam", "--sortedbam", dest="sortedbam", default=None, help
 # machine options
 parser.add_argument("--job_array_mode", dest="job_array_mode", type=str, default="local", help="It specifies in how to run the job arrays for,  --testAccuracy, the downloading of reads if  --close_shortReads_table is auto, and the SV calling for the table in --close_shortReads_table. It can be 'local' (runs one job after the other or 'job_array'. If 'job_array' is specified, this pipeline will generate a file with all the jobs to run, and stop. You will have to run these jobs before stepping into downstream analyses.")
 
-
 # other args
 parser.add_argument("-mchr", "--mitochondrial_chromosome", dest="mitochondrial_chromosome", default="mito_C_glabrata_CBS138", type=str, help="The name of the mitochondrial chromosome. This is important if you have mitochondrial proteins for which to annotate the impact of nonsynonymous variants, as the mitochondrial genetic code is different. This should be the same as in the gff. If there is no mitochondria just put 'no_mitochondria'. If there is more than one mitochindrial scaffold, provide them as comma-sepparated IDs.")
 
@@ -148,13 +146,15 @@ parser.add_argument("-gff", "--gff-file", dest="gff", default=None, help="path t
 parser.add_argument("-caller", "--caller", dest="caller", required=False, default="all", help="SNP caller option to obtain vcf file. options: no/all/HaplotypeCaller/bcftools/freebayes. It can be a comma-sepparated string, like 'HaplotypeCaller,freebayes'")
 parser.add_argument("-c", "--coverage", dest="coverage", default=20, type=int, help="minimum Coverage (int)")
 parser.add_argument("--minAF_smallVars", dest="minAF_smallVars", default="infer", help="The minimum fraction of reads covering a variant to be called. The default is 'infer', which will set a threshold based on the ploidy. This is only relevant for the final vcfs, where only PASS vars are considered. It can be a number between 0 and 1.")
+parser.add_argument("--window_freebayes_bp", dest="window_freebayes_bp", default=10000, type=int, help="The window (in bp) in which freebayes regions are split to. If you increase this number the splitting will be in larger chunks of the genome.")
+
 
 parser.add_argument("-mcode", "--mitochondrial_code", dest="mitochondrial_code", default=3, type=int, help="The code of the NCBI mitochondrial genetic code. For yeasts it is 3. You can find the numbers for your species here https://www.ncbi.nlm.nih.gov/Taxonomy/Utils/wprintgc.cgi")
 parser.add_argument("-gcode", "--gDNA_code", dest="gDNA_code", default=1, type=int, help="The code of the NCBI gDNA genetic code. You can find the numbers for your species here https://www.ncbi.nlm.nih.gov/Taxonomy/Utils/wprintgc.cgi . For C. albicans it is 12. ")
 parser.add_argument("--remove_smallVarsCNV_nonEssentialFiles", dest="remove_smallVarsCNV_nonEssentialFiles", action="store_true", default=False, help="Will remove all the varCall files except the integrated final file and the bam file.")
 parser.add_argument("--replace_var_integration", dest="replace_var_integration", action="store_true", help="Replace all the variant integration steps for smallVariantCalling.")
 parser.add_argument("--generate_alternative_genome", dest="generate_alternative_genome", default=False, action="store_true", help="Generate an alternative genome in smallVariantCalling.")
-parser.add_argument("--skip_cnv_analysis", dest="skip_cnv_analysis", default=False, action="store_true", help="Don't perform the cnv analysis")
+parser.add_argument("--skip_cnv_analysis", dest="skip_cnv_analysis", default=False, action="store_true", help="Don't perform the cnv analysis where we calculate coverage per gene and per equal windows of the genome")
 
 
 # add the CNV calling args
@@ -524,6 +524,9 @@ if run_SV_CNV_calling is True:
     if opt.replace_SV_CNVcalling is True: 
         for f in [cnv_calling_outdir, outdir_var_calling]: fun.delete_folder(f)
 
+
+    sys.exit(0)
+
     # make folders
     for f in [cnv_calling_outdir, outdir_var_calling]: fun.make_folder(f)
     
@@ -531,7 +534,9 @@ if run_SV_CNV_calling is True:
     df_gridss = fun.get_svtype_to_svfile_and_df_gridss_from_perSVade_outdir(opt.outdir, opt.ref)[1]
 
     # run CNVcalling 
-    df_CNV_coverage = fun.run_CNV_calling(sorted_bam, opt.ref, cnv_calling_outdir, opt.threads, opt.replace, opt.mitochondrial_chromosome, df_gridss, opt.window_size_CNVcalling, opt.ploidy)
+    if opt.skip_CNV_calling is False: df_CNV_coverage = fun.run_CNV_calling(sorted_bam, opt.ref, cnv_calling_outdir, opt.threads, opt.replace, opt.mitochondrial_chromosome, df_gridss, opt.window_size_CNVcalling, opt.ploidy)
+
+    else: df_CNV_coverage = pd.DataFrame(columns=["chromosome", "merged_relative_CN", "start", "end", "CNVid", "median_coverage", "median_coverage_corrected", "median_relative_CN_CONY", "median_relative_CN_HMMcopy", "SVTYPE"])
 
     # get the variant calling 
     SV_CNV_vcf = fun.get_vcf_all_SVs_and_CNV(opt.outdir, outdir_var_calling, sorted_bam, opt.ref, opt.ploidy, df_CNV_coverage, opt.window_size_CNVcalling, replace=opt.replace, threads=opt.threads, mitochondrial_chromosome=opt.mitochondrial_chromosome)
@@ -565,7 +570,7 @@ if opt.run_smallVarsCNV:
     outdir_varcall = "%s/smallVars_CNV_output"%opt.outdir
 
     # define the basic cmd
-    varcall_cmd = "%s -r %s --threads %i --outdir %s -sbam %s --caller %s --coverage %i --mitochondrial_chromosome %s --mitochondrial_code %i --gDNA_code %i --minAF_smallVars %s"%(varcall_cnv_pipeline, opt.ref, opt.threads, outdir_varcall, sorted_bam, opt.caller, opt.coverage, opt.mitochondrial_chromosome, opt.mitochondrial_code, opt.gDNA_code, opt.minAF_smallVars)
+    varcall_cmd = "%s -r %s --threads %i --outdir %s -sbam %s --caller %s --coverage %i --mitochondrial_chromosome %s --mitochondrial_code %i --gDNA_code %i --minAF_smallVars %s --window_freebayes_bp %i"%(varcall_cnv_pipeline, opt.ref, opt.threads, outdir_varcall, sorted_bam, opt.caller, opt.coverage, opt.mitochondrial_chromosome, opt.mitochondrial_code, opt.gDNA_code, opt.minAF_smallVars, opt.window_freebayes_bp)
 
     # add options
     if opt.replace is True: varcall_cmd += " --replace"
@@ -585,7 +590,7 @@ if opt.run_smallVarsCNV:
     # run for each ploidy
     for ploidy_varcall in ploidies_varcall:
 
-    	# run the variant calling command
+        # run the variant calling command
         varcall_cmd += " -p %i"%ploidy_varcall
         if __name__ == '__main__': fun.run_cmd(varcall_cmd)
 
@@ -610,7 +615,7 @@ if opt.run_smallVarsCNV:
 ##### VARIANTS VISUALIZATION ########
 #####################################
 
-if (opt.skip_SVcalling is False or run_smallVarsCNV is True) and not any([x=="skip" for x in {opt.fastq1, opt.fastq2}]) and opt.visualization_results is True and opt.gff is not None:
+if (opt.skip_SVcalling is False or opt.run_smallVarsCNV is True) and not any([x=="skip" for x in {opt.fastq1, opt.fastq2}]) and opt.visualization_results is True and opt.gff is not None:
 
     # visualize the results with the browser
 
