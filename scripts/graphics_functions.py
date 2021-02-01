@@ -185,8 +185,8 @@ def get_integrated_vars_df(df, cache_dir, target_regions, target_genes, gff_df):
     print("adding protein description")
 
     all_ANNOTATION_IDs = set(gff_df.index)
-    if len(small_vars_annot)>0: small_vars_annot["Feature_productDescription"] = small_vars_annot.apply(lambda r: get_descriptions_affected_features(r, gff_df, all_ANNOTATION_IDs), axis=1)
-    if len(SV_CNV_annot)>0: SV_CNV_annot["Feature_productDescription"] = SV_CNV_annot.apply(lambda r: get_descriptions_affected_features(r, gff_df, all_ANNOTATION_IDs), axis=1)
+    if len(small_vars_annot)>0 and "Feature_productDescription" not in set(small_vars_annot.keys()): small_vars_annot["Feature_productDescription"] = small_vars_annot.apply(lambda r: get_descriptions_affected_features(r, gff_df, all_ANNOTATION_IDs), axis=1)
+    if len(SV_CNV_annot)>0 and "Feature_productDescription" not in set(SV_CNV_annot.keys()): SV_CNV_annot["Feature_productDescription"] = SV_CNV_annot.apply(lambda r: get_descriptions_affected_features(r, gff_df, all_ANNOTATION_IDs), axis=1)
 
     ########################
 
@@ -211,6 +211,10 @@ def get_integrated_vars_df(df, cache_dir, target_regions, target_genes, gff_df):
     # filter the annotation DFs
     small_vars_annot = small_vars_annot[small_vars_annot["#Uploaded_variation"].isin(interesting_variantIDs)]
     SV_CNV_annot = SV_CNV_annot[SV_CNV_annot["#Uploaded_variation"].isin(interesting_variantIDs)]
+
+    # keep only variant annotations of the target henes
+    small_vars_annot = small_vars_annot[small_vars_annot.Gene.isin(target_genes)]
+    SV_CNV_annot = SV_CNV_annot[SV_CNV_annot.Gene.isin(target_genes)]
 
     # filter the small vars
     small_vars["IDset"] = small_vars.ID.apply(lambda x: set(x.split(";")))
@@ -400,12 +404,16 @@ def add_gff_traces_as_scatters(fig, gff_df, chrom_to_Xoffset, gff_annotation_fie
 
             # define the hover text
             hovertext = "<b>%s%s"%(direction_text, r["ID"])
-            for f in gff_annotation_fields: 
-                if f in r.keys() and not pd.isna(r[f]): hovertext += "-%s:%s"%(f, r[f])
+
+            # add the hovertext of gff_annotation_fields if userProvided_description is not given
+            if pd.isna(r["userProvided_description"]):
+
+                for f in gff_annotation_fields: 
+                    if f in r.keys() and not pd.isna(r[f]): hovertext += "-%s:%s"%(f, r[f])
+
+            else: hovertext += ":%s"%r["userProvided_description"]
 
             hovertext += "%s</b>"%direction_text
-
-
             #hovertext = "<b>%s%s-%s%s</b>"%(direction_text, geneID_to_name[r["upmost_parent"]], r["ID"], direction_text)
 
             # get the symbol
@@ -1358,6 +1366,9 @@ def get_genome_variation_browser(df_data, samples_colors_df, target_regions, tar
 
     # keep them 
     shapes += chromosome_rectanges
+
+    # keep the gff_df that has the target genes
+    gff_df = gff_df[gff_df.upmost_parent.isin(target_genes)]
 
     # get the gff features
     add_gff_traces_as_scatters(fig, gff_df, chrom_to_Xoffset, gff_annotation_fields, interesting_features=interesting_features, geneID_to_name=geneID_to_name, fig_location=(2,2))

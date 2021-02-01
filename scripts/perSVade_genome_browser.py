@@ -69,10 +69,10 @@ parser.add_argument("--vcf_fields_onHover", dest="vcf_fields_onHover", default="
 parser.add_argument("-mchr", "--mitochondrial_chromosome", dest="mitochondrial_chromosome", default="mito_C_glabrata_CBS138", type=str, help="The name of the mitochondrial chromosome. This is important if you have mitochondrial proteins for which to annotate the impact of nonsynonymous variants, as the mitochondrial genetic code is different. This should be the same as in the gff. If there is no mitochondria just put 'no_mitochondria'. If there is more than one mitochindrial scaffold, provide them as comma-sepparated IDs.")
 parser.add_argument("--gff_annotation_fields", dest="gff_annotation_fields", default="upmost_parent,ANNOTATION_product,ANNOTATION_Note", type=str, help="A comma-sepparated string of the interesting fields of the gff (it can include fields in the annotation by starting with 'ANNOTATION_') to add to the browser. By default, it will draw the upmost_parent of each feature, which is usually the ID of the corresponding gene.")
 parser.add_argument("--interesting_features", dest="interesting_features", default="all", type=str, help="A comma-sepparated string of the interesting features of the gff to draw.")
+parser.add_argument("--gffID_to_hoverText", dest="gffID_to_hoverText", default=None, type=str, help="A tab sepparated file that has 'ID' and 'description' for some of the gff rows (related through the ID from annotation of the gff). For those IDs in whcich this is provided the description will override the hover text defined by interesting_features.")
+
 
 parser.add_argument("--coverage_range", dest="coverage_range", default="0,2", type=str, help="A comma-sepparated string of the minimum and max coverage.")
-
-
 
 opt = parser.parse_args()
 
@@ -119,6 +119,21 @@ df["bgcolor"] = df.bgcolor.apply(lambda x: x.split(","))
 # load the gff df
 df_gff = fun.load_gff3_intoDF(opt.gff)
 
+# add the gffID_to_hoverText
+if opt.gffID_to_hoverText is not None:
+
+    # load
+    gffID_to_hoverText_df = pd.read_csv(opt.gffID_to_hoverText, sep="\t").rename(columns={"description":"userProvided_description"})
+
+    # check that all IDs are in the gff
+    missing_IDs = set(gffID_to_hoverText_df.ID).difference(set(df_gff.ID))
+    if len(missing_IDs)>0: raise ValueError("there are some missing IDs %s"%missing_IDs)
+
+    # add
+    df_gff = df_gff.merge(gffID_to_hoverText_df, how="left", validate="one_to_one", on="ID")
+
+else: df_gff["userProvided_description"] = np.nan
+
 # check that the fields of the gff are as expected
 expected_features = {'pseudogene', 'rRNA', 'tRNA', 'repeat_region', 'chromosome', 'CDS', 'mRNA', 'gene', 'exon', 'centromere', 'ncRNA', 'long_terminal_repeat', 'polyA_site', 'region'} # long_terminal_repeat
 missing_features = set(df_gff.feature).difference(expected_features)
@@ -132,19 +147,25 @@ if len(missing_features)>0: raise ValueError("Features %s are not expected in th
 # define all genes
 all_genes = set(df_gff[df_gff.feature.isin({"pseudogene", "gene"})].upmost_parent)
 
+# define all target regions
+all_target_regions = pd.DataFrame({I : {"chromosome":chrom, "start":0, "end":length} for I, (chrom, length) in enumerate(fun.get_chr_to_len(opt.reference_genome).items())}).transpose()
+
+
 # define the target genes. Define the target regions
 if opt.target_genes is not None: target_genes = set(opt.target_genes.split(","))
-else: target_genes = set()
+else: 
+    target_genes = set()
+    target_regions = all_target_regions
 
 # define the target regions
 if opt.target_regions is not None: target_regions = pd.read_csv(opt.target_regions, sep="\t")
-else: df_regions = pd.DataFrame(columns=["chromosome", "start", "end"])
+else: target_regions = pd.DataFrame(columns=["chromosome", "start", "end"])
 
 # if both are empty, just get them all
 if opt.target_regions is None and opt.target_genes is None:
 
     target_genes = all_genes
-    target_regions = pd.DataFrame({I : {"chromosome":chrom, "start":0, "end":length} for I, (chrom, length) in enumerate(fun.get_chr_to_len(opt.reference_genome).items())}).transpose()
+    target_regions = all_target_regions
 
 # check that the fields are correct
 target_regions = target_regions[["chromosome", "start", "end"]]
@@ -153,8 +174,9 @@ target_regions = target_regions[["chromosome", "start", "end"]]
 missing_genes = target_genes.difference(all_genes)
 if len(missing_genes)>0: raise ValueError("%s are missing genes"%missing_genes)
 
-######################################################
+print("There will be %i genes depicted"%len(target_genes))
 
+######################################################
 
 # define the samples_colors_df
 sample_group_labels = opt.sample_group_labels.split(",")
