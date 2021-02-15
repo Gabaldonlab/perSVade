@@ -168,7 +168,7 @@ test_Ninja_installation $previously_installed_Ninja "previously_installed"  || {
 		test_Ninja_installation  $installation_dir/Ninja_data/NINJA_repo_05112020/NINJA/Ninja "NINJA_repo_05112020" || {
 
 
-			echo 'ERROR: Ninja could not be installed. You should do it on your own for perSVade to run. Check the options in their github repo https://github.com/TravisWheelerLab/NINJA. Another option is to use one of the binaries provided under installation/Ninja_binaries, but this may not work for some systems. Once you have NINJA installed, you should add folder that contains it to $PATH, and re-run this script to finish the setup of perSVade.'
+			echo 'ERROR: Ninja could not be installed. This means that the repeat masker features will not worl. You should do it on your own for perSVade to run. Check the options in their github repo https://github.com/TravisWheelerLab/NINJA. Another option is to use one of the binaries provided under installation/Ninja_binaries, but this may not work for some systems. Once you have Ninja installed, you should add folder that contains it to $PATH, and re-run this script to finish the setup of perSVade.'
 			exit
 		}
 	}
@@ -228,6 +228,7 @@ conda install -n $R_env_name -c conda-forge -y r-r.utils=2.9.2;
 conda install -n $R_env_name -c bioconda -y bioconductor-structuralvariantannotation=1.4.0;
 
 
+
 # create a subenvironment for running CONY. The last commit of CONY was the 12/06/2017. This is 3 years and 4 months ago., so that I have to install software from a similar age
 
 # packages from bioconda:
@@ -245,6 +246,18 @@ CONY_env_name="$env_name"_CONY_env
 echo "creating conda env $CONY_env_name"
 conda create -y --name $CONY_env_name -c bioconda bioconductor-iranges=2.8.2 bioconductor-exomecopy=1.22.0 r-snow=0.4; # this should install r-base=3.3.2, which fits all the dependencies
 conda install -y -n $CONY_env_name -c conda-forge r-argparser=0.4;
+
+# create an environment to run AneuFinder
+AneuFinder_env_name="$env_name"_AneuFinder_env
+echo "creating conda env $AneuFinder_env_name"
+
+# this is the current version
+conda create -y --name $AneuFinder_env_name -c bioconda bioconductor-aneufinder=1.18.0;
+conda install -y -n $AneuFinder_env_name -c conda-forge r-argparser=0.6;
+
+# old versions as in the C. albicans paper
+#conda create -y --name $AneuFinder_env_name -c bioconda bioconductor-aneufinder=1.10.2;
+#conda install -y -n $AneuFinder_env_name -c conda-forge r-argparser=0.4;
 
 # create a subenvironment to run HMMCOPY
 HMMcopy_env_name="$env_name"_HMMcopy_env

@@ -66,6 +66,11 @@ conda install -c bioconda -y genmap=1.3.0 &&
 conda install -c anaconda -y cython=0.29.21 # necessary for the cylowess running
 conda install -c anaconda -y xlrd=1.2.0
 
+
+# things that don't work
+#conda install -c bioconda cnvpytor=1.0 # a package to run CNV calls. It does not install any R pack
+
+
 #conda install -c conda-forge -y python-igraph=0.8.3 && # this updates many things. It may be necessary to stick to python-igraph=0.7.1.post7. This 
 
 #conda install -c anaconda -y statsmodels=0.12.0 &&
@@ -84,7 +89,6 @@ conda install -c anaconda -y xlrd=1.2.0
 #conda install -c conda-forge -y igraph=0.7.1 && # updates openssl pkgs/main::openssl-1.1.1g-h7b6447c_0 --> conda-forge::openssl-1.1.1g-h516909a_1
 #conda install -c conda-forge -y python-igraph=0.7.1.post7 &&
 
-#conda install -c bioconda cnvpytor=1.0 # a package to run CNV calls. It does not install any R pack
 
 
 
