@@ -49,7 +49,7 @@ if (length(rownames(usedRD_df))==0) {
 # estimate the parameters used to define each of the copies. NCN=5 means that there will be ranges from 1-to-5 CN
 print("running EstPar")
 
-ploidy = as.integer(opt$ploidy)
+ploidy = as.integer(as.character(opt$ploidy))
 if (ploidy==1){ncopies = 4}
 if (ploidy==2){ncopies = 4}
 

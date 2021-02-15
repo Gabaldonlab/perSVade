@@ -9,6 +9,7 @@ testing/Cglabrata_table_short_reads.tab
 testing/taxdump.tar.gz
 testing/std_files_testingAccuracy
 testing/Cglabrata_testingSimulations
+testing/testing_HrantCalbicansInput
 installation/external_software
 sync_git.py
 installation/test_installation/__pycache__

@@ -15,6 +15,7 @@ import pandas as pd
 import numpy as np
 import sys
 from collections import ChainMap
+from collections import OrderedDict
 import warnings
 from Bio import SeqIO
 from scipy import linalg
@@ -141,6 +142,7 @@ EnvName_ete3 = "%s_ete3_3.0.0_env"%EnvName
 EnvName_RepeatMasker = "%s_RepeatMasker_env"%EnvName
 EnvName_CONY = "%s_CONY_env"%EnvName
 EnvName_HMMcopy = "%s_HMMcopy_env"%EnvName
+EnvName_AneuFinder = "%s_AneuFinder_env"%EnvName
 
 # define other envDirs
 picard_EnvDir = "%s/envs/%s"%(CondaDir, EnvName_picard)
@@ -220,6 +222,7 @@ create_targeted_simulatedSVgenome_R = "%s/create_targeted_simulatedSVgenome.R"%C
 annotate_simpleEvents_gridssVCF_R = "%s/annotate_simpleEvents_gridssVCF.R"%CWD
 run_CONY_R = "%s/run_CONY.R"%CWD
 run_HMMcopy_R = "%s/run_HMMcopy.R"%CWD
+run_AneuFinder_R = "%s/run_ANEUFINDER.R"%CWD
 analyze_svVCF = "%s/generate_files_from_svVCF.R"%CWD
 analyze_svVCF_simple = "%s/generate_files_from_svVCF_simple.R"%CWD
 TRIMMOMATIC = "%s/run_trimmomatic.py"%CWD 
@@ -357,6 +360,8 @@ default_gridss_blacklisted_regions = ""
 default_gridss_maxcoverage = 50000
 default_max_rel_coverage_to_consider_del = 0.1
 default_min_rel_coverage_to_consider_dup = 1.8
+
+default_parms_dict_HMMcopy = dict(e=0.9999999, mu=[-0.458558247, -0.215877601, -0.002665686, 0.191051578, 0.347816046, 1.664333241], lambda_val=20, nu=2.1, kappa=[50, 50, 700, 100, 50, 50], m=[-0.458558247, -0.215877601, -0.002665686, 0.191051578, 0.347816046, 1.664333241], eta=50000, gamma=3, S=0.02930164, strength="1e7")
 
 # define lists of filters ordered from less conservative to most conservative
 g_all_FILTER_tags = ("ASSEMBLY_ONLY", "NO_ASSEMBLY", "ASSEMBLY_TOO_FEW_READ", "ASSEMBLY_TOO_SHORT", "INSUFFICIENT_SUPPORT", "LOW_QUAL", "REF", "SINGLE_ASSEMBLY")
@@ -641,11 +646,12 @@ def get_weigthed_median(df, field, weight_field, type_algorithm="fast"):
     return median
 
 
-def get_median_coverage(coverage_df, mitochondrial_chromosome):
+def get_median_coverage(coverage_df, mitochondrial_chromosome, coverage_field="mediancov_1"):
 
     """This function takes a coverage df and calculates the median for those non-0 coverage windows. It will return the median coverage weighted by length """
 
     # keep
+    if len(coverage_df)==0: raise ValueError("there should be some data in the coverage_df")
     coverage_df = cp.deepcopy(coverage_df)
 
     # define the chrom field
@@ -653,11 +659,11 @@ def get_median_coverage(coverage_df, mitochondrial_chromosome):
     elif "chromosome" in coverage_df.keys(): chrom_f = "chromosome"
 
     # define the set
-    mitochondrial_chromosomes = mitochondrial_chromosome.split(",")
+    mitochondrial_chromosomes = set(mitochondrial_chromosome.split(","))
 
     # get the nuclear and not 0 idx
-    if set(coverage_df[chrom_f])==mitochondrial_chromosomes: idx = (coverage_df["mediancov_1"]>0)
-    else: idx = (~coverage_df[chrom_f].isin(mitochondrial_chromosomes)) & (coverage_df["mediancov_1"]>0)
+    if set(coverage_df[chrom_f])==mitochondrial_chromosomes: idx = (coverage_df[coverage_field]>0)
+    else: idx = (~coverage_df[chrom_f].isin(mitochondrial_chromosomes)) & (coverage_df[coverage_field]>0)
 
     df = coverage_df[idx]
 
@@ -665,7 +671,7 @@ def get_median_coverage(coverage_df, mitochondrial_chromosome):
     df["length"] = df.end - df.start
 
     # get the median wwighted by len
-    median = get_weigthed_median(df, "mediancov_1", "length", type_algorithm="fast")
+    median = get_weigthed_median(df, coverage_field, "length", type_algorithm="fast")
 
     return median
 
@@ -6838,6 +6844,10 @@ def clean_perSVade_outdir(outdir):
 
     #####################################################################
 
+    ######## CNVcalling files ##########
+
+    ####################################
+
     ####### REMOVE AND CHANGE FILENAMES #######
 
     # change name
@@ -10859,7 +10869,13 @@ def get_mpileup_file_one_chrom(sorted_bam, replace, reference_genome, min_baseca
     return mpileup_file
 
 
-def run_HMMcopy(coverage_file, outfile, parms_dict=dict(e=0.9999999, mu=[-0.458558247, -0.215877601, -0.002665686, 0.191051578, 0.347816046, 1.664333241], lambda_val=20, nu=2.1, kappa=[50, 50, 700, 100, 50, 50], m=[-0.458558247, -0.215877601, -0.002665686, 0.191051578, 0.347816046, 1.664333241], eta=50000, gamma=3, S=0.02930164, strength="1e7"), replace=False):
+
+
+#########################
+####### HMMCOPY #########
+#########################
+
+def run_HMMcopy(coverage_file, outfile, parms_dict=default_parms_dict_HMMcopy, replace=False):
 
     """Runs HMMcopy with the different paramters into outfile. It returns the df with the outfile."""
 
@@ -10948,7 +10964,7 @@ def get_crossValidated_rsquare_HMMcopy_givenParameters(Ip, parameters_dict, outf
 
         # run hmm copy on the training df
         df_train = run_HMMcopy(training_coverage_file, outfile_HMMcopy_cvID, parms_dict=parameters_dict, replace=True)
-        remove_file(outfile_HMMcopy_cvID)
+        #remove_file(outfile_HMMcopy_cvID)
 
         # get the test df
         df_test = testing_coverage_dfs[cvID]
@@ -10972,9 +10988,10 @@ def get_crossValidated_rsquare_HMMcopy_givenParameters(Ip, parameters_dict, outf
 
     return mean_rsquare, std_rsquare
 
+
 def run_CNV_calling_HMMcopy(outdir, replace, threads, df_coverage, ploidy, reference_genome, mitochondrial_chromosome, min_number_of_regions_CNVcalling=50):
 
-    """This function runs HMMcopy and returns a df with the relative_CN"""
+    """This function runs HMMcopy and returns a df with the relative_CN."""
 
     print_if_verbose("running HMMcopy")
     make_folder(outdir)
@@ -11105,6 +11122,9 @@ def run_CNV_calling_HMMcopy(outdir, replace, threads, df_coverage, ploidy, refer
                 # add the midle position
                 df_coverage_HMMcopy_chrom["middle_position"] = df_coverage_HMMcopy_chrom.start + (df_coverage_HMMcopy_chrom.end-df_coverage_HMMcopy_chrom.start)/2
 
+                # debug too short chromosomes
+                if len(df_coverage_HMMcopy_chrom)<10: continue
+
                 # go through CV of each chromosome
                 kfold_object = KFold(n_splits=5, random_state=1, shuffle=True)
                 for cvID, (numeric_train_index, numeric_test_index) in enumerate(kfold_object.split(df_coverage_HMMcopy_chrom.index)):
@@ -11153,9 +11173,17 @@ def run_CNV_calling_HMMcopy(outdir, replace, threads, df_coverage, ploidy, refer
             # get the best parameters
             best_parameters_row = parameters_df.sort_values(by=["cv_rsquare_mean", "cv_rsquare_inverse_std"], ascending=False).iloc[0]
 
-            print_if_verbose("The best parameters have an R2=%.3f +- %.3f (SD)"%(best_parameters_row["cv_rsquare_mean"], best_parameters_row["cv_rsquare_std"]))
+            # if there are some best parameters, pick them
+            if best_parameters_row["cv_rsquare_mean"]>0: 
 
-            best_parameters_dict = dict(best_parameters_row[parameter_fields])
+                print_if_verbose("The best parameters have an R2=%.3f +- %.3f (SD)"%(best_parameters_row["cv_rsquare_mean"], best_parameters_row["cv_rsquare_std"]))
+
+                best_parameters_dict = dict(best_parameters_row[parameter_fields])
+
+            else:
+
+                print_if_verbose("There are no optimum parms, set the default ones")
+                best_parameters_dict = default_parms_dict_HMMcopy
 
             ###########################################
 
@@ -11186,7 +11214,164 @@ def run_CNV_calling_HMMcopy(outdir, replace, threads, df_coverage, ploidy, refer
 
     return df_CNperWindow_HMMcopy
 
-def run_CNV_calling_CONY_one_chromosome(reference_genome, outdir, chromosome, replace, window_size, threads, chrom_len, sample_name, df_coverage, ploidy, min_number_of_regions_CNVcalling=10):
+#########################
+#########################
+#########################
+
+############################
+####### ANEUFINDER #########
+############################
+
+
+def run_AneuFinder(coverage_file, outfile, threads, parms_dict={"R":10, "sig_lvl":0.1}, replace=False):
+
+    """This function runs aneufinder from coverage_file to outfile using the parms dict. It returns a df with coverage_outfile and relative_CN (which is the CN divided by 2) """
+
+    # define the parms
+    R = int(parms_dict["R"])
+    sig_lvl = float(parms_dict["sig_lvl"])
+
+    # run aneufinder
+    if file_is_empty(outfile) or replace is True:
+
+        # get the outfile
+        outfile_tmp = "%s.tmp"%outfile
+        print_if_verbose("generating %s"%outfile)
+
+        # run
+        aneufinder_std = "%s.generating.std"%outfile
+        run_cmd("%s --coverage_table %s --outfile %s --threads %i --R %i --sig_lvl %.4f > %s 2>&1"%(run_AneuFinder_R, coverage_file, outfile_tmp, threads, R, sig_lvl, aneufinder_std), env=EnvName_AneuFinder)
+
+        # save
+        os.rename(outfile_tmp, outfile)
+
+    # get the out df
+    df_out = get_tab_as_df_or_empty_df(outfile).set_index("seqnames")
+    df_out["relative_CN"] = df_out["copy.number"] / 2
+
+    # add to df the relative_CN. Everything is called as a diploid
+    df = get_tab_as_df_or_empty_df(coverage_file)
+    def get_relative_CN(r):
+
+        # get the chromosome df
+        df_c = df_out.loc[{r["seqnames"]}]
+
+        # get the window of df_out that includes the CN of r
+        all_relative_CNs = list(df_c[(df_c.start<=r["start"]) & (df_c.end>=r["end"])].relative_CN)
+
+        # check that it is just 1
+        if len(all_relative_CNs)!=1: raise ValueError("there should only be one relative CN.")
+
+        return all_relative_CNs[0]
+
+    df["relative_CN"] = df.apply(get_relative_CN, axis=1)
+    if any(pd.isna(df.relative_CN)): raise ValueError("there can't be NaNs in df.relative_CN")
+
+    return df
+
+
+def run_CNV_calling_AneuFinder(outdir, replace, threads, df_coverage, ploidy, reference_genome, mitochondrial_chromosome, read_length, min_number_of_regions_CNVcalling=50):
+
+    """This function runs AneuFinder and returns a df with the relative CN"""
+
+    print_if_verbose("running AneuFinder")
+    make_folder(outdir)
+
+    # define chroms
+    all_chromosomes = set(get_chr_to_len(reference_genome))
+    if mitochondrial_chromosome!="no_mitochondria": mtDNA_chromosomes = set(mitochondrial_chromosome.split(","))
+    else: mtDNA_chromosomes = set()
+    gDNA_chromosomes = all_chromosomes.difference(mtDNA_chromosomes)
+
+    # initialize the final df
+    final_fields = ["chromosome", "start", "end", "corrected_relative_coverage", "relative_CN"]
+    df_CNperWindow_AneuFinder = pd.DataFrame(columns=final_fields)
+
+    # iterate through each genome
+    for type_genome, chroms in [("mtDNA", mtDNA_chromosomes), ("gDNA", gDNA_chromosomes)]:
+
+        # define the outdir of the genome
+        outdir_genome = "%s/%s"%(outdir, type_genome); make_folder(outdir_genome)
+
+        # debug
+        if len(chroms)==0: continue
+
+        # get the df coverage for this genome
+        df_coverage_genome = df_coverage[df_coverage.chromosome.isin(chroms)]
+
+        # debug the fact that there are not enough regions. If so set everything to relative_CN==1
+        if len(df_coverage_genome)<min_number_of_regions_CNVcalling: 
+
+            # get relative_CN as 1
+            df_CNperWindow_AneuFinder_genome = df_coverage_genome[["chromosome", "start", "end", "corrected_relative_coverage"]]
+            df_CNperWindow_AneuFinder_genome["relative_CN"] = 1.0
+
+        else:
+
+            print_if_verbose("running aneufinder")
+
+            ######## DEFINE THE INPUT #########
+
+            # get a df_coverage with 1-based ["seqnames", "ranges", "strand", "counts"], where counts is the corrected_relative_coverage
+
+            # add fields necesary for AneuFinder
+            df_coverage_genome["seqnames"] = df_coverage_genome.chromosome
+            df_coverage_genome["strand"] = "*" 
+            df_coverage_genome["start"] = df_coverage_genome.start+1
+
+            # add the counts for aneufinder, proportional to the median coverage * the corrected relative coverage * length of each window / read length
+            median_coverage_positon = get_median_coverage(df_coverage_genome, mitochondrial_chromosome) 
+            if median_coverage_positon<=0: raise ValueError("The median coverage per position %i is not valid"%median_coverage_positon)
+            df_coverage_genome["counts"] = (df_coverage_genome.corrected_relative_coverage*df_coverage_genome.width*(median_coverage_positon/read_length)).apply(int)
+
+            # define the fields
+            AneuFinder_fields = ["seqnames", "start", "end", "strand", "counts"]
+
+            ##################################
+
+            ########## RUN ANEUFINDER  WITH BEST PARMS ########
+
+            best_parameters_dict = {"R":10, "sig_lvl":0.1}
+            print_if_verbose("running AneuFinder with best parameters: %s"%best_parameters_dict)
+
+            # write to file the coverage file
+            coverage_file = "%s/coverage_file.tab"%outdir_genome
+            save_df_as_tab(df_coverage_genome[AneuFinder_fields], coverage_file)
+
+            # run  with the best parameters
+            best_parameters_outfile = "%s/AneuFinder_output_best_parms.tab"%outdir_genome
+            df_AneuFinder_best = run_AneuFinder(coverage_file, best_parameters_outfile, threads, parms_dict=best_parameters_dict, replace=replace)
+
+            initial_len_df_AneuFinder_best = len(df_AneuFinder_best)
+
+            # add the corrected_relative_coverage
+            df_AneuFinder_best = df_AneuFinder_best.merge(df_coverage_genome[["chromosome", "start", "end", "corrected_relative_coverage"]], left_on=["seqnames", "start", "end"], right_on=["chromosome", "start", "end"], how="left", validate="one_to_one")
+
+            # debug merge
+            if initial_len_df_AneuFinder_best!=len(df_AneuFinder_best): raise ValueError("There lengths are not the same")
+
+            # change the start to be 0-based
+            df_AneuFinder_best["start"] = df_AneuFinder_best.start - 1
+
+            # define the final output
+            df_CNperWindow_AneuFinder_genome = df_AneuFinder_best
+
+            ###################################################
+
+        # keep
+        df_CNperWindow_AneuFinder = df_CNperWindow_AneuFinder.append(df_CNperWindow_AneuFinder_genome[final_fields])
+
+        # delete folder
+        #delete_folder(outdir_genome)
+
+    return df_CNperWindow_AneuFinder
+
+
+############################
+############################
+############################
+
+def run_CNV_calling_CONY_one_chromosome(reference_genome, outdir, chromosome, replace, window_size, threads, chrom_len, sample_name, df_coverage, ploidy, min_number_of_regions_CNVcalling=50):
 
     """ runs CONY on a given chromosome into outdir. It returns a df with the  """
 
@@ -11217,9 +11402,16 @@ def run_CNV_calling_CONY_one_chromosome(reference_genome, outdir, chromosome, re
     CONY_fields = ["seqname", "start", "end", "width", "nonAmb", "GC", "AdjRD"]
     save_df_as_tab(df_coverage_chrom[CONY_fields], coverage_file_chrom)
 
-    # define the fragment length: the length of analytic fragments for each lane. The suggested default is 500,000 (bps) at a time. RJMCMC would be run with several lanes simultaneously via snow package. The number of lanes is total number of analytic windows/ (fragment length/ window size).
+    # define the fragment length: the length of analytic fragments for each lane. The suggested default is 500,000 (bps) at a time. RJMCMC would be run with several lanes simultaneously via snow package. The number of lanes (can be thought as threads) is total number of analytic windows/ (fragment length/ window size). If we increase the fragment length the number of lanes (threads) decreases.
 
-    fragment_len = int((window_size*(len(df_coverage_chrom)/threads))*0.9) + 1
+    
+    fraction_fragment_len = 0.9 # this was the original. It is a very low number, so it implies paralelism
+    #fraction_fragment_len = 3 # this is to increase the number of lanes
+    fragment_len = int((window_size*(len(df_coverage_chrom)/threads))*fraction_fragment_len) + 1
+
+    # set to a minimum, for avoiding CONY errors
+    min_fragment_len = int(min_number_of_regions_CNVcalling*window_size)
+    fragment_len = max([fragment_len, min_fragment_len])
 
     #################################################
 
@@ -11233,10 +11425,9 @@ def run_CNV_calling_CONY_one_chromosome(reference_genome, outdir, chromosome, re
 
         # run CONY
         cony_std = "%s/running_cony.std"%outdir
-        print_if_verbose("Running CONY. The std is in %s"%cony_std)
+        print_if_verbose("Running CONY. The std is in %s. Running on a fragment length of %i"%(cony_std, fragment_len))
 
-        #cmd = "%s --libraries_CONY %s --chromosome %s --sample_name %s --outdir %s > %s 2>&1"%(run_CONY_R, libraries_CONY, chromosome, sample_name, outdir, cony_std)
-        cmd = "%s --libraries_CONY %s --chromosome %s --sample_name %s --outdir %s --ploidy %i --fragment_len %i"%(run_CONY_R, libraries_CONY, chromosome, sample_name, outdir, ploidy, fragment_len)
+        cmd = "%s --libraries_CONY %s --chromosome %s --sample_name %s --outdir %s --ploidy %i --fragment_len %i > %s 2>&1"%(run_CONY_R, libraries_CONY, chromosome, sample_name, outdir, ploidy, fragment_len, cony_std)
 
         run_cmd(cmd, env=EnvName_CONY)
 
@@ -11268,7 +11459,7 @@ def run_CNV_calling_CONY_one_chromosome(reference_genome, outdir, chromosome, re
 
     # add the relative CN
     df_perWindow["relative_CN"] = (df_perWindow.CN / 2)*chromosomal_CN
-    df_perWindow["chromosmoal_relative_CN"] = chromosomal_CN
+    df_perWindow["chromosomal_relative_CN"] = chromosomal_CN
 
 
     #################################
@@ -11326,131 +11517,6 @@ def get_sample_name_from_bam(bam):
     sample_name = str(subprocess.check_output("%s view -H %s | egrep '^@RG'"%(samtools, bam), shell=True)).split("ID:")[1].split("\\t")[0]
     
     return sample_name
-
-
-def configure_reference_genome_for_CNVnator(reference_genome, threads, root_file, mitochondrial_chromosome):
-
-    """This function will create all the necessary files to create the reference genome file and configure root_file to use it. It is based on this: https://github.com/abyzovlab/CNVpytor/blob/master/examples/AddReferenceGenome.md"""   
-
-    print_if_verbose("configure reference_genome")
-
-    # get the bgzipped reference_genome
-    reference_genome_gz = "%s.reference_genome.gz"%root_file
-    reference_genome_gz_stderr = "%s.generating.stderr"%reference_genome_gz
-    run_cmd("%s %s --stdout > %s 2>%s"%(bgzip, reference_genome, reference_genome_gz, reference_genome_gz_stderr))
-    remove_file(reference_genome_gz_stderr)
-
-    # get the GC mask file. By default it works on 100-bp bins
-    gc_file = "%s.gc.pytor"%root_file
-    gc_file_std = "%s.generating.std"%gc_file
-    run_cmd("%s -root %s -gc %s -make_gc_file > %s 2>&1"%(cnvpytor_exec, gc_file, reference_genome_gz, gc_file_std))
-    remove_file(gc_file_std)
-
-    save_df_as_tab
-    # create dict that has the info
-    """
-    reference_genome_dict = {"custom_ref":{"name":"custom reference genome",
-                                           "species":"custom species",
-                                           "chromosomes":}}
-    """
-
-
-    khadkdha
-
-    print(gc_file)
-    ljhdahkjdad
-
-
-    # get the outdir
-    #outdir = get_dir(root_file)
-
-
-
-    #> cnvpytor -root MGSCv37_gc_file.pytor -gc ~/hg19/mouse.fasta.gz -make_gc_file
-
-def run_CNVNATOR(sorted_bam, reference_genome, outdir, threads, replace, mitochondrial_chromosome, df_clove, window_size, sample_name, chrom_to_len):
-
-    """Gets CNV calls based on CNVnator"""
-
-    print_if_verbose("running CNVnator")
-
-    # define the genome len
-    genome_size = sum(chrom_to_len.values())
-
-    # make the outdir and move there
-    CurDir = get_fullpath(".")
-    make_folder(outdir); os.chdir(outdir)
-
-    # define all chroms
-    all_chromosomes = sorted(chrom_to_len.keys())
-
-    # get the sorted_bam under current dir
-    run_sorted_bam = "%s.bam"%sample_name
-    soft_link_files(sorted_bam, run_sorted_bam)
-    soft_link_files("%s.bai"%sorted_bam, "%s.bai"%run_sorted_bam)
-
-    # define the root file
-    root_file = "%s.pythor"%sample_name
-
-    # configure the reference genome into root_file
-    configure_reference_genome_for_CNVnator(reference_genome, threads, root_file, mitochondrial_chromosome)
-
-
-    addahadghjg
-
-    ###### CONFIGURE REFERENCE GENOME ######
-
-    print_if_verbose("configuring reference genome")
-
-    cnvpytor_std = "%s.addingRefGenome.std"%root_file
-    run_cmd("%s -root %s"%(cnvpytor_exec, root_file))
-
-
-    # we could also add a mask file
-    
-
-
-    ########################################
-
-    # get the reference genome under the current dir
-    run_reference_genome = "reference_genome.fa"
-    copy_file(reference_genome, run_reference_genome)
-    run_cmd("gzip -f %s"%run_reference_genome)
-    run_reference_genome_gz = "%s.gz"%run_reference_genome
-
-    # import the loging
-    logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-    logger = logging.getLogger('cnvpytor')
-
-    # create a new root class
-    app = cnvpytor.Root(root_file, create=True, max_cores=threads)
-
-
-    # import RD signal from bam
-    print_if_verbose("importing RD signals from Bam")
-    app.rd(bamfiles=[run_sorted_bam], chroms=all_chromosomes, reference_filename=run_reference_genome_gz)
-
-    # calculating histograms
-    print_if_verbose("calculate histograms")
-    app.calculate_histograms([window_size], chroms=all_chromosomes)
-
-    # calculatuing partitions
-    print_if_verbose("calculate partitions")
-    app.partition([window_size], chroms=all_chromosomes, use_gc_corr=True, repeats=3, genome_size=genome_size)
-
-    # call CNVs
-    print_if_verbose("calling CNV")
-    calls = app.call([window_size])
-
-
-
-
-
-    print(calls)
-    ldahhkdkjhad
-
-    # at the end move back to CurDir
-    os.chdir(CurDir)
 
 def get_coverage_df_for_windows_of_genome(sorted_bam, reference_genome, outdir, replace, threads, window_size):
 
@@ -12404,7 +12470,7 @@ def get_chrom_to_Xoffset_plot(reference_genome):
 
     return all_chromosomes, chrom_to_Xoffset
 
-def get_df_CNV_with_metadata_from_df_coverage(df_coverage, df_CNV):
+def get_df_CNV_with_metadata_from_df_coverage(df_coverage, df_CNV, relative_CN_fields):
 
     """This function takes a df coverage and a df_CNV and returns a series with metadata from the df_CNV to the df_coverage"""
 
@@ -12425,20 +12491,18 @@ def get_df_CNV_with_metadata_from_df_coverage(df_coverage, df_CNV):
         if min(df_cov.start)!=r["start"] or max(df_cov.end)!=r["end"]: raise ValueError("invalid parsing")
 
         # get several things
-        median_coverage = np.median(df_cov.relative_coverage)
-        median_coverage_corrected = np.median(df_cov.corrected_relative_coverage)
-        median_relative_CN_CONY = np.median(df_cov.relative_CN_CONY)
-        median_relative_CN_HMMcopy = np.median(df_cov.relative_CN_HMMcopy)
+        final_dict = {"median_coverage" : np.median(df_cov.relative_coverage),
+                      "median_coverage_corrected" : np.median(df_cov.corrected_relative_coverage)}
+
+        for field_CN in relative_CN_fields: final_dict["median_%s"%field_CN] = np.median(df_cov[field_CN])
 
         # return as a series
-        final_series = pd.Series({"median_coverage" : np.median(df_cov.relative_coverage),
-                                  "median_coverage_corrected" : np.median(df_cov.corrected_relative_coverage),
-                                  "median_relative_CN_CONY" : np.median(df_cov.relative_CN_CONY),
-                                  "median_relative_CN_HMMcopy" : np.median(df_cov.relative_CN_HMMcopy)})
+        final_series = pd.Series(final_dict)
 
         return final_series
 
-    df_CNV[["median_coverage", "median_coverage_corrected", "median_relative_CN_CONY", "median_relative_CN_HMMcopy"]] = df_CNV.apply(get_metadata_for_df_CNV_r, axis=1)
+    fields_to_add = ["median_coverage", "median_coverage_corrected"] + ["median_%s"%x for x in relative_CN_fields]
+    df_CNV[fields_to_add] = df_CNV.apply(get_metadata_for_df_CNV_r, axis=1)
 
     # add whether it is a duplication or a deletion
     def get_type_CNV_from_coverageState(x):
@@ -12450,108 +12514,346 @@ def get_df_CNV_with_metadata_from_df_coverage(df_coverage, df_CNV):
 
     return df_CNV
 
-def run_CNV_calling(sorted_bam, reference_genome, outdir, threads, replace, mitochondrial_chromosome, df_gridss, window_size, ploidy, plot_correlation=False):
+def get_df_coverage_with_relative_coverage_and_for_each_typeGenome(df_coverage, reference_genome, mitochondrial_chromosome):
 
-    """This function takes a sorted bam and runs several programs on it to get the copy-number variation results. It is important that the sorted_bam contains no duplicates. It will correct bu GC content, mappability and distance to the telomere. All coverage will be corrected by GC content, mappability and the distance to the telomere, which will be calculated also taking into account breakpoint information. """
+    """This function adds the relative coverage to df_coverage and also the relative to gDNA or mtDNA"""
+
+    # add the relative coverage
+    median_coverage = get_median_coverage(df_coverage, mitochondrial_chromosome)
+    df_coverage["relative_coverage"] = df_coverage["mediancov_1"]/median_coverage
+
+    # define chroms
+    all_chromosomes = set(get_chr_to_len(reference_genome))
+    if mitochondrial_chromosome!="no_mitochondria": mtDNA_chromosomes = set(mitochondrial_chromosome.split(","))
+    else: mtDNA_chromosomes = set()
+    gDNA_chromosomes = all_chromosomes.difference(mtDNA_chromosomes)
+
+    # add the type of genome
+    def get_type_genome(c):
+        if c in gDNA_chromosomes: return "gDNA"
+        elif c in mtDNA_chromosomes: return "mtDNA"
+        else: raise ValueError("%s is not in gDNA nor mtDNA"%c)
+    df_coverage["type_genome"] = df_coverage.chromosome.apply(get_type_genome)
+
+    # calculate the median of each genome
+    type_genome_to_median_relativeCov = {type_genome : get_median_coverage(df_coverage[df_coverage.type_genome==type_genome], mitochondrial_chromosome, coverage_field="relative_coverage") for type_genome in ["gDNA", "mtDNA"] if sum(df_coverage.type_genome==type_genome)>0}
+
+    # add to the df the relative_coverage_to_genome
+    df_coverage["median_relative_coverage_genome"] = df_coverage.type_genome.apply(lambda x: type_genome_to_median_relativeCov[x])
+    df_coverage["relative_coverage_to_genome"] = df_coverage.relative_coverage / df_coverage.median_relative_coverage_genome
+
+    return df_coverage
+
+def get_df_coverage_with_corrected_coverage_background(df_coverage, df_coverage_bg, reference_genome, outdir, replace, threads, mitochondrial_chromosome):
+
+    """This function takes a df_coverage and a df_coverage of the background. It returns the same df_coverage with the 'corrected_relative_coverage' which is the correction by the background. """
+
+    # debug inputs
+    if len(df_coverage)!=len(df_coverage_bg): raise ValueError("the df coverages are not the same")
+
+    # define the initial cols
+    initial_cols = list(df_coverage.columns)
+
+    # define the outfile_final
+    outfile_final = "%s/df_coverage_with_corrected_relative_coverage.tab"%outdir
+
+    # define the working dir
+    working_outdir = "%s/working_dir"%outdir; make_folder(working_outdir)
+
+    if file_is_empty(outfile_final) or replace is True:
+
+        # check content
+        if any(df_coverage.start>=df_coverage.end): raise ValueError("start can't be after end")
+
+        # add "relative_coverage", which will include coverage_field
+        if "relative_coverage" in set(df_coverage.keys()): raise ValueError("coverage can't be in the df keys")
+
+        # add the GC content
+        gcontent_outfile = "%s/df_coverage_with_gccontent.py"%working_outdir
+        df_coverage = get_df_with_GCcontent(df_coverage, reference_genome, gcontent_outfile, replace=replace)
+
+        # add the median mappability
+        mappability_outfile = "%s/df_coverage_with_mappability.tab"%working_outdir
+        df_coverage = get_df_windows_with_median_mappability(df_coverage, reference_genome, mappability_outfile, replace, threads)
+
+        # add the relative coverage and relative coverage to the genome to each df
+        df_coverage = get_df_coverage_with_relative_coverage_and_for_each_typeGenome(df_coverage, reference_genome, mitochondrial_chromosome)
+        df_coverage_bg = get_df_coverage_with_relative_coverage_and_for_each_typeGenome(df_coverage_bg, reference_genome, mitochondrial_chromosome)
+
+        # define a unique index
+        df_coverage.index = list(range(0, len(df_coverage)))
+        df_coverage_bg.index = list(range(0, len(df_coverage_bg)))
+
+        # add the realtive coverage to the genome of the background sample
+        df_coverage = df_coverage.merge(df_coverage_bg[["chromosome", "start", "end", "relative_coverage_to_genome"]], on=["chromosome", "start", "end"], how="left", validate="one_to_one", suffixes=("", "_background"))
+
+        # add the corrected_relative_coverage so by normalising the coverage relative to the genome by the same one in the background. If the coverage in the bg is 0 we'll also set the coverage of the current to 0. The corrected relative coaverage will be maxed at 10.0
+        def get_corrected_relative_coverage_bg(r):
+
+            # get the vals
+            cov = r.relative_coverage_to_genome
+            cov_bg = r.relative_coverage_to_genome_background
+
+            if cov_bg>0: return cov/cov_bg
+            elif cov_bg==0: return 0.0 # if the reference is deleted, set also as deleted the relative coverage
+            else: raise ValueError("the coverages %.2f and %.2f are not valid"%(cov, cov_bg))
+
+        def set_to_max_cov(x): return min([10.0, x])
+        df_coverage["corrected_relative_coverage"] = df_coverage.apply(get_corrected_relative_coverage_bg, axis=1).apply(set_to_max_cov)
+
+        # save
+        save_df_as_tab(df_coverage, outfile_final)
+
+    # load
+    df_coverage = get_tab_as_df_or_empty_df(outfile_final)
+
+    # remove the working dir
+    delete_folder(working_outdir)
+
+    # return 
+    return df_coverage
+
+
+
+def run_CNV_calling(sorted_bam, reference_genome, outdir, threads, replace, mitochondrial_chromosome, df_gridss, window_size, ploidy, plot_correlation=True, bg_sorted_bam_CNV=None, cnv_calling_algs={"HMMcopy", "AneuFinder", "CONY"}):
+
+    """This function takes a sorted bam and runs several programs on it to get the copy-number variation results. It is important that the sorted_bam contains no duplicates. It will correct bu GC content, mappability and distance to the telomere. All coverage will be corrected by GC content, mappability and the distance to the telomere, which will be calculated also taking into account breakpoint information. 
+
+    If bg_sorted_bam_CNV is provided the correction will be performed by this sorted bam instead of the position, GC content and mappability."""
 
     make_folder(outdir)
 
     # define the final file
     final_CNV_file = "%s/final_CNVcalling.tab"%outdir
+    final_df_coverage_file = "%s/final_df_coverage.tab"%outdir
 
-    if file_is_empty(final_CNV_file) or replace is True:
+    if file_is_empty(final_CNV_file) or file_is_empty(final_df_coverage_file) or replace is True:
+
+        # init the files to remove
+        files_folders_remove = []
+
+        ############ GET A DF WITH CORRECTED COVERAGE ##############
 
         # make a df with windows of the genome
         df_coverage = get_coverage_df_for_windows_of_genome(sorted_bam, reference_genome, outdir, replace, threads, window_size)
 
+        # add the files to remove
+        files_folders_remove.append("%s/coverage_per_windows_%ibp.tab"%(outdir, window_size))
+
         # add the 'corrected_relative_coverage' by mappability, GC content and distance to the telomere
-        df_coverage = get_df_coverage_with_corrected_coverage(df_coverage, reference_genome, outdir, replace, threads, mitochondrial_chromosome, df_gridss)
+        if bg_sorted_bam_CNV is None:
+
+            df_coverage = get_df_coverage_with_corrected_coverage(df_coverage, reference_genome, outdir, replace, threads, mitochondrial_chromosome, df_gridss)
+
+        # if bg_sorted_bam_CNV is provided, calculate the "corrected_relative_coverage" as compared to the bg_sorted_bam_CNV
+        else:
+
+            # get the df coverage of the background
+            outdir_calculating_coverage_bg = "%s/calculating_bg_coverage"%outdir; make_folder(outdir_calculating_coverage_bg)
+            df_coverage_bg = get_coverage_df_for_windows_of_genome(bg_sorted_bam_CNV, reference_genome, outdir_calculating_coverage_bg, replace, threads, window_size)
+
+            # get the df coverage with the corrected_relative_coverage (relative to bg), mappability, GC content
+            df_coverage = get_df_coverage_with_corrected_coverage_background(df_coverage, df_coverage_bg, reference_genome, outdir, replace, threads, mitochondrial_chromosome)
+
+            files_folders_remove += [outdir_calculating_coverage_bg, "%s/df_coverage_with_corrected_relative_coverage.tab"%outdir]
+
+
+        # check that there are no NaNs
+        if any(pd.isna(df_coverage.corrected_relative_coverage)): raise ValueError("There should be no NaNs in 'corrected_relative_coverage' ")
 
         # add the fraction of N bases
         chrom_to_seq = {seq.id : str(seq.seq).upper() for seq in SeqIO.parse(reference_genome, "fasta")}
         df_coverage["width"] = (df_coverage.end - df_coverage.start).apply(int)
         df_coverage["fraction_N_bases"] = df_coverage.apply(run_fraction_Nbases_window_genome, chrom_to_seq=chrom_to_seq, axis=1)
 
+        # debug
+        if len(set(cnv_calling_algs).difference({"AneuFinder", "HMMcopy", "CONY"}))>0: raise ValueError("the cnv_calling_algs %s are not correct"%cnv_calling_algs)
+
+        ############################################################
+
+        ######## RUN ANEUFINDER ########
+
+        # init the cnv_calling fields
+        relative_CN_fields = []
+        
+        if "AneuFinder" in cnv_calling_algs:
+
+            # this is from a 2020 paper of CNV and antifungal drugs in C. albicans
+
+            AneuFinder_outdir = "%s/AneuFinder_run"%outdir
+            df_CNperWindow_AneuFinder_file = "%s/df_CNperWindow_AneuFinder_final.tab"%outdir
+
+            if file_is_empty(df_CNperWindow_AneuFinder_file) or replace is True:
+
+                # define the threads
+                threads_aneufinder = 1 # note that the aneufinder threads is 1 to improve performance
+
+                # calculate the read length
+                read_length = get_read_length(sorted_bam, threads=threads, replace=replace)
+
+                df_CNperWindow_AneuFinder = run_CNV_calling_AneuFinder(AneuFinder_outdir, replace, threads_aneufinder, df_coverage, ploidy, reference_genome, mitochondrial_chromosome, read_length)
+
+                save_df_as_tab(df_CNperWindow_AneuFinder, df_CNperWindow_AneuFinder_file)
+
+            df_CNperWindow_AneuFinder = get_tab_as_df_or_empty_df(df_CNperWindow_AneuFinder_file)
+
+            print(df_CNperWindow_AneuFinder)
+
+            df_coverage = df_coverage.merge(df_CNperWindow_AneuFinder[["chromosome", "start", "end", "relative_CN"]], on=["chromosome", "start", "end"], left_index=False, right_index=False, how="left", validate="one_to_one").rename(columns={"relative_CN":"relative_CN_AneuFinder"})
+
+            # keep
+            relative_CN_fields.append("relative_CN_AneuFinder")
+            files_folders_remove += [AneuFinder_outdir, df_CNperWindow_AneuFinder_file]
+
+        ################################
+
         ######## RUN CONY ########
 
-        # get chrom to len
-        chrom_to_len = get_chr_to_len(reference_genome)
+        if "CONY" in cnv_calling_algs:
 
-        # define the sample name
-        sample_name = get_sample_name_from_bam(sorted_bam)
+            # This is a recent paper that shows very high accuracy
 
-        # run CONY for each chromosome
-        df_CNperWindow_CONY_file = "%s/df_CNperWindow_CONY.tab"%outdir
+            # get chrom to len
+            chrom_to_len = get_chr_to_len(reference_genome)
 
-        if file_is_empty(df_CNperWindow_CONY_file) or replace is True:
+            # define the sample name
+            sample_name = get_sample_name_from_bam(sorted_bam)
 
-            df_CNperWindow_CONY = pd.concat([run_CNV_calling_CONY_one_chromosome(reference_genome, "%s/%s_CONYrun"%(outdir, c), c, replace, window_size, threads, chrom_len, sample_name, df_coverage, ploidy) for c, chrom_len in chrom_to_len.items()])
+            # run CONY for each chromosome
+            df_CNperWindow_CONY_file = "%s/df_CNperWindow_CONY.tab"%outdir
 
-            save_df_as_tab(df_CNperWindow_CONY, df_CNperWindow_CONY_file)
+            if file_is_empty(df_CNperWindow_CONY_file) or replace is True:
 
-        df_CNperWindow_CONY = get_tab_as_df_or_empty_df(df_CNperWindow_CONY_file).rename(columns={"seqname":"chromosome"})
+                # start by the shortest chromosomes
+                chroms_sorted_by_len = sorted(set(chrom_to_len), key=(lambda c: chrom_to_len[c]))
+
+                df_CNperWindow_CONY = pd.concat([run_CNV_calling_CONY_one_chromosome(reference_genome, "%s/%s_CONYrun"%(outdir, c), c, replace, window_size, threads, chrom_to_len[c], sample_name, df_coverage, ploidy) for c in chroms_sorted_by_len])
+
+                save_df_as_tab(df_CNperWindow_CONY, df_CNperWindow_CONY_file)
+
+            df_CNperWindow_CONY = get_tab_as_df_or_empty_df(df_CNperWindow_CONY_file).rename(columns={"seqname":"chromosome"})
+
+            # add to df coverage
+            df_coverage = df_coverage.merge(df_CNperWindow_CONY[["chromosome", "start", "end", "relative_CN"]], on=["chromosome", "start", "end"], left_index=False, right_index=False, how="left", validate="one_to_one").rename(columns={"relative_CN":"relative_CN_CONY"})
+
+            relative_CN_fields.append("relative_CN_CONY")
+            files_folders_remove += (["%s/%s_CONYrun"%(outdir, c) for c in chrom_to_len] + [df_CNperWindow_CONY_file])
 
         ##########################
 
         ####### RUN HMMCOPY, SIMILARLY TO A RECENT C. glabrata PAPER #######
 
-        # This is based on "Understand the genomic diversity and evolution of fungal pathogen Candida glabrata by genome-wide analysis of genetic variations"
+        if "HMMcopy" in cnv_calling_algs:
 
-        HMMcopy_outdir = "%s/HMMcopy_run"%outdir
-        df_CNperWindow_HMMcopy_file = "%s/df_CNperWindow_HMMcopy_final.tab"%outdir
+            # This is based on "Understand the genomic diversity and evolution of fungal pathogen Candida glabrata by genome-wide analysis of genetic variations"
 
-        if file_is_empty(df_CNperWindow_HMMcopy_file) or replace is True:
+            HMMcopy_outdir = "%s/HMMcopy_run"%outdir
+            df_CNperWindow_HMMcopy_file = "%s/df_CNperWindow_HMMcopy_final.tab"%outdir
 
-            df_CNperWindow_HMMcopy = run_CNV_calling_HMMcopy(HMMcopy_outdir, replace, threads, df_coverage, ploidy, reference_genome, mitochondrial_chromosome)
+            if file_is_empty(df_CNperWindow_HMMcopy_file) or replace is True:
 
-            save_df_as_tab(df_CNperWindow_HMMcopy, df_CNperWindow_HMMcopy_file)
+                df_CNperWindow_HMMcopy = run_CNV_calling_HMMcopy(HMMcopy_outdir, replace, threads, df_coverage, ploidy, reference_genome, mitochondrial_chromosome)
 
-        df_CNperWindow_HMMcopy = get_tab_as_df_or_empty_df(df_CNperWindow_HMMcopy_file)
+                save_df_as_tab(df_CNperWindow_HMMcopy, df_CNperWindow_HMMcopy_file)
+
+            df_CNperWindow_HMMcopy = get_tab_as_df_or_empty_df(df_CNperWindow_HMMcopy_file)
+
+            df_coverage = df_coverage.merge(df_CNperWindow_HMMcopy[["chromosome", "start", "end", "relative_CN"]], on=["chromosome", "start", "end"], left_index=False, right_index=False, how="left", validate="one_to_one").rename(columns={"relative_CN":"relative_CN_HMMcopy"})
+
+            relative_CN_fields.append("relative_CN_HMMcopy")
+            files_folders_remove += [HMMcopy_outdir, df_CNperWindow_HMMcopy_file]
+
+        if len(relative_CN_fields)==0: raise ValueError("you should have some values in relative_CN_fields")
 
         ####################################################################
 
-        # add to df coverage
-        df_coverage = df_coverage.merge(df_CNperWindow_CONY[["chromosome", "start", "end", "relative_CN"]], on=["chromosome", "start", "end"], left_index=False, right_index=False, how="left", validate="one_to_one").rename(columns={"relative_CN":"relative_CN_CONY"})
+        ###### PLOT THE CALLING OF ALL PROGRAMS ######
 
-        df_coverage = df_coverage.merge(df_CNperWindow_HMMcopy[["chromosome", "start", "end", "relative_CN"]], on=["chromosome", "start", "end"], left_index=False, right_index=False, how="left", validate="one_to_one").rename(columns={"relative_CN":"relative_CN_HMMcopy"})
+        PlotsDir = "%s/plots"%outdir; make_folder(PlotsDir)
+        df_plot = cp.deepcopy(df_coverage)
 
+        # add the plot position to the df_plot
+        all_chromosomes, chrom_to_Xoffset = get_chrom_to_Xoffset_plot(reference_genome)
+        df_plot["Xoffset_plot"] = df_plot.chromosome.apply(lambda c: chrom_to_Xoffset[c])
+        df_plot["plot_positionX"] = df_plot.start + df_plot.Xoffset_plot
 
-        print_if_verbose("plotting predictions")
+        # define graphic properties
+        cnvAlg_to_color = {"HMMcopy":"red", "CONY":"green", "AneuFinder":"black"}
+
+        # init fig
+        fig = tools.make_subplots(rows=1, cols=1, specs=[[{}]], vertical_spacing=0.0, horizontal_spacing=0.0, subplot_titles=(""), shared_yaxes=True, shared_xaxes=True, print_grid=True)
+
+        # get data
+        all_Xs = []
+        all_relative_coverage = []
+        cnv_alg_to_all_CN = {cnv_alg : [] for cnv_alg in cnv_calling_algs}
+
+        for chrom in all_chromosomes:
+
+            # get the df of the chrom
+            df_c = df_plot[df_plot.chromosome==chrom]
+
+            # keep the x and the relative coverage
+            all_Xs += (list(df_c.plot_positionX) + [None])
+            all_relative_coverage += (list(df_c.corrected_relative_coverage) + [None])
+
+            # one line for each cnv calling
+            for cnv_alg in cnv_calling_algs: cnv_alg_to_all_CN[cnv_alg] += (list(df_c["relative_CN_%s"%cnv_alg]) + [None])
+        
+        # plot the relative coverage
+        fig.append_trace(go.Scatter(x=all_Xs, y=all_relative_coverage, showlegend=True, mode="lines+markers", marker=dict(symbol="circle", color="blue", size=4), opacity=1, hoveron="points+fills", name="corrected read depth", line=dict(color="blue", width=2, dash=None)) , 1, 1) 
+
+        # add the CN of each alg
+        for cnv_alg, all_CN in cnv_alg_to_all_CN.items():
+
+            fig.append_trace(go.Scatter(x=all_Xs, y=all_CN, showlegend=True, mode="lines", line=dict(color=cnvAlg_to_color[cnv_alg], width=2, dash="dash"), opacity=1, hoveron="points+fills", name="%s CN"%cnv_alg), 1, 1) 
+
+        # get figure
+        fig['layout'].update(title="relative coverage and CN", margin=go.Margin(l=250, r=250, b=50, t=50), showlegend=True)
+        config={'editable': False}
+        off_py.plot(fig, filename="%s/CNcalling_interactive.html"%(PlotsDir), auto_open=False, config=config)
+        
+        ##############################################
 
         ######### PLOT CORRELATION #########
 
-        if plot_correlation is True:
+        if plot_correlation is True and len(relative_CN_fields)>=2:
 
             print_if_verbose("plotting predictions")
 
             # define a plot df
             df_plot = cp.deepcopy(df_coverage)
 
-            # get the plot and jitter
-            df_plot = df_plot.sort_values(by=["relative_CN_HMMcopy", "relative_CN_CONY"])
-            df_plot["relative_CN_HMMcopy"] = df_plot.relative_CN_HMMcopy + np.random.uniform(-1, 1, len(df_plot))*0.2
-            df_plot["relative_CN_CONY"] = df_plot.relative_CN_CONY + np.random.uniform(-1, 1, len(df_plot))*0.2
+            for xfield, yfield in itertools.combinations(relative_CN_fields, 2):
 
-            fig = plt.figure(figsize=(5,5))
+                # get only the df_plot which is under some CNV
+                df_plot = df_plot[(df_plot[xfield]!=1.0) | (df_plot[yfield]!=1.0)]
 
-            plt.plot(df_plot["relative_CN_HMMcopy"], df_plot["relative_CN_CONY"], "o", alpha=0.01, color="gray", label="CN by each program")
-            #sns.kdeplot(df_plot[["relative_CN_HMMcopy", "relative_CN_CONY"]], cmap="gist_gray", shade=True)
+                # get the plot and jitter. This sets to a maximum of 3
+                df_plot = df_plot.sort_values(by=[xfield, yfield])
+                def set_to_max3(x): return min([x, 3])
+                df_plot[xfield] = df_plot[xfield].apply(set_to_max3) + np.random.uniform(-1, 1, len(df_plot))*0.2
+                df_plot[yfield] = df_plot[yfield].apply(set_to_max3) + np.random.uniform(-1, 1, len(df_plot))*0.2
 
-            max_val = max([max(df_plot.relative_CN_HMMcopy), max(df_plot.relative_CN_CONY)])
-            lims = [0, max_val]
+                fig = plt.figure(figsize=(5,5))
 
-            plt.legend(bbox_to_anchor=(1, 1))
-            plt.xlim(lims)
-            plt.ylim(lims)
-            plt.xlabel("CN predicted by HMMcopy")
-            plt.ylabel("CN predicted by CONY")
+                plt.plot(df_plot[xfield], df_plot[yfield], "o", alpha=0.05, color="gray", label="CN by each program")
 
-            # add line
-            plt.plot(np.linspace(0, max_val, 3), np.linspace(0, max_val, 3), "--", color="red", linewidth=.9)
+                max_val = max([max(df_plot[xfield]), max(df_plot[yfield])])
+                lims = [0, max_val]
 
-            filename = "%s/CNtwoPrograms.pdf"%(outdir)
-            fig.savefig(filename, bbox_inches='tight')
-            plt.close(fig)
+                plt.legend(bbox_to_anchor=(1, 1))
+                plt.xlim(lims)
+                plt.ylim(lims)
+                plt.xlabel("CN predicted by %s"%xfield)
+                plt.ylabel("CN predicted by %s"%yfield)
+
+                # add line
+                plt.plot(np.linspace(0, max_val, 3), np.linspace(0, max_val, 3), "--", color="red", linewidth=.9)
+
+                filename = "%s/CNtwoPrograms_%s_vs_%s.pdf"%(PlotsDir, xfield, yfield)
+                fig.savefig(filename, bbox_inches='tight')
+                plt.close(fig)
 
         ####################################
 
@@ -12561,7 +12863,14 @@ def run_CNV_calling(sorted_bam, reference_genome, outdir, threads, replace, mito
         
         # get the most conservative relative_CN
         def get_closest_to_relative_CN(r): return find_nearest(r, 1.0)
-        df_coverage["merged_relative_CN"] = df_coverage[["relative_CN_CONY", "relative_CN_HMMcopy"]].apply(get_closest_to_relative_CN, axis=1)
+        df_coverage["merged_relative_CN"] = df_coverage[relative_CN_fields].apply(get_closest_to_relative_CN, axis=1)
+
+        # correct the relative_CN so that if the relative_coverage is 0 it is also 0. Sometimes the programs don't work if there is few variability in the data (like in the WT).
+        def get_corrected_merged_relative_CN_according_to_relative_coverage(r):
+            if r["corrected_relative_coverage"] in {0.0}: return r["corrected_relative_coverage"]
+            else: return r["merged_relative_CN"]
+
+        df_coverage["merged_relative_CN"] = df_coverage.apply(get_corrected_merged_relative_CN_according_to_relative_coverage, axis=1)
 
         print_if_verbose("There are %i/%i windows of the genome under CNV"%(sum(df_coverage.merged_relative_CN!=1.0), len(df_coverage)))
 
@@ -12608,15 +12917,17 @@ def run_CNV_calling(sorted_bam, reference_genome, outdir, threads, replace, mito
 
 
         # add metadata
-        df_CNV = get_df_CNV_with_metadata_from_df_coverage(df_coverage, df_CNV)
+        df_CNV = get_df_CNV_with_metadata_from_df_coverage(df_coverage, df_CNV, relative_CN_fields)
 
         ############################################
 
         # clean
-        files_folders_remove = [HMMcopy_outdir] + ["%s/%s_CONYrun"%(outdir, c) for c in chrom_to_len]
-        for f in files_folders_remove: delete_folder(f)
+        for f in files_folders_remove: 
+            remove_file(f)
+            delete_folder(f)
 
         # save
+        save_df_as_tab(df_coverage, final_df_coverage_file)
         save_df_as_tab(df_CNV, final_CNV_file)
 
     # load
@@ -13830,7 +14141,7 @@ def run_vep_parallel(vcf, reference_genome, gff_with_biotype, mitochondrial_chro
         df_vep = pd.concat(list_vep_dfs).sort_values(by="#Uploaded_variation").drop_duplicates()
 
         # check that not all of the variants are intergenic (this would be suspicious)
-        if (sum(df_vep.Consequence=="intergenic_variant")/len(df_vep)) > 0.9: print_if_verbose("WARNING: There are >90 percent of the variants that are intergenic. Maybe your gff is wrong. ")
+        if (sum(df_vep.Consequence=="intergenic_variant")/len(df_vep)) > 0.9: print("WARNING: There are >90 percent of the variants that are intergenic. Maybe your gff is wrong. ")
         # write
         print_if_verbose("saving")
         df_vep.to_csv(output_vcf_tmp, sep="\t", header=True, index=False)
@@ -15351,14 +15662,27 @@ def get_correct_INFO_with_bendIDs_and_bendStats(r, df_gridss):
 
             bpointID_to_score = df_gridss.groupby("eventID_as_clove").apply(get_score_breakpoint_matchingVariant)
 
-            best_breakpoint = bpointID_to_score[bpointID_to_score==max(bpointID_to_score)].index[0]
+            # if there is some breakpoint with two breakends, it should be the one that is about this breakpoint
+            if any(bpointID_to_score>0):
 
-            # keep the breakend IDs of the best breakpoints
-            best_bp_df_gridss = df_gridss[df_gridss.eventID_as_clove==best_breakpoint].sort_values(by="POS")
-            if len(best_bp_df_gridss)!=2: raise ValueError("There should be 2 breakpoints in %s"%best_bp_df_gridss)
+                best_breakpoint = bpointID_to_score[bpointID_to_score==max(bpointID_to_score)].index[0]
 
-            # define the breakend IDs
-            breakend_IDs = [best_bp_df_gridss.ID.iloc[0], best_bp_df_gridss.ID.iloc[1]]
+                # keep the breakend IDs of the best breakpoints
+                best_bp_df_gridss = df_gridss[df_gridss.eventID_as_clove==best_breakpoint].sort_values(by="POS")
+                if len(best_bp_df_gridss)!=2: 
+                    raise ValueError("There should be 2 breakpoints in %s"%best_bp_df_gridss)
+
+                # define the breakend IDs
+                breakend_IDs = [best_bp_df_gridss.ID.iloc[0], best_bp_df_gridss.ID.iloc[1]]
+
+            # any breakend, even if it is not from the same breakpoint can be interesting
+            else:
+
+                # get the breakends that are closest to the positions
+                breakend_IDs = [sorted([(bendID, abs(r_bend["POS"]-target_pos)) for bendID, r_bend in df_gridss.iterrows()], key=(lambda x: x[1]))[0][0] for target_pos in [r["POS"], info["END"]]]
+
+                # check that these are two different breakends
+                if len(set(breakend_IDs))!=2: raise ValueError("the bend IDs are not unique")
 
         else: 
 
@@ -15437,7 +15761,7 @@ def clean_sorted_bam_coverage_per_window_files(sorted_bam):
         if path.startswith("%s.coverage_per_window."%sorted_bam): remove_file(path)
 
 
-def get_df_vcf_with_df_CNV_coverage_added_nonRedundant(sorted_bam, reference_genome, mitochondrial_chromosome, df_vcf, df_CNV, outdir, df_gridss, df_clove, threads, replace, window_size_CNVcalling):
+def get_df_vcf_with_df_CNV_coverage_added_nonRedundant(sorted_bam, reference_genome, mitochondrial_chromosome, df_vcf, df_CNV, outdir, df_gridss, df_clove, threads, replace, window_size_CNVcalling, cnv_calling_algs):
 
     """This function merges the df_vcf with the coverage-based prediction, removing redudnant events."""
 
@@ -15500,7 +15824,18 @@ def get_df_vcf_with_df_CNV_coverage_added_nonRedundant(sorted_bam, reference_gen
         else:
 
             # add the field
-            df_CNV["INFO"] = df_CNV.apply(lambda r: "END=%i;SVTYPE=%s;merged_relative_CN=%.3f;median_coverage_corrected=%.3f;median_relative_CN_CONY=%.3f;median_relative_CN_HMMcopy=%.3f"%(r["end"], r["SVTYPE"], r["merged_relative_CN"], r["median_coverage_corrected"], r["median_relative_CN_CONY"], r["median_relative_CN_HMMcopy"]), axis=1)
+            def get_INFO_from_df_CNV_r(r):
+
+                # add the info
+                info = "END=%i;SVTYPE=%s;merged_relative_CN=%.3f;median_coverage_corrected=%.3f"%(r["end"], r["SVTYPE"], r["merged_relative_CN"], r["median_coverage_corrected"])
+
+                # add the calling of cnvs
+                cnv_calling_algs_fields = ["median_relative_CN_%s"%alg for alg in cnv_calling_algs]
+                info += ";%s"%(";".join(["%s=%.3f"%(f, r[f]) for f in cnv_calling_algs_fields]))
+
+                return info 
+
+            df_CNV["INFO"] = df_CNV.apply(get_INFO_from_df_CNV_r, axis=1)
 
             # filter out SVs that have a size below min_CNVsize_coverageBased
             df_CNV["length_CNV"] = df_CNV.end - df_CNV.start
@@ -15543,7 +15878,7 @@ def get_df_vcf_with_df_CNV_coverage_added_nonRedundant(sorted_bam, reference_gen
 
     return df_vcf_final
 
-def get_vcf_all_SVs_and_CNV(perSVade_outdir, outdir, sorted_bam, reference_genome, ploidy, df_CNV_coverage, window_size_CNVcalling, replace=False, threads=4, mitochondrial_chromosome="mito_C_glabrata_CBS138"):
+def get_vcf_all_SVs_and_CNV(perSVade_outdir, outdir, sorted_bam, reference_genome, ploidy, df_CNV_coverage, window_size_CNVcalling, cnv_calling_algs, replace=False, threads=4, mitochondrial_chromosome="mito_C_glabrata_CBS138"):
 
     """This function generates a vcf that has all the variants and CNV"""
 
@@ -15592,8 +15927,10 @@ def get_vcf_all_SVs_and_CNV(perSVade_outdir, outdir, sorted_bam, reference_genom
 
         ####################################
 
+
+
         # add the df_CNV_coverage
-        df_vcf = get_df_vcf_with_df_CNV_coverage_added_nonRedundant(sorted_bam, reference_genome, mitochondrial_chromosome, df_vcf, df_CNV_coverage, outdir, df_gridss, df_clove, threads, replace, window_size_CNVcalling)
+        df_vcf = get_df_vcf_with_df_CNV_coverage_added_nonRedundant(sorted_bam, reference_genome, mitochondrial_chromosome, df_vcf, df_CNV_coverage, outdir, df_gridss, df_clove, threads, replace, window_size_CNVcalling, cnv_calling_algs)
 
         # add a tag to the ID, that makes it unique
         df_vcf[["ID", "INFO"]] = df_vcf.apply(get_correctID_and_INFO_df_vcf_SV_CNV, axis=1)
@@ -15604,14 +15941,12 @@ def get_vcf_all_SVs_and_CNV(perSVade_outdir, outdir, sorted_bam, reference_genom
         # add the POS and END that are correct, these should be 1-based. Note that they wont match the ID
         df_vcf["POS"] = df_vcf.apply(get_correct_POS_in1based, axis=1)
 
-
         # add to the END + 1
         chr_to_len = get_chr_to_len(reference_genome)
-        df_vcf["INFO"] = df_vcf.apply(lambda r: get_correct_INFO_withEND_in1based(r, chr_to_len), axis=1)
+        df_vcf["INFO"] = df_vcf.apply(lambda r: get_correct_INFO_withEND_in1based(r, chr_to_len), axis=1)        
         
         # add the breakend IDs and the metadata info
         df_vcf["INFO"] = df_vcf.apply(lambda r: get_correct_INFO_with_bendIDs_and_bendStats(r, df_gridss), axis=1)
-
 
         # write vcf
         vcf_SVcalling_tmp = "%s.tmp"%vcf_SVcalling
@@ -15740,6 +16075,13 @@ def save_df_as_tab(df, file):
     df.to_csv(file_tmp, sep="\t", index=False, header=True)
     os.rename(file_tmp, file)
 
+def save_df_as_tab_with_index(df, file):
+
+    """Takes a df and saves it as tab"""
+
+    file_tmp = "%s.tmp"%file
+    df.to_csv(file_tmp, sep="\t", index=True, header=True)
+    os.rename(file_tmp, file)
 
 def get_tab_as_df_or_empty_df(file):
 
@@ -15750,6 +16092,15 @@ def get_tab_as_df_or_empty_df(file):
     if nlines==0: return pd.DataFrame()
     else: return pd.read_csv(file, sep="\t")
 
+
+def get_tab_as_df_or_empty_df_with_index(file):
+
+    """Gets df from file or empty df"""
+
+    nlines = len([l for l in open(file, "r").readlines() if len(l)>1])
+
+    if nlines==0: return pd.DataFrame()
+    else: return pd.read_csv(file, sep="\t", index_col=0)
 
 def get_END_vcf_df_r_NaN_to_1(r):
 
@@ -15861,7 +16212,10 @@ def get_small_variant_calling_withCNstate(varcall_file, df_CNV_coverage, replace
 
         # load the variant calling df
         df_varcall = get_tab_as_df_or_empty_df(varcall_file).sort_values(by=["#CHROM", "POS"])
-        initial_fields_varcall = list(df_varcall.keys())
+
+        # define the initial fields that can't be realted to relative_CN
+        def get_field_is_similar_to_relative_CN(x): return (x.split(".")[0]=="relative_CN") and (set(x.split(".")[1:])=={"1"})
+        initial_fields_varcall = [x for x in list(df_varcall.keys()) if x!="relative_CN" and not get_field_is_similar_to_relative_CN(x)]
 
         # define an outdir for the intersection processing
         outdir_adding_relativeCN = "%s.adding_relativeCN"%varcall_file; make_folder(outdir_adding_relativeCN)
@@ -16325,7 +16679,9 @@ def get_bed_df_from_variantID(varID):
 
 def get_SV_CNV_df_with_common_variantID_acrossSamples(SV_CNV, outdir, pct_overlap, tol_bp):
 
-    """Takes a SV_CNV df and returns it with the field 'variantID_across_samples'. It uses bedmap to be particularly efficient."""
+    """
+    Takes a SV_CNV df and returns it with the field 'variantID_across_samples'. It uses bedmap to be particularly efficient. The basis of this is that if two variants are of the same type and overlap by pct_overlap or tol_bp they are called to be the same.
+    """
 
     make_folder(outdir)
 
@@ -16693,13 +17049,231 @@ def get_annotation_df_with_GeneFeature_as_gff(annot_df, gff):
 
     return annot_df
 
-def get_integrated_SV_CNV_smallVars_df_from_run_perSVade_severalSamples(paths_df, cwd, ploidy, pct_overlap, tol_bp, gff, run_ploidy2_ifHaploid=False, generate_integrated_gridss_dataset=False, SV_CNV_called=True):
+def get_overlapping_df_bedpe_multiple_samples(df_bedpe_all, outdir, tol_bp, pct_overlap, threads):
+
+    """Takes a df bedpe and returns a df with the overlapping breakpoints """
+
+    df_overlapping_BPs_file = "%s/df_overlapping_BPs.tab"%outdir
+
+    if file_is_empty(df_overlapping_BPs_file) or True:
+
+        print("getting overlapping breakpoints")
+
+        # this is a df were the rows are some target breakpoints (the ones that PASS the filters) and each column is a different breakpoint. The cell will be True if they are equivalent breakpoints
+
+        # add the unique breakpointID
+        df_bedpe_all["unique_bpID"] = df_bedpe_all.sampleID.apply(str) + "_" + df_bedpe_all.name
+        if len(df_bedpe_all)!=len(set(df_bedpe_all.unique_bpID)): raise ValueError("The breakpoint IDs are not unique in the bedpe")
+        df_bedpe_all = df_bedpe_all.set_index("unique_bpID", drop=False)
+
+        # add the positions
+        df_bedpe_all["pos1"] = (df_bedpe_all.start1 + (df_bedpe_all.end1-df_bedpe_all.start1)/2).apply(int)
+        df_bedpe_all["pos2"] = (df_bedpe_all.start2 + (df_bedpe_all.end2-df_bedpe_all.start2)/2).apply(int)
+        df_bedpe_all["pos1_plus1"] = df_bedpe_all["pos1"] + 1
+        df_bedpe_all["pos2_plus1"] = df_bedpe_all["pos2"] + 1
+
+        # add the type of breakpoint
+        bool_to_text = {True:"intra_chromosomal", False:"inter_chromosomal"}
+        df_bedpe_all["type_breakpoint"] = (df_bedpe_all.chrom1==df_bedpe_all.chrom2).map(bool_to_text)
+
+        # add the merge of chromosome and strand
+        df_bedpe_all["chrom_strand_1"] = df_bedpe_all.chrom1 + "_" + df_bedpe_all.strand1
+        df_bedpe_all["chrom_strand_2"] = df_bedpe_all.chrom2 + "_" + df_bedpe_all.strand2
+        df_bedpe_all["unique_bpID_1"] = df_bedpe_all.unique_bpID + "_1"
+        df_bedpe_all["unique_bpID_2"] = df_bedpe_all.unique_bpID + "_2"
+
+        #### GET BREAKPOINTS THAT OVERLAP BY POSITION #####
+
+        # adds to df_bedpe_all an overlapping_bps_by_pos, which is a set of the breakpoints were both breakedns overlap by tol_bp
+
+        # get a bed that has the positions of the breakends
+        df_positions = pd.concat([df_bedpe_all[["chrom_strand_%i"%I, "pos%i"%I, "pos%i_plus1"%I, "unique_bpID_%i"%I]].rename(columns=dict(zip(["chrom_strand_%i"%I, "pos%i"%I, "pos%i_plus1"%I, "unique_bpID_%i"%I], ["chrom", "start", "end", "ID"]))) for I in [1, 2]]).sort_values(by=["chrom", "start", "end"])
+
+        bed_positions = "%s/breakend_positions.bed"%outdir
+        df_positions.to_csv(bed_positions, sep="\t", header=False, index=False)
+
+        # define the stderr
+        bedmap_stderr = "%s/running_bedmap.stderr"%outdir
+
+        # run bedmap tol_bp. These are breakpoints that overlap by at leasttol_bp
+        bedmap_outfile = "%s/bedmap_outfile_range.txt"%outdir
+        run_cmd("%s --delim '\t' --range %i --echo-map-id %s > %s 2>%s"%(bedmap, tol_bp, bed_positions, bedmap_outfile, bedmap_stderr))
+
+        # add to df bed
+        df_overlap_tolBp  = pd.read_csv(bedmap_outfile, sep="\t", header=None, names=["overlapping_IDs"])
+        df_overlap_tolBp["ID"] = list(df_positions.ID)
+        df_positions = df_positions.merge(df_overlap_tolBp, on="ID", how="left", validate="one_to_one")
+        if len(df_overlap_tolBp)!=len(df_positions): raise ValueError("the length should be as the bed") # debug
+
+        # add the unique ID
+        def get_bpointID(x): return "_".join(x.split("_")[0:-1])
+        df_positions["breakpointID"] = df_positions.ID.apply(get_bpointID)
+
+        # add the overlapping breakendIDs
+        def get_as_list(x): x.split(";")
+        df_positions["overlapping_bends"] = df_positions.overlapping_IDs.apply(get_as_list).apply(set)
+
+        ###################################################
+ 
+
+        print(df_positions)
+
+        adkhgadhgadhjd
+
+        # get a bed that thas the regions of interchromosomal breakpoints
+        df_intra_chrom = df_bedpe_all[df_bedpe_all.type_breakpoint=="intra_chromosomal"]
+        if not all (df_intra_chrom.pos2>df_intra_chrom.pos1): raise ValueError("pos2 should be after pos1 in intrachromosomal breakpoints")
+
+        bed_intrachromosomal_regions = "%s/intrachromosomal_regions.bed"%outdir
+        df_intra_chrom["chrom_and_orientations"] = df_intra_chrom.chrom1 + "_" + df_intra_chrom.strand1 + "_" + df_intra_chrom.strand2
+        df_intra_chrom[["chrom_and_orientations", "pos1", "pos2", "unique_bpID"]].sort_values(by=["chrom_and_orientations", "pos1", "pos2"]).to_csv(bed_intrachromosomal_regions, sep="\t", header=False, index=False)
+
+        # run bedpe for the positions
+
+
+        ###################################################################
+
+
+
+        print(bed_intrachromosomal_regions)
+
+        adjhgadhj
+
+        # check that pos1 is always before pos2 in intrachromosomeals
+        if not all (df_intra_chrom.pos2>df_intra_chrom.pos1): raise ValueError("pos2 should be after pos1 in intrachromosomal breakpoints")
+
+        ############## DEFINE THE OVERLAPS OF INTRACHROMOSOMAL BEDS ###########
+
+        # generate a bed file with the important fields
+        bed_intrachromosomal = "%s/"%bed_intrachromosomal
+
+
+
+        breakpoints_bed = "%s/bed_for_bedmap_bedpe.bed"%outdir
+        df_bedpe_all[["chrom_like_for_bedmap", "pos1", "pos2", "unique_bpID"]].sort_values(by=["chrom_like_for_bedmap", "pos1", "pos2"]).to_csv(breakpoints_bed, sep="\t", index=False, header=False)
+
+        # define the stderr
+        bedmap_stderr = "%s/running_bedmap.stderr"%outdir
+
+        # run bedmap tol_bp. These are breakpoints that overlap by at least
+        bedmap_outfile = "%s/bedmap_outfile_range.txt"%outdir
+        run_cmd("%s --delim '\t' --range %i --echo-map-id %s > %s 2>%s"%(bedmap, tol_bp, breakpoints_bed, bedmap_outfile, bedmap_stderr))
+
+        df_overlap_tolBp  = pd.read_csv(bedmap_outfile, sep="\t", header=None, names=["overlapping_IDs"])
+        df_overlap_tolBp["ID"] = list(df_bed_all.ID)
+        df_overlap_tolBp = df_overlap_tolBp.set_index("ID", drop=False)
+
+        # run bedmap pct overlap
+        bedmap_outfile = "%s/bedmap_outfile_pctOverlap.txt"%outdir
+        run_cmd("%s --delim '\t' --fraction-both %.2f --echo-map-id %s > %s 2>%s"%(bedmap, pct_overlap, variants_bed, bedmap_outfile, bedmap_stderr))
+
+        df_overlap_pctOverlap  = pd.read_csv(bedmap_outfile, sep="\t", header=None, names=["overlapping_IDs"])
+        df_overlap_pctOverlap["ID"] = list(df_bed_all.ID)
+        df_overlap_pctOverlap = df_overlap_pctOverlap.set_index("ID", drop=False)
+
+        # get a unique df_overlap, which only considers overlaps that fullfill both the Bp and pct overlap
+        df_overlap = pd.DataFrame()
+        df_overlap["ID"] = df_overlap_tolBp.ID
+        df_overlap = df_overlap.set_index("ID", drop=False)
+        sdssfsdsfssfdsdfs
+        bedmap
+
+        print(bedfile)
+
+        bedmap
+
+        adkjghdakhadkjd
+
+
+
+        # define overlapping fields
+        equal_fields = ["chrom1", "chrom2", "strand1", "strand2"]
+        approximate_fields = ["pos1", "pos2"]
+        type_bp_to_chromField_to_posFields = {"intra_chromosomal": {"chrom1":{"start":"pos1", "end":"pos2"}},
+                                              "inter_chromosomal": {}}
+
+        # init a df that has the starting dfs
+        PASS_breakpoints = sorted(set(df_bedpe_all[df_bedpe_all.PASSed_filters].unique_bpID))
+        PASS_query_breakpoints_series = pd.Series(PASS_breakpoints, index=PASS_breakpoints)
+        all_breakpoints = sorted(set(df_bedpe_all.unique_bpID))
+        df_overlapping_BPs = pd.DataFrame(index=PASS_breakpoints)
+
+        # define the inputs for parallelization
+        list_inputs = list(map(lambda subject_bpID: (PASS_query_breakpoints_series, subject_bpID, df_bedpe_all, type_bp_to_chromField_to_posFields, equal_fields, approximate_fields, tol_bp, pct_overlap), all_breakpoints))
+
+        # run parallelization
+        print("running in parallel the calculation of overlaps")
+        with multiproc.Pool(threads) as pool:
+            list_series_subjectIDs = pool.starmap(get_series_overlapping_PASS_query_breakpoints_series_in_subjectID, list_inputs) 
+                
+            pool.close()
+            pool.terminate()
+
+        # get the df
+        df_overlapping_BPs = pd.DataFrame(dict(zip(all_breakpoints, list_series_subjectIDs)))
+
+        # filter to only keep those overlapping breakpoints that overlap something
+        interesting_overlaps = df_overlapping_BPs.columns[df_overlapping_BPs.apply(sum, axis=0)>0]
+        df_overlapping_BPs = df_overlapping_BPs[interesting_overlaps]
+        df_overlapping_BPs = df_overlapping_BPs[df_overlapping_BPs.apply(sum, axis=1)>0]
+
+        # save
+        save_df_as_tab_with_index(df_overlapping_BPs, df_overlapping_BPs_file)
+
+    # load
+    df_overlapping_BPs = get_tab_as_df_or_empty_df_with_index(df_overlapping_BPs_file)
+
+    return df_overlapping_BPs
+
+def get_SV_CNV_df_with_overlaps_with_all_samples(SV_CNV, outdir, tol_bp, pct_overlap, cwd, df_bedpe_all, df_CN_all, threads):
+
+    """This function takes a SV_CNV df and returns the same df with some added fields about which other samples may also have that variant."""
+
+    # define the initial fields
+    initial_fields = list(SV_CNV.keys())
+
+    # keep
+    SV_CNV = cp.deepcopy(SV_CNV)
+
+    # make the folder
+    make_folder(outdir)
+
+    # change the name so that it is as in clove
+    df_bedpe_all["name"] = df_bedpe_all
+
+    # get a df were each row is a PASS breakpoint
+    df_overlaps_breakpoints = get_overlapping_df_bedpe_multiple_samples(df_bedpe_all, outdir, tol_bp, pct_overlap, threads)
+
+    conrunkjadhadkhakd
+      
+
+
+    print(df_overlaps_breakpoints)
+
+
+    
+
+    khgadhjg
+
+
+def get_whetherCNVcalling_was_performed(VarCallOutdirs, samples_to_run):
+
+    """Checks whether the CNV calling was correctly performed"""
+
+    existing_cnv_files = [not file_is_empty("%s/%s/CNV_calling/final_df_coverage.tab"%(VarCallOutdirs, f)) for f in os.listdir(VarCallOutdirs) if f.split("_VarCallresults")[0] in samples_to_run]
+
+    if sum(existing_cnv_files)!=0 and not all(existing_cnv_files): raise ValueError("not all CNV have been correctly called")
+
+    return all(existing_cnv_files)
+
+def get_integrated_SV_CNV_smallVars_df_from_run_perSVade_severalSamples(paths_df, cwd, ploidy, pct_overlap, tol_bp, gff, run_ploidy2_ifHaploid=False, generate_integrated_gridss_dataset=False, SV_CNV_called=True, threads=4):
 
     """Takes the same input as run_perSVade_severalSamples and writes the integrated dfs under cwd, adding to the integrated SV_CNV datasets some added fields that indicate that the SVs and CNV are shared among several samples.
 
     If generate_integrated_gridss_vcf is True it will generate an integrated gridss dataset that has all breakends and a field called "PASSed_filters" indicating if the breakend passed the filters .
 
-    SV_CNV_called indicates whether SV_CNV were called"""
+    SV_CNV_called indicates whether SV_CNV were called.
+    """
 
     # define the final filesfiles
     coverage_df_file = "%s/merged_coverage.tab"%cwd
@@ -16708,18 +17282,29 @@ def get_integrated_SV_CNV_smallVars_df_from_run_perSVade_severalSamples(paths_df
     SV_CNV_file_simple = "%s/SV_CNV_ploidy%i.simple.tab"%(cwd, ploidy)
     SV_CNV_annot_file = "%s/SV_CNV_annot_ploidy%i.tab"%(cwd, ploidy)
     integrated_gridss_df = "%s/integrated_gridss_df_ploidy%i.tab"%(cwd, ploidy)
+    integrated_bedpe_df = "%s/integrated_bedpe_df_ploidy%i.tab"%(cwd, ploidy)
+    integrated_CNperWindow_df = "%s/integrated_CNperWindow.tab"%cwd
 
     if run_ploidy2_ifHaploid is True: small_var_annot_file = "%s/smallVars_annot_ploidy1and2.tab"%cwd
     else: small_var_annot_file = "%s/smallVars_annot_ploidy%i.tab"%(cwd, ploidy)
 
     if run_ploidy2_ifHaploid is True: small_vars_df_ploidy2_file = "%s/smallVars_ploidy2.tab"%cwd
 
+    # define the samples to run
+    samples_to_run = set(paths_df.sampleID)
+    #samples_to_run = {"8", "74"} # debug        
+
     # define dirs
     VarCallOutdirs = "%s/VarCallOutdirs"%cwd
+
 
     # define the expected files
     if SV_CNV_called is True: expected_files = [coverage_df_file, small_vars_df_file, small_var_annot_file, SV_CNV_file_simple, SV_CNV_annot_file]
     else: expected_files = [coverage_df_file, small_vars_df_file, small_var_annot_file]
+
+    # define whether there was some CNV calling
+    CNV_calling_performed = get_whetherCNVcalling_was_performed(VarCallOutdirs, samples_to_run)
+    if CNV_calling_performed is True: expected_files.append(integrated_CNperWindow_df)
 
     ######### GET THE SIMPLY MERGED DFS ##########
 
@@ -16736,18 +17321,22 @@ def get_integrated_SV_CNV_smallVars_df_from_run_perSVade_severalSamples(paths_df
         small_var_annot = pd.DataFrame()
         coverage_df = pd.DataFrame()
         if run_ploidy2_ifHaploid is True: small_vars_df_ploidy2 = pd.DataFrame()
+        if CNV_calling_performed is True: df_CN = pd.DataFrame()
 
         # init dict
         sampleID_to_SV_dataDict = {}
-
-        samples_to_run = set(paths_df.sampleID)
-        #samples_to_run = {"Cg1_CBS138", "Cg2_921192_2"}
 
         for sampleID in samples_to_run:
             print(sampleID)
 
             # create an outdir
             outdir = "%s/%s_VarCallresults"%(VarCallOutdirs, sampleID); make_folder(outdir)
+
+            # add the CN df
+            if CNV_calling_performed is True: 
+                df_CN_sample = get_tab_as_df_or_empty_df("%s/CNV_calling/final_df_coverage.tab"%(outdir))
+                df_CN_sample["sampleID"] = sampleID
+                df_CN = df_CN.append(df_CN_sample)
 
             # add the small vars
             s_small_vars_df = pd.read_csv("%s/smallVars_CNV_output/variant_calling_ploidy%i.tab"%(outdir, ploidy), sep="\t")
@@ -16807,9 +17396,68 @@ def get_integrated_SV_CNV_smallVars_df_from_run_perSVade_severalSamples(paths_df
             SV_CNV_annot["is_protein_coding_gene"] = SV_CNV_annot.Gene.isin(all_protein_coding_genes)
             SV_CNV_annot["is_transcript_disrupting"] = SV_CNV_annot.Consequence.apply(get_is_transcript_disrupting_consequence_SV)
 
+        #### ADD THE SAMPLES THAT SHARE VARIANTS ####
+        print("adding samples that have the same var")
+
+        # define all small_vars_df
+        if run_ploidy2_ifHaploid is False: small_vars_dfs_list = [small_vars_df]
+        else: small_vars_dfs_list = [small_vars_df, small_vars_df_ploidy2]
+
+        # add things to the dfs
+        for df in small_vars_dfs_list: 
+
+            # add whether it is an heterozygous variant
+            if "relative_CN" in set(df.keys()): df["is_diploid_heterozygous"] = (df.common_GT=="0/1") & (df.relative_CN>=2)
+            else: df["is_diploid_heterozygous"] = df.common_GT=="0/1"
+
+            # add whether it is a correct haploid
+            df["is_haploid"] = (df.common_GT=="1") & (df.mean_fractionReadsCov_PASS_algs>=0.9)
+
+        # merge all the called variants
+        merged_small_vars_df = pd.concat(small_vars_dfs_list) 
+
+        # define dfs
+        any_called_variants_df = merged_small_vars_df
+        PASSatLeast2_variants_df = merged_small_vars_df[(merged_small_vars_df.NPASS>=2) & ((merged_small_vars_df.is_diploid_heterozygous) | (merged_small_vars_df.is_haploid))]
+
+        # map each sample to the variants of each type
+        def get_set_variants_from_df_s(df_s): return set(df_s["#Uploaded_variation"])
+        sampleID_to_any_called_variants = any_called_variants_df.groupby("sampleID").apply(get_set_variants_from_df_s)
+        sampleID_to_PASSatLeast2_variants = PASSatLeast2_variants_df.groupby("sampleID").apply(get_set_variants_from_df_s)
+
+        # create a dict with all sampleID_to_variants_series
+        typeVars_to_sampleID_to_variants_series = {"anyCalled":sampleID_to_any_called_variants, "PASSatLeast2":sampleID_to_PASSatLeast2_variants}
+
+        # add the missing samples
+        for sampleID_to_variants_series in typeVars_to_sampleID_to_variants_series.values():
+            for sampleID in samples_to_run: 
+                if sampleID not in set(sampleID_to_variants_series.index): sampleID_to_variants_series[sampleID] = set()
+
+        # add the intersection of each var in each df of small_vars_dfs_list with the types of vars in typeVars_to_sampleID_to_variants_series
+        for df in small_vars_dfs_list:
+            for typeVars, sampleID_to_variants in typeVars_to_sampleID_to_variants_series.items():
+
+                # init the field of other samples
+                df["other_samples_with_%s"%typeVars] = ""
+
+                # map each sample that is mapping 
+                for sampleID, variants in sampleID_to_variants.items():
+                    bool_to_text = {True: ","+sampleID, False:""}
+                    df["other_samples_with_%s"%typeVars] += df["#Uploaded_variation"].isin(variants).map(bool_to_text)
+
+                # get the final set of samples
+                def get_set_other_samples_withVar(r): return set(r["other_samples_with_%s"%typeVars].split(",")).difference({"", r["sampleID"]})
+                def convert_list_to_string(x): return ",".join(x)
+
+                df["other_samples_with_%s"%typeVars] = df.apply(get_set_other_samples_withVar, axis=1).apply(sorted).apply(convert_list_to_string)
+
+        #############################################
+
         # write dfs
         save_df_as_tab(small_vars_df, small_vars_df_file)
         save_df_as_tab(small_var_annot, small_var_annot_file)
+
+        if CNV_calling_performed is True: save_df_as_tab(df_CN, integrated_CNperWindow_df)
 
         if SV_CNV_called is True:
             save_df_as_tab(SV_CNV, SV_CNV_file_simple)
@@ -16819,45 +17467,31 @@ def get_integrated_SV_CNV_smallVars_df_from_run_perSVade_severalSamples(paths_df
         save_df_as_tab(coverage_df, coverage_df_file)
 
 
+    # load the CNV calling df
+    if CNV_calling_performed is True: df_CN_all = get_tab_as_df_or_empty_df(integrated_CNperWindow_df)
+    else: df_CN_all = None
+
     ###########################################################
 
-    ######### GET THE COMMON DF OF SVs #########
+    ####### GET THE INTEGRATED GRIDSS DF AND BEDPE DF ######
 
-    if file_is_empty(SV_CNV_file) and SV_CNV_called is True:
+    # generates a gridss df that has all the breakpoints
 
-        print("adding the common variant ID")
-
-        # loading SV_CNV simple
-        SV_CNV = get_tab_as_df_or_empty_df(SV_CNV_file_simple)
-
-        # add the common variant ID across samples
-        outdir_common_variantID_acrossSamples = "%s/getting_common_variantID_acrossSamples"%cwd
-        delete_folder(outdir_common_variantID_acrossSamples)
-
-        SV_CNV = get_SV_CNV_df_with_common_variantID_acrossSamples(SV_CNV, outdir_common_variantID_acrossSamples, pct_overlap, tol_bp)
-
-        # keep relevant files
-        SV_CNV = SV_CNV[[k for k in SV_CNV.keys() if k!="INFO"]]
-
-        delete_folder(outdir_common_variantID_acrossSamples)
-
-        # keep
-        save_df_as_tab(SV_CNV, SV_CNV_file)
-
-    #############################################
-
-
-    ####### GET THE INTEGRATED GRIDSS DF ######
-
-    if generate_integrated_gridss_dataset is True and file_is_empty(integrated_gridss_df) and SV_CNV_called is True:
+    if (file_is_empty(integrated_gridss_df) or file_is_empty(integrated_bedpe_df)) and SV_CNV_called is True:
 
         print("generating integrated gridss df")
 
         samples_to_run = set(paths_df.sampleID)
         #samples_to_run = {"Cg1_CBS138", "Cg2_921192_2"}
 
+        # make a folder to integrate the gridss df
+        outdir_integrating_gridss_df = "%s/intergrating_gridss_df"%cwd
+        delete_folder(outdir_integrating_gridss_df)
+        make_folder(outdir_integrating_gridss_df)
+
         # init
         df_gridss_all = pd.DataFrame()
+        df_bedpe_all = pd.DataFrame()
 
         for sampleID in samples_to_run:
             print(sampleID)
@@ -16865,9 +17499,36 @@ def get_integrated_SV_CNV_smallVars_df_from_run_perSVade_severalSamples(paths_df
             # get the outdir
             outdir = "%s/%s_VarCallresults/SVdetection_output/final_gridss_running"%(VarCallOutdirs, sampleID); make_folder(outdir)
 
+            # define the filenames original
+            origin_gridss_vcf_raw_file = "%s/gridss_output.raw.vcf"%outdir
+            origin_gridss_vcf_filt_file = "%s/gridss_output.filt.vcf"%outdir
+
+            # put them into the outdir_integrating_gridss_df
+            gridss_vcf_raw_file = "%s/%s_gridss_output.raw.vcf"%(outdir_integrating_gridss_df, sampleID)
+            gridss_vcf_filt_file = "%s/%s_gridss_output.filt.vcf"%(outdir_integrating_gridss_df, sampleID)
+            soft_link_files(origin_gridss_vcf_raw_file, gridss_vcf_raw_file)
+            soft_link_files(origin_gridss_vcf_filt_file, gridss_vcf_filt_file)
+
+            ## GET THE BEDPE ##
+
+            # get the bedpe files
+            bedpe_raw = get_tab_as_df_or_empty_df(get_bedpe_from_svVCF(gridss_vcf_raw_file, outdir_integrating_gridss_df, replace=False, only_simple_conversion=True))
+            bedpe_filt = get_tab_as_df_or_empty_df(get_bedpe_from_svVCF(gridss_vcf_filt_file, outdir_integrating_gridss_df, replace=False, only_simple_conversion=True))
+
+            # add whether it is PASS
+            pass_breakpoints = set(bedpe_filt.name)
+            bedpe_raw["PASSed_filters"] = bedpe_raw.name.isin(pass_breakpoints)
+            
+            # add name and keep
+            bedpe_raw["sampleID"] = sampleID
+            df_bedpe_all = df_bedpe_all.append(bedpe_raw)
+            ###################
+
+            ## GET THE GRIDSS ##
+
             # get the gridss vcfs
-            gridss_vcf_raw = get_df_and_header_from_vcf("%s/gridss_output.raw.vcf"%outdir)[0]
-            gridss_vcf_filt = get_df_and_header_from_vcf("%s/gridss_output.filt.vcf"%outdir)[0]
+            gridss_vcf_raw = get_df_and_header_from_vcf(gridss_vcf_raw_file)[0]
+            gridss_vcf_filt = get_df_and_header_from_vcf(gridss_vcf_filt_file)[0]
 
             # change names
             sample_name_vcf = gridss_vcf_raw.columns[-1]
@@ -16882,10 +17543,53 @@ def get_integrated_SV_CNV_smallVars_df_from_run_perSVade_severalSamples(paths_df
             # keep
             df_gridss_all = df_gridss_all.append(gridss_vcf_raw)
 
+            ####################
+
+        # clean
+        delete_folder(outdir_integrating_gridss_df)
+
         # save
         save_df_as_tab(df_gridss_all, integrated_gridss_df)
+        save_df_as_tab(df_bedpe_all, integrated_bedpe_df)
+
+    # load the df
+    df_gridss_all = get_tab_as_df_or_empty_df(integrated_gridss_df)
+    df_bedpe_all = get_tab_as_df_or_empty_df(integrated_bedpe_df)
 
     ###########################################
+
+    ######### GET THE COMMON DF OF SVs #########
+
+    if file_is_empty(SV_CNV_file) and SV_CNV_called is True:
+
+        print("adding the common variant ID")
+
+        # loading SV_CNV simple
+        SV_CNV = get_tab_as_df_or_empty_df(SV_CNV_file_simple)
+
+        # add the common variant ID across samples
+        outdir_common_variantID_acrossSamples = "%s/getting_common_variantID_acrossSamples"%cwd
+        
+        # add the overlaps with other samples
+        SV_CNV = get_SV_CNV_df_with_overlaps_with_all_samples(SV_CNV, outdir_common_variantID_acrossSamples, tol_bp, pct_overlap, cwd, df_bedpe_all, df_CN_all, threads)
+
+
+        jhgadjhgadhjgda
+
+        # get the common variant ID
+        SV_CNV = get_SV_CNV_df_with_common_variantID_acrossSamples(SV_CNV, outdir_common_variantID_acrossSamples, pct_overlap, tol_bp)
+
+        # keep relevant files
+        SV_CNV = SV_CNV[[k for k in SV_CNV.keys() if k!="INFO"]]
+
+        delete_folder(outdir_common_variantID_acrossSamples)
+
+        # keep
+        save_df_as_tab(SV_CNV, SV_CNV_file)
+
+    #############################################
+
+
 
   
 

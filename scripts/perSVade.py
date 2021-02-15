@@ -58,6 +58,8 @@ parser.add_argument("-p", "--ploidy", dest="ploidy", default=1, type=int, help="
 parser.add_argument("--replace_SV_CNVcalling", dest="replace_SV_CNVcalling", action="store_true", help="Replace everything related to the SV and CNV calling.")
 
 
+
+
 parser.add_argument("--replace_FromGridssRun_final_perSVade_run", dest="replace_FromGridssRun_final_perSVade_run", action="store_true", help="Replace from the clove running in the final gridss+clove running")
 
 
@@ -100,8 +102,8 @@ parser.add_argument("--StopAfterPrefecth_of_reads", dest="StopAfterPrefecth_of_r
 parser.add_argument("--StopAfterPrefecth_of_reads_goldenSet", dest="StopAfterPrefecth_of_reads_goldenSet", action="store_true", default=False, help="Stop after obtaining the prefetched .srr file in case --goldenSet_dir is specified.")
 parser.add_argument("--StopAfter_obtentionOFcloseSVs", dest="StopAfter_obtentionOFcloseSVs", action="store_true", default=False, help="Stop after obtaining the real_bedpe_breakpoints ")
 parser.add_argument("--StopAfter_repeatsObtention", dest="StopAfter_repeatsObtention", action="store_true", default=False, help="Stop after obtaining  the repeats table")
-
 parser.add_argument("--StopAfter_testAccuracy_perSVadeRunning", dest="StopAfter_testAccuracy_perSVadeRunning", action="store_true", default=False, help="When --testAccuracy is specified, the pipeline will stop after the running of perSVade on all the inputs of --close_shortReads_table with the different configurations.")
+parser.add_argument("--StopAfter_replace_SV_CNVcalling", dest="StopAfter_replace_SV_CNVcalling", action="store_true", help="Stop after the removal of files for repeating the CNV calling.")
 
 # testing options
 parser.add_argument("--testAccuracy", dest="testAccuracy", action="store_true", default=False, help="Reports the accuracy  of your calling on the real data, simulations and fastSVcalling for all the WGS runs specified in --close_shortReads_table. ")
@@ -153,12 +155,15 @@ parser.add_argument("-mcode", "--mitochondrial_code", dest="mitochondrial_code",
 parser.add_argument("-gcode", "--gDNA_code", dest="gDNA_code", default=1, type=int, help="The code of the NCBI gDNA genetic code. You can find the numbers for your species here https://www.ncbi.nlm.nih.gov/Taxonomy/Utils/wprintgc.cgi . For C. albicans it is 12. ")
 parser.add_argument("--remove_smallVarsCNV_nonEssentialFiles", dest="remove_smallVarsCNV_nonEssentialFiles", action="store_true", default=False, help="Will remove all the varCall files except the integrated final file and the bam file.")
 parser.add_argument("--replace_var_integration", dest="replace_var_integration", action="store_true", help="Replace all the variant integration steps for smallVariantCalling.")
+parser.add_argument("--replace_addingCNstate_to_smallVars", dest="replace_addingCNstate_to_smallVars", action="store_true", default=False, help="Replace the step of adding the Copy Number of each variant.")
+
 parser.add_argument("--generate_alternative_genome", dest="generate_alternative_genome", default=False, action="store_true", help="Generate an alternative genome in smallVariantCalling.")
 parser.add_argument("--skip_cnv_analysis", dest="skip_cnv_analysis", default=False, action="store_true", help="Don't perform the cnv analysis where we calculate coverage per gene and per equal windows of the genome")
 
 
 # add the CNV calling args
 parser.add_argument("--window_size_CNVcalling", dest="window_size_CNVcalling", default=100, type=int, help="The window size in which the genome will be fragmented for CNV calling.")
+parser.add_argument("--cnv_calling_algs", dest="cnv_calling_algs", default="HMMcopy,CONY", type=str, help="A comma-sepparated string thatindicates which programs should be used for the CNV calling. It can be any of HMMcopy,CONY,AneuFinder. We note that CONY does not work well for small chromosomes or large binned windows.")
 
 
 # visualization
@@ -177,6 +182,9 @@ parser.add_argument("--run_ploidy2_ifHaploid", dest="run_ploidy2_ifHaploid", act
 # repeat obtention
 parser.add_argument("--consider_repeats_smallVarCall", dest="consider_repeats_smallVarCall", action="store_true", default=False, help="If --run_smallVarsCNV, this option will imply that each small  variant will have an annotation of whether it overlaps a repeat region.")
 parser.add_argument("--previous_repeats_table", dest="previous_repeats_table", default=None, help="This may be the path to a file that contains the processed output of RepeatMasker (such as the one output by the function get_repeat_maskerDF). This should be a table with the following header: 'SW_score, perc_div, perc_del, perc_ins, chromosome, begin_repeat, end_repeat, left_repeat, strand, repeat, type, position_inRepeat_begin, position_inRepeat_end, left_positionINrepeat, IDrepeat'. It is created by parsing the tabular output of RepeatMasker and putting into a real .tab format.")
+
+parser.add_argument("--bg_sorted_bam_CNV", dest="bg_sorted_bam_CNV", default=None, help="This is a sorted bam (with duplicated marked) that is taken as a 'reference' background in the CNV calling. By default, perSVade corrects the coverage by GC content, mappability and the distance to the telomere. If --bg_sorted_bam_CNV, the coverage will be normalised by the coverage of this sorted bam.")
+
 
 parser.add_argument("--skip_repeat_analysis", dest="skip_repeat_analysis", default=False, action="store_true", help="Skip the inference of repeats. If --previous_repeats_table is provided, this argument will override it.")
 
@@ -270,6 +278,11 @@ else:
     if opt.pooled_sequencing is True: simulation_ploidies = ["diploid_homo", "ref:9_var:1"]
     elif opt.ploidy==1: simulation_ploidies = ["haploid"]
     else: simulation_ploidies = ["diploid_homo", "ref:%i_var:1"%(opt.ploidy-1)]
+
+# define the CNV calling algs
+cnv_calling_algs = set(opt.cnv_calling_algs.split(","))
+all_expected_cnv_calling_algs = {"HMMcopy", "AneuFinder", "CONY"}
+if len(cnv_calling_algs.difference(all_expected_cnv_calling_algs))>0: raise ValueError("the cnv calling algs should be in %s"%all_expected_cnv_calling_algs)
 
 # set a specific calling for pooled sequencing
 if opt.pooled_sequencing is True: print("WARNING: Running on pooled sequencing.  These are the simulated ploidies for the SV calling parameter optimisation:", simulation_ploidies)
@@ -516,16 +529,20 @@ print("structural variation analysis with perSVade finished")
 run_SV_CNV_calling = (opt.skip_SVcalling is False and not any([x=="skip" for x in {opt.fastq1, opt.fastq2}]) and opt.skip_SV_CNV_calling is False)
 if run_SV_CNV_calling is True:
 
+    print("running CNV calling per window and integrating to SV calling")
+
     # define outdirs
     cnv_calling_outdir = "%s/CNV_calling"%opt.outdir
     outdir_var_calling = "%s/SVcalling_output"%opt.outdir
 
-    # remove folders if there is some replacement to be done
+    # remove folders if there is some replacement to be done. Remove
     if opt.replace_SV_CNVcalling is True: 
         for f in [cnv_calling_outdir, outdir_var_calling]: fun.delete_folder(f)
 
-
-    sys.exit(0)
+    # stop after the removal
+    if opt.StopAfter_replace_SV_CNVcalling is True: 
+        print("exitting after the --replace_SV_CNVcalling action")
+        sys.exit(0)
 
     # make folders
     for f in [cnv_calling_outdir, outdir_var_calling]: fun.make_folder(f)
@@ -534,12 +551,14 @@ if run_SV_CNV_calling is True:
     df_gridss = fun.get_svtype_to_svfile_and_df_gridss_from_perSVade_outdir(opt.outdir, opt.ref)[1]
 
     # run CNVcalling 
-    if opt.skip_CNV_calling is False: df_CNV_coverage = fun.run_CNV_calling(sorted_bam, opt.ref, cnv_calling_outdir, opt.threads, opt.replace, opt.mitochondrial_chromosome, df_gridss, opt.window_size_CNVcalling, opt.ploidy)
+    minimal_CNV_fields = ["chromosome", "merged_relative_CN", "start", "end", "CNVid", "median_coverage", "median_coverage_corrected", "SVTYPE"] + ["median_relative_CN_%s"%x for x in cnv_calling_algs]
 
-    else: df_CNV_coverage = pd.DataFrame(columns=["chromosome", "merged_relative_CN", "start", "end", "CNVid", "median_coverage", "median_coverage_corrected", "median_relative_CN_CONY", "median_relative_CN_HMMcopy", "SVTYPE"])
+    if opt.skip_CNV_calling is False: df_CNV_coverage = fun.run_CNV_calling(sorted_bam, opt.ref, cnv_calling_outdir, opt.threads, opt.replace, opt.mitochondrial_chromosome, df_gridss, opt.window_size_CNVcalling, opt.ploidy, bg_sorted_bam_CNV=opt.bg_sorted_bam_CNV, cnv_calling_algs=cnv_calling_algs)
+
+    else: df_CNV_coverage = pd.DataFrame(columns=minimal_CNV_fields)
 
     # get the variant calling 
-    SV_CNV_vcf = fun.get_vcf_all_SVs_and_CNV(opt.outdir, outdir_var_calling, sorted_bam, opt.ref, opt.ploidy, df_CNV_coverage, opt.window_size_CNVcalling, replace=opt.replace, threads=opt.threads, mitochondrial_chromosome=opt.mitochondrial_chromosome)
+    SV_CNV_vcf = fun.get_vcf_all_SVs_and_CNV(opt.outdir, outdir_var_calling, sorted_bam, opt.ref, opt.ploidy, df_CNV_coverage, opt.window_size_CNVcalling, cnv_calling_algs, replace=opt.replace, threads=opt.threads, mitochondrial_chromosome=opt.mitochondrial_chromosome)
 
     print("the SV and CNV calling vcf can be found in %s"%SV_CNV_vcf)
 
@@ -595,7 +614,7 @@ if opt.run_smallVarsCNV:
         if __name__ == '__main__': fun.run_cmd(varcall_cmd)
 
         # regenerate the variant calling file according to run_SV_CNV_calling
-        if run_SV_CNV_calling is True: fun.get_small_variant_calling_withCNstate("%s/variant_calling_ploidy%i.tab"%(outdir_varcall, ploidy_varcall), df_CNV_coverage, replace=opt.replace)
+        if run_SV_CNV_calling is True: fun.get_small_variant_calling_withCNstate("%s/variant_calling_ploidy%i.tab"%(outdir_varcall, ploidy_varcall), df_CNV_coverage, replace=(opt.replace or opt.replace_addingCNstate_to_smallVars))
   
     # define the small variants vcf
     small_vars_vcf = "%s/variants_atLeast1PASS_ploidy%i.vcf"%(outdir_varcall, opt.ploidy)
@@ -652,6 +671,7 @@ if opt.skip_cleaning_outdir is False: fun.clean_perSVade_outdir(opt.outdir)
 
 # generate a file that indicates whether the gridss run is finished
 open(final_file, "w").write("perSVade_finished finished...")
+
 
 print("perSVade Finished correctly")
 

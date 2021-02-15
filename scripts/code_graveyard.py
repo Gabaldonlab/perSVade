@@ -14190,3 +14190,1074 @@ def get_correct_INFO_with_bendIDs_and_bendStats(r, df_gridss):
     # get the INFO as a string
     return ";".join(["%s=%s"%(k, get_x_as_string(v)) for k, v in info.items()])
 
+
+
+
+def configure_reference_genome_for_CNVnator(reference_genome, threads, root_file, mitochondrial_chromosome):
+
+    """This function will create all the necessary files to create the reference genome file and configure root_file to use it. It is based on this: https://github.com/abyzovlab/CNVpytor/blob/master/examples/AddReferenceGenome.md"""   
+
+    print_if_verbose("configure reference_genome")
+
+    # get the bgzipped reference_genome
+    reference_genome_gz = "%s.reference_genome.gz"%root_file
+    reference_genome_gz_stderr = "%s.generating.stderr"%reference_genome_gz
+    run_cmd("%s %s --stdout > %s 2>%s"%(bgzip, reference_genome, reference_genome_gz, reference_genome_gz_stderr))
+    remove_file(reference_genome_gz_stderr)
+
+    # get the GC mask file. By default it works on 100-bp bins
+    gc_file_std = "%s.generating.std"%root_file
+    run_cmd("%s -root %s -gc %s -make_gc_file > %s 2>&1"%(cnvpytor_exec, root_file, reference_genome_gz, gc_file_std))
+    remove_file(gc_file_std)
+
+    # map each chromosome to the type chrom
+    mito_chromosomes = set(mitochondrial_chromosome.split(","))
+    chrom_to_len = get_chr_to_len(reference_genome)
+    bool_to_text = {True:"M", False:"A"}
+    chrom_to_type = {c : bool_to_text[c in mito_chromosomes] for c in chrom_to_len}
+
+    # create dict that has the info
+    reference_genome_dict = {"custom_ref":
+                                          {"name":"custom reference genome",
+                                           "species":"custom species",
+                                           "chromosomes": OrderedDict({c : (length, chrom_to_type[c]) for c, length in chrom_to_len.items()}),
+                                           "gc_file": root_file}
+
+                                           }
+
+    # save the dict as json
+    reference_genome_conf_file = "%s.ref_genome_conf.py"%root_file   
+    dict_json = json.dumps(reference_genome_dict, cls=NpEncoder, indent=4, sort_keys=True)
+    open(reference_genome_conf_file, "w").write(dict_json)
+
+    return reference_genome_conf_file
+
+def run_CNVNATOR(sorted_bam, reference_genome, outdir, threads, replace, mitochondrial_chromosome, window_size, sample_name, chrom_to_len):
+
+    """Gets CNV calls based on CNVnator"""
+
+    print_if_verbose("running CNVnator")
+
+    # define the genome len
+    genome_size = sum(chrom_to_len.values())
+
+    # make the outdir and move there
+    CurDir = get_fullpath(".")
+    make_folder(outdir); os.chdir(outdir)
+
+    # define all chroms
+    all_chromosomes = sorted(chrom_to_len.keys())
+
+    # get the sorted_bam under current dir
+    run_sorted_bam = "%s.bam"%sample_name
+    soft_link_files(sorted_bam, run_sorted_bam)
+    soft_link_files("%s.bai"%sorted_bam, "%s.bai"%run_sorted_bam)
+
+    # define the root file
+    root_file = "%s.pythor"%sample_name
+
+    # configure the reference genome into root_file
+    reference_genome_conf_file = configure_reference_genome_for_CNVnator(reference_genome, threads, root_file, mitochondrial_chromosome)
+
+    # import the loging
+    import cnvpytor
+    logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+    logger = logging.getLogger('cnvpytor')
+
+    # create a new root class
+    app = cnvpytor.Root(root_file, create=False, max_cores=threads)
+
+    # import RD signal from bam
+    print_if_verbose("importing RD signals from Bam")
+    app.rd(bamfiles=[run_sorted_bam], chroms=all_chromosomes, reference_filename=reference_genome_conf_file)
+
+    # calculating histograms
+    print_if_verbose("calculate histograms")
+    app.calculate_histograms([window_size], chroms=all_chromosomes)
+
+    # calculatuing partitions
+    print_if_verbose("calculate partitions")
+    app.partition([window_size], chroms=all_chromosomes, use_gc_corr=True, repeats=3, genome_size=genome_size)
+
+    # call CNVs
+    print_if_verbose("calling CNV")
+    calls = app.call([window_size])
+
+
+
+
+
+    print(calls)
+    ldahhkdkjhad
+
+    # at the end move back to CurDir
+    os.chdir(CurDir)
+
+
+        ######### RUN CNVNATOR ##########
+
+        # this is experimental
+        sample_name = get_sample_name_from_bam(sorted_bam)
+        chrom_to_len = get_chr_to_len(reference_genome)
+        outdir_cnvnator = "%s/cnvnator_output"%outdir
+        run_CNVNATOR(sorted_bam, reference_genome, outdir_cnvnator, threads, replace, mitochondrial_chromosome, window_size, sample_name, chrom_to_len)
+
+        #################################
+
+
+
+def get_rsquare_one_chromosome_crossValidated_rsquare_AneuFinder(df_train, df_test, chromosome):
+
+    """This function takes a chromosome and a df train and df test of AneuFinder and returns the rsquare of the fit"""
+
+    # get the dfs of the chromosome
+    df_train = df_train[df_train.seqnames==chromosome]
+    df_test = df_test[df_test.seqnames==chromosome]
+
+    # get the function that interpolates position vs copy number
+    interpolation_function = scipy_interpolate.interp1d(df_train.middle_position, df_train.relative_CN, bounds_error=True, kind="linear", assume_sorted=True)
+
+    # get the prediction on the test
+    test_relative_CN = interpolation_function(df_test.middle_position)
+
+    # debug the fact that some training/testing pairs generate a df with only one data point
+    if len(df_test)==1 and len(test_relative_CN)==1: return 0.0
+
+    # calculate the rsquare between the test CN and the actual coverage
+    rsquare = r2_score(df_test.counts.values, test_relative_CN)
+
+    # debug
+    if pd.isna(rsquare): raise ValueError("rsquare can't be NaN")
+
+    # get miniumum 0
+    return max([0.0, rsquare])
+
+def get_crossValidated_rsquare_AneuFinder_givenParameters(Ip, parameters_dict, outfile_AneuFinder_prefix, training_coverage_files, testing_coverage_dfs, threads, replace):
+
+    """This function takes a parameters dict and returns the R2 of how these parameters work on 5-fold cross validation. coverage_files are a list of matched training and testing files for a balanced cross validation selection. This function will report how good each of the training files works on the testing files. """
+
+    print_if_verbose("checking parameters %i"%Ip)
+
+    # define the rsquares
+    rsquares_list = []
+
+    # go through each cvID
+    for cvID, training_coverage_file in enumerate(training_coverage_files):
+
+        # define the outfile of this CV 
+        outfile_AneuFinder_cvID = "%s.train_cv%i.tab"%(outfile_AneuFinder_prefix, cvID)
+
+        # run hmm copy on the training df
+        df_train = run_AneuFinder(training_coverage_file, outfile_AneuFinder_cvID, threads, parms_dict=parameters_dict, replace=replace)
+        #remove_file(outfile_AneuFinder_cvID)
+
+        # get the test df
+        df_test = testing_coverage_dfs[cvID]
+
+        # get the rsquares for each chromosome
+        rsquare = np.mean(list(map(lambda c: get_rsquare_one_chromosome_crossValidated_rsquare_AneuFinder(df_train, df_test, c), set(df_train.seqnames))))
+
+        if rsquare<=0: break
+
+        # keep 
+        rsquares_list.append(rsquare)
+
+    # get the mean and std rsquares
+    if len(rsquares_list)!=len(training_coverage_files):
+        mean_rsquare = 0.0
+        std_rsquare = 1.0
+
+    else:
+        mean_rsquare = max([0.0, np.mean(rsquares_list)])
+        std_rsquare = np.std(rsquares_list)
+
+    return mean_rsquare, std_rsquare
+
+
+
+def run_CNV_calling_AneuFinder(outdir, replace, threads, df_coverage, ploidy, reference_genome, mitochondrial_chromosome, min_number_of_regions_CNVcalling=50):
+
+    """This function runs AneuFinder and returns a df with the relative CN"""
+
+    print_if_verbose("running AneuFinder")
+    make_folder(outdir)
+
+    # define chroms
+    all_chromosomes = set(get_chr_to_len(reference_genome))
+    if mitochondrial_chromosome!="no_mitochondria": mtDNA_chromosomes = set(mitochondrial_chromosome.split(","))
+    else: mtDNA_chromosomes = set()
+    gDNA_chromosomes = all_chromosomes.difference(mtDNA_chromosomes)
+
+    # initialize the final df
+    final_fields = ["chromosome", "start", "end", "corrected_relative_coverage", "relative_CN"]
+    df_CNperWindow_AneuFinder = pd.DataFrame(columns=final_fields)
+
+    # iterate through each genome
+    for type_genome, chroms in [("mtDNA", mtDNA_chromosomes), ("gDNA", gDNA_chromosomes)]:
+
+        # define the outdir of the genome
+        outdir_genome = "%s/%s"%(outdir, type_genome); make_folder(outdir_genome)
+
+        # debug
+        if len(chroms)==0: continue
+
+        # get the df coverage for this genome
+        df_coverage_genome = df_coverage[df_coverage.chromosome.isin(chroms)]
+
+        # debug the fact that there are not enough regions. If so set everything to relative_CN==1
+        if len(df_coverage_genome)<min_number_of_regions_CNVcalling: 
+
+            # get relative_CN as 1
+            df_CNperWindow_AneuFinder_genome = df_coverage_genome[["chromosome", "start", "end", "corrected_relative_coverage"]]
+            df_CNperWindow_AneuFinder_genome["relative_CN"] = 1.0
+
+        else:
+
+            print_if_verbose("running aneufinder")
+
+            ######## DEFINE THE INPUT #########
+
+            # get a df_coverage with 1-based ["seqnames", "ranges", "strand", "counts"], where counts is the corrected_relative_coverage
+
+            # debug
+            #first_chrom = sorted(set(df_coverage_genome.chromosome))[8]
+            #df_coverage_genome = df_coverage_genome[df_coverage_genome.chromosome==first_chrom]
+            #df_coverage_genome = df_coverage_genome.iloc[0:300].append(df_coverage_genome.iloc[-100:])
+
+            # add fields necesary for AneuFinder
+            df_coverage_genome["seqnames"] = df_coverage_genome.chromosome
+            df_coverage_genome["counts"] = df_coverage_genome.corrected_relative_coverage
+            df_coverage_genome["strand"] = "*" 
+            df_coverage_genome["start"] = df_coverage_genome.start+1
+            AneuFinder_fields = ["seqnames", "start", "end", "strand", "counts"]
+
+            ##################################
+
+            ###### DEFINE SEVERAL PARAMETERS TO DO CV ########
+
+            # get a df with the combinations of parameters
+            parameters_dict = {}; Ip = 0
+            for R in [10]: # this is the number of permutations (default 10)
+                for sig_lvl in [0.005, 0.01, 0.05, 0.1, 0.2]: # this is the number of signifficance levels (default 0.1)
+
+                    parameters_dict[Ip] = {"R":R, "sig_lvl":sig_lvl}; Ip+=1
+
+            parameter_fields = ["R", "sig_lvl"]
+            parameters_df = pd.DataFrame(parameters_dict).transpose().sort_index()
+
+            ##################################################
+
+            ####### FIND THE BEST PARAMETERS #######
+
+            # define the fields for the 
+
+            print_if_verbose("finding best parameters out of %i"%len(parameters_df))
+
+            # define the cross validation datasets
+            typeDF_to_cvID_to_df = {t : {cvID : pd.DataFrame() for cvID in range(5)} for t in {"train", "test"}}
+
+            for chrom in chroms:
+
+                # get the df with the coverage of this chromosome
+                df_coverage_AneuFinder_chrom = df_coverage_genome[df_coverage_genome.seqnames==chrom][AneuFinder_fields]
+
+                # add the midle position
+                df_coverage_AneuFinder_chrom["middle_position"] = df_coverage_AneuFinder_chrom.start + (df_coverage_AneuFinder_chrom.end-df_coverage_AneuFinder_chrom.start)/2
+
+                # debug too short chromosomes
+                if len(df_coverage_AneuFinder_chrom)<10: continue
+
+                # go through CV of each chromosome
+                kfold_object = KFold(n_splits=5, random_state=1, shuffle=True)
+                for cvID, (numeric_train_index, numeric_test_index) in enumerate(kfold_object.split(df_coverage_AneuFinder_chrom.index)):
+
+                    # get the dfs
+                    train_df = df_coverage_AneuFinder_chrom.iloc[numeric_train_index]
+                    test_df = df_coverage_AneuFinder_chrom.iloc[numeric_test_index]
+
+                    # get the test df that is within the bounds of train_df
+                    test_df = test_df[(test_df.middle_position>=min(train_df.middle_position)) & (test_df.middle_position<=max(train_df.middle_position))]
+
+                    # add to the dfs
+                    typeDF_to_cvID_to_df["train"][cvID] = typeDF_to_cvID_to_df["train"][cvID].append(train_df)
+                    typeDF_to_cvID_to_df["test"][cvID] = typeDF_to_cvID_to_df["test"][cvID].append(test_df)
+
+            # write the training datasets into outdir outdir_genome
+            training_coverage_files = []
+            for cvID in range(5): 
+
+                # get file
+                df = typeDF_to_cvID_to_df["train"][cvID]
+                training_coverage_file = "%s/training_df_cv%i.tab"%(outdir_genome, cvID)
+                save_df_as_tab(df, training_coverage_file)
+
+                # check that the length of the df is enough
+                if len(df)==0: raise ValueError("The cv dfs are too small")
+
+                # keep
+                training_coverage_files.append(training_coverage_file)
+
+            # get a list with the testing dfs
+            testing_coverage_dfs = [typeDF_to_cvID_to_df["test"][cvID] for cvID in range(5)]
+
+            # get a list with the R2 of each parameter set from cross validation
+            list_rsquares_and_stds = [get_crossValidated_rsquare_AneuFinder_givenParameters(Ip, parameters_dict[Ip], "%s/AneuFinder_parms%i.tab"%(outdir_genome, Ip), training_coverage_files, testing_coverage_dfs, threads, replace) for Ip in parameters_df.index]
+
+            # add the lists in the df
+            parameters_df["cv_rsquare_mean"] = [x[0] for x in list_rsquares_and_stds]
+            parameters_df["cv_rsquare_std"] = [x[1] for x in list_rsquares_and_stds]
+            parameters_df["cv_rsquare_inverse_std"] = 1/parameters_df.cv_rsquare_std
+
+            # get the best parameters
+            best_parameters_row = parameters_df.sort_values(by=["cv_rsquare_mean", "cv_rsquare_inverse_std"], ascending=False).iloc[0]
+
+            # if there are some best parameters, pick them
+            if best_parameters_row["cv_rsquare_mean"]>0: 
+
+                print_if_verbose("The best parameters have an R2=%.3f +- %.3f (SD)"%(best_parameters_row["cv_rsquare_mean"], best_parameters_row["cv_rsquare_std"]))
+
+                best_parameters_dict = dict(best_parameters_row[parameter_fields])
+
+            else:
+
+                print_if_verbose("There are no optimum parms, set the default ones")
+                best_parameters_dict = {"R":10, "sig_lvl":0.1}
+
+            ###########################################
+
+            ########## RUN ANEUFINDER  WITH BEST PARMS ########
+
+            print_if_verbose("running AneuFinder with best parameters: %s"%best_parameters_dict)
+
+            # write to file the coverage file
+            coverage_file = "%s/coverage_file.tab"%outdir_genome
+            save_df_as_tab(df_coverage_genome[AneuFinder_fields], coverage_file)
+
+            # run  with the best parameters
+            best_parameters_outfile = "%s/AneuFinder_output_best_parms.tab"%outdir_genome
+            df_AneuFinder_best = run_AneuFinder(coverage_file, best_parameters_outfile, threads, parms_dict=best_parameters_dict, replace=replace)
+
+            # change the start to be 0-based
+            df_AneuFinder_best["start"] = df_AneuFinder_best.start - 1
+
+            # define the final output
+            df_CNperWindow_AneuFinder_genome = df_AneuFinder_best
+            df_CNperWindow_AneuFinder_genome["corrected_relative_coverage"] = df_CNperWindow_AneuFinder_genome.counts
+            df_CNperWindow_AneuFinder_genome["chromosome"] = df_CNperWindow_AneuFinder_genome.seqnames
+
+            ###################################################
+
+        # keep
+        df_CNperWindow_AneuFinder = df_CNperWindow_AneuFinder.append(df_CNperWindow_AneuFinder_genome[final_fields])
+
+
+
+        # delete folder
+        #delete_folder(outdir_genome)
+
+    return df_CNperWindow_AneuFinder
+
+
+
+def run_AneuFinder(coverage_file, outfile, threads, parms_dict={"R":10, "sig_lvl":0.1}, replace=False):
+
+    """This function runs aneufinder from coverage_file to outfile using the parms dict. It returns a df with coverage_outfile and relative_CN (which is the CN divided by 2) """
+
+    # define the parms
+    R = int(parms_dict["R"])
+    sig_lvl = float(parms_dict["sig_lvl"])
+
+    # run aneufinder
+    if file_is_empty(outfile) or replace is True:
+
+        # get the outfile
+        outfile_tmp = "%s.tmp"%outfile
+        print_if_verbose("generating %s"%outfile)
+
+        # run
+        aneufinder_std = "%s.generating.std"%outfile
+        run_cmd("%s --coverage_table %s --outfile %s --threads %i --R %i --sig_lvl %.4f > %s 2>&1"%(run_AneuFinder_R, coverage_file, outfile_tmp, threads, R, sig_lvl, aneufinder_std), env=EnvName_R)
+
+        # save
+        os.rename(outfile_tmp, outfile)
+
+    # get the out df
+    df_out = get_tab_as_df_or_empty_df(outfile).set_index("seqnames")
+    df_out["relative_CN"] = df_out["copy.number"] / 2
+
+    # add to df the relative_CN. Everything is called as a diploid
+    df = get_tab_as_df_or_empty_df(coverage_file)
+    def get_relative_CN(r):
+
+        # get the chromosome df
+        df_c = df_out.loc[{r["seqnames"]}]
+
+        # get the window of df_out that includes the CN of r
+        all_relative_CNs = list(df_c[(df_c.start<=r["start"]) & (df_c.end>=r["end"])].relative_CN)
+
+        # check that it is just 1
+        if len(all_relative_CNs)!=1: raise ValueError("there should only be one relative CN.")
+
+        return all_relative_CNs[0]
+
+    df["relative_CN"] = df.apply(get_relative_CN, axis=1)
+    if any(pd.isna(df.relative_CN)): raise ValueError("there can't be NaNs in df.relative_CN")
+
+    return df
+
+
+def run_CNV_calling_AneuFinder(outdir, replace, threads, df_coverage, ploidy, reference_genome, mitochondrial_chromosome, min_number_of_regions_CNVcalling=50):
+
+    """This function runs AneuFinder and returns a df with the relative CN"""
+
+    print_if_verbose("running AneuFinder")
+    make_folder(outdir)
+
+    # define chroms
+    all_chromosomes = set(get_chr_to_len(reference_genome))
+    if mitochondrial_chromosome!="no_mitochondria": mtDNA_chromosomes = set(mitochondrial_chromosome.split(","))
+    else: mtDNA_chromosomes = set()
+    gDNA_chromosomes = all_chromosomes.difference(mtDNA_chromosomes)
+
+    # initialize the final df
+    final_fields = ["chromosome", "start", "end", "corrected_relative_coverage", "relative_CN"]
+    df_CNperWindow_AneuFinder = pd.DataFrame(columns=final_fields)
+
+    # iterate through each genome
+    for type_genome, chroms in [("mtDNA", mtDNA_chromosomes), ("gDNA", gDNA_chromosomes)]:
+
+        # define the outdir of the genome
+        outdir_genome = "%s/%s"%(outdir, type_genome); make_folder(outdir_genome)
+
+        # debug
+        if len(chroms)==0: continue
+
+        # get the df coverage for this genome
+        df_coverage_genome = df_coverage[df_coverage.chromosome.isin(chroms)]
+
+        # debug the fact that there are not enough regions. If so set everything to relative_CN==1
+        if len(df_coverage_genome)<min_number_of_regions_CNVcalling: 
+
+            # get relative_CN as 1
+            df_CNperWindow_AneuFinder_genome = df_coverage_genome[["chromosome", "start", "end", "corrected_relative_coverage"]]
+            df_CNperWindow_AneuFinder_genome["relative_CN"] = 1.0
+
+        else:
+
+            print_if_verbose("running aneufinder")
+
+            ######## DEFINE THE INPUT #########
+
+            # get a df_coverage with 1-based ["seqnames", "ranges", "strand", "counts"], where counts is the corrected_relative_coverage
+
+            # debug
+            #first_chrom = sorted(set(df_coverage_genome.chromosome))[8]
+            #df_coverage_genome = df_coverage_genome[df_coverage_genome.chromosome==first_chrom]
+            #df_coverage_genome = df_coverage_genome.iloc[0:300].append(df_coverage_genome.iloc[-100:])
+
+            # add fields necesary for AneuFinder
+            df_coverage_genome["seqnames"] = df_coverage_genome.chromosome
+            df_coverage_genome["counts"] = df_coverage_genome.corrected_relative_coverage
+            df_coverage_genome["strand"] = "*" 
+            df_coverage_genome["start"] = df_coverage_genome.start+1
+            AneuFinder_fields = ["seqnames", "start", "end", "strand", "counts"]
+
+            ##################################
+
+            ########## RUN ANEUFINDER  WITH BEST PARMS ########
+
+            best_parameters_dict = {"R":10, "sig_lvl":0.1}
+            print_if_verbose("running AneuFinder with best parameters: %s"%best_parameters_dict)
+
+            # write to file the coverage file
+            coverage_file = "%s/coverage_file.tab"%outdir_genome
+            save_df_as_tab(df_coverage_genome[AneuFinder_fields], coverage_file)
+
+            # run  with the best parameters
+            best_parameters_outfile = "%s/AneuFinder_output_best_parms.tab"%outdir_genome
+            df_AneuFinder_best = run_AneuFinder(coverage_file, best_parameters_outfile, threads, parms_dict=best_parameters_dict, replace=replace)
+
+            # change the start to be 0-based
+            df_AneuFinder_best["start"] = df_AneuFinder_best.start - 1
+
+            # define the final output
+            df_CNperWindow_AneuFinder_genome = df_AneuFinder_best
+            df_CNperWindow_AneuFinder_genome["corrected_relative_coverage"] = df_CNperWindow_AneuFinder_genome.counts
+            df_CNperWindow_AneuFinder_genome["chromosome"] = df_CNperWindow_AneuFinder_genome.seqnames
+
+            ###################################################
+
+        # keep
+        df_CNperWindow_AneuFinder = df_CNperWindow_AneuFinder.append(df_CNperWindow_AneuFinder_genome[final_fields])
+
+        # delete folder
+        #delete_folder(outdir_genome)
+
+    return df_CNperWindow_AneuFinder
+
+
+
+
+#### aneufinder each chromosome sepparated
+
+def run_AneuFinder(df_coverage, coverage_fileprefix, outprefix, threads, ploidy, min_number_of_regions_CNVcalling, reference_genome, parms_dict={"R":10, "sig_lvl":0.1}, replace=False):
+
+    """This function runs aneufinder from a df_coverage to outprefix using the parms dict. It returns a df with coverage_outfile and relative_CN (which is the CN divided by 2). It runs each chromosome sepparated."""
+
+    # define the parms
+    R = int(parms_dict["R"])
+    sig_lvl = float(parms_dict["sig_lvl"])
+
+    # define the fields of the final aneufinder outfile
+    AneuFinder_fields = ["seqnames", "start", "end", "strand", "counts"]
+
+    # initial fields
+    initial_fields = list(df_coverage.keys())
+
+    # run for each chromosome
+
+    # define a df_output
+    df_output = pd.DataFrame()
+
+    # define 
+    chrom_to_len = get_chr_to_len(reference_genome)
+    all_chromosomes = sorted(set(df_coverage.chromosome), key=(lambda x: chrom_to_len[x]), reverse=True)
+    for c in all_chromosomes: print(c, chrom_to_len[c])
+
+    for Ic, chrom in enumerate(all_chromosomes):
+        print_if_verbose("running AneuFinder for chrom %i/%i %s"%(Ic+1, len(all_chromosomes), chrom))
+
+        # get the df of this chrom 
+        df_coverage_chrom = df_coverage[df_coverage.chromosome==chrom]
+
+        # if there is enough data get the AneuFinder prediction
+        if len(df_coverage_chrom)<min_number_of_regions_CNVcalling: df_coverage_chrom["relative_CN"] = 1.0
+
+        else:
+
+            # define the inputs of AneuFinder
+            coverage_file = "%s_%s.tab"%(coverage_fileprefix, chrom)
+            outfile =  "%s_%s.tab"%(outprefix, chrom)
+            save_df_as_tab(df_coverage_chrom[AneuFinder_fields], coverage_file)
+
+            # run aneufinder
+            if file_is_empty(outfile) or replace is True:
+
+                # get the outfile
+                outfile_tmp = "%s.tmp"%outfile
+                print_if_verbose("generating %s"%outfile)
+
+                # run
+                aneufinder_std = "%s.generating.std"%outfile
+                run_cmd("%s --coverage_table %s --outfile %s --threads %i --R %i --sig_lvl %.4f > %s 2>&1"%(run_AneuFinder_R, coverage_file, outfile_tmp, threads, R, sig_lvl, aneufinder_std), env=EnvName_R)
+
+                # save
+                os.rename(outfile_tmp, outfile)
+
+            # get the out df for this chromosome
+            df_out_chrom = get_tab_as_df_or_empty_df(outfile).set_index("seqnames")
+            df_out_chrom["relative_CN"] = df_out_chrom["copy.number"] / 2
+
+            # add to df the relative_CN. Everything is called as a diploid
+            def get_relative_CN(r):
+
+                # get the chromosome df
+                df_c = df_out_chrom.loc[{r["seqnames"]}]
+
+                # get the window of df_out_chrom that includes the CN of r
+                all_relative_CNs = list(df_c[(df_c.start<=r["start"]) & (df_c.end>=r["end"])].relative_CN)
+
+                # check that it is just 1
+                if len(all_relative_CNs)!=1: raise ValueError("there should only be one relative CN.")
+
+                return all_relative_CNs[0]
+
+            df_coverage_chrom["CN_relativeToChrom"] = df_coverage_chrom.apply(get_relative_CN, axis=1)
+            if any(pd.isna(df_coverage_chrom.CN_relativeToChrom)): raise ValueError("there can't be NaNs in df.relative_CN")
+
+            # define the relative_CN to take into account that some chromosomes may be duplicated
+            df_coverage_chrom_CN1 = df_coverage_chrom[df_coverage_chrom.CN_relativeToChrom==1.0]
+            if len(df_coverage_chrom_CN1)==0: raise ValueError("There should be some part of the df with CN==1")
+            CN1_relative_coverage = float(np.median(df_coverage_chrom_CN1.corrected_relative_coverage))
+
+            if ploidy==1: possible_CN1s = [1, 2]
+            elif ploidy==2: possible_CN1s = [0.5, 1, 1.5, 2]
+            else: raise ValueError("CNV calling is not possible for ploidy %i"%ploidy)
+            chromosomal_CN = find_nearest(possible_CN1s, CN1_relative_coverage)
+
+            df_coverage_chrom["relative_CN"] = df_coverage_chrom.CN_relativeToChrom*chromosomal_CN
+
+        # keep
+        df_output = df_output.append(df_coverage_chrom[initial_fields + ["relative_CN"]])
+
+    ##########################################
+
+    return df_output
+
+def run_CNV_calling_AneuFinder(outdir, replace, threads, df_coverage, ploidy, reference_genome, mitochondrial_chromosome, read_length, min_number_of_regions_CNVcalling=50):
+
+    """This function runs AneuFinder and returns a df with the relative CN"""
+
+    print_if_verbose("running AneuFinder")
+    make_folder(outdir)
+
+    # define chroms
+    all_chromosomes = set(get_chr_to_len(reference_genome))
+    if mitochondrial_chromosome!="no_mitochondria": mtDNA_chromosomes = set(mitochondrial_chromosome.split(","))
+    else: mtDNA_chromosomes = set()
+    gDNA_chromosomes = all_chromosomes.difference(mtDNA_chromosomes)
+
+    # initialize the final df
+    final_fields = ["chromosome", "start", "end", "corrected_relative_coverage", "relative_CN"]
+    df_CNperWindow_AneuFinder = pd.DataFrame(columns=final_fields)
+
+    # iterate through each genome
+    for type_genome, chroms in [("mtDNA", mtDNA_chromosomes), ("gDNA", gDNA_chromosomes)]:
+
+        # define the outdir of the genome
+        outdir_genome = "%s/%s"%(outdir, type_genome); make_folder(outdir_genome)
+
+        # debug
+        if len(chroms)==0: continue
+
+        # get the df coverage for this genome
+        df_coverage_genome = df_coverage[df_coverage.chromosome.isin(chroms)]
+
+        # debug the fact that there are not enough regions. If so set everything to relative_CN==1
+        if len(df_coverage_genome)<min_number_of_regions_CNVcalling: 
+
+            # get relative_CN as 1
+            df_CNperWindow_AneuFinder_genome = df_coverage_genome[["chromosome", "start", "end", "corrected_relative_coverage"]]
+            df_CNperWindow_AneuFinder_genome["relative_CN"] = 1.0
+
+        else:
+
+            print_if_verbose("running aneufinder")
+
+            ######## DEFINE THE INPUT #########
+
+            # get a df_coverage with 1-based ["seqnames", "ranges", "strand", "counts"], where counts is the corrected_relative_coverage
+
+            # add fields necesary for AneuFinder
+            df_coverage_genome["seqnames"] = df_coverage_genome.chromosome
+            df_coverage_genome["strand"] = "*" 
+            df_coverage_genome["start"] = df_coverage_genome.start+1
+
+            # add the counts for aneufinder, proportional to the median coverage * the corrected relative coverage * length of each window / read length
+            median_coverage_positon = get_median_coverage(df_coverage_genome, mitochondrial_chromosome) 
+            if median_coverage_positon<=0: raise ValueError("The median coverage per position %i is not valid"%median_coverage_positon)
+            df_coverage_genome["counts"] = (df_coverage_genome.corrected_relative_coverage*df_coverage_genome.width*(median_coverage_positon/read_length)).apply(int)
+
+            ##################################
+
+            ########## RUN ANEUFINDER  WITH BEST PARMS ########
+
+            best_parameters_dict = {"R":10, "sig_lvl":0.1}
+            print_if_verbose("running AneuFinder with best parameters: %s"%best_parameters_dict)
+
+            # write to file the coverage file
+            coverage_fileprefix = "%s/coverage_file"%outdir_genome
+
+            # run  with the best parameters
+            best_parameters_outprefix = "%s/AneuFinder_output_best_parms"%outdir_genome
+            df_AneuFinder_best = run_AneuFinder(df_coverage_genome, coverage_fileprefix, best_parameters_outprefix, threads, ploidy, min_number_of_regions_CNVcalling, reference_genome, parms_dict=best_parameters_dict, replace=replace)
+
+            # change the start to be 0-based
+            df_AneuFinder_best["start"] = df_AneuFinder_best.start - 1
+
+            # define the final output
+            df_CNperWindow_AneuFinder_genome = df_AneuFinder_best
+
+            ###################################################
+
+        # keep
+        df_CNperWindow_AneuFinder = df_CNperWindow_AneuFinder.append(df_CNperWindow_AneuFinder_genome[final_fields])
+
+        # delete folder
+        #delete_folder(outdir_genome)
+
+    return df_CNperWindow_AneuFinder
+
+
+####### aneufinder option all chroms together
+
+def run_AneuFinder(coverage_file, outfile, threads, parms_dict={"R":10, "sig_lvl":0.1}, replace=False):
+
+    """This function runs aneufinder from coverage_file to outfile using the parms dict. It returns a df with coverage_outfile and relative_CN (which is the CN divided by 2) """
+
+    # define the parms
+    R = int(parms_dict["R"])
+    sig_lvl = float(parms_dict["sig_lvl"])
+
+    # run aneufinder
+    if file_is_empty(outfile) or replace is True:
+
+        # get the outfile
+        outfile_tmp = "%s.tmp"%outfile
+        print_if_verbose("generating %s"%outfile)
+
+        # run
+        aneufinder_std = "%s.generating.std"%outfile
+        run_cmd("%s --coverage_table %s --outfile %s --threads %i --R %i --sig_lvl %.4f > %s 2>&1"%(run_AneuFinder_R, coverage_file, outfile_tmp, threads, R, sig_lvl, aneufinder_std), env=EnvName_AneuFinder)
+
+        # save
+        os.rename(outfile_tmp, outfile)
+
+    # get the out df
+    df_out = get_tab_as_df_or_empty_df(outfile).set_index("seqnames")
+    df_out["relative_CN"] = df_out["copy.number"] / 2
+
+    # add to df the relative_CN. Everything is called as a diploid
+    df = get_tab_as_df_or_empty_df(coverage_file)
+    def get_relative_CN(r):
+
+        # get the chromosome df
+        df_c = df_out.loc[{r["seqnames"]}]
+
+        # get the window of df_out that includes the CN of r
+        all_relative_CNs = list(df_c[(df_c.start<=r["start"]) & (df_c.end>=r["end"])].relative_CN)
+
+        # check that it is just 1
+        if len(all_relative_CNs)!=1: raise ValueError("there should only be one relative CN.")
+
+        return all_relative_CNs[0]
+
+    df["relative_CN"] = df.apply(get_relative_CN, axis=1)
+    if any(pd.isna(df.relative_CN)): raise ValueError("there can't be NaNs in df.relative_CN")
+
+    return df
+
+def run_CNV_calling_AneuFinder(outdir, replace, threads, df_coverage, ploidy, reference_genome, mitochondrial_chromosome, read_length, min_number_of_regions_CNVcalling=50):
+
+    """This function runs AneuFinder and returns a df with the relative CN"""
+
+    print_if_verbose("running AneuFinder")
+    make_folder(outdir)
+
+    # define chroms
+    all_chromosomes = set(get_chr_to_len(reference_genome))
+    if mitochondrial_chromosome!="no_mitochondria": mtDNA_chromosomes = set(mitochondrial_chromosome.split(","))
+    else: mtDNA_chromosomes = set()
+    gDNA_chromosomes = all_chromosomes.difference(mtDNA_chromosomes)
+
+    # initialize the final df
+    final_fields = ["chromosome", "start", "end", "corrected_relative_coverage", "relative_CN"]
+    df_CNperWindow_AneuFinder = pd.DataFrame(columns=final_fields)
+
+    # iterate through each genome
+    for type_genome, chroms in [("mtDNA", mtDNA_chromosomes), ("gDNA", gDNA_chromosomes)]:
+
+        # define the outdir of the genome
+        outdir_genome = "%s/%s"%(outdir, type_genome); make_folder(outdir_genome)
+
+        # debug
+        if len(chroms)==0: continue
+
+        # get the df coverage for this genome
+        df_coverage_genome = df_coverage[df_coverage.chromosome.isin(chroms)]
+
+        # debug the fact that there are not enough regions. If so set everything to relative_CN==1
+        if len(df_coverage_genome)<min_number_of_regions_CNVcalling: 
+
+            # get relative_CN as 1
+            df_CNperWindow_AneuFinder_genome = df_coverage_genome[["chromosome", "start", "end", "corrected_relative_coverage"]]
+            df_CNperWindow_AneuFinder_genome["relative_CN"] = 1.0
+
+        else:
+
+            print_if_verbose("running aneufinder")
+
+            ######## DEFINE THE INPUT #########
+
+            # get a df_coverage with 1-based ["seqnames", "ranges", "strand", "counts"], where counts is the corrected_relative_coverage
+
+            # add fields necesary for AneuFinder
+            df_coverage_genome["seqnames"] = df_coverage_genome.chromosome
+            df_coverage_genome["strand"] = "*" 
+            df_coverage_genome["start"] = df_coverage_genome.start+1
+
+            # add the counts for aneufinder, proportional to the median coverage * the corrected relative coverage * length of each window / read length
+            median_coverage_positon = get_median_coverage(df_coverage_genome, mitochondrial_chromosome) 
+            if median_coverage_positon<=0: raise ValueError("The median coverage per position %i is not valid"%median_coverage_positon)
+            df_coverage_genome["counts"] = (df_coverage_genome.corrected_relative_coverage*df_coverage_genome.width*(median_coverage_positon/read_length)).apply(int)
+
+            # define the fields
+            AneuFinder_fields = ["seqnames", "start", "end", "strand", "counts"]
+
+            ##################################
+
+            ########## RUN ANEUFINDER  WITH BEST PARMS ########
+
+            best_parameters_dict = {"R":10, "sig_lvl":0.1}
+            print_if_verbose("running AneuFinder with best parameters: %s"%best_parameters_dict)
+
+            # write to file the coverage file
+            coverage_file = "%s/coverage_file.tab"%outdir_genome
+            save_df_as_tab(df_coverage_genome[AneuFinder_fields], coverage_file)
+
+            # run  with the best parameters
+            best_parameters_outfile = "%s/AneuFinder_output_best_parms.tab"%outdir_genome
+            df_AneuFinder_best = run_AneuFinder(coverage_file, best_parameters_outfile, threads, parms_dict=best_parameters_dict, replace=replace)
+
+            initial_len_df_AneuFinder_best = len(df_AneuFinder_best)
+
+            # add the corrected_relative_coverage
+            df_AneuFinder_best = df_AneuFinder_best.merge(df_coverage_genome[["chromosome", "start", "end", "corrected_relative_coverage"]], left_on=["seqnames", "start", "end"], right_on=["chromosome", "start", "end"], how="left", validate="one_to_one")
+
+            # debug merge
+            if initial_len_df_AneuFinder_best!=len(df_AneuFinder_best): raise ValueError("There lengths are not the same")
+
+            # change the start to be 0-based
+            df_AneuFinder_best["start"] = df_AneuFinder_best.start - 1
+
+            # define the final output
+            df_CNperWindow_AneuFinder_genome = df_AneuFinder_best
+
+            ###################################################
+
+        # keep
+        df_CNperWindow_AneuFinder = df_CNperWindow_AneuFinder.append(df_CNperWindow_AneuFinder_genome[final_fields])
+
+        # delete folder
+        #delete_folder(outdir_genome)
+
+    return df_CNperWindow_AneuFinder
+
+######### aneufinder running some regions first ######
+
+
+def get_collapsed_r_from_AneuFinder_df_several_windows(df):
+
+    """
+    Takes a df that has the fields from aneufinder and returns a series that contains the collapsed info about all of them
+    """
+
+    # define things
+    chrom = df.seqnames.iloc[0]
+    start = df.start.iloc[0]
+    end = df.end.iloc[-1]
+    strand = df.strand.iloc[0]
+    counts = sum(df.counts)
+
+    # check things
+    if {chrom}!=set(df.seqnames): raise ValueError("There is not only 1 chromosome")
+    if {strand}!=set(df.strand): raise ValueError("There is not only 1 strand")
+    if start!=min(df.start): raise ValueError("The start is not as expected")
+    if end!=max(df.end): raise ValueError("The end is not as expected")
+
+    return pd.Series({"seqnames":chrom, "start":start, "end":end, "strand":strand, "counts":counts})
+
+def run_CNV_calling_AneuFinder(outdir, replace, threads, df_coverage, ploidy, reference_genome, mitochondrial_chromosome, read_length, min_number_of_regions_CNVcalling=50):
+
+    """This function runs AneuFinder and returns a df with the relative CN"""
+
+    print_if_verbose("running AneuFinder")
+    make_folder(outdir)
+
+    # define chroms
+    all_chromosomes = set(get_chr_to_len(reference_genome))
+    if mitochondrial_chromosome!="no_mitochondria": mtDNA_chromosomes = set(mitochondrial_chromosome.split(","))
+    else: mtDNA_chromosomes = set()
+    gDNA_chromosomes = all_chromosomes.difference(mtDNA_chromosomes)
+
+    # initialize the final df
+    final_fields = ["chromosome", "start", "end", "corrected_relative_coverage", "relative_CN"]
+    df_CNperWindow_AneuFinder = pd.DataFrame(columns=final_fields)
+
+    # iterate through each genome
+    for type_genome, chroms in [("mtDNA", mtDNA_chromosomes), ("gDNA", gDNA_chromosomes)]:
+
+        # define the outdir of the genome
+        outdir_genome = "%s/%s"%(outdir, type_genome); make_folder(outdir_genome)
+
+        # debug
+        if len(chroms)==0: continue
+
+        # get the df coverage for this genome
+        df_coverage_genome = df_coverage[df_coverage.chromosome.isin(chroms)]
+
+        # debug the fact that there are not enough regions. If so set everything to relative_CN==1
+        if len(df_coverage_genome)<min_number_of_regions_CNVcalling: 
+
+            # get relative_CN as 1
+            df_CNperWindow_AneuFinder_genome = df_coverage_genome[["chromosome", "start", "end", "corrected_relative_coverage"]]
+            df_CNperWindow_AneuFinder_genome["relative_CN"] = 1.0
+
+        else:
+
+            print_if_verbose("running aneufinder")
+
+            ######## DEFINE THE INPUT #########
+
+            # get a df_coverage with 1-based ["seqnames", "ranges", "strand", "counts"], where counts is the corrected_relative_coverage
+
+            # add fields necesary for AneuFinder
+            df_coverage_genome["seqnames"] = df_coverage_genome.chromosome
+            df_coverage_genome["strand"] = "*" 
+            df_coverage_genome["start"] = df_coverage_genome.start+1
+
+            # add the counts for aneufinder, proportional to the median coverage * the corrected relative coverage * length of each window / read length
+            median_coverage_positon = get_median_coverage(df_coverage_genome, mitochondrial_chromosome) 
+            if median_coverage_positon<=0: raise ValueError("The median coverage per position %i is not valid"%median_coverage_positon)
+            df_coverage_genome["counts"] = (df_coverage_genome.corrected_relative_coverage*df_coverage_genome.width*(median_coverage_positon/read_length)).apply(int)
+
+            # define the fields
+            AneuFinder_fields = ["seqnames", "start", "end", "strand", "counts"]
+
+            ##################################
+
+            ########## RUN ANEUFINDER  WITH BEST PARMS FOR A SUBSET OF WINDOWS 5X LARGER ########
+
+            # generate a df_coverage_genome_5x, which includes the 5x larger windows to speed aneufinder searches
+            df_coverage_genome_5xReduced = pd.DataFrame()
+            for chrom in sorted(chroms):
+
+                # define the window ID for the chrom
+                df_coverage_genome_chrom = df_coverage_genome[df_coverage_genome.chromosome==chrom]
+                df_coverage_genome_chrom["window_ID_5xLarger"] = make_flat_listOflists([[I]*5 for I in range(int(len(df_coverage_genome_chrom)/5)+1)])[0:len(df_coverage_genome_chrom)]
+
+                # define the coverage df and keep
+                df_coverage_genome_5xReduced_chrom = df_coverage_genome_chrom[AneuFinder_fields +["window_ID_5xLarger"]].groupby("window_ID_5xLarger").apply(get_collapsed_r_from_AneuFinder_df_several_windows)
+                df_coverage_genome_5xReduced = df_coverage_genome_5xReduced.append(df_coverage_genome_5xReduced_chrom)
+
+            print_if_verbose("running AneuFinder with default parameters for 5x larger windows")
+
+            # write to file the coverage file
+            coverage_file_5xReduced = "%s/coverage_file_5xreduced.tab"%outdir_genome
+            save_df_as_tab(df_coverage_genome_5xReduced[AneuFinder_fields], coverage_file_5xReduced)
+
+            # run  aneufinder
+            AneuFinder_5xreduced_outfile = "%s/AneuFinder_output_5xreduced.tab"%outdir_genome
+            df_AneuFinder_5xreduced = run_AneuFinder(coverage_file_5xReduced, AneuFinder_5xreduced_outfile, threads, replace=replace)
+
+            #####################################
+
+            ############# GENERATE df_CNperWindow_AneuFinder_genome FOR THE ORIGINAL WINDOWS ###############
+
+            
+
+            ################################################################################################
+
+
+
+
+            adkdakadkjadjadadhjaddakjda
+
+            initial_len_df_AneuFinder_best = len(df_AneuFinder_best)
+
+            # add the corrected_relative_coverage
+            df_AneuFinder_best = df_AneuFinder_best.merge(df_coverage_genome[["chromosome", "start", "end", "corrected_relative_coverage"]], left_on=["seqnames", "start", "end"], right_on=["chromosome", "start", "end"], how="left", validate="one_to_one")
+
+            # debug merge
+            if initial_len_df_AneuFinder_best!=len(df_AneuFinder_best): raise ValueError("There lengths are not the same")
+
+            # change the start to be 0-based
+            df_AneuFinder_best["start"] = df_AneuFinder_best.start - 1
+
+            # define the final output
+            df_CNperWindow_AneuFinder_genome = df_AneuFinder_best
+
+            ###################################################
+
+        # keep
+        df_CNperWindow_AneuFinder = df_CNperWindow_AneuFinder.append(df_CNperWindow_AneuFinder_genome[final_fields])
+
+        # delete folder
+        #delete_folder(outdir_genome)
+
+    return df_CNperWindow_AneuFinder
+
+
+
+def get_are_overlapping_breakpoints(query_bpID, subject_bpID, df_bedpe_all, type_bp_to_chromField_to_posFields, equal_fields, approximate_fields, tol_bp, pct_overlap): 
+    
+    # return if they are the same
+    if query_bpID==subject_bpID: return False
+
+    # define the rows
+    row_query = df_bedpe_all.loc[query_bpID]
+    row_subject = df_bedpe_all.loc[subject_bpID]
+
+    # define trhe chromField_to_posFields
+    chromField_to_posFields = type_bp_to_chromField_to_posFields[row_query["type_breakpoint"]]
+
+    # get whether they are the same
+    return get_is_matching_predicted_and_known_rows(row_query, row_subject, equal_fields, approximate_fields, chromField_to_posFields, tol_bp=tol_bp, pct_overlap=pct_overlap)
+
+def get_series_overlapping_PASS_query_breakpoints_series_in_subjectID(PASS_query_breakpoints_series, subject_bpID, df_bedpe_all, type_bp_to_chromField_to_posFields, equal_fields, approximate_fields, tol_bp, pct_overlap):
+
+    """Takes the series PASS_query_breakpoints_series and applies the function get_are_overlapping_breakpoints for each subject_bpID """
+
+    return PASS_query_breakpoints_series.apply(get_are_overlapping_breakpoints, subject_bpID=subject_bpID, df_bedpe_all=df_bedpe_all, type_bp_to_chromField_to_posFields=type_bp_to_chromField_to_posFields, equal_fields=equal_fields, approximate_fields=approximate_fields, tol_bp=tol_bp, pct_overlap=pct_overlap)
+ 
+
+def get_overlapping_df_bedpe_multiple_samples(df_bedpe_all, outdir, tol_bp, pct_overlap, threads):
+
+    """Takes a df bedpe and returns a df with the overlapping breakpoints """
+
+    df_overlapping_BPs_file = "%s/df_overlapping_BPs.tab"%outdir
+
+    if file_is_empty(df_overlapping_BPs_file) or True:
+
+        print("getting overlapping breakpoints")
+
+        # this is a df were the rows are some target breakpoints (the ones that PASS the filters) and each column is a different breakpoint. The cell will be True if they are equivalent breakpoints
+
+        # add the unique breakpointID
+        df_bedpe_all["unique_bpID"] = df_bedpe_all.sampleID.apply(str) + "_" + df_bedpe_all.name
+        if len(df_bedpe_all)!=len(set(df_bedpe_all.unique_bpID)): raise ValueError("The breakpoint IDs are not unique in the bedpe")
+        df_bedpe_all = df_bedpe_all.set_index("unique_bpID", drop=False)
+
+        # add the positions
+        df_bedpe_all["pos1"] = (df_bedpe_all.start1 + (df_bedpe_all.end1-df_bedpe_all.start1)/2).apply(int)
+        df_bedpe_all["pos2"] = (df_bedpe_all.start2 + (df_bedpe_all.end2-df_bedpe_all.start2)/2).apply(int)
+
+        
+
+        # add the type of breakpoint
+        bool_to_text = {True:"intra_chromosomal", False:"inter_chromosomal"}
+        df_bedpe_all["type_breakpoint"] = (df_bedpe_all.chrom1==df_bedpe_all.chrom2).map(bool_to_text)
+
+        # check that pos1 is always before pos2 in intrachromosomeals
+        df_intra_chrom = df_bedpe_all[df_bedpe_all.type_breakpoint=="intra_chromosomal"]
+        if not all (df_intra_chrom.pos2>df_intra_chrom.pos1): raise ValueError("pos2 should be after pos1 in intrachromosomal breakpoints")
+
+        # define overlapping fields
+        equal_fields = ["chrom1", "chrom2", "strand1", "strand2"]
+        approximate_fields = ["pos1", "pos2"]
+        type_bp_to_chromField_to_posFields = {"intra_chromosomal": {"chrom1":{"start":"pos1", "end":"pos2"}},
+                                              "inter_chromosomal": {}}
+
+        # init a df that has the starting dfs
+        PASS_breakpoints = sorted(set(df_bedpe_all[df_bedpe_all.PASSed_filters].unique_bpID))
+        PASS_query_breakpoints_series = pd.Series(PASS_breakpoints, index=PASS_breakpoints)
+        all_breakpoints = sorted(set(df_bedpe_all.unique_bpID))
+        df_overlapping_BPs = pd.DataFrame(index=PASS_breakpoints)
+
+        # define the inputs for parallelization
+        list_inputs = list(map(lambda subject_bpID: (PASS_query_breakpoints_series, subject_bpID, df_bedpe_all, type_bp_to_chromField_to_posFields, equal_fields, approximate_fields, tol_bp, pct_overlap), all_breakpoints))
+
+        # run parallelization
+        print("running in parallel the calculation of overlaps")
+        with multiproc.Pool(threads) as pool:
+            list_series_subjectIDs = pool.starmap(get_series_overlapping_PASS_query_breakpoints_series_in_subjectID, list_inputs) 
+                
+            pool.close()
+            pool.terminate()
+
+        # get the df
+        df_overlapping_BPs = pd.DataFrame(dict(zip(all_breakpoints, list_series_subjectIDs)))
+
+        # filter to only keep those overlapping breakpoints that overlap something
+        interesting_overlaps = df_overlapping_BPs.columns[df_overlapping_BPs.apply(sum, axis=0)>0]
+        df_overlapping_BPs = df_overlapping_BPs[interesting_overlaps]
+        df_overlapping_BPs = df_overlapping_BPs[df_overlapping_BPs.apply(sum, axis=1)>0]
+
+        # save
+        save_df_as_tab_with_index(df_overlapping_BPs, df_overlapping_BPs_file)
+
+    # load
+    df_overlapping_BPs = get_tab_as_df_or_empty_df_with_index(df_overlapping_BPs_file)
+
+    return df_overlapping_BPs
+
