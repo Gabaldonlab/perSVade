@@ -15261,3 +15261,27 @@ def get_overlapping_df_bedpe_multiple_samples(df_bedpe_all, outdir, tol_bp, pct_
 
     return df_overlapping_BPs
 
+
+
+
+### 2. Manual installation of Ninja
+
+perSVade has one dependency, Ninja (https://github.com/TravisWheelerLab/NINJA, release 0.95-cluster_only), that you have to install manually. Make sure that the folder containing the compiled binary of Ninja can be found in your $PATH. This is an example of how you can do this:
+
+`cd <path_to_install_Ninja>`
+
+`wget https://github.com/TravisWheelerLab/NINJA/archive/0.95-cluster_only.tar.gz`
+
+`tar -xvf 0.95-cluster_only.tar.gz; rm 0.95-cluster_only.tar.gz; cd NINJA-0.95-cluster_only/NINJA`
+
+`make all`
+
+`export PATH=$PATH:<path_to_install_Ninja>/NINJA-0.95-cluster_only/NINJA`
+
+You may need to install some extra dependencies to compile Ninja with `make`. If you can't get the compiled binary (called `Ninja`), you may try among the ones provided by perSVade in `<perSVade_dir>/installation/Ninja_binaries`. Note that these will not necessarily work on your computer. As an example, in a linux machine with a `x86_64` architecture you can use the provided binary by adding the containing folder to the $PATH:
+
+`export PATH=$PATH:<perSVade_dir>/installation/Ninja_binaries/Ninja_x86_64`
+
+At the end, make sure that you can execute Ninja by typing:
+
+`Ninja --help`

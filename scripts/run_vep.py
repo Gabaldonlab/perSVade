@@ -121,7 +121,9 @@ if fun.file_is_empty(outfile_vep_raw):
     fun.run_cmd(cmd)
 
     # check that there are no errors in the output
-    if any([any({e in l.upper() for e in {"EXCEPTION", "ERROR"}}) for l in open(vep_std, "r").readlines()]): raise ValueError("There was an error running vep. Check %s"%vep_std) 
+    if any([any({e in l.upper() for e in {"EXCEPTION", "ERROR"}}) and (not l.upper().startswith("WARNING")) for l in open(vep_std, "r").readlines()]): raise ValueError("There was an error running vep. Check %s"%vep_std) 
+
+    #and (not l.startswith("WARNING")) 
 
     # check that <10% of the variants were not annotated
     nlines_vep_output = len([l for l in open(outfile_vep_raw_tmp, "r").readlines() if not l.startswith("#")])
@@ -132,7 +134,6 @@ if fun.file_is_empty(outfile_vep_raw):
 
     # rename
     os.rename(outfile_vep_raw_tmp, outfile_vep_raw)
-
 
 #############################################
 #############################################

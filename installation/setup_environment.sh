@@ -12,7 +12,6 @@ conda_dir=$(echo $env_path | sed "s/\/envs\/$env_name//g")
 # define the path to the installation dir
 installation_dir=$(readlink -f $0 | sed 's/\/setup_environment.sh//g')
 
-
 ####### INSTALL EXTERNAL SOFTWARE #######
 
 # go to the installation dir
@@ -228,7 +227,6 @@ conda install -n $R_env_name -c conda-forge -y r-r.utils=2.9.2;
 conda install -n $R_env_name -c bioconda -y bioconductor-structuralvariantannotation=1.4.0;
 
 
-
 # create a subenvironment for running CONY. The last commit of CONY was the 12/06/2017. This is 3 years and 4 months ago., so that I have to install software from a similar age
 
 # packages from bioconda:
@@ -250,14 +248,8 @@ conda install -y -n $CONY_env_name -c conda-forge r-argparser=0.4;
 # create an environment to run AneuFinder
 AneuFinder_env_name="$env_name"_AneuFinder_env
 echo "creating conda env $AneuFinder_env_name"
-
-# this is the current version
 conda create -y --name $AneuFinder_env_name -c bioconda bioconductor-aneufinder=1.18.0;
 conda install -y -n $AneuFinder_env_name -c conda-forge r-argparser=0.6;
-
-# old versions as in the C. albicans paper
-#conda create -y --name $AneuFinder_env_name -c bioconda bioconductor-aneufinder=1.10.2;
-#conda install -y -n $AneuFinder_env_name -c conda-forge r-argparser=0.4;
 
 # create a subenvironment to run HMMCOPY
 HMMcopy_env_name="$env_name"_HMMcopy_env
@@ -266,7 +258,7 @@ conda create -y --name $HMMcopy_env_name
 conda config --add channels conda-forge
 conda install -y -n $HMMcopy_env_name -c bioconda bioconductor-hmmcopy=1.32.0; # this should install r-base=3.3.2, which fits all the dependencies
 conda install -y -n $HMMcopy_env_name -c conda-forge r-argparser=0.6;
-conda install -n $HMMcopy_env_name -c conda-forge r-kernsmooth=2.23;
+conda install -y -n $HMMcopy_env_name -c conda-forge r-kernsmooth=2.23;
 
 # create a subenvironment to run gridss
 gridss_env_name="$env_name"_gridss_env
@@ -283,7 +275,6 @@ conda create -y --name $picard_env_name -c conda-forge r-base=4.0.2
 conda install -n $picard_env_name -c bioconda -y picard=2.18.26
 
 ####################################
-
 
 # print that everything went well
 echo 'SUCCESS: all perSVade dependencies were properly installed.'

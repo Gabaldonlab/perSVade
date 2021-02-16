@@ -8,36 +8,13 @@ perSVade is a method that runs structural variation (SV) calling and interpretat
 
 Download the perSVade source code from one of the releases and decompress. For example:
 
-`wget https://github.com/Gabaldonlab/perSVade/releases/download/v0.4/perSVade_v0.4.tar.gz`
+`wget https://github.com/Gabaldonlab/perSVade/releases/download/v0.5/perSVade_v0.5.tar.gz`
 
-`tar -xvf perSVade_v0.4.tar.gz; rm perSVade_v0.4.tar.gz`
+`tar -xvf perSVade_v0.5.tar.gz; rm perSVade_v0.4.tar.gz`
 
-This already contains all the scripts to run the pipeline. Note that the created file (for example `perSVade_v0.4`) will be referred as `<perSVade_dir>`
+This already contains all the scripts to run the pipeline. Note that the created file (for example `perSVade_v0.5`) will be referred as `<perSVade_dir>`
 
-### 2. Manual installation of Ninja
-
-perSVade has one dependency, Ninja (https://github.com/TravisWheelerLab/NINJA, release 0.95-cluster_only), that you have to install manually. Make sure that the folder containing the compiled binary of Ninja can be found in your $PATH. This is an example of how you can do this:
-
-`cd <path_to_install_Ninja>`
-
-`wget https://github.com/TravisWheelerLab/NINJA/archive/0.95-cluster_only.tar.gz`
-
-`tar -xvf 0.95-cluster_only.tar.gz; rm 0.95-cluster_only.tar.gz; cd NINJA-0.95-cluster_only/NINJA`
-
-`make all`
-
-`export PATH=$PATH:<path_to_install_Ninja>/NINJA-0.95-cluster_only/NINJA`
-
-You may need to install some extra dependencies to compile Ninja with `make`. If you can't get the compiled binary (called `Ninja`), you may try among the ones provided by perSVade in `<perSVade_dir>/installation/Ninja_binaries`. Note that these will not necessarily work on your computer. As an example, in a linux machine with a `x86_64` architecture you can use the provided binary by adding the containing folder to the $PATH:
-
-`export PATH=$PATH:<perSVade_dir>/installation/Ninja_binaries/Ninja_x86_64`
-
-At the end, make sure that you can execute Ninja by typing:
-
-`Ninja --help`
-
-
-### 3. Create a conda environment with most dependencies
+### 2. Create a conda environment with most dependencies
 
 perSVade is written in python, R and bash for Linux. Most of the dependecies can be installed through conda. It is advisable that you install these dependencies by creating a conda environment (for example called perSVade_env) with all of them, which we provide, with the following commands:
 
@@ -47,9 +24,9 @@ perSVade is written in python, R and bash for Linux. Most of the dependecies can
 
 `conda activate <env_name>`
 
-### 4. Automatic installation of additional dependencies 
+### 3. Automatic installation of additional dependencies 
 
-In addition, you should install some additional dependencies with the following command:
+In addition, you should install some additional dependencies and setup of other environments with the following command:
 
 `./installation/setup_environment.sh`
 
@@ -62,12 +39,17 @@ NOTE: This will create the following additional environments:
 3. `<env_name>_R_env`
 4. `<env_name>_gridss_env`
 5. `<env_name>_picard_env`
+6. `<env_name>_AneuFinder_env`
+7. `<env_name>_CONY_env`
+8. `<env_name>_HMMcopy_env`
+9. `<env_name>_RepeatMasker_env`
+10. `<env_name>_RepeatMasker_env`
 
 Make sure that none of them exist before running this script. You can change `<env_name>` to fullfil this requirement.
 
 We note that this was tested with `conda 4.8.0` on a Linux-x86 64-bit architecture, installed at 03/2019. If you have a different conda version, you may change a bit the perSVade_env.yml file so that it does not create dependency problems.
 
-### 5. Test installation
+### 4. Test installation
 
 We highly recommend to test that all dependencies were properly installed with the following commands:
 
@@ -83,23 +65,18 @@ There is a WARNING message that you should look for after running this script:
 
 ## Running in MareNostrum
 
-If you are working from any cluster that has access to the BSC /gpfs filesystem you can activate the perSVade environment from its location in mschikora. You should be running this from an interactive node in MN like this:
-
-`salloc -n 1 -c 48 -t 02:00:00 --qos debug` # runs an interactive session. ESSENTIAL
+If you are working from any cluster that has access to the BSC /gpfs filesystem you can activate the perSVade environment from its location in mschikora. You don't need to re-install anything if you are working in the BSC.
 
 `source /gpfs/projects/bsc40/mschikora/anaconda3/etc/profile.d/conda.sh`  # activate the conda environment of mschikora
 
-`conda activate perSVade_v0.4_env` # activate the environment of perSVade version 0.4. You can change the version
-
-VERY IMPORTANT NOTE:
-
-NEVER activate the enviroment in the login of MN, as this is a large environment and uses a lot of resources. In fact, sometimes the login FAILS for all MN users when you activate this environent, so please don't do it.
+`conda activate perSVade_v0.5_env` # activate the environment of perSVade version 0.5. You can change the version
 
 You can next run perSVade from the releases folder (these are stable versions of the pipeline). For example:
 
 `python /gpfs/projects/bsc40/mschikora/scripts/perSVade/releases/v0.2/scripts/perSVade.py -r <path to the reference genome (fasta)> -o <output_directory> -p <ploidy, 1 or 2> -f1 <forward_reads.fastq.gz> -f2 <reverse_reads.fastq.gz> `
 
 ## Running in other systems
+
 Once you have installed all the dependencies, you can call the perSVade pipeline with:
 
 `conda activate perSVade_env`
@@ -111,7 +88,7 @@ Once you have installed all the dependencies, you can call the perSVade pipeline
 
 perSVade also includes the possibility of running small variant calling. You can do this by skipping SV detection, with a command like:
 
-`./scripts/perSVade.py --ref reference_genome.fasta --threads 4 -o ./output_directory -f1 reads_FWD.fastq.gz -f2 reads_FWD.fastq.gz --mitochondrial_chromosome chr_mito --mitochondrial_code 3 --gDNA_code 12 -gff features.gff  --run_smallVarsCNV --skip_SVcalling --caller all --coverage 20 --ploidy 2 --remove_smallVarsCNV_nonEssentialFiles`
+`./scripts/perSVade.py --ref reference_genome.fasta --threads 4 -o ./output_directory -f1 reads_FWD.fastq.gz -f2 reads_FWD.fastq.gz --mitochondrial_chromosome chr_mito --mitochondrial_code 3 --gDNA_code 12 -gff features.gff  --run_smallVarsCNV --skip_SVcalling --caller all --coverage 20 --ploidy 2 --remove_smallVarsCNV_nonEssentialFiles --skip_repeat_analysis`
 
 This will align the reads with `bwa mem` and run `GATK HaplotypeCaller`, `freebayes` and `bcftools call` on the provided reads. The variants are filtered with the default parameters and the specified coverage. The resulting variants are be merged and annotated with `Ensembl VEP`. In addition, the read depth of each gene will be calculated with `mosdepth`.
 
@@ -124,6 +101,7 @@ Type `./scripts/perSVade.py -h` to understand wahat is the meaning of these opti
 5. `--coverage` is the minimum coverage for a variant to be kept. This parameter should be related to the coverage of your library. You may be careful with setting it too low (i.e. <15) as it will yield many false positive calls. It is reasonable to check how other similar studies set this parameter.
 6. `--remove_smallVarsCNV_nonEssentialFiles` is useful to clean the output directory from non-essential output files.
 7. If you may want to understand what the programs of this pipeline do. Check freebayes, bcftools, GATK HaplotypeCaller and ENSEMBL Variant Annotation Predictor.
+8. `--skip_repeat_analysis` does not analyze whether your variants overlap repetitive regions. By default it does, and finding repeats in the genome can slow down the analysis.
 
 This will output the following files and folders under `./output_directory`:
 
