@@ -8,11 +8,11 @@ perSVade is a method that runs structural variation (SV) calling and interpretat
 
 Download the perSVade source code from one of the releases and decompress. For example:
 
-`wget https://github.com/Gabaldonlab/perSVade/releases/download/v0.5/perSVade_v0.5.tar.gz`
+`wget https://github.com/Gabaldonlab/perSVade/archive/v0.5.tar.gz`
 
-`tar -xvf perSVade_v0.5.tar.gz; rm perSVade_v0.4.tar.gz`
+`tar -xvf v0.5.tar.gz; rm v0.5.tar.gz`
 
-This already contains all the scripts to run the pipeline. Note that the created file (for example `perSVade_v0.5`) will be referred as `<perSVade_dir>`
+This already contains all the scripts to run the pipeline. Note that the created file (for example `perSVade-v0.5`) will be referred as `<perSVade_dir>`
 
 ### 2. Create a conda environment with most dependencies
 
