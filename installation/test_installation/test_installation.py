@@ -132,12 +132,11 @@ real_bedpe_breakpoints = test_fun.test_realSVgeneration(Cglabrata_subsampled_rea
 # test the parameter optimisation based on real_bedpe_breakpoints
 #test_fun.test_parameter_optimisation_perSVade_real(Cglabrata_subsampled_reads_dir, Cglabrata_subsampled_perSVade_outdir, Cglabrata_repeats, Cglabrata_genome, real_bedpe_breakpoints, replace=False)
 
-# test CNV calling with the three programs
+# test CNV calling with each of the three programs
 
 # test ONT read calling
 
 ### TESTING THINGS THAT ARE DISPENSABLE ###
-
 
 # test the querying of the SRA database and downloading, and trimming of reads and also gztool
 outdir_SRAdb_query_downloading_and_readTrimming = "%s/testing_SRAdb_query_downloading_and_readTrimming_MERS"%testing_outputs_dir

@@ -11381,6 +11381,9 @@ def run_CNV_calling_CONY_one_chromosome(reference_genome, outdir, chromosome, re
     # define the curdir
     CurDir = get_fullpath(".")
 
+    # define the outdir as the full path
+    outdir = get_fullpath(outdir)
+
     # change dir to outdir
     os.chdir(outdir)
 
@@ -17049,20 +17052,23 @@ def get_annotation_df_with_GeneFeature_as_gff(annot_df, gff):
 
     return annot_df
 
-def get_overlapping_df_bedpe_multiple_samples(df_bedpe_all, outdir, tol_bp, pct_overlap, threads):
+def get_overlapping_df_bedpe_multiple_samples(df_bedpe_all, outdir, tol_bp, pct_overlap, threads, replace=False):
 
     """Takes a df bedpe and returns a df with the overlapping breakpoints """
 
-    df_overlapping_BPs_file = "%s/df_overlapping_BPs.tab"%outdir
+    # add the unique breakpointID
+    df_bedpe_all["unique_bpID"] = df_bedpe_all.sampleID.apply(str) + "_" + df_bedpe_all.name
 
-    if file_is_empty(df_overlapping_BPs_file) or True:
+    # define file
+    df_overlapping_BPs_file = "%s/df_bedpe_all_with_overlapping_BPs.py"%outdir
+    initial_fields = list(df_bedpe_all.keys())
+
+    if file_is_empty(df_overlapping_BPs_file) or replace is True:
 
         print("getting overlapping breakpoints")
 
         # this is a df were the rows are some target breakpoints (the ones that PASS the filters) and each column is a different breakpoint. The cell will be True if they are equivalent breakpoints
 
-        # add the unique breakpointID
-        df_bedpe_all["unique_bpID"] = df_bedpe_all.sampleID.apply(str) + "_" + df_bedpe_all.name
         if len(df_bedpe_all)!=len(set(df_bedpe_all.unique_bpID)): raise ValueError("The breakpoint IDs are not unique in the bedpe")
         df_bedpe_all = df_bedpe_all.set_index("unique_bpID", drop=False)
 
@@ -17084,7 +17090,7 @@ def get_overlapping_df_bedpe_multiple_samples(df_bedpe_all, outdir, tol_bp, pct_
 
         #### GET BREAKPOINTS THAT OVERLAP BY POSITION #####
 
-        # adds to df_bedpe_all an overlapping_bps_by_pos, which is a set of the breakpoints were both breakedns overlap by tol_bp
+        # adds to df_bedpe_all an bpoints_overlapping_by_pos, which is a set of the breakpoints were both breakedns overlap by tol_bp
 
         # get a bed that has the positions of the breakends
         df_positions = pd.concat([df_bedpe_all[["chrom_strand_%i"%I, "pos%i"%I, "pos%i_plus1"%I, "unique_bpID_%i"%I]].rename(columns=dict(zip(["chrom_strand_%i"%I, "pos%i"%I, "pos%i_plus1"%I, "unique_bpID_%i"%I], ["chrom", "start", "end", "ID"]))) for I in [1, 2]]).sort_values(by=["chrom", "start", "end"])
@@ -17109,123 +17115,84 @@ def get_overlapping_df_bedpe_multiple_samples(df_bedpe_all, outdir, tol_bp, pct_
         def get_bpointID(x): return "_".join(x.split("_")[0:-1])
         df_positions["breakpointID"] = df_positions.ID.apply(get_bpointID)
 
-        # add the overlapping breakendIDs
-        def get_as_list(x): x.split(";")
+        # add the other bend ID
+        number_to_ther_number = {"1":"2", "2":"1"}
+        def get_other_bendID_name(bendID): return number_to_ther_number[bendID.split("_")[-1]]
+        df_positions["other_bendID"] = df_positions.breakpointID + "_" + df_positions.ID.apply(get_other_bendID_name)
+
+        # add the overlapping breakendIDs as a set
+        def get_as_list(x): return x.split(";")
         df_positions["overlapping_bends"] = df_positions.overlapping_IDs.apply(get_as_list).apply(set)
 
+        # map breakends
+        bend_to_bpoint = dict(df_positions.set_index("ID").breakpointID)
+        bend_to_otherBend = dict(df_positions.set_index("ID").other_bendID)
+        bpoint_to_bends = df_positions.groupby("breakpointID").apply(lambda df_bp: set(df_bp.ID))
+        bend_to_overlapping_bends = dict(df_positions.set_index("ID")["overlapping_bends"])
+
+        # get the 
+        def get_all_overlapping_bends_from_bpID(bpID): return set.union(*[bend_to_overlapping_bends[bend] for bend in bpoint_to_bends[bpID]])
+        df_bedpe_all["overlapping_bends"] =  df_bedpe_all.unique_bpID.apply(get_all_overlapping_bends_from_bpID)
+
+        def get_bpoints_overlapping_by_pos(all_overlapping_bends): return {bend_to_bpoint[bend] for bend in all_overlapping_bends if bend_to_otherBend[bend] in all_overlapping_bends}
+        df_bedpe_all["bpoints_overlapping_by_pos"] = df_bedpe_all.overlapping_bends.apply(get_bpoints_overlapping_by_pos)
+
         ###################################################
+
+        ############ DEFINE BREAKPOINTS OVERLAPPING BY PCT_OVERLAP ######
+        print("geting pct_overlaps")
+
+        # add to df_bedpe_all a bpoints_overlapping_by_region, just for the intrachromosomal events
  
-
-        print(df_positions)
-
-        adkhgadhgadhjd
-
         # get a bed that thas the regions of interchromosomal breakpoints
         df_intra_chrom = df_bedpe_all[df_bedpe_all.type_breakpoint=="intra_chromosomal"]
         if not all (df_intra_chrom.pos2>df_intra_chrom.pos1): raise ValueError("pos2 should be after pos1 in intrachromosomal breakpoints")
 
         bed_intrachromosomal_regions = "%s/intrachromosomal_regions.bed"%outdir
         df_intra_chrom["chrom_and_orientations"] = df_intra_chrom.chrom1 + "_" + df_intra_chrom.strand1 + "_" + df_intra_chrom.strand2
-        df_intra_chrom[["chrom_and_orientations", "pos1", "pos2", "unique_bpID"]].sort_values(by=["chrom_and_orientations", "pos1", "pos2"]).to_csv(bed_intrachromosomal_regions, sep="\t", header=False, index=False)
-
-        # run bedpe for the positions
-
-
-        ###################################################################
-
-
-
-        print(bed_intrachromosomal_regions)
-
-        adjhgadhj
-
-        # check that pos1 is always before pos2 in intrachromosomeals
-        if not all (df_intra_chrom.pos2>df_intra_chrom.pos1): raise ValueError("pos2 should be after pos1 in intrachromosomal breakpoints")
-
-        ############## DEFINE THE OVERLAPS OF INTRACHROMOSOMAL BEDS ###########
-
-        # generate a bed file with the important fields
-        bed_intrachromosomal = "%s/"%bed_intrachromosomal
-
-
-
-        breakpoints_bed = "%s/bed_for_bedmap_bedpe.bed"%outdir
-        df_bedpe_all[["chrom_like_for_bedmap", "pos1", "pos2", "unique_bpID"]].sort_values(by=["chrom_like_for_bedmap", "pos1", "pos2"]).to_csv(breakpoints_bed, sep="\t", index=False, header=False)
-
-        # define the stderr
-        bedmap_stderr = "%s/running_bedmap.stderr"%outdir
-
-        # run bedmap tol_bp. These are breakpoints that overlap by at least
-        bedmap_outfile = "%s/bedmap_outfile_range.txt"%outdir
-        run_cmd("%s --delim '\t' --range %i --echo-map-id %s > %s 2>%s"%(bedmap, tol_bp, breakpoints_bed, bedmap_outfile, bedmap_stderr))
-
-        df_overlap_tolBp  = pd.read_csv(bedmap_outfile, sep="\t", header=None, names=["overlapping_IDs"])
-        df_overlap_tolBp["ID"] = list(df_bed_all.ID)
-        df_overlap_tolBp = df_overlap_tolBp.set_index("ID", drop=False)
+        df_intra_chrom = df_intra_chrom.sort_values(by=["chrom_and_orientations", "pos1", "pos2"])
+        df_intra_chrom[["chrom_and_orientations", "pos1", "pos2", "unique_bpID"]].to_csv(bed_intrachromosomal_regions, sep="\t", header=False, index=False)
 
         # run bedmap pct overlap
         bedmap_outfile = "%s/bedmap_outfile_pctOverlap.txt"%outdir
-        run_cmd("%s --delim '\t' --fraction-both %.2f --echo-map-id %s > %s 2>%s"%(bedmap, pct_overlap, variants_bed, bedmap_outfile, bedmap_stderr))
+        run_cmd("%s --delim '\t' --fraction-both %.2f --echo-map-id %s > %s 2>%s"%(bedmap, pct_overlap, bed_intrachromosomal_regions, bedmap_outfile, bedmap_stderr))
 
         df_overlap_pctOverlap  = pd.read_csv(bedmap_outfile, sep="\t", header=None, names=["overlapping_IDs"])
-        df_overlap_pctOverlap["ID"] = list(df_bed_all.ID)
-        df_overlap_pctOverlap = df_overlap_pctOverlap.set_index("ID", drop=False)
+        df_overlap_pctOverlap["ID"] = list(df_intra_chrom.unique_bpID)
+        df_overlap_pctOverlap["overlapping_IDs_set"] = df_overlap_pctOverlap.overlapping_IDs.apply(get_as_list).apply(set)
 
-        # get a unique df_overlap, which only considers overlaps that fullfill both the Bp and pct overlap
-        df_overlap = pd.DataFrame()
-        df_overlap["ID"] = df_overlap_tolBp.ID
-        df_overlap = df_overlap.set_index("ID", drop=False)
-        sdssfsdsfssfdsdfs
-        bedmap
+        # add the set to the breakpoint (also with missing vals)
+        bpoint_to_overlappingBpoints_pctOverlap = df_overlap_pctOverlap.set_index("ID")["overlapping_IDs_set"]
+        inter_chromosomal_bpoints = df_bedpe_all[df_bedpe_all.type_breakpoint=="inter_chromosomal"].unique_bpID
+        bpoint_to_overlappingBpoints_pctOverlap = bpoint_to_overlappingBpoints_pctOverlap.append(pd.Series(dict(zip(inter_chromosomal_bpoints, [set()]*len(inter_chromosomal_bpoints)))))
 
-        print(bedfile)
+        df_bedpe_all = df_bedpe_all.set_index("unique_bpID", drop=False)
+        df_bedpe_all["bpoints_overlapping_by_region"] = bpoint_to_overlappingBpoints_pctOverlap.loc[df_bedpe_all.index]
 
-        bedmap
+        ###################################################################
 
-        adkjghdakhadkjd
+        # get the overlap, which depends on the type
+        def get_overlapping_bpoints(r):
 
+            # define things
+            by_region_bps = r["bpoints_overlapping_by_region"].difference({r["unique_bpID"]})
+            by_pos_bps = r["bpoints_overlapping_by_pos"].difference({r["unique_bpID"]})
 
+            if r.type_breakpoint=="intra_chromosomal": return by_region_bps.intersection(by_pos_bps)
+            elif r.type_breakpoint=="inter_chromosomal": return by_pos_bps
+            else: raise ValueError("r %s is not valid"%r)
 
-        # define overlapping fields
-        equal_fields = ["chrom1", "chrom2", "strand1", "strand2"]
-        approximate_fields = ["pos1", "pos2"]
-        type_bp_to_chromField_to_posFields = {"intra_chromosomal": {"chrom1":{"start":"pos1", "end":"pos2"}},
-                                              "inter_chromosomal": {}}
-
-        # init a df that has the starting dfs
-        PASS_breakpoints = sorted(set(df_bedpe_all[df_bedpe_all.PASSed_filters].unique_bpID))
-        PASS_query_breakpoints_series = pd.Series(PASS_breakpoints, index=PASS_breakpoints)
-        all_breakpoints = sorted(set(df_bedpe_all.unique_bpID))
-        df_overlapping_BPs = pd.DataFrame(index=PASS_breakpoints)
-
-        # define the inputs for parallelization
-        list_inputs = list(map(lambda subject_bpID: (PASS_query_breakpoints_series, subject_bpID, df_bedpe_all, type_bp_to_chromField_to_posFields, equal_fields, approximate_fields, tol_bp, pct_overlap), all_breakpoints))
-
-        # run parallelization
-        print("running in parallel the calculation of overlaps")
-        with multiproc.Pool(threads) as pool:
-            list_series_subjectIDs = pool.starmap(get_series_overlapping_PASS_query_breakpoints_series_in_subjectID, list_inputs) 
-                
-            pool.close()
-            pool.terminate()
-
-        # get the df
-        df_overlapping_BPs = pd.DataFrame(dict(zip(all_breakpoints, list_series_subjectIDs)))
-
-        # filter to only keep those overlapping breakpoints that overlap something
-        interesting_overlaps = df_overlapping_BPs.columns[df_overlapping_BPs.apply(sum, axis=0)>0]
-        df_overlapping_BPs = df_overlapping_BPs[interesting_overlaps]
-        df_overlapping_BPs = df_overlapping_BPs[df_overlapping_BPs.apply(sum, axis=1)>0]
+        df_bedpe_all["overlapping_bpoints_final"] = df_bedpe_all.apply(get_overlapping_bpoints, axis=1)
 
         # save
-        save_df_as_tab_with_index(df_overlapping_BPs, df_overlapping_BPs_file)
+        save_object(df_bedpe_all[initial_fields + ["overlapping_bpoints_final"]], df_overlapping_BPs_file)
 
-    # load
-    df_overlapping_BPs = get_tab_as_df_or_empty_df_with_index(df_overlapping_BPs_file)
+    # load bepe with adds
+    df_bedpe_all_withAdds = load_object(df_overlapping_BPs_file)
 
-    return df_overlapping_BPs
+    return df_bedpe_all_withAdds
 
-def get_SV_CNV_df_with_overlaps_with_all_samples(SV_CNV, outdir, tol_bp, pct_overlap, cwd, df_bedpe_all, df_CN_all, threads):
+def get_SV_CNV_df_with_overlaps_with_all_samples(SV_CNV, outdir, tol_bp, pct_overlap, cwd, df_bedpe_all, df_CN_all, threads, reference_genome):
 
     """This function takes a SV_CNV df and returns the same df with some added fields about which other samples may also have that variant."""
 
@@ -17238,22 +17205,159 @@ def get_SV_CNV_df_with_overlaps_with_all_samples(SV_CNV, outdir, tol_bp, pct_ove
     # make the folder
     make_folder(outdir)
 
-    # change the name so that it is as in clove
-    df_bedpe_all["name"] = df_bedpe_all
+    # define a file
+    SC_CNV_with_added_overlaps_file = "%s/SC_CNV_with_added_overlaps.tab"%outdir
 
-    # get a df were each row is a PASS breakpoint
-    df_overlaps_breakpoints = get_overlapping_df_bedpe_multiple_samples(df_bedpe_all, outdir, tol_bp, pct_overlap, threads)
+    if file_is_empty(SC_CNV_with_added_overlaps_file):
 
-    conrunkjadhadkhakd
-      
+        print("getting overlaps")
 
+        # add things to the SV df
+        SV_CNV["sampleID"] = SV_CNV.sampleID.apply(str)
+        SV_CNV["is_coverage_SV"] = SV_CNV.INFO_variantID.apply(lambda ID: ID.startswith("coverage"))
+        SV_CNV["INFO_BREAKPOINTIDs_set"] = SV_CNV.INFO_BREAKPOINTIDs.apply(lambda x: set(str(x).split(",")).difference({"nan"}))
+        if any(SV_CNV[~SV_CNV.is_coverage_SV].INFO_BREAKPOINTIDs_set.apply(len)==0): raise ValueError("The bpID is not always defined ")
+        SV_CNV["INFO_BREAKPOINTIDs_set_withSampleID"] = SV_CNV.apply(lambda r: {"%s_%s"%(r.sampleID, x) for x in r.INFO_BREAKPOINTIDs_set}, axis=1)
+        SV_CNV["sampleID_and_variantID"] = SV_CNV.sampleID.apply(str) + "_" + SV_CNV.INFO_variantID
 
-    print(df_overlaps_breakpoints)
+        ###### ADD FIELDS TO DF BEDPE ABOUT THE OVERLAP BETWEEN BREAKPOINTS ######
 
+        # change the name so that it is as in clove
+        df_bedpe_all["name"] = df_bedpe_all.name.apply(lambda x: x[0:-1]) + "o"
 
-    
+        # get the df bedpe with the breakpoints that are overlapping across several samples
+        df_bedpe_all = get_overlapping_df_bedpe_multiple_samples(df_bedpe_all, outdir, tol_bp, pct_overlap, threads).set_index("unique_bpID", drop=False)
 
-    khgadhjg
+        # add the overlapping breakpoints PASS
+        pass_breakpoints = set(df_bedpe_all[df_bedpe_all.PASSed_filters].unique_bpID)
+        def get_only_PASSbps(all_bps): return all_bps.intersection(pass_breakpoints)
+        df_bedpe_all["overlapping_bpoints_final_PASS"] = df_bedpe_all.overlapping_bpoints_final.apply(get_only_PASSbps)
+
+        # add the samples that have that have the breakpoint
+        bpID_to_SID = dict(df_bedpe_all.sampleID)
+        def get_sampleIDs_from_bpIDs(bpIDs): return {bpID_to_SID[x] for x in bpIDs}
+        df_bedpe_all["overlapping_samples_called"] = df_bedpe_all.overlapping_bpoints_final.apply(get_sampleIDs_from_bpIDs)
+        df_bedpe_all["overlapping_samples_PASS"] = df_bedpe_all.overlapping_bpoints_final_PASS.apply(get_sampleIDs_from_bpIDs)
+
+        ##########################################################################
+
+        ###########  add the overlapping samples by breakpoint ###########
+
+        # check that each variant ID has the same breakpoints
+        for varID, bps in dict(SV_CNV[~SV_CNV.is_coverage_SV].groupby("sampleID_and_variantID").apply(lambda df_v: set(df_v.INFO_BREAKPOINTIDs))).items():
+            if len(bps)!=1: 
+                for idx, r in SV_CNV[SV_CNV.INFO_variantID==varID][["sampleID_and_variantID", "ID", "INFO_BREAKPOINTIDs", "sampleID"]].iterrows():
+                    print(r["sampleID"], r["sampleID_and_variantID"], r["ID"], r["INFO_BREAKPOINTIDs"])
+                raise ValueError("%s has more than 1 (%s) bpIDs"%(varID, bps))
+
+        # define a function that returns the string with the overlapping samples
+        def overlapping_samples_byBreakPoints(r, overlapping_samples_f):
+
+            # this only applies to SVs, not CNVs
+            if  r.is_coverage_SV is True: return ""
+            else:
+
+                all_breakponints_SV = r.INFO_BREAKPOINTIDs_set_withSampleID
+                overlapping_samples = set(map(str, set.union(*df_bedpe_all.loc[all_breakponints_SV, overlapping_samples_f])))
+                return ",".join(sorted(overlapping_samples))
+
+        SV_CNV["overlapping_samples_byBreakPoints_allCalled"] = SV_CNV.apply(overlapping_samples_byBreakPoints, overlapping_samples_f="overlapping_samples_called", axis=1)
+
+        SV_CNV["overlapping_samples_byBreakPoints_PASS"] = SV_CNV.apply(overlapping_samples_byBreakPoints, overlapping_samples_f="overlapping_samples_PASS", axis=1)
+
+        # init the interesting fields
+        final_interesting_fields = initial_fields + ["overlapping_samples_byBreakPoints_allCalled", "overlapping_samples_byBreakPoints_PASS"]
+
+        ##################################################################
+
+        ######## ADD WHETHER THE coverage CNVs overlap other samples ###########
+        if df_CN_all is not None:
+
+            print("adding overlaps with CNV")
+
+            # redefine df_CN
+            df_CN_all["sampleID"] = df_CN_all.sampleID.apply(str)
+            df_CN_all = df_CN_all.sort_values(by=["sampleID", "chromosome", "start", "end"])
+            df_CN_all["sorted_window_ID"] = list(range(len(df_CN_all)))
+
+            # add the end to fit SV_CNV. Note that it only changes the end of the chromosome
+            chrom_to_len = get_chr_to_len(reference_genome)
+            def get_end_as_in_SV_CNV(r):
+                if r.end==r.chrom_len: return r.end - 1
+                else: return r.end
+
+            df_CN_all["chrom_len"] = df_CN_all.chromosome.map(chrom_to_len)
+            df_CN_all["end_as_in_SV_CNV"] = df_CN_all.apply(get_end_as_in_SV_CNV, axis=1)
+
+            # create df_CN with several indices
+            sampleChromStart_to_sortedWindowID = dict(df_CN_all.set_index(["sampleID", "chromosome", "start"], drop=False).sorted_window_ID)
+            sampleChromEnd_to_sortedWindowID = dict(df_CN_all.set_index(["sampleID", "chromosome", "end_as_in_SV_CNV"], drop=False).sorted_window_ID)
+            sortedWindowID_to_relativeCN = df_CN_all.set_index("sorted_window_ID", drop=False).merged_relative_CN
+
+            # go through several pct overlaps
+            for min_pct_overlap in [0.1, 0.25, 0.5, 0.75, 0.9, 0.95]: 
+                print("getting CNVs overlapping by at least %.2f"%min_pct_overlap)
+
+                # define samples
+                all_samples = set(df_CN_all.sampleID)
+                sample_to_otherSamples = {sampleID : all_samples.difference({sampleID}) for sampleID in all_samples}
+
+                # define a function that takes an r of the SV_CNV and another sample name, it returns the name of the other sample if it is overlapping by at least min_pct_overlap
+                def get_overlapping_sample_string(r, other_sample):
+
+                    # define the relative CN for r
+                    r_relative_CN = r.INFO_merged_relative_CN
+                    r_start = r.POS-1
+                    r_end = r.INFO_END-1
+
+                    # define a df that has the region of the chromosome in other sample
+                    other_start_windowID = sampleChromStart_to_sortedWindowID[(other_sample, r["#CHROM"], r_start)]
+                    other_end_windowID = sampleChromEnd_to_sortedWindowID[(other_sample, r["#CHROM"], r_end)] + 1
+                    other_relativeCN = sortedWindowID_to_relativeCN[other_start_windowID:other_end_windowID]
+
+                    # debug
+                    if len(other_relativeCN)==0: raise ValueError("The df_other can't be 0")
+                   
+                    # if it is a duplication, define the number of windows in other_relativeCN that have a coverage equal or above r_relative_CN
+                    if r_relative_CN>1: n_similar_CNV_windows = sum(other_relativeCN>=r_relative_CN)
+
+                    # if it is a deletion, define the number of windows in other_relativeCN that have a covereage equal or below r_relative_CN
+                    elif r_relative_CN<1: n_similar_CNV_windows = sum(other_relativeCN<=r_relative_CN)
+     
+                    else: raise ValueError("The relative_CN can't be 1")
+
+                    # if the ratio of similar windows is above the threshold, return the sample name of the other
+                    if (n_similar_CNV_windows/len(other_relativeCN))>=min_pct_overlap: return other_sample
+                    else: return ""
+                
+                def get_overlapping_samples_CNV_atLeast_pct_overlap(r):
+
+                    # only work if it is a CNV variant
+                    if r.is_coverage_SV is True: 
+
+                        # get all the overlapping samples
+                        all_samples_overlapping = set(map(lambda other_sample: get_overlapping_sample_string(r, other_sample), sample_to_otherSamples[r.sampleID])).difference({""})
+
+                        return ",".join(sorted(all_samples_overlapping))
+
+                    else: return ""
+
+                # add the samples that are overlapping at least by min_pct_overlap windows of coverage
+                field_overlapping_samples_CNV = "overlapping_samples_CNV_atLeast_%.2f"%min_pct_overlap
+                SV_CNV[field_overlapping_samples_CNV] = SV_CNV.apply(get_overlapping_samples_CNV_atLeast_pct_overlap, axis=1)
+                
+                # keep field
+                final_interesting_fields.append(field_overlapping_samples_CNV)
+
+        #########################################################################
+
+        # save
+        save_df_as_tab(SV_CNV[final_interesting_fields], SC_CNV_with_added_overlaps_file)
+
+    # load
+    SV_CNV = get_tab_as_df_or_empty_df(SC_CNV_with_added_overlaps_file)
+
+    return SV_CNV
 
 
 def get_whetherCNVcalling_was_performed(VarCallOutdirs, samples_to_run):
@@ -17266,7 +17370,7 @@ def get_whetherCNVcalling_was_performed(VarCallOutdirs, samples_to_run):
 
     return all(existing_cnv_files)
 
-def get_integrated_SV_CNV_smallVars_df_from_run_perSVade_severalSamples(paths_df, cwd, ploidy, pct_overlap, tol_bp, gff, run_ploidy2_ifHaploid=False, generate_integrated_gridss_dataset=False, SV_CNV_called=True, threads=4):
+def get_integrated_SV_CNV_smallVars_df_from_run_perSVade_severalSamples(paths_df, cwd, ploidy, pct_overlap, tol_bp, gff, reference_genome, run_ploidy2_ifHaploid=False, generate_integrated_gridss_dataset=False, SV_CNV_called=True, threads=4):
 
     """Takes the same input as run_perSVade_severalSamples and writes the integrated dfs under cwd, adding to the integrated SV_CNV datasets some added fields that indicate that the SVs and CNV are shared among several samples.
 
@@ -17571,10 +17675,7 @@ def get_integrated_SV_CNV_smallVars_df_from_run_perSVade_severalSamples(paths_df
         outdir_common_variantID_acrossSamples = "%s/getting_common_variantID_acrossSamples"%cwd
         
         # add the overlaps with other samples
-        SV_CNV = get_SV_CNV_df_with_overlaps_with_all_samples(SV_CNV, outdir_common_variantID_acrossSamples, tol_bp, pct_overlap, cwd, df_bedpe_all, df_CN_all, threads)
-
-
-        jhgadjhgadhjgda
+        SV_CNV = get_SV_CNV_df_with_overlaps_with_all_samples(SV_CNV, outdir_common_variantID_acrossSamples, tol_bp, pct_overlap, cwd, df_bedpe_all, df_CN_all, threads, reference_genome)
 
         # get the common variant ID
         SV_CNV = get_SV_CNV_df_with_common_variantID_acrossSamples(SV_CNV, outdir_common_variantID_acrossSamples, pct_overlap, tol_bp)

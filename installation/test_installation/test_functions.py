@@ -312,7 +312,7 @@ def test_parameter_optimisation_perSVade(sorted_bam, reference_genome, outdir, t
 
     if fun.file_is_empty("%s/perSVade_finished_file.txt"%outdir):
 
-        cmd = "%s -r %s -thr %i -o %s -sbam %s --nvars 5 --simulation_ploidies haploid --range_filtering_benchmark theoretically_meaningful -mchr mito_C_glabrata_CBS138 --min_chromosome_len 100 --nsimulations 1 --skip_repeat_analysis"%(fun.perSVade_py, reference_genome, threads, outdir, sorted_bam)
+        cmd = "%s -r %s -thr %i -o %s -sbam %s --nvars 5 --simulation_ploidies haploid --range_filtering_benchmark theoretically_meaningful -mchr mito_C_glabrata_CBS138 --min_chromosome_len 100 --nsimulations 1 --skip_repeat_analysis --skip_CNV_calling"%(fun.perSVade_py, reference_genome, threads, outdir, sorted_bam)
 
         if fun.printing_verbose_mode is True: cmd += " --verbose"
 
@@ -343,7 +343,7 @@ def test_realSVgeneration(reads_dir, outdir, repeats, reference_genome, relaxed_
         reads_df.to_csv(close_shortReads_table, sep="\t", index=False, header=True)
 
         # run persvade
-        cmd = "%s -r %s -thr %i -o %s -f1 skip -f2 skip --nvars 500 -mchr mito_C_glabrata_CBS138 --min_chromosome_len 10000 --StopAfter_obtentionOFcloseSVs --close_shortReads_table %s --previous_repeats_table %s --parameters_json_file %s"%(fun.perSVade_py, reference_genome, threads, outdir, close_shortReads_table, repeats, relaxed_parms)
+        cmd = "%s -r %s -thr %i -o %s -f1 skip -f2 skip --nvars 500 -mchr mito_C_glabrata_CBS138 --min_chromosome_len 10000 --StopAfter_obtentionOFcloseSVs --close_shortReads_table %s --previous_repeats_table %s --parameters_json_file %s --skip_CNV_calling"%(fun.perSVade_py, reference_genome, threads, outdir, close_shortReads_table, repeats, relaxed_parms)
 
         if fun.printing_verbose_mode is True: cmd += " --verbose"
         fun.run_cmd(cmd)
