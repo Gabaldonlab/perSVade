@@ -4,7 +4,7 @@ channels:
   - plotly
   - bioconda
   - conda-forge
-  - asmeurer
+  - r
 dependencies:
   - python=3.6
   - pandas=0.24.2
@@ -32,4 +32,8 @@ dependencies:
   - trimmomatic=0.38
   - parallel-fastq-dump=0.6.3
   - fastqc=0.11.9
+  - bedops=2.4.39
+  - genmap=1.3.0
+  - cython=0.29.21
+  - xlrd=1.2.0
 prefix: /gpfs/projects/bsc40/mschikora/anaconda3/envs/perSVade_env

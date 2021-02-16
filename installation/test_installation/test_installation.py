@@ -27,7 +27,7 @@ test_gff = "%s/reduced_annotation.gff"%testing_inputs_dir
 # load the functions (test if you can import python packages)
 import sv_functions as fun
 print("loading python packages worked successfully")
-fun.printing_verbose_mode = True
+fun.printing_verbose_mode = False
 
 # define the testing inuts dir 
 testing_outputs_dir = "%s/testing_outputs"%test_dir # this is the normal place
@@ -81,7 +81,6 @@ inputs_Calbicans_chr1_2_6 = "%s/Candida_albicans_chr1_2_6.fasta"%testing_inputs_
 Calbicans_chr1_2_6 = "%s/Candida_albicans_chr1_2_6.fasta"%testing_outputs_dir
 fun.soft_link_files(inputs_Calbicans_chr1_2_6, Calbicans_chr1_2_6)
 
-
 ########################################
 
 # check that that the database has been created
@@ -133,14 +132,19 @@ real_bedpe_breakpoints = test_fun.test_realSVgeneration(Cglabrata_subsampled_rea
 # test the parameter optimisation based on real_bedpe_breakpoints
 #test_fun.test_parameter_optimisation_perSVade_real(Cglabrata_subsampled_reads_dir, Cglabrata_subsampled_perSVade_outdir, Cglabrata_repeats, Cglabrata_genome, real_bedpe_breakpoints, replace=False)
 
+# test CNV calling with the three programs
+
+# test ONT read calling
+
 ### TESTING THINGS THAT ARE DISPENSABLE ###
 
-# test the repeat masker obtention for a long chromosome 1, 2 and 6
-test_fun.test_get_repeat_maskerDF(Calbicans_chr1_2_6, replace=False)
 
 # test the querying of the SRA database and downloading, and trimming of reads and also gztool
 outdir_SRAdb_query_downloading_and_readTrimming = "%s/testing_SRAdb_query_downloading_and_readTrimming_MERS"%testing_outputs_dir
 test_fun.test_SRAdb_query_downloading_and_readTrimming(outdir_SRAdb_query_downloading_and_readTrimming, MERS_genome, 1335626, replace=False)
+
+# test the repeat masker obtention for a long chromosome 1, 2 and 6
+test_fun.test_get_repeat_maskerDF(Calbicans_chr1_2_6, replace=False)
 
 ############################################
 

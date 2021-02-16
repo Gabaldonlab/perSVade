@@ -32,7 +32,6 @@ conda config --add channels bioconda &&
 conda config --add channels plotly &&
 conda config --add channels anaconda &&
 
-
 # install packages that should be loaded 
 conda install -y pandas=0.24.2 &&
 conda install -y biopython=1.73 &&
@@ -41,7 +40,7 @@ conda install -y scikit-learn=0.21.3 &&
 conda install -y -c plotly plotly=2.7.0 &&
 conda install -y -c conda-forge cufflinks-py=0.13.0 &&
 conda install -c anaconda -y seaborn=0.9.0 && # updates: ca-certificates    conda-forge/label/cf201901::ca-certif~ --> anaconda::ca-certificates-2020.6.24-0, certifi  conda-forge/label/cf201901::certifi-2~ --> anaconda::certifi-2020.6.20-py36_0
-conda install -c conda-forge -y matplotlib=3.3.0 # by default, seaborn installs 3.3.1, which raises errors
+conda install -c conda-forge -y matplotlib=3.3.0 && # by default, seaborn installs 3.3.1, which raises errors
 conda install -c anaconda -y psutil=5.7.2 &&
 conda install -c anaconda -y pigz=2.4 &&
 
@@ -63,45 +62,25 @@ conda install -c bioconda -y parallel-fastq-dump=0.6.3 &&
 conda install -c bioconda -y fastqc=0.11.9 &&
 conda install -c bioconda -y bedops=2.4.39 &&
 conda install -c bioconda -y genmap=1.3.0 &&
-conda install -c anaconda -y cython=0.29.21 # necessary for the cylowess running
+conda install -c anaconda -y cython=0.29.21 && # necessary for the cylowess running
 conda install -c anaconda -y xlrd=1.2.0
+
+# export env
+conda env export --no-builds --from-history -n perSVade_env --file perSVade_env.yml
 
 
 # things that don't work
 #conda install -c bioconda cnvpytor=1.0 # a package to run CNV calls. It does not install any R pack
-
-
 #conda install -c conda-forge -y python-igraph=0.8.3 && # this updates many things. It may be necessary to stick to python-igraph=0.7.1.post7. This 
-
 #conda install -c anaconda -y statsmodels=0.12.0 &&
-
-
 #conda install -c bioconda bioconductor-aneufinder=1.16.0 # it updates a couple things
 #conda install -c anaconda -y cython=0.29.21 # this is necessary for the lowess package
 #conda install -c conda-forge -y python-igraph=0.7.1.post7 # this have errors with the subgraph
 #conda install -c conda-forge -y igraph=0.7.1
 #conda install -c conda-forge -y pycairo=1.20.0 # this is to plot igraph. It updates a lot of things so that it may not be worth
-
-
-
-
-
 #conda install -c conda-forge -y igraph=0.7.1 && # updates openssl pkgs/main::openssl-1.1.1g-h7b6447c_0 --> conda-forge::openssl-1.1.1g-h516909a_1
 #conda install -c conda-forge -y python-igraph=0.7.1.post7 &&
-
-
-
-
-
-############################################################
-
-conda env export --no-builds --from-history -n perSVade_env --file perSVade_env.yml
-
-
-#################### R env ####################
-
 #conda create -n perSVade_env_R
-
 # install R packages
 #conda install -c conda-forge -y r-base=4.0.2 &&
 #conda install -c conda-forge -y r-argparser=0.6 && # at some point this gave problems. The initially installed package was 0.4, which gave inconsistencies
@@ -110,46 +89,20 @@ conda env export --no-builds --from-history -n perSVade_env --file perSVade_env.
 #conda install -c bioconda -y bioconductor-rtracklayer=1.48.0 &&
 #conda install -c conda-forge -y r-r.utils=2.9.2 &&
 #conda install -c bioconda -y bioconductor-structuralvariantannotation=1.4.0;
-
-########################################
-
 # conda install -y gcc_linux-64 &&
 #conda install -y gxx_linux-64
-
 #conda install -c bioconda -y repeatmasker=4.0.9_p2 && # downgrades: gmp 6.2.0-he1b5a44_2 --> 6.1.2-hf484d3e_1000
 #conda install -c bioconda -y repeatmodeler=2.0.1 &&
 # conda install -c asmeurer -y glibc=2.19 # This was necessary to run in Nord3
-
-
-
 #conda config --remove channels defaults
 #conda config --remove channels r
 #conda config --remove channels biocore
-
-
-
-
-
-
-
-
-
-
-## GRAVEYARD ## 
-
 #conda install -c bioconda -y picard=2.18.26 &&
-
-
 #conda install -c conda-forge -y r-base=4.0.2 # originally: conda install -c conda-forge -y r-base=4.0.2
-
-
 # The following packages will be UPDATED:
-
 #   gsl                                        2.5-h294904e_1 --> 2.6-h294904e_0
 #   openssl               anaconda::openssl-1.1.1g-h7b6447c_0 --> conda-forge::openssl-1.1.1g-h516909a_1
-
 # The following packages will be SUPERSEDED by a higher-priority channel:
-
 #   ca-certificates     anaconda::ca-certificates-2020.6.24-0 --> conda-forge::ca-certificates-2020.6.20-hecda079_0
 #   certifi                anaconda::certifi-2020.6.20-py36_0 --> conda-forge::certifi-2020.6.20-py36h9f0ad1d_0
 
@@ -157,14 +110,6 @@ conda env export --no-builds --from-history -n perSVade_env --file perSVade_env.
 
 #   bcftools                                   1.9-h68d8f2e_9 --> 1.9-ha228f0b_4
 #   libdeflate                                 1.2-h516909a_1 --> 1.0-h14c3975_1
-
-
-
-
-
-
-
-
 
 # The following NEW packages will be INSTALLED:
 
@@ -179,10 +124,6 @@ conda env export --no-builds --from-history -n perSVade_env --file perSVade_env.
 # The following packages will be SUPERSEDED by a higher-priority channel:
 
 #   ca-certificates     anaconda::ca-certificates-2020.7.22-0 --> conda-forge::ca-certificates-2020.6.20-hecda079_0
-
-
-
-
 
 # the environment can be exported as:
 #conda env create --file perSVade_env.yml --name perSVade_env
@@ -246,23 +187,23 @@ conda env export --no-builds --from-history -n perSVade_env --file perSVade_env.
 
 
 # Ninja installation 
-git clone https://github.com/TravisWheelerLab/NINJA
-cd NINJA
-make build
+#git clone https://github.com/TravisWheelerLab/NINJA
+#cd NINJA
+#make build
 
-wget https://github.com/TravisWheelerLab/NINJA/archive/0.95-cluster_only.tar.gz
-tar -xvf 0.95-cluster_only.tar.gz; rm 0.95-cluster_only.tar.gz; cd NINJA-0.95-cluster_only/NINJA
-make all
+#wget https://github.com/TravisWheelerLab/NINJA/archive/0.95-cluster_only.tar.gz
+#tar -xvf 0.95-cluster_only.tar.gz; rm 0.95-cluster_only.tar.gz; cd NINJA-0.95-cluster_only/NINJA
+#make all
 
-wget https://github.com/TravisWheelerLab/NINJA/archive/0.97-cluster_only.tar.gz
-tar -xvf 0.97-cluster_only.tar.gz; rm 0.97-cluster_only.tar.gz; cd NINJA-0.97-cluster_only/NINJA
-make all
+#wget https://github.com/TravisWheelerLab/NINJA/archive/0.97-cluster_only.tar.gz
+#tar -xvf 0.97-cluster_only.tar.gz; rm 0.97-cluster_only.tar.gz; cd NINJA-0.97-cluster_only/NINJA
+#make all
 
-ln -s ~/anaconda3/bin/x86_64-conda-cos6-linux-gnu-gcc ~/anaconda3/bin/gcc
-ln -s ~/anaconda3/bin/x86_64-conda_cos6-linux-gnu-g++ ~/anaconda3/bin/g++
+#ln -s ~/anaconda3/bin/x86_64-conda-cos6-linux-gnu-gcc ~/anaconda3/bin/gcc
+#ln -s ~/anaconda3/bin/x86_64-conda_cos6-linux-gnu-g++ ~/anaconda3/bin/g++
 
-chmod 755 ~/anaconda3/bin/gcc
-chmod 755 ~/anaconda3/bin/g++
+#chmod 755 ~/anaconda3/bin/gcc
+#chmod 755 ~/anaconda3/bin/g++
 
 
 
