@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-# This is a script that runs the testing of perSVade on several species
+# This is a script that runs the testing of perSVade on several species. THere are functions and more info in testing_functions.py
 
 ##### DEFINE ENVIRONMENT #######
 
@@ -12,10 +12,10 @@ import pandas as pd
 # define the parent dir of the cluster or not
 ParentDir = "%s/samba"%(os.getenv("HOME")); # local
 if os.path.exists(ParentDir):
-    run_in_cluster = False    
+    running_in_cluster = False    
     threads = 4
 else:
-    run_in_cluster = True    
+    running_in_cluster = True    
     ParentDir = "/gpfs/projects/bsc40/mschikora"
         
 # define the dir where all perSVade code is
@@ -26,12 +26,15 @@ sys.path.insert(0, perSVade_dir)
 print("importing functions")
 import sv_functions as fun
 
+# import testing functions
+sys.path.insert(0, "%s/scripts/perSVade/perSVade_repository/testing"%ParentDir)
+import testing_functions as test_fun
 
 # get the cluster name
-if run_in_cluster is True:
+if running_in_cluster is True:
 
     cluster_name = fun.get_current_clusterName_mareNostrum()
-    if cluster_name=="MN4": threads = 24
+    if cluster_name=="MN4": threads = 48
     elif cluster_name=="Nord3": threads = 16
     else: raise ValueError("cluster could not be identified")
 
@@ -45,108 +48,36 @@ outdir_genomes_and_annotations = "%s/scripts/perSVade/perSVade_repository/testin
 
 ################################
 
-
-"""
-This is how the genomes were obtained:
-
-C. glabrata: reference genome from CGD: the latest version by 12/03/2019, which is v_s02-m07-r35 
-
-C. albicans: 
-
-    ref genome CGD: http://www.candidagenome.org/download/sequence/C_albicans_SC5314/Assembly22/current/C_albicans_SC5314_version_A22-s07-m01-r110_chromosomes.fasta.gz
-
-    gff from CGD: http://www.candidagenome.org/download/gff/C_albicans_SC5314/Assembly22/C_albicans_SC5314_version_A22-s07-m01-r110_features.gff
-
-    From here I keep 'haplotype A' for both files
-
-C. neoformans: ref genome from GenBank GCA_000149245.3
-
-A. fumigatus: 
-
-    gDNA from reference NCBI:
-
-    https://ftp.ncbi.nlm.nih.gov/genomes/all/GCF/000/002/655/GCF_000002655.1_ASM265v1/GCF_000002655.1_ASM265v1_genomic.fna.gz
-    https://ftp.ncbi.nlm.nih.gov/genomes/all/GCF/000/002/655/GCF_000002655.1_ASM265v1/GCF_000002655.1_ASM265v1_genomic.gff.gz
-    
-    mtDNA from https://www.ncbi.nlm.nih.gov/nuccore/CM016889.1
-
-A. thaliana: ref genome from GenBank GCA_000001735.2
-
-D. melanogaster: ref genome from GenBank GCA_000001215.4
-
-D. rerio: ref genome from GenBank removing the alternate haplotypes. (this is GCA_000002035.4)
-
-H. sapiens: ref genome from GenBank removing the alternate haplotypes. (this is GCA_000001405.28)
-
-For C. glabrata I got the nanopore reads from ~/../mmarcet/nanopore/GABALDON02/assembly_files/BG2/nanopore.reads.pass.fastq.gz and the short reads from Ewa's experiment in RUN4_BG2_SRA_WT
-
-"""
-
 # define the table for C. glabrata
 close_shortReads_table_Cglabrata = "%s/scripts/perSVade/perSVade_repository/testing/Cglabrata_table_short_reads.tab"%ParentDir
 goldenSet_dir_Cglabrata = "%s/scripts/perSVade/perSVade_repository/testing/Cglabrata_goldenSetReads_BG2"%ParentDir
 
 # define important info about each species: taxID, spName, ploidy
 
-"""
-species_Info = [("5478", "Candida_glabrata", 1, "mito_C_glabrata_CBS138"),
-                ("5476", "Candida_albicans", 2, "Ca22chrM_C_albicans_SC5314"),
-                ("5207", "Cryptococcus_neoformans", 1, "CP003834.1"),
-                ("746128", "Aspergillus_fumigatus", 1, "CM016889.1"),
-                ("3702", "Arabidopsis_thaliana", 2, "BK010421.1,AP000423.1"),
-                ("7227", "Drosophila_melanogaster", 2, "KJ947872.2")]
-                #("7955", "Danio_rerio", 2, "NC_002333.2")]
-                #("9606", "Homo_sapiens", 2, "NC_012920.1")]
-"""
+#("7955", "Danio_rerio", 2, "NC_002333.2")]
+#("9606", "Homo_sapiens", 2, "NC_012920.1")]
 
-"""
-species_Info = [("7227", "Drosophila_melanogaster", 2, "KJ947872.2")]
-                #("7955", "Danio_rerio", 2, "NC_002333.2")]
-                #("9606", "Homo_sapiens", 2, "NC_012920.1")]
-"""
-
-"""
-species_Info = [("5478", "Candida_glabrata", 1, "mito_C_glabrata_CBS138"),
-                ("5476", "Candida_albicans", 2, "Ca22chrM_C_albicans_SC5314"),
-                ("5207", "Cryptococcus_neoformans", 1, "CP003834.1"),
-                ("746128", "Aspergillus_fumigatus", 1, "CM016889.1")]
-"""
-#species_Info = [("7227", "Drosophila_melanogaster", 2, "KJ947872.2")]
-#species_Info  = [("3702", "Arabidopsis_thaliana", 2, "BK010421.1,AP000423.1")]
-#species_Info = [("5476", "Candida_albicans", 2, "Ca22chrM_C_albicans_SC5314")]
-#species_Info = [("5478", "Candida_glabrata", 1, "mito_C_glabrata_CBS138")]
-#species_Info = [("5207", "Cryptococcus_neoformans", 1, "CP003834.1")]
-
-"""
-species_Info = [("746128", "Aspergillus_fumigatus", 1, "CM016889.1"),
-                ("5207", "Cryptococcus_neoformans", 1, "CP003834.1")]
-"""
-
-species_Info = [("7227", "Drosophila_melanogaster", 2, "KJ947872.2", 30, 10000),
-                ("3702", "Arabidopsis_thaliana", 2, "BK010421.1,AP000423.1", 30, 10000),
-                ("746128", "Aspergillus_fumigatus", 1, "CM016889.1", 10000000000000000, 5000)]
-
-#species_Info = [("3702", "Arabidopsis_thaliana", 2, "BK010421.1,AP000423.1", 30)]
-#species_Info = [("7227", "Drosophila_melanogaster", 2, "KJ947872.2", 30)]
-
+species_Info = [("5478", "Candida_glabrata", 1, "mito_C_glabrata_CBS138", 10000000000000000),
+                ("5476", "Candida_albicans", 2, "Ca22chrM_C_albicans_SC5314", 10000000000000000),
+                ("5207", "Cryptococcus_neoformans", 1, "CP003834.1", 10000000000000000),
+                ("746128", "Aspergillus_fumigatus", 1, "CM016889.1", 10000000000000000),
+                ("3702", "Arabidopsis_thaliana", 2, "BK010421.1,AP000423.1", 30),
+                ("7227", "Drosophila_melanogaster", 2, "KJ947872.2", 30)]
 
 taxIDs_with_noON_overalpping = {"5476", "746128"}
 
 # define the type of run
 running_type = "normalRun" # can be 'normalRun' or 'goldenSet'
-StopAfterPrefecth_of_reads = False
-compute_timimng = False
+run_in_cluster = True
 
-# initialize the df with the timing information
-filename_timing_df = "%s/calculating_resources.tab"%CurDir
-header_fields = ["species", "sampleID", "type_run", "threads", "nvars", "nsimulations", "range_filtering_benchmark", "simulation_ploidies",  "run_time", "exit_status", "finishing_greasy_time", "overall_runID", "std_file", "last_error_line", "job_cmd"]
+# init a df that has the timing and memoryrecordings
+df_resources_file = "%s/resources_consumption.tab"%outdir_testing 
 
-#  generate the file if not already done
-if fun.file_is_empty(filename_timing_df): 
-    open(filename_timing_df, "w").write("\t".join(header_fields) + "\n")
+# define a dir with the STDs of the normal run's testing accuracy
+all_STDs_dir = "%s/all_STDs_testingAccuracySeveralSpecies"%outdir_testing; fun.make_folder(all_STDs_dir)
 
 # go through each species
-for taxID, spName, ploidy, mitochondrial_chromosome, max_coverage_sra_reads, min_CNVsize_betweenBPs in species_Info:
+for taxID, spName, ploidy, mitochondrial_chromosome, max_coverage_sra_reads in species_Info:
     print(taxID, spName)
 
     #if spName=="Candida_glabrata": continue # debug
@@ -158,133 +89,38 @@ for taxID, spName, ploidy, mitochondrial_chromosome, max_coverage_sra_reads, min
     # create an outdir
     outdir_perSVade = "%s/%s_%s"%(outdir_testing, taxID, spName); fun.make_folder(outdir_perSVade)
 
+    # get the repeats for this genome
+    previous_repeats_table = fun.get_repeat_maskerDF(genome, threads=threads, replace=False)[1]
+
     if running_type=="normalRun":
 
-        ###### compute the timing of previous runs ######
+        # this is testing the whole perSVade pipeline on 3 runs of 3 close taxIDs to the reference genome. It will run only SV calling.
 
-        # define files
-        greasy_log = "%s/testing_Accuracy/STDfiles/testAccuracy_greasy.log"%outdir_perSVade
-        jobs_file = "%s/testing_Accuracy/jobs.testingRealDataAccuracy"%outdir_perSVade
-
-        # check that both of these files exists to continue
-        if all([not fun.file_is_empty(x) for x in [greasy_log, jobs_file]]) and compute_timimng is True:
-            print("timing")
-
-            # define the overall_runID
-            overall_runID = "run3"
-            needtochangetheID
-
-            # define the expected jobIDs
-            expected_jobIDs = set(range(1,28))
-
-            # define the finishing greasy time
-            finishing_greasy_time_lines = ["_".join(l.split("]")[0].split("[")[1].split()) for l in open(greasy_log, "r").readlines() if "Finished greasing" in l]
-
-            if len(finishing_greasy_time_lines)!=1: 
-                print("greasy did not finish due to unexpected errors. skipping")
-                continue
-
-            finishing_greasy_time = finishing_greasy_time_lines[0]
-            if len(finishing_greasy_time)!=19: raise ValueError("the greasy log is not correct")
-
-            # if the combination of species and finishing_greasy_time is already in the df, skip. It means that it is an already included measurement
-            previous_df = pd.read_csv(filename_timing_df, sep="\t")
-            previous_species_finishing_time_combinations = set(previous_df.species + "_" + previous_df.finishing_greasy_time)
-            if "%s_%s"%(spName, finishing_greasy_time) in previous_species_finishing_time_combinations:
-                print("already completed species. skipping")
-                continue
-  
-            # map each jobID to an exit status
-            jobID_to_exit_status = {int(l.split("located in line ")[1].split()[0]) : l.split()[9] for l in open(greasy_log, "r").readlines() if "Elapsed:" in l}
-
-            # check that all are failed or completed
-            if len(set(jobID_to_exit_status.values()).difference({"failed", "completed"}))>0: raise ValueError("All the exist status should be failed or completed")
-
-            # map each jobID to the elapsed time
-            jobID_to_elapsed_time = {int(l.split("located in line ")[1].split()[0]) : l.strip().split()[-1] for l in open(greasy_log, "r").readlines() if "Elapsed:" in l}
-
-            # add the remaining jobIDs
-            for remaining_jobID in expected_jobIDs.difference(set(jobID_to_elapsed_time)): 
-
-                jobID_to_elapsed_time[remaining_jobID] = "00:00:00"
-                jobID_to_exit_status[remaining_jobID] = "pending"
-
-
-            # go through each job
-            jobID_to_metadata = {}
-            for Ijob, job_cmd in enumerate(open(jobs_file, "r").readlines()):
-
-                # define the things derived from the outdir
-                outdir_job = job_cmd.split("--outdir ")[1].split()[0]
-                sampleID = outdir_job.split("/")[-1]
-                type_run = outdir_job.split("/")[-2]
-
-                # other things
-                threads = int(job_cmd.split("--threads ")[1].split()[0])
-                nvars = int(job_cmd.split("--nvars ")[1].split()[0])
-                nsimulations = int(job_cmd.split("--nsimulations ")[1].split()[0])
-                simulation_ploidies = job_cmd.split("--simulation_ploidies ")[1].split()[0]
-                range_filtering_benchmark = job_cmd.split("--range_filtering_benchmark ")[1].split()[0]
-
-                # get the log
-                std_file_original = job_cmd.split()[-2]
-                std_file = "%s/std_files_testingAccuracy/%s_%s_%s_%ithreads_%ivars_%isims_range:%s_ploidies:%s_greasyFinish:%s.std"%(CurDir, spName, sampleID, type_run, threads, nvars, nsimulations, range_filtering_benchmark, simulation_ploidies, finishing_greasy_time)
-                fun.run_cmd("cp %s %s"%(std_file_original, std_file))
-
-                # get the last line with an error
-                lines_with_error = [l.strip() for l in open(std_file_original, "r").readlines() if "ERROR" in l.upper()]
-                if len(lines_with_error)==0: last_error_line = "no_error"
-                else: last_error_line = lines_with_error[-1]
-
-                # get into dict
-                jobID_to_metadata[Ijob+1] = {'species': spName, 'sampleID': sampleID, 'type_run': type_run, 'threads': threads, 'nvars': nvars, 'nsimulations': nsimulations, 'simulation_ploidies': simulation_ploidies, 'run_time': jobID_to_elapsed_time[Ijob+1], 'range_filtering_benchmark':range_filtering_benchmark, 'exit_status': jobID_to_exit_status[Ijob+1], "finishing_greasy_time":finishing_greasy_time, "overall_runID":overall_runID, "std_file":std_file, "last_error_line":last_error_line, "job_cmd":job_cmd.split(" >")[0]}
-
-                # remove the 'failed'
-                #if jobID_to_exit_status[Ijob+1]=="failed": fun.delete_folder(outdir_job)
-
-            # deifine as df
-            df_timimg = pd.DataFrame(jobID_to_metadata).transpose()[header_fields]
-
-            # add the previous df to drop duplicates
-            df_timimg = df_timimg.append(pd.read_csv(filename_timing_df, sep="\t")).drop_duplicates()
-
-            # append
-            df_timimg.to_csv(filename_timing_df, sep="\t", header=True, index=False)
-
-        # skip the running of the cmds
-        if compute_timimng is True: continue # debug
-
-        ################################################
-
-        ####### delete the folders that did not complete in any of the previous runs ######
-
-        """
-
-        for typeSim in ["fast", "uniform", "realSVs"]:
-            outdir_testAccuracy = "%s/testing_Accuracy/%s"%(outdir_perSVade, typeSim)
-            if not os.path.isdir(outdir_testAccuracy): continue
-
-            for f in os.listdir(outdir_testAccuracy): 
-                outdir_f = "%s/%s"%(outdir_testAccuracy, f)
-                if fun.file_is_empty("%s/perSVade_finished_file.txt"%(outdir_f)):
-
-                    print("deleting %s"%outdir_f)
-                    fun.delete_folder(outdir_f)
-
-        """
-
-        ####################################################################################
-
+        # record the used resources in this run (this should be only implemented when there are no running jobs)
+        df_resources, current_roundID = tes_fun.update_df_resources_nord3Runs_testingAccuracy(df_resources_file, outdir_perSVade, spName, all_STDs_dir)
 
         # define the table with short reads
         if spName=="Candida_glabrata": close_shortReads_table = close_shortReads_table_Cglabrata
         else: close_shortReads_table = "auto"
 
         # get the reads from SRA. 3 samples, 3 runs per sample. Process with the. --verbose
-        cmd = "%s --ref %s --threads %i -o %s --close_shortReads_table %s --target_taxID %s --n_close_samples 3 --nruns_per_sample 3 -f1 skip -f2 skip --mitochondrial_chromosome %s --testAccuracy --skip_SVcalling --verbose --skip_cleaning_simulations_files_and_parameters --StopAfter_testAccuracy_perSVadeRunning --max_coverage_sra_reads %i --gff %s --nsimulations 2 --min_CNVsize_betweenBPs %i"%(perSVade_py, genome, threads, outdir_perSVade, close_shortReads_table, taxID, mitochondrial_chromosome, max_coverage_sra_reads, gff, min_CNVsize_betweenBPs)
-        # --StopAfter_testAccuracy_perSVadeRunning --slurm_constraint, --StopAfter_obtentionOFcloseSVs --gff %s. Need to add the ploidy (-p ploidy) min_CNV_size # replace_SV_CNVcalling_and_optimisation
+        cmd = "%s --ref %s --threads %i -o %s --close_shortReads_table %s --target_taxID %s --n_close_samples 3 --nruns_per_sample 3 -f1 skip -f2 skip --mitochondrial_chromosome %s --testAccuracy --verbose --max_coverage_sra_reads %i --gff %s --nsimulations 2 --skip_CNV_calling --simulation_ploidies haploid,diploid_hetero --previous_repeats_table %s"%(perSVade_py, genome, threads, outdir_perSVade, close_shortReads_table, taxID, mitochondrial_chromosome, max_coverage_sra_reads, gff, previous_repeats_table)
+
+        """ 
+        Relevant args
+        --skip_SVcalling
+        --skip_CNV_calling: This is always used because this testing is about SV calling
+        --StopAfter_readObtentionFromSRA
+        --StopAfter_obtentionOFcloseSVs
+
+        # --StopAfter_testAccuracy_perSVadeRunning --slurm_constraint, --StopAfter_obtentionOFcloseSVs --gff %s. Need to add the ploidy (-p ploidy) min_CNV_size # replace_SV_CNVcalling_and_optimisation --skip_cleaning_simulations_files_and_parameters --skip_repeat_analysis, --StopAfterPrefecth_of_reads, --StopAfter_sampleIndexingFromSRA
+
+        """
+        
 
     elif running_type=="goldenSet":
+
+        # this can only work if the normalRun has worked well and there is a set of breakends that have been related through the 
 
         # define the goldenSet_dir
         if spName=="Candida_glabrata": goldenSet_dir = goldenSet_dir_Cglabrata
@@ -298,24 +134,22 @@ for taxID, spName, ploidy, mitochondrial_chromosome, max_coverage_sra_reads, min
     if run_in_cluster is True: cmd += " --job_array_mode job_array"
     else: cmd += " --job_array_mode local"
 
-    if StopAfterPrefecth_of_reads is True: cmd += " --StopAfterPrefecth_of_reads"
-
     cmd_output = "%s/cmd_testing.std"%outdir_perSVade
     print("running std into %s"%cmd_output)
-    fun.run_cmd("%s > %s 2>&1"%(cmd, cmd_output))
+    fun.run_cmd("%s > %s 2>&1"%(cmd, cmd_output)) # run with stdout
+    #fun.run_cmd(cmd); continue # run locally
 
     ###### RUN JOB ARRAYS ######
 
     # get the jobs file to run
     all_lines_jobfile = [l for l in open(cmd_output, "r").readlines() if l.startswith("You need to successfully run all jobs in")]
 
-    if len(all_lines_jobfile)==1:
+    if len(all_lines_jobfile)==1 and run_in_cluster is True:
 
         jobs_filename = [x for x in all_lines_jobfile[-1].split() if x.startswith("/gpfs/projects/bsc40/mschikora")][0]
 
         # define parameters
         name = "%s_jobs"%spName
-
      
         # run jobs
         if cluster_name=="MN4": 
@@ -328,9 +162,8 @@ for taxID, spName, ploidy, mitochondrial_chromosome, max_coverage_sra_reads, min
 
         elif cluster_name=="Nord3": 
 
-
             queue = "bsc_ls"; 
-            RAM_per_thread = 3600; 
+            RAM_per_thread = 5000; 
             time = "48:00:00" # per job
 
             fun.run_jobarray_file_Nord3(jobs_filename, name, time=time, queue=queue, threads_per_job=threads, RAM_per_thread=RAM_per_thread, max_njobs_to_run=1000)
@@ -342,53 +175,6 @@ for taxID, spName, ploidy, mitochondrial_chromosome, max_coverage_sra_reads, min
     #if taxID=="5476": adkjhdakg # stop after C. albicans
 
 print("the testing of several species finsihed susccesffully")
-
-# an example CMD to debug de generation of merged vcfs
-"""
-
-cd ~/samba/CandidaMine_data_generation/v1/data/Candida_albicans_5476/varCall_output/SRR6669901/
-
-~/samba/scripts/perSVade/perSVade_repository/scripts/varcall_cnv_pipeline.py -r ~/samba/CandidaMine_data_generation/v1/data/Candida_albicans_5476/genome.fasta -thr 4 -o smallVars_CNV_output -p 2 -sbam aligned_reads.bam.sorted -c 12 -mchr Ca22chrM_C_albicans_SC5314 -mcode 4 -gcode 12 -gff ~/samba/CandidaMine_data_generation/v1/data/Candida_albicans_5476/annotations.gff --get_merged_vcf
-
-
-"""
-
-
-# an example of running the pipeline for adding the repeats
-
-"""
-
-python /gpfs/projects/bsc40/mschikora/scripts/perSVade/perSVade_repository/scripts/perSVade.py -r /gpfs/projects/bsc40/mschikora/scripts/perSVade/perSVade_repository/testing/outdirs_testing_severalSpecies/5478_Candida_glabrata/reference_genome_dir/reference_genome.fasta --threads 48 --outdir /gpfs/projects/bsc40/mschikora/scripts/perSVade/perSVade_repository/testing/outdirs_testing_severalSpecies/5478_Candida_glabrata/testing_Accuracy/fast/BG2_ANI --nvars 50 --nsimulations 2 --simulation_ploidies haploid,diploid_hetero --range_filtering_benchmark theoretically_meaningful --mitochondrial_chromosome mito_C_glabrata_CBS138 -f1 /gpfs/projects/bsc40/mschikora/Cglabrata_antifungals/data/trimmed_reads/RUN1_BG2_11B_ANI_R1_trimmed.fq.gz -f2 /gpfs/projects/bsc40/mschikora/Cglabrata_antifungals/data/trimmed_reads/RUN1_BG2_11B_ANI_R2_trimmed.fq.gz --fast_SVcalling --previous_repeats_table /gpfs/projects/bsc40/mschikora/scripts/perSVade/perSVade_repository/testing/outdirs_testing_severalSpecies/5478_Candida_glabrata/reference_genome.fasta.repeats.tab
-
-
-source ~/.bash_profile
-run_interactive_session_debug
-conda activate perSVade_env
-
-# drosophila files
-/gpfs/projects/bsc40/mschikora/scripts/perSVade/perSVade_repository/testing/outdirs_testing_severalSpecies/7227_Drosophila_melanogaster/testing_Accuracy
-
-# arabidposis files
-/gpfs/projects/bsc40/mschikora/scripts/perSVade/perSVade_repository/testing/outdirs_testing_severalSpecies/3702_Arabidopsis_thaliana/testing_Accuracy
-
-# testing on Arabidopsis
-
-cd /gpfs/projects/bsc40/mschikora/scripts/perSVade/perSVade_repository/testing/outdirs_testing_severalSpecies/3702_Arabidopsis_thaliana/testing_Accuracy/realSVs/sample59689_SRR7119536
-
-conda activate perSVade_env
-
-python /gpfs/projects/bsc40/mschikora/scripts/perSVade/perSVade_repository/scripts/perSVade.py -r /gpfs/projects/bsc40/mschikora/scripts/perSVade/perSVade_repository/testing/outdirs_testing_severalSpecies/3702_Arabidopsis_thaliana/reference_genome_dir/reference_genome.fasta --threads 48 --outdir /gpfs/projects/bsc40/mschikora/scripts/perSVade/perSVade_repository/testing/outdirs_testing_severalSpecies/3702_Arabidopsis_thaliana/testing_Accuracy/realSVs/sample59689_SRR7119536 --nvars 50 --nsimulations 1 --simulation_ploidies haploid,diploid_hetero --range_filtering_benchmark theoretically_meaningful --mitochondrial_chromosome BK010421.1,AP000423.1 -f1 /gpfs/projects/bsc40/mschikora/scripts/perSVade/perSVade_repository/testing/outdirs_testing_severalSpecies/3702_Arabidopsis_thaliana/findingRealSVs_automaticFindingOfCloseReads/getting_closeReads/reads/SRR7119536/SRR7119536_trimmed_reads_1.fastq.gz.30x.fastq.gz -f2 /gpfs/projects/bsc40/mschikora/scripts/perSVade/perSVade_repository/testing/outdirs_testing_severalSpecies/3702_Arabidopsis_thaliana/findingRealSVs_automaticFindingOfCloseReads/getting_closeReads/reads/SRR7119536/SRR7119536_trimmed_reads_2.fastq.gz.30x.fastq.gz --previous_repeats_table /gpfs/projects/bsc40/mschikora/scripts/perSVade/perSVade_repository/testing/outdirs_testing_severalSpecies/3702_Arabidopsis_thaliana/reference_genome_dir/reference_genome.fasta.repeats.tab --skip_cleaning_outdir --real_bedpe_breakpoints /gpfs/projects/bsc40/mschikora/scripts/perSVade/perSVade_repository/testing/outdirs_testing_severalSpecies/3702_Arabidopsis_thaliana/findingRealSVs_automaticFindingOfCloseReads/integrated_breakpoints.bedpe --verbose &
-
-# testing on Drosophila
-
-cd /gpfs/projects/bsc40/mschikora/scripts/perSVade/perSVade_repository/testing/outdirs_testing_severalSpecies/7227_Drosophila_melanogaster/testing_Accuracy/realSVs/sample7240_SRR6466705
-
-python /gpfs/projects/bsc40/mschikora/scripts/perSVade/perSVade_repository/scripts/perSVade.py -r /gpfs/projects/bsc40/mschikora/scripts/perSVade/perSVade_repository/testing/outdirs_testing_severalSpecies/7227_Drosophila_melanogaster/reference_genome_dir/reference_genome.fasta --threads 48 --outdir /gpfs/projects/bsc40/mschikora/scripts/perSVade/perSVade_repository/testing/outdirs_testing_severalSpecies/7227_Drosophila_melanogaster/testing_Accuracy/realSVs/sample7240_SRR6466705 --nvars 50 --nsimulations 1 --simulation_ploidies haploid --range_filtering_benchmark theoretically_meaningful --mitochondrial_chromosome KJ947872.2 -f1 /gpfs/projects/bsc40/mschikora/scripts/perSVade/perSVade_repository/testing/outdirs_testing_severalSpecies/7227_Drosophila_melanogaster/findingRealSVs_automaticFindingOfCloseReads/getting_closeReads/reads/SRR6466705/SRR6466705_trimmed_reads_1.fastq.gz.30x.fastq.gz -f2 /gpfs/projects/bsc40/mschikora/scripts/perSVade/perSVade_repository/testing/outdirs_testing_severalSpecies/7227_Drosophila_melanogaster/findingRealSVs_automaticFindingOfCloseReads/getting_closeReads/reads/SRR6466705/SRR6466705_trimmed_reads_2.fastq.gz.30x.fastq.gz --previous_repeats_table /gpfs/projects/bsc40/mschikora/scripts/perSVade/perSVade_repository/testing/outdirs_testing_severalSpecies/7227_Drosophila_melanogaster/reference_genome_dir/reference_genome.fasta.repeats.tab --skip_cleaning_outdir --real_bedpe_breakpoints /gpfs/projects/bsc40/mschikora/scripts/perSVade/perSVade_repository/testing/outdirs_testing_severalSpecies/7227_Drosophila_melanogaster/findingRealSVs_automaticFindingOfCloseReads/integrated_breakpoints.bedpe --gff /gpfs/projects/bsc40/mschikora/scripts/perSVade/perSVade_repository/testing/outdirs_testing_severalSpecies/7227_Drosophila_melanogaster/reference_genome_dir/reference_genome_features.gff_corrected.gff_with_biotype.gff --verbose &
-
-
-"""
-
-
 
 
 

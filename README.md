@@ -73,7 +73,11 @@ If you are working from any cluster that has access to the BSC /gpfs filesystem 
 
 You can next run perSVade from the releases folder (these are stable versions of the pipeline). For example:
 
-`python /gpfs/projects/bsc40/mschikora/scripts/perSVade/releases/v0.2/scripts/perSVade.py -r <path to the reference genome (fasta)> -o <output_directory> -p <ploidy, 1 or 2> -f1 <forward_reads.fastq.gz> -f2 <reverse_reads.fastq.gz> `
+`python /gpfs/projects/bsc40/mschikora/scripts/perSVade/releases/perSVade-0.5/scripts/perSVade.py -r <path to the reference genome (fasta)> -o <output_directory> -p <ploidy, 1 or 2> -f1 <forward_reads.fastq.gz> -f2 <reverse_reads.fastq.gz> `
+
+IMPORTANT NOTE: The activation of the perSVade conda environment works well from version 0.5 on. This means that you can activate from the login of MN or interactive nodes. However, the activation of older versions (v0.4 and below) is costly, and it overloads the login nodes. If you want to use an old version of perSVade, always activate it on an interactive node (i.e.: `salloc`). In addition, you can't run the perSVade pipeline from a login, because it takes too many resources. You can submit perSVade as a job or run from an interactive session with `salloc -n 1 --time=02:00:00 -c 48 --qos debug`.
+
+
 
 ## Running in other systems
 

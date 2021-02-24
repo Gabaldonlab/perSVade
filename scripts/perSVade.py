@@ -20,6 +20,7 @@ from Bio.SeqRecord import SeqRecord
 import random
 import sys
 from shutil import copyfile
+import time
 
 # get the cwd were all the scripts are 
 CWD = "/".join(__file__.split("/")[0:-1]); sys.path.insert(0, CWD)
@@ -56,15 +57,10 @@ parser.add_argument("-p", "--ploidy", dest="ploidy", default=1, type=int, help="
 
 # replace CNV_calling
 parser.add_argument("--replace_SV_CNVcalling", dest="replace_SV_CNVcalling", action="store_true", help="Replace everything related to the SV and CNV calling.")
-
-
-
-
 parser.add_argument("--replace_FromGridssRun_final_perSVade_run", dest="replace_FromGridssRun_final_perSVade_run", action="store_true", help="Replace from the clove running in the final gridss+clove running")
 
 
 # different modules to be executed
-parser.add_argument("--testSVgen_from_DefaulReads", dest="testSVgen_from_DefaulReads", default=False, action="store_true", help="This indicates whether to generate a report of how the generation of SV works with the default parameters on random simulations")
 
 parser.add_argument("--close_shortReads_table", dest="close_shortReads_table", type=str, default=None, help="This is the path to a table that has 4 fields: sampleID,runID,short_reads1,short_reads2. These should be WGS runs of samples that are close to the reference genome and some expected SV. Whenever this argument is provided, the pipeline will find SVs in these samples and generate a folder <outdir>/findingRealSVs<>/SVs_compatible_to_insert that will contain one file for each SV, so that they are compatible and ready to insert in a simulated genome. This table will be used if --testAccuracy is specified, which will require at least 3 runs for each sample. It can be 'auto', in which case it will be inferred from the taxID provided by --target_taxID.")
 
@@ -77,8 +73,6 @@ parser.add_argument("--nruns_per_sample", dest="nruns_per_sample", default=3, ty
 parser.add_argument("--real_bedpe_breakpoints", dest="real_bedpe_breakpoints", type=str, default=None, help="A file with the list of 'real' breakpoints arround which to insert the SVs in simulations. It may be created with --close_shortReads_table. If both --real_bedpe_breakpoints and --close_shortReads_table are provided, --real_bedpe_breakpoints will be used, and --close_shortReads_table will have no effect. If none of them are provided, this pipeline will base the parameter optimization on randomly inserted SVs (the default behavior). The coordinates have to be 1-based, as they are ready to insert into RSVsim.")
 
 parser.add_argument("--parameters_json_file", dest="parameters_json_file", type=str, default=None, help="A file with the json parameters to use. This only has effect if --fast_SVcalling is specified")
-
-
 parser.add_argument("--fast_SVcalling", dest="fast_SVcalling", action="store_true", default=False, help="Run SV calling with a default set of parameters. There will not be any optimisation nor reporting of accuracy. This is expected to work almost as fast as gridss and clove together. If --parameters_json_file, the parameters are substituted by the json parameters.")
 
 
@@ -96,7 +90,6 @@ parser.add_argument("--goldenSet_dir", dest="goldenSet_dir", type=str, default=N
 # pipeline stopping options
 parser.add_argument("--StopAfter_readObtentionFromSRA", dest="StopAfter_readObtentionFromSRA", action="store_true", default=False, help="Stop after obtaining reads from SRA.")
 parser.add_argument("--StopAfter_sampleIndexingFromSRA", dest="StopAfter_sampleIndexingFromSRA", action="store_true", default=False, help="It will stop after indexing the samples of SRA. You can use this if, for example, your local machine has internet connection and your slurm cluster does not. You can first obtain the SRA indexes in the local machine. And then run again this pipeline without this option in the slurm cluster.")
-parser.add_argument("--StopAfter_genomeObtention", dest="StopAfter_genomeObtention", action="store_true", default=False, help="Stop after genome obtention.")
 parser.add_argument("--StopAfter_bamFileObtention", dest="StopAfter_bamFileObtention", action="store_true", default=False, help="Stop after obtaining the BAM file of aligned reads.")
 parser.add_argument("--StopAfterPrefecth_of_reads", dest="StopAfterPrefecth_of_reads", action="store_true", default=False, help="Stop after obtaining the prefetched .srr file in case close_shortReads_table is 'auto'")
 parser.add_argument("--StopAfterPrefecth_of_reads_goldenSet", dest="StopAfterPrefecth_of_reads_goldenSet", action="store_true", default=False, help="Stop after obtaining the prefetched .srr file in case --goldenSet_dir is specified.")
@@ -107,7 +100,6 @@ parser.add_argument("--StopAfter_replace_SV_CNVcalling", dest="StopAfter_replace
 
 # testing options
 parser.add_argument("--testAccuracy", dest="testAccuracy", action="store_true", default=False, help="Reports the accuracy  of your calling on the real data, simulations and fastSVcalling for all the WGS runs specified in --close_shortReads_table. ")
-
 
 # simulation parameter args
 parser.add_argument("--nvars", dest="nvars", default=50, type=int, help="Number of variants to simulate for each SVtype.")
@@ -140,7 +132,7 @@ parser.add_argument("--max_coverage_sra_reads", dest="max_coverage_sra_reads", d
 parser.add_argument("--min_chromosome_len", dest="min_chromosome_len", default=100000, type=int, help="The minimum length to consider chromosomes from the provided fasta for calculating the window length. Any chromosomes that shorter than the window length will not be considered in the random SV simulations.")
 
 # the fraction of available memory
-parser.add_argument("--fraction_available_mem", dest="fraction_available_mem", default=None, help="The fraction of RAM that is being allocated to this perSVade run. In several steps, this pipeline needs to calculate the available memory (using psutil.virtual_memory()). This returns all the available memory in the computer. If you are running on a fraction of the computers' resources, this calculation is overestimating the available RAM. In such case you can provide the fraction available through this argument. By default, it will calculate the available ram by filling the memory, which may give errors.")
+parser.add_argument("--fraction_available_mem", dest="fraction_available_mem", default=None, help="The fraction of RAM that is being allocated to this perSVade run. In several steps, this pipeline needs to calculate the available memory (using psutil.virtual_memory()). This returns all the available memory in the computer. If you are running on a fraction of the computers' resources, this calculation is overestimating the available RAM. In such case you can provide the fraction available through this argument. By default, it will calculate the available ram by filling the memory, which may give errors. It is highly reccommended that you provide this option. If you want to use all the allocated memory you should specify --fraction_available_mem 1.0")
 
 # small VarCall and CNV args
 parser.add_argument("--run_smallVarsCNV", dest="run_smallVarsCNV", action="store_true", default=False, help="Will call small variants and CNV.")
@@ -158,7 +150,7 @@ parser.add_argument("--replace_var_integration", dest="replace_var_integration",
 parser.add_argument("--replace_addingCNstate_to_smallVars", dest="replace_addingCNstate_to_smallVars", action="store_true", default=False, help="Replace the step of adding the Copy Number of each variant.")
 
 parser.add_argument("--generate_alternative_genome", dest="generate_alternative_genome", default=False, action="store_true", help="Generate an alternative genome in smallVariantCalling.")
-parser.add_argument("--skip_cnv_analysis", dest="skip_cnv_analysis", default=False, action="store_true", help="Don't perform the cnv analysis where we calculate coverage per gene and per equal windows of the genome")
+parser.add_argument("--skip_cnv_analysis", dest="skip_cnv_analysis", default=False, action="store_true", help="Don't perform the cnv analysis where we calculate coverage per gene and per equal windows of the genome. This refers to the per-gene CNV analysis, not the per-window.")
 
 
 # add the CNV calling args
@@ -197,6 +189,10 @@ opt = parser.parse_args()
 ########################################
 ##### GENERAL PROCESSING OF INPUTS #####
 ########################################
+
+# start time of processing
+start_time_GeneralProcessing =  time.time()
+start_time_all =  time.time()
 
 # if replace is set remove the outdir, and then make it
 if opt.replace is True: fun.delete_folder(opt.outdir)
@@ -251,7 +247,7 @@ else:
 
 #### REPLACE THE REPEATS TABLE IF PROVIDED ####
 
-# define the 
+# define the repeats table. This will work for any downstream analysis of this
 repeats_table_file = "%s.repeats.tab"%opt.ref
 
 if opt.previous_repeats_table is not None:
@@ -259,13 +255,11 @@ if opt.previous_repeats_table is not None:
 
     if fun.file_is_empty(opt.previous_repeats_table): raise ValueError("The provided repeats table does not exist")
     # softlink
+    fun.remove_file(repeats_table_file)
     fun.soft_link_files(opt.previous_repeats_table, repeats_table_file)
 
 ###############################################
 
-if opt.StopAfter_genomeObtention is True: 
-    print("Stopping pipeline after the genome obtention.")
-    sys.exit(0)
 
 #### define misc args ####
 
@@ -300,6 +294,7 @@ fun.printing_verbose_mode = opt.verbose
 
 # defin the fraction of available mem
 fun.fraction_available_mem = opt.fraction_available_mem
+if opt.fraction_available_mem is None: print("WARNING: You did not specify how much RAM should be used through --fraction_available_mem. perSVade will calculate this by filling the memory, which may be dangerous. If you want to use all the allocated memory you should specify --fraction_available_mem 1.0")
 
 # define the min_CNVsize_coverageBased
 fun.min_CNVsize_coverageBased = opt.min_CNVsize_coverageBased
@@ -342,6 +337,9 @@ if opt.StopAfter_repeatsObtention is True:
 
 #############################
 
+# end time of processing
+end_time_GeneralProcessing =  time.time()
+
 ########################################
 ########################################
 ########################################
@@ -350,6 +348,8 @@ if opt.StopAfter_repeatsObtention is True:
 #####################################
 ############# BAM FILE ##############
 #####################################
+
+start_time_alignment =  time.time()
 
 if not any([x=="skip" for x in {opt.fastq1, opt.fastq2}]):
 
@@ -391,6 +391,9 @@ if not any([x=="skip" for x in {opt.fastq1, opt.fastq2}]):
     # check that all the important files exist
     if any([fun.file_is_empty(x) for x in {sorted_bam, index_bam}]): raise ValueError("You need the sorted and indexed bam files in ")
 
+
+end_time_alignment =  time.time()
+
 #####################################
 #####################################
 #####################################
@@ -430,6 +433,7 @@ if opt.StopAfter_bamFileObtention is True:
 ##### STRUCTURAL VARIATION ##########
 #####################################
 
+start_time_obtentionCloseSVs =  time.time()
 
 ##### find a dict that maps each svtype to a file with a set of real SVs (real_svtype_to_file) #####
 all_svs = {'translocations', 'insertions', 'deletions', 'inversions', 'tandemDuplications'}
@@ -485,7 +489,7 @@ if opt.StopAfter_obtentionOFcloseSVs:
     print("stopping pipeline after obtention of close SVs")
     sys.exit(0)
 
-
+end_time_obtentionCloseSVs =  time.time()
 
 ###################################################################################################
 
@@ -498,7 +502,20 @@ if opt.testAccuracy is True:
     if opt.close_shortReads_table is None or opt.fast_SVcalling is True: 
         raise ValueError("You have to specify a --close_shortReads_table and not run in --fast_SVcalling to test the accuracy of the pipeline on several datasets (--testAccuracy)")
 
-    fun.report_accuracy_realSVs(opt.close_shortReads_table, opt.ref, "%s/testing_Accuracy"%opt.outdir, real_bedpe_breakpoints, threads=opt.threads, replace=opt.replace, n_simulated_genomes=opt.nsimulations, mitochondrial_chromosome=opt.mitochondrial_chromosome, simulation_ploidies=simulation_ploidies, range_filtering_benchmark=opt.range_filtering_benchmark, nvars=opt.nvars, job_array_mode=opt.job_array_mode, StopAfter_testAccuracy_perSVadeRunning=opt.StopAfter_testAccuracy_perSVadeRunning, skip_cleaning_simulations_files_and_parameters=opt.skip_cleaning_simulations_files_and_parameters, skip_cleaning_outdir=opt.skip_cleaning_outdir, parameters_json_file=opt.parameters_json_file, gff=opt.gff, replace_FromGridssRun_final_perSVade_run=opt.replace_FromGridssRun_final_perSVade_run, fraction_available_mem=opt.fraction_available_mem, replace_SV_CNVcalling=opt.replace_SV_CNVcalling)
+    ### RUN PERSVADE ###
+
+    dict_perSVade_outdirs = fun.report_accuracy_realSVs_perSVadeRuns(opt.close_shortReads_table, opt.ref, "%s/testing_Accuracy"%opt.outdir, real_bedpe_breakpoints, threads=opt.threads, replace=opt.replace, n_simulated_genomes=opt.nsimulations, mitochondrial_chromosome=opt.mitochondrial_chromosome, simulation_ploidies=simulation_ploidies, range_filtering_benchmark=opt.range_filtering_benchmark, nvars=opt.nvars, job_array_mode=opt.job_array_mode, skip_cleaning_simulations_files_and_parameters=opt.skip_cleaning_simulations_files_and_parameters, skip_cleaning_outdir=opt.skip_cleaning_outdir, parameters_json_file=opt.parameters_json_file, gff=opt.gff, replace_FromGridssRun_final_perSVade_run=opt.replace_FromGridssRun_final_perSVade_run, fraction_available_mem=opt.fraction_available_mem, replace_SV_CNVcalling=opt.replace_SV_CNVcalling, skip_CNV_calling=opt.skip_CNV_calling, outdir_finding_realVars=outdir_finding_realVars)
+
+    if opt.StopAfter_testAccuracy_perSVadeRunning is True: 
+        print_if_verbose("You already ran all the configurations of perSVade. Stopping after the running of perSVade on testAccuracy")
+        sys.exit(0)
+
+    ####################   
+
+    ### REPORT ACCURACY SINGLE SAMPLE ###
+    youhavetoaddcodeof_codeGraveyard_report_accuracy_realSVs
+
+    ##################################### 
 
 
 # get the golden set
@@ -509,12 +526,16 @@ if opt.goldenSet_dir is not None:
     outdir_goldenSet = "%s/testing_goldenSetAccuracy"%opt.outdir
     fun.report_accuracy_golden_set(opt.goldenSet_dir, outdir_goldenSet, opt.ref, real_svtype_to_file, threads=opt.threads, replace=opt.replace, n_simulated_genomes=opt.nsimulations, mitochondrial_chromosome=opt.mitochondrial_chromosome, simulation_ploidies=simulation_ploidies, range_filtering_benchmark=opt.range_filtering_benchmark, nvars=opt.nvars, job_array_mode=opt.job_array_mode, StopAfter_sampleIndexingFromSRA=opt.StopAfter_sampleIndexingFromSRA, StopAfterPrefecth_of_reads=opt.StopAfterPrefecth_of_reads_goldenSet, target_taxID=opt.target_taxID, parameters_json_file=opt.parameters_json_file, fraction_available_mem=opt.fraction_available_mem)
 
+
+start_time_SVcalling =  time.time()
+
 # run the actual perSVade function optimising parameters
 if opt.skip_SVcalling is False and not any([x=="skip" for x in {opt.fastq1, opt.fastq2}]):
 
     SVdetection_outdir = "%s/SVdetection_output"%opt.outdir
     outdir_gridss_final = fun.run_GridssClove_optimising_parameters(sorted_bam, opt.ref, SVdetection_outdir, threads=opt.threads, replace=opt.replace, n_simulated_genomes=opt.nsimulations, mitochondrial_chromosome=opt.mitochondrial_chromosome, simulation_ploidies=simulation_ploidies, range_filtering_benchmark=opt.range_filtering_benchmark, nvars=opt.nvars, fast_SVcalling=opt.fast_SVcalling, real_bedpe_breakpoints=real_bedpe_breakpoints, replace_FromGridssRun_final_perSVade_run=opt.replace_FromGridssRun_final_perSVade_run)
 
+end_time_SVcalling =  time.time()
 
 print("structural variation analysis with perSVade finished")
 
@@ -525,6 +546,8 @@ print("structural variation analysis with perSVade finished")
 #####################################
 ###### SV and CNV ANNOTATION ########
 #####################################
+
+start_time_SVandCNVcalling =  time.time()
 
 run_SV_CNV_calling = (opt.skip_SVcalling is False and not any([x=="skip" for x in {opt.fastq1, opt.fastq2}]) and opt.skip_SV_CNV_calling is False)
 if run_SV_CNV_calling is True:
@@ -572,16 +595,19 @@ if run_SV_CNV_calling is True:
     
     else: print("WARNING: Skipping SV annotation because -gff was not provided.")
 
+end_time_SVandCNVcalling =  time.time()
+
 #####################################
 #####################################
 #####################################
 
 # stop after the generation of SV and CNV calls
 
-
 #####################################
 ###### SMALL VARS AND CNV ###########
 #####################################
+
+start_time_smallVarsCNV =  time.time()
 
 if opt.run_smallVarsCNV:
 
@@ -624,6 +650,8 @@ if opt.run_smallVarsCNV:
 
     # clean the varcall dir if specified
     if opt.remove_smallVarsCNV_nonEssentialFiles is True: fun.remove_smallVarsCNV_nonEssentialFiles_severalPloidies(outdir_varcall, ploidies_varcall)
+
+end_time_smallVarsCNV =  time.time()
 
 #####################################
 #####################################
@@ -669,9 +697,11 @@ if (opt.skip_SVcalling is False or opt.run_smallVarsCNV is True) and not any([x=
 # at the end you want to clean the outdir to keep only the essential files
 if opt.skip_cleaning_outdir is False: fun.clean_perSVade_outdir(opt.outdir)
 
-# generate a file that indicates whether the gridss run is finished
-open(final_file, "w").write("perSVade_finished finished...")
+# define times
+end_time_all = time.time()
 
+# generate a file that indicates whether the gridss run is finished
+fun.generate_final_file_report(final_file, start_time_GeneralProcessing, end_time_GeneralProcessing, start_time_alignment, end_time_alignment, start_time_all, end_time_all, start_time_obtentionCloseSVs, end_time_obtentionCloseSVs, start_time_SVcalling, end_time_SVcalling, start_time_SVandCNVcalling, end_time_SVandCNVcalling, start_time_smallVarsCNV, end_time_smallVarsCNV)
 
 print("perSVade Finished correctly")
 

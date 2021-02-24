@@ -206,12 +206,17 @@ ete3_env_name="$env_name"_ete3_3.0.0_env
 echo "creating conda env $ete3_env_name"
 conda config --add channels conda-forge
 rm -rf $conda_dir/envs/$ete3_env_name || echo 'ete3 was not created'
-conda create -y --name $ete3_env_name python=3.6 # I install python because it is missing
-conda install -n $ete3_env_name -c conda-forge -y ete3=3.0.0;
+conda create -y --name $ete3_env_name python=3.6
+conda install -n $ete3_env_name -c etetoolkit-y ete3=3.1.2; # note that this was updated because 3.3.0 did not work
 
+
+# old
+#conda create -y --name $ete3_env_name python=3.6 # I install python because it is missing
+#conda install -n $ete3_env_name -c conda-forge -y ete3=3.0.0;
 # fix the ete3 script
-ete3_script="$conda_envs_dir"/"$ete3_env_name"/lib/python3.6/site-packages/ete3/ncbi_taxonomy/ncbiquery.py
-python $installation_dir/fix_ete3_script.py $ete3_script;
+#ete3_script="$conda_envs_dir"/"$ete3_env_name"/lib/python3.6/site-packages/ete3/ncbi_taxonomy/ncbiquery.py
+#python $installation_dir/fix_ete3_script.py $ete3_script;
+
 
 # create a subenvironment with all the R dependencies
 R_env_name="$env_name"_R_env
