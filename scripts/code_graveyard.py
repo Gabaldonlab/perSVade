@@ -15285,3 +15285,563 @@ You may need to install some extra dependencies to compile Ninja with `make`. If
 At the end, make sure that you can execute Ninja by typing:
 
 `Ninja --help`
+
+
+
+        ###### compute the timing of previous runs ######
+
+        # define files
+        greasy_log = "%s/testing_Accuracy/STDfiles/testAccuracy_greasy.log"%outdir_perSVade
+        jobs_file = "%s/testing_Accuracy/jobs.testingRealDataAccuracy"%outdir_perSVade
+
+        # check that both of these files exists to continue
+        if all([not fun.file_is_empty(x) for x in [greasy_log, jobs_file]]) and compute_timimng is True:
+            print("timing")
+
+            # define the overall_runID
+            overall_runID = "run3"
+            needtochangetheID
+
+            # define the expected jobIDs
+            expected_jobIDs = set(range(1,28))
+
+            # define the finishing greasy time
+            finishing_greasy_time_lines = ["_".join(l.split("]")[0].split("[")[1].split()) for l in open(greasy_log, "r").readlines() if "Finished greasing" in l]
+
+            if len(finishing_greasy_time_lines)!=1: 
+                print("greasy did not finish due to unexpected errors. skipping")
+                continue
+
+            finishing_greasy_time = finishing_greasy_time_lines[0]
+            if len(finishing_greasy_time)!=19: raise ValueError("the greasy log is not correct")
+
+            # if the combination of species and finishing_greasy_time is already in the df, skip. It means that it is an already included measurement
+            previous_df = pd.read_csv(filename_timing_df, sep="\t")
+            previous_species_finishing_time_combinations = set(previous_df.species + "_" + previous_df.finishing_greasy_time)
+            if "%s_%s"%(spName, finishing_greasy_time) in previous_species_finishing_time_combinations:
+                print("already completed species. skipping")
+                continue
+  
+            # map each jobID to an exit status
+            jobID_to_exit_status = {int(l.split("located in line ")[1].split()[0]) : l.split()[9] for l in open(greasy_log, "r").readlines() if "Elapsed:" in l}
+
+            # check that all are failed or completed
+            if len(set(jobID_to_exit_status.values()).difference({"failed", "completed"}))>0: raise ValueError("All the exist status should be failed or completed")
+
+            # map each jobID to the elapsed time
+            jobID_to_elapsed_time = {int(l.split("located in line ")[1].split()[0]) : l.strip().split()[-1] for l in open(greasy_log, "r").readlines() if "Elapsed:" in l}
+
+            # add the remaining jobIDs
+            for remaining_jobID in expected_jobIDs.difference(set(jobID_to_elapsed_time)): 
+
+                jobID_to_elapsed_time[remaining_jobID] = "00:00:00"
+                jobID_to_exit_status[remaining_jobID] = "pending"
+
+
+            # go through each job
+            jobID_to_metadata = {}
+            for Ijob, job_cmd in enumerate(open(jobs_file, "r").readlines()):
+
+                # define the things derived from the outdir
+                outdir_job = job_cmd.split("--outdir ")[1].split()[0]
+                sampleID = outdir_job.split("/")[-1]
+                type_run = outdir_job.split("/")[-2]
+
+                # other things
+                threads = int(job_cmd.split("--threads ")[1].split()[0])
+                nvars = int(job_cmd.split("--nvars ")[1].split()[0])
+                nsimulations = int(job_cmd.split("--nsimulations ")[1].split()[0])
+                simulation_ploidies = job_cmd.split("--simulation_ploidies ")[1].split()[0]
+                range_filtering_benchmark = job_cmd.split("--range_filtering_benchmark ")[1].split()[0]
+
+                # get the log
+                std_file_original = job_cmd.split()[-2]
+                std_file = "%s/std_files_testingAccuracy/%s_%s_%s_%ithreads_%ivars_%isims_range:%s_ploidies:%s_greasyFinish:%s.std"%(CurDir, spName, sampleID, type_run, threads, nvars, nsimulations, range_filtering_benchmark, simulation_ploidies, finishing_greasy_time)
+                fun.run_cmd("cp %s %s"%(std_file_original, std_file))
+
+                # get the last line with an error
+                lines_with_error = [l.strip() for l in open(std_file_original, "r").readlines() if "ERROR" in l.upper()]
+                if len(lines_with_error)==0: last_error_line = "no_error"
+                else: last_error_line = lines_with_error[-1]
+
+                # get into dict
+                jobID_to_metadata[Ijob+1] = {'species': spName, 'sampleID': sampleID, 'type_run': type_run, 'threads': threads, 'nvars': nvars, 'nsimulations': nsimulations, 'simulation_ploidies': simulation_ploidies, 'run_time': jobID_to_elapsed_time[Ijob+1], 'range_filtering_benchmark':range_filtering_benchmark, 'exit_status': jobID_to_exit_status[Ijob+1], "finishing_greasy_time":finishing_greasy_time, "overall_runID":overall_runID, "std_file":std_file, "last_error_line":last_error_line, "job_cmd":job_cmd.split(" >")[0]}
+
+                # remove the 'failed'
+                #if jobID_to_exit_status[Ijob+1]=="failed": fun.delete_folder(outdir_job)
+
+            # deifine as df
+            df_timimg = pd.DataFrame(jobID_to_metadata).transpose()[header_fields]
+
+            # add the previous df to drop duplicates
+            df_timimg = df_timimg.append(pd.read_csv(filename_timing_df, sep="\t")).drop_duplicates()
+
+            # append
+            df_timimg.to_csv(filename_timing_df, sep="\t", header=True, index=False)
+
+        # skip the running of the cmds
+        if compute_timimng is True: continue # debug
+
+        ################################################
+
+
+compute_timimng = False
+
+# initialize the df with the timing information
+filename_timing_df = "%s/calculating_resources.tab"%CurDir
+header_fields = ["species", "sampleID", "type_run", "threads", "nvars", "nsimulations", "range_filtering_benchmark", "simulation_ploidies",  "run_time", "exit_status", "finishing_greasy_time", "overall_runID", "std_file", "last_error_line", "job_cmd"]
+
+#  generate the file if not already done
+if fun.file_is_empty(filename_timing_df): 
+    open(filename_timing_df, "w").write("\t".join(header_fields) + "\n")
+
+
+
+  
+
+def report_accuracy_realSVs(close_shortReads_table, reference_genome, outdir, real_bedpe_breakpoints, threads=4, replace=False, n_simulated_genomes=2, mitochondrial_chromosome="mito_C_glabrata_CBS138", simulation_ploidies=["haploid", "diploid_homo", "diploid_hetero", "ref:2_var:1", "ref:3_var:1", "ref:4_var:1", "ref:5_var:1", "ref:9_var:1", "ref:19_var:1", "ref:99_var:1"], range_filtering_benchmark="theoretically_meaningful", nvars=100, job_array_mode="local", StopAfter_testAccuracy_perSVadeRunning=False, skip_cleaning_simulations_files_and_parameters=False, skip_cleaning_outdir=False, parameters_json_file=None, gff=None, replace_FromGridssRun_final_perSVade_run=False, fraction_available_mem=None, replace_SV_CNVcalling_and_optimisation=False, replace_only_SV_CNVcalling=False, skip_CNV_calling=False):
+
+
+    """This function runs the SV pipeline for all the datasets in close_shortReads_table with the fastSV, optimisation based on uniform parameters and optimisation based on realSVs (specified in real_svtype_to_file). The latter is skipped if real_svtype_to_file is empty.
+
+    First, it runs perSVade on all parameters without cleaning. At the end it cleans."""
+
+    # this pipeline requires real data and close_shortReads_table that is not none
+    if real_bedpe_breakpoints is None: raise ValueError("You need real data if you want to test accuracy")
+    if file_is_empty(close_shortReads_table): raise ValueError("You need real data reads if you want to test accuracy")
+
+    # make the outdir
+    make_folder(outdir)
+
+    # make a plots dir
+    plots_dir = "%s/plots"%outdir; make_folder(plots_dir)
+
+    print_if_verbose("testing the accuracy of perSVade")
+
+    # load the real data table
+    df_reads = pd.read_csv(close_shortReads_table, sep="\t").set_index("runID", drop=False)
+
+    # define the outfiles
+    all_sampleID_to_dfBestAccuracy_file = "%s/all_sampleID_to_dfBestAccuracy.py"%outdir
+    ID_to_svtype_to_svDF_file = "%s/ID_to_svtype_to_svDF.py"%outdir
+
+    # get the gff with biotype
+    if gff is not None: 
+        correct_gff, gff_with_biotype = get_correct_gff_and_gff_with_biotype(gff, replace=replace)
+        gff = gff_with_biotype
+
+    if file_is_empty(ID_to_svtype_to_svDF_file) or file_is_empty(all_sampleID_to_dfBestAccuracy_file) or replace is True:
+
+        # initialize a dict that will contain all the data
+        all_sampleID_to_svtype_to_file = {}
+        all_sampleID_to_dfGRIDSS = {}
+        all_sampleID_to_dfBestAccuracy = {}
+
+        # initialize the cmds to run 
+        all_cmds = []
+
+        # predefine if some jobs need to be ran
+        n_remaining_jobs = sum([sum([file_is_empty("%s/%s/%s/perSVade_finished_file.txt"%(outdir, typeSimulations, runID)) for runID in set(df_reads.runID)]) for typeSimulations in ["uniform", "fast", "realSVs"]])
+        print_if_verbose("There are %i remaining jobs"%n_remaining_jobs)
+
+        # go through each run and configuration
+        for typeSimulations, bedpe_breakpoints, fast_SVcalling in [("uniform", None, False), ("realSVs", real_bedpe_breakpoints, False), ("fast", None, True)]:
+
+            # define an outdir for this type of simulations
+            outdir_typeSimulations = "%s/%s"%(outdir, typeSimulations); make_folder(outdir_typeSimulations)
+
+            # go though each runID
+            for runID in set(df_reads.runID):
+                print_if_verbose(typeSimulations, runID)
+
+                # define an outdir for this runID
+                outdir_runID = "%s/%s"%(outdir_typeSimulations, runID); make_folder(outdir_runID)
+
+                # define the reads
+                r1 = df_reads.loc[runID, "short_reads1"]
+                r2 = df_reads.loc[runID, "short_reads2"]
+
+                # define the final file 
+                final_file = "%s/perSVade_finished_file.txt"%outdir_runID
+                parameters_file = "%s/SVdetection_output/final_gridss_running/perSVade_parameters.json"%outdir_runID
+
+                # define the previous repeats file 
+                previous_repeats_table = "%s.repeats.tab"%reference_genome
+                if file_is_empty(previous_repeats_table): raise ValueError("%s should exist"%previous_repeats_table)
+                
+                # only contine if the final file is not defined
+                if file_is_empty(final_file) or replace is True:# or file_is_empty(parameters_file):
+
+                    # define the cmd. This is a normal perSvade.py run with the vars of the previous dir  
+                    cmd = "python %s -r %s --threads %i --outdir %s --nvars %i --nsimulations %i --simulation_ploidies %s --range_filtering_benchmark %s --mitochondrial_chromosome %s -f1 %s -f2 %s --previous_repeats_table %s --skip_cleaning_outdir --min_CNVsize_coverageBased %i"%(perSVade_py, reference_genome, threads, outdir_runID, nvars, n_simulated_genomes, ",".join(simulation_ploidies), range_filtering_benchmark, mitochondrial_chromosome, r1, r2, previous_repeats_table, min_CNVsize_coverageBased)
+
+                    # add arguments depending on the pipeline
+                    if replace is True: cmd += " --replace"
+                    if fast_SVcalling is True: cmd += " --fast_SVcalling"
+                    if bedpe_breakpoints is not None: cmd += " --real_bedpe_breakpoints %s"%bedpe_breakpoints
+                    if printing_verbose_mode is True: cmd += " --verbose"
+                    if parameters_json_file is not None: cmd += " --parameters_json_file %s"%parameters_json_file
+                    if gff is not None: cmd += " --gff %s"%gff
+                    if replace_FromGridssRun_final_perSVade_run is True: cmd += " --replace_FromGridssRun_final_perSVade_run"
+                    if fraction_available_mem is not None: cmd += " --fraction_available_mem %.3f"%(float(fraction_available_mem))
+                    if replace_SV_CNVcalling_and_optimisation is True: cmd += " --replace_SV_CNVcalling_and_optimisation"
+                    if replace_only_SV_CNVcalling is True: cmd += " --replace_only_SV_CNVcalling"
+                    if skip_CNV_calling is True: cmd += " --skip_CNV_calling"
+
+
+                    # if the running in slurm is false, just run the cmd
+                    if job_array_mode=="local": run_cmd(cmd)
+                    elif job_array_mode=="job_array": 
+                        all_cmds.append(cmd)
+                        continue
+
+                    else: raise ValueError("%s is not valid"%job_array_mode)
+
+                if StopAfter_testAccuracy_perSVadeRunning is True: continue
+
+                # define the svdict and the df_gridss 
+                svtype_to_svfile, df_gridss = get_svtype_to_svfile_and_df_gridss_from_perSVade_outdir(outdir_runID, reference_genome)
+
+                # add to dict
+                ID = "%s||||%s"%(typeSimulations, runID)
+                all_sampleID_to_svtype_to_file[ID] = svtype_to_svfile
+                all_sampleID_to_dfGRIDSS[ID] = df_gridss
+
+                # get the df best accuracy
+                if typeSimulations!="fast": all_sampleID_to_dfBestAccuracy[ID] = pd.read_csv("%s/SVdetection_output/parameter_optimisation/benchmarking_all_filters_for_all_genomes_and_ploidies/df_cross_benchmark_best.tab"%outdir_runID, sep="\t")
+
+        # if you are not running on slurm, just execute one cmd after the other
+        if job_array_mode=="job_array":
+
+            if len(all_cmds)>0: 
+                print_if_verbose("submitting %i jobs to the cluster for testing accuracy of perSVade on several combinations of parameters. The files of the submission are in %s"%(len(all_cmds), outdir))
+                jobs_filename = "%s/jobs.testingRealDataAccuracy"%outdir
+                open(jobs_filename, "w").write("\n".join(all_cmds))
+
+                generate_jobarray_file(jobs_filename, "accuracyRealSVs")
+
+                print_if_verbose("You have to wait under all the jobs in testRealSVs are done")
+                sys.exit(0)
+
+
+        if StopAfter_testAccuracy_perSVadeRunning is True: 
+            print_if_verbose("You already ran all the configurations of perSVade. Stopping after the running of perSVade on testAccuracy")
+            sys.exit(0)
+
+        print_if_verbose("getting ID_to_svtype_to_svDF")
+        ID_to_svtype_to_svDF = get_sampleID_to_svtype_to_svDF_filtered(all_sampleID_to_svtype_to_file, all_sampleID_to_dfGRIDSS)
+
+        # add the 'svID', which is useful to calculate overlaps
+        print_if_verbose("adding svID")
+        add_svID_to_IDtoSVTYPEtoDF(ID_to_svtype_to_svDF)
+
+        # save
+        save_object(ID_to_svtype_to_svDF, ID_to_svtype_to_svDF_file)
+        save_object(all_sampleID_to_dfBestAccuracy, all_sampleID_to_dfBestAccuracy_file)
+
+    else: 
+        print_if_verbose("loading objects")
+        ID_to_svtype_to_svDF = load_object(ID_to_svtype_to_svDF_file)
+        all_sampleID_to_dfBestAccuracy = load_object(all_sampleID_to_dfBestAccuracy_file) 
+
+    if StopAfter_testAccuracy_perSVadeRunning is True: 
+        print_if_verbose("You already ran all the configurations of perSVade. Stopping after the running of perSVade on testAccuracy")
+        sys.exit(0)
+
+
+    thisneedstoberefactored_and_simplified
+
+    print_if_verbose("getting the plots about accuracy")
+    # map each runID to the IDs of the same sample 
+    runID_to_replicateIDs = {runID : set(df_reads[df_reads.sampleID==df_reads.loc[runID, "sampleID"]].index).difference({runID}) for runID in df_reads.runID}
+
+    # map each ID to the svIDs 
+    ID_to_svIDs = {ID : set.union(*[set(svDF.svID) for svDF in svtype_to_svDF.values() if len(svDF)>0]) for ID, svtype_to_svDF in ID_to_svtype_to_svDF.items()}
+
+    # define the fraction of samples with this ID
+    svID_to_fractionIDsPresent = {svID : sum([svID in svIDs for svIDs in ID_to_svIDs.values()])/len(ID_to_svIDs) for svID in set.union(*ID_to_svIDs.values())}
+
+    # define the wrong svIDs as those that are present in >75% of the samples. These are likely errors in the assembly
+    wrong_svIDs = {svID for svID, fraction in svID_to_fractionIDsPresent.items() if fraction>0.75}
+
+    # map each runID to the svtype to the svIDs
+    ID_to_svtype_to_svIDs = {ID : {svtype : set(svDF.svID).difference(wrong_svIDs) for svtype, svDF in svtype_to_svDF.items() if len(svDF)>0} for ID, svtype_to_svDF in ID_to_svtype_to_svDF.items()}
+
+    # initialize a benchmarking dict
+    df_benchmarking_realSVs_dict = {}
+
+    for ID, svtype_to_svIDs in ID_to_svtype_to_svIDs.items():
+
+        # initialize the total numbers
+        nSVs_list = []
+        fraction_overlapping_list = []
+
+        for svtype, svIDs in svtype_to_svIDs.items():
+
+            # define the IDs
+            simulationID, runID = ID.split("||||")
+
+            # only keep data if there are more than 10 svIDs
+            if len(svIDs)>=0: 
+
+                # define the svIDs in other runs of the same sample
+                list_other_svIDs = [ID_to_svtype_to_svIDs["%s||||%s"%(simulationID, otherRunID)][svtype] for otherRunID in runID_to_replicateIDs[runID] if svtype in ID_to_svtype_to_svIDs["%s||||%s"%(simulationID, otherRunID)]] + [set()]
+
+                # define all the others
+                all_other_svIDs = set.union(*list_other_svIDs)
+
+                # define the true even
+                intersection_other_svIDs = set.intersection(*list_other_svIDs)
+
+                # define the overlap as the ratio 
+                n_SVs = len(svIDs)
+                n_overlapping = len(all_other_svIDs.intersection(svIDs))
+                if n_SVs>0: overlap_SVs = n_overlapping/len(svIDs)
+                else: overlap_SVs = 0
+
+                # define the 'recall' of real vars
+                TPs = intersection_other_svIDs.intersection(svIDs)
+                #recall = len(TPs)/len(intersection_other_svIDs)
+
+                # keep
+                IDdict = "%s||||%s"%(ID, svtype)
+
+                #df_benchmarking_realSVs_dict[IDdict] = {"simulationID":simulationID, "runID":runID, "sampleID":df_reads.loc[runID, "sampleID"], "svtype":svtype, "fraction overlapping SVs":overlap_SVs, "n_overlapping":n_overlapping, "n SVs":n_SVs, "n_HighConfidence_SVs":len(intersection_other_svIDs)}   
+
+                #keep
+                nSVs_list.append(n_SVs)
+                fraction_overlapping_list.append(overlap_SVs)
+
+                # only keep important things
+                df_benchmarking_realSVs_dict[IDdict] = {"simulationID":simulationID, "runID":runID, "sampleID":df_reads.loc[runID, "sampleID"], "svtype":svtype, "fraction overlapping SVs":overlap_SVs, "n SVs":n_SVs}  
+
+
+        # add the integrated vars
+        integrated_n_SVs = sum(nSVs_list)
+        integeated_overlap_SVs = np.mean(make_flat_listOflists([[fraction_overlapping_list[Isvtype]]*nSVs for Isvtype, nSVs in enumerate(nSVs_list)]))
+
+        df_benchmarking_realSVs_dict["%s||||integrated"%ID] = {"simulationID":simulationID, "runID":runID, "sampleID":df_reads.loc[runID, "sampleID"], "svtype":"integrated", "fraction overlapping SVs":integeated_overlap_SVs, "n SVs":integrated_n_SVs}  
+
+    df_benchmarking_realSVs = pd.DataFrame(df_benchmarking_realSVs_dict).transpose()
+
+    # plot the fraction of overlapping real SVs as a boxplot
+    filename = "%s/accuracy_realSVs.pdf"%plots_dir
+    plot_fraction_overlapping_realSVs(df_benchmarking_realSVs, filename)
+
+    # plot the fraction of overlapping real SVs as a precision-vs-recall plot
+    filename = "%s/accuracy_realSVs_precisionVSrecall.pdf"%plots_dir
+    plot_fraction_overlapping_realSVs_precision_vs_recall(df_benchmarking_realSVs, filename)
+ 
+    # plot the accuracy on simulations
+    filename = "%s/accuracy_simulations.pdf"%plots_dir
+    plot_accuracy_simulations_from_all_sampleID_to_dfBestAccuracy(all_sampleID_to_dfBestAccuracy, filename)
+
+    ########## plot the cross-accuracy between different parameters ##########
+
+    # initialize a dir that will contain the sorted bams and gridss vcf outputs
+    simulations_files_and_parameters_dir = "%s/simulations_files_and_parameters"%outdir
+    if replace is True: delete_folder(simulations_files_and_parameters_dir)
+    make_folder(simulations_files_and_parameters_dir)
+
+    # This requires the definition of two things:
+
+    # the parameters_df. The first cols are metadata (like sampleID, runID and optimisation type) and the others are things necessary for runnning gridss: and the path to the parameters_json
+    parameters_df_dict = {}
+
+    # test_df: This is info on which to test the running of gridss+clove. It contains metadata cols (sampleID, runID, optimisation type (real, uniform), simName, ploidy, svtype) and data to run the optimisation on (sorted_bam, gridss_vcf, reference_genome, mitochondrial_chromosome)
+    test_df_dict = {}
+
+    for typeSimulations in ["uniform", "realSVs", "fast"]:
+
+        # go through each sampleID
+        for sampleID in sorted(set(df_reads.sampleID)):
+
+            # go though each runID
+            for runID in sorted(set(df_reads[df_reads.sampleID==sampleID].runID)):
+
+                # define the outdir of the run
+                runID_outdir = "%s/%s/%s/SVdetection_output"%(outdir, typeSimulations, runID)
+
+                # get the parameters
+                parameters_json_origin = "%s/final_gridss_running/perSVade_parameters.json"%runID_outdir
+                parameters_json_dest = "%s/parameters_%s_%s_%s.json"%(simulations_files_and_parameters_dir, typeSimulations, sampleID, runID)
+                if file_is_empty(parameters_json_dest): 
+                    parameters_json_dest_tmp = "%s.tmp"%parameters_json_dest
+                    run_cmd("cp %s %s"%(parameters_json_origin, parameters_json_dest_tmp))
+                    os.rename(parameters_json_dest_tmp, parameters_json_dest)
+
+                parameters_df_dict[(sampleID, runID, typeSimulations)] = {"sampleID":sampleID, "runID":runID, "typeSimulations":typeSimulations, "parameters_json":parameters_json_dest}
+
+                # go through additional things
+                if typeSimulations!="fast":
+                    for Isim in range(n_simulated_genomes):
+
+                        # define the name
+                        simName = "simulation_%i"%(Isim+1)
+                        sim_outdir = "%s/parameter_optimisation/%s"%(runID_outdir, simName)
+
+                        # go through each ploidy
+                        for ploidy in simulation_ploidies:
+
+                            # define the destintaion bam 
+                            destination_bam = "%s/reads_%s_%s_%s_sim%i_%s.bam"%(simulations_files_and_parameters_dir, typeSimulations, sampleID, runID, Isim+1, ploidy)
+
+                            # change the place
+                            if file_is_empty(destination_bam): 
+
+                                # define the origin bam
+                                if ploidy=="haploid": suffix_ploidy = "bam.sorted"
+                                else: suffix_ploidy = "bam.sorted.%s.bam.sorted"%ploidy
+                                bam_files = ["%s/%s"%(sim_outdir, file) for file in os.listdir(sim_outdir) if file.startswith("aligned_reads") and ".".join(file.split(".")[1:])==suffix_ploidy]
+                                if len(bam_files)!=1: raise ValueError("There should be only one bam")
+                                origin_bam = bam_files[0]
+   
+                                # copy the metrics
+                                origin_metrics = "%s/%s/%s/aligned_reads.bam.sorted.CollectInsertSizeMetrics.out"%(outdir, typeSimulations, runID)
+                                destination_metrics = "%s.CollectInsertSizeMetrics.out"%destination_bam
+                                destination_metrics_tmp = "%s.tmp"%destination_metrics
+                                if file_is_empty(destination_metrics):
+                                    run_cmd("cp %s %s"%(origin_metrics, destination_metrics_tmp))
+                                    os.rename(destination_metrics_tmp, destination_metrics)
+
+                                # change the bai
+                                if file_is_empty("%s.bai"%destination_bam): os.rename("%s.bai"%origin_bam, "%s.bai"%destination_bam)
+
+                                # change the coverage per window (this is any destination)
+                                if file_is_empty("%s.coverage_per_window.tab"%destination_bam): os.rename("%s.coverage_per_window.tab"%origin_bam, "%s.coverage_per_window.tab"%destination_bam)
+
+                                # change the coverage per constant windows
+                                calculating_windowcoverage_dir = "%s.calculating_windowcoverage"%destination_bam; make_folder(calculating_windowcoverage_dir)
+                                destination_windowcoverage_file = "%s/coverage_windows_%ibp.tab"%(calculating_windowcoverage_dir, window_l)
+                                origin_windowcoverage_file = "%s/benchmark_GridssClove_%s/coverage_windows_%ibp.tab"%(sim_outdir, ploidy, window_l)
+                                if file_is_empty(destination_windowcoverage_file): os.rename(origin_windowcoverage_file, destination_windowcoverage_file)
+
+                                # rename the bam
+                                os.rename(origin_bam, destination_bam)
+
+                            # change the gridss vcf
+                            origin_gridss_vcf = "%s/benchmark_GridssClove_%s/benchmark_max50000x_ignoreRegionsFalse/gridss_output.vcf.withSimpleEventType.vcf"%(sim_outdir, ploidy)
+                            dest_gridss_vcf = "%s/gridss_vcf_%s_%s_%s_sim%i_%s.vcf"%(simulations_files_and_parameters_dir, typeSimulations, sampleID, runID, Isim+1, ploidy)
+                            if file_is_empty(dest_gridss_vcf): os.rename(origin_gridss_vcf, dest_gridss_vcf)
+
+                            # change the location of the simulated SVs
+                            svtables_prefix =  "%s/SVs_%s_%s_%s_sim%i"%(simulations_files_and_parameters_dir, typeSimulations, sampleID, runID, Isim+1)
+                            for svtype in {"insertions", "deletions", "translocations", "inversions", "tandemDuplications"}:
+
+                                # define the files
+                                origin_file = "%s/final_simulated_SVs/%s.tab"%(sim_outdir, svtype)
+                                dest_file = "%s_%s.tab"%(svtables_prefix, svtype)
+                                dest_file_tmp = "%s.tmp"%dest_file
+
+                                # move
+                                if file_is_empty(dest_file):
+                                    run_cmd("cp %s %s"%(origin_file, dest_file_tmp))
+                                    os.rename(dest_file_tmp, dest_file)
+
+                            # get the name
+                            test_df_dict[(sampleID, runID, typeSimulations, simName, ploidy)] = {"sampleID":sampleID, "runID":runID, "typeSimulations":typeSimulations, "simName":simName, "ploidy":ploidy, "sorted_bam":destination_bam, "gridss_vcf":dest_gridss_vcf, "reference_genome":reference_genome, "mitochondrial_chromosome":mitochondrial_chromosome, "svtables_prefix":svtables_prefix}
+
+    # get the dfs
+    parameters_df = pd.DataFrame(parameters_df_dict).transpose()[["sampleID", "runID", "typeSimulations", "parameters_json"]]
+    test_df = pd.DataFrame(test_df_dict).transpose()[["sampleID", "runID", "typeSimulations", "simName", "ploidy", "sorted_bam", "gridss_vcf", "reference_genome", "mitochondrial_chromosome", "svtables_prefix"]]
+
+    # plot the cross-accuracy
+    print_if_verbose("plotting cross-accuracy")
+    outdir_cross_accuracy = "%s/cross_accuracy_calculations"%outdir
+    plot_accuracy_of_parameters_on_test_samples(parameters_df, test_df, outdir_cross_accuracy, plots_dir, replace=replace, threads=threads)
+
+    ##########################################################################
+
+    ##### VERY IMPORTANT: CLEAN THE OUTPUT #####
+
+    # clean the simulations_files_and_parameters if not stated otherwise
+    if skip_cleaning_simulations_files_and_parameters is False: 
+        print_if_verbose("cleaning simulations_files_and_parameters_dir")
+        delete_folder(simulations_files_and_parameters_dir)
+
+    if skip_cleaning_outdir is False:
+        print_if_verbose("cleaning outdir of each run")
+
+        # clean the outdir of each sample
+        for typeSimulations in ["uniform", "realSVs", "fast"]:
+
+            # go though each runID
+            for runID in set(df_reads.runID):
+
+                # define an outdir for this runID and clean
+                outdir_runID = "%s/%s/%s"%(outdir, typeSimulations, runID)
+                clean_perSVade_outdir(outdir_runID)
+
+                # remove the bam files
+                for f in ["aligned_reads.bam.sorted", "aligned_reads.bam.sorted.bai"]: remove_file("%s/%s"%(outdir_runID, f))
+
+    #############################################
+
+
+
+# an example CMD to debug de generation of merged vcfs
+"""
+
+cd ~/samba/CandidaMine_data_generation/v1/data/Candida_albicans_5476/varCall_output/SRR6669901/
+
+~/samba/scripts/perSVade/perSVade_repository/scripts/varcall_cnv_pipeline.py -r ~/samba/CandidaMine_data_generation/v1/data/Candida_albicans_5476/genome.fasta -thr 4 -o smallVars_CNV_output -p 2 -sbam aligned_reads.bam.sorted -c 12 -mchr Ca22chrM_C_albicans_SC5314 -mcode 4 -gcode 12 -gff ~/samba/CandidaMine_data_generation/v1/data/Candida_albicans_5476/annotations.gff --get_merged_vcf
+
+
+"""
+
+
+# an example of running the pipeline for adding the repeats
+
+"""
+
+python /gpfs/projects/bsc40/mschikora/scripts/perSVade/perSVade_repository/scripts/perSVade.py -r /gpfs/projects/bsc40/mschikora/scripts/perSVade/perSVade_repository/testing/outdirs_testing_severalSpecies/5478_Candida_glabrata/reference_genome_dir/reference_genome.fasta --threads 48 --outdir /gpfs/projects/bsc40/mschikora/scripts/perSVade/perSVade_repository/testing/outdirs_testing_severalSpecies/5478_Candida_glabrata/testing_Accuracy/fast/BG2_ANI --nvars 50 --nsimulations 2 --simulation_ploidies haploid,diploid_hetero --range_filtering_benchmark theoretically_meaningful --mitochondrial_chromosome mito_C_glabrata_CBS138 -f1 /gpfs/projects/bsc40/mschikora/Cglabrata_antifungals/data/trimmed_reads/RUN1_BG2_11B_ANI_R1_trimmed.fq.gz -f2 /gpfs/projects/bsc40/mschikora/Cglabrata_antifungals/data/trimmed_reads/RUN1_BG2_11B_ANI_R2_trimmed.fq.gz --fast_SVcalling --previous_repeats_table /gpfs/projects/bsc40/mschikora/scripts/perSVade/perSVade_repository/testing/outdirs_testing_severalSpecies/5478_Candida_glabrata/reference_genome.fasta.repeats.tab
+
+
+source ~/.bash_profile
+run_interactive_session_debug
+conda activate perSVade_env
+
+# drosophila files
+/gpfs/projects/bsc40/mschikora/scripts/perSVade/perSVade_repository/testing/outdirs_testing_severalSpecies/7227_Drosophila_melanogaster/testing_Accuracy
+
+# arabidposis files
+/gpfs/projects/bsc40/mschikora/scripts/perSVade/perSVade_repository/testing/outdirs_testing_severalSpecies/3702_Arabidopsis_thaliana/testing_Accuracy
+
+# testing on Arabidopsis
+
+cd /gpfs/projects/bsc40/mschikora/scripts/perSVade/perSVade_repository/testing/outdirs_testing_severalSpecies/3702_Arabidopsis_thaliana/testing_Accuracy/realSVs/sample59689_SRR7119536
+
+conda activate perSVade_env
+
+python /gpfs/projects/bsc40/mschikora/scripts/perSVade/perSVade_repository/scripts/perSVade.py -r /gpfs/projects/bsc40/mschikora/scripts/perSVade/perSVade_repository/testing/outdirs_testing_severalSpecies/3702_Arabidopsis_thaliana/reference_genome_dir/reference_genome.fasta --threads 48 --outdir /gpfs/projects/bsc40/mschikora/scripts/perSVade/perSVade_repository/testing/outdirs_testing_severalSpecies/3702_Arabidopsis_thaliana/testing_Accuracy/realSVs/sample59689_SRR7119536 --nvars 50 --nsimulations 1 --simulation_ploidies haploid,diploid_hetero --range_filtering_benchmark theoretically_meaningful --mitochondrial_chromosome BK010421.1,AP000423.1 -f1 /gpfs/projects/bsc40/mschikora/scripts/perSVade/perSVade_repository/testing/outdirs_testing_severalSpecies/3702_Arabidopsis_thaliana/findingRealSVs_automaticFindingOfCloseReads/getting_closeReads/reads/SRR7119536/SRR7119536_trimmed_reads_1.fastq.gz.30x.fastq.gz -f2 /gpfs/projects/bsc40/mschikora/scripts/perSVade/perSVade_repository/testing/outdirs_testing_severalSpecies/3702_Arabidopsis_thaliana/findingRealSVs_automaticFindingOfCloseReads/getting_closeReads/reads/SRR7119536/SRR7119536_trimmed_reads_2.fastq.gz.30x.fastq.gz --previous_repeats_table /gpfs/projects/bsc40/mschikora/scripts/perSVade/perSVade_repository/testing/outdirs_testing_severalSpecies/3702_Arabidopsis_thaliana/reference_genome_dir/reference_genome.fasta.repeats.tab --skip_cleaning_outdir --real_bedpe_breakpoints /gpfs/projects/bsc40/mschikora/scripts/perSVade/perSVade_repository/testing/outdirs_testing_severalSpecies/3702_Arabidopsis_thaliana/findingRealSVs_automaticFindingOfCloseReads/integrated_breakpoints.bedpe --verbose &
+
+# testing on Drosophila
+
+cd /gpfs/projects/bsc40/mschikora/scripts/perSVade/perSVade_repository/testing/outdirs_testing_severalSpecies/7227_Drosophila_melanogaster/testing_Accuracy/realSVs/sample7240_SRR6466705
+
+python /gpfs/projects/bsc40/mschikora/scripts/perSVade/perSVade_repository/scripts/perSVade.py -r /gpfs/projects/bsc40/mschikora/scripts/perSVade/perSVade_repository/testing/outdirs_testing_severalSpecies/7227_Drosophila_melanogaster/reference_genome_dir/reference_genome.fasta --threads 48 --outdir /gpfs/projects/bsc40/mschikora/scripts/perSVade/perSVade_repository/testing/outdirs_testing_severalSpecies/7227_Drosophila_melanogaster/testing_Accuracy/realSVs/sample7240_SRR6466705 --nvars 50 --nsimulations 1 --simulation_ploidies haploid --range_filtering_benchmark theoretically_meaningful --mitochondrial_chromosome KJ947872.2 -f1 /gpfs/projects/bsc40/mschikora/scripts/perSVade/perSVade_repository/testing/outdirs_testing_severalSpecies/7227_Drosophila_melanogaster/findingRealSVs_automaticFindingOfCloseReads/getting_closeReads/reads/SRR6466705/SRR6466705_trimmed_reads_1.fastq.gz.30x.fastq.gz -f2 /gpfs/projects/bsc40/mschikora/scripts/perSVade/perSVade_repository/testing/outdirs_testing_severalSpecies/7227_Drosophila_melanogaster/findingRealSVs_automaticFindingOfCloseReads/getting_closeReads/reads/SRR6466705/SRR6466705_trimmed_reads_2.fastq.gz.30x.fastq.gz --previous_repeats_table /gpfs/projects/bsc40/mschikora/scripts/perSVade/perSVade_repository/testing/outdirs_testing_severalSpecies/7227_Drosophila_melanogaster/reference_genome_dir/reference_genome.fasta.repeats.tab --skip_cleaning_outdir --real_bedpe_breakpoints /gpfs/projects/bsc40/mschikora/scripts/perSVade/perSVade_repository/testing/outdirs_testing_severalSpecies/7227_Drosophila_melanogaster/findingRealSVs_automaticFindingOfCloseReads/integrated_breakpoints.bedpe --gff /gpfs/projects/bsc40/mschikora/scripts/perSVade/perSVade_repository/testing/outdirs_testing_severalSpecies/7227_Drosophila_melanogaster/reference_genome_dir/reference_genome_features.gff_corrected.gff_with_biotype.gff --verbose &
+
+
+"""
+
+
+
+
+        ####### delete the folders that did not complete in any of the previous runs ######
+
+        """
+
+        for typeSim in ["fast", "uniform", "realSVs"]:
+            outdir_testAccuracy = "%s/testing_Accuracy/%s"%(outdir_perSVade, typeSim)
+            if not os.path.isdir(outdir_testAccuracy): continue
+
+            for f in os.listdir(outdir_testAccuracy): 
+                outdir_f = "%s/%s"%(outdir_testAccuracy, f)
+                if fun.file_is_empty("%s/perSVade_finished_file.txt"%(outdir_f)):
+
+                    print("deleting %s"%outdir_f)
+                    fun.delete_folder(outdir_f)
+
+        """
+
+        ####################################################################################

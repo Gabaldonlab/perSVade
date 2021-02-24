@@ -63,7 +63,9 @@ conda install -c bioconda -y fastqc=0.11.9 &&
 conda install -c bioconda -y bedops=2.4.39 &&
 conda install -c bioconda -y genmap=1.3.0 &&
 conda install -c anaconda -y cython=0.29.21 && # necessary for the cylowess running
-conda install -c anaconda -y xlrd=1.2.0
+conda install -c anaconda -y xlrd=1.2.0 &&
+conda install -c bioconda entrez-direct=13.3 # would be to install esearch and efetch, but they are already installed with VEP
+
 
 # export env
 conda env export --no-builds --from-history -n perSVade_env --file perSVade_env.yml
