@@ -96,6 +96,11 @@ parser.add_argument("--StopAfterPrefecth_of_reads_goldenSet", dest="StopAfterPre
 parser.add_argument("--StopAfter_obtentionOFcloseSVs", dest="StopAfter_obtentionOFcloseSVs", action="store_true", default=False, help="Stop after obtaining the real_bedpe_breakpoints ")
 parser.add_argument("--StopAfter_repeatsObtention", dest="StopAfter_repeatsObtention", action="store_true", default=False, help="Stop after obtaining  the repeats table")
 parser.add_argument("--StopAfter_testAccuracy_perSVadeRunning", dest="StopAfter_testAccuracy_perSVadeRunning", action="store_true", default=False, help="When --testAccuracy is specified, the pipeline will stop after the running of perSVade on all the inputs of --close_shortReads_table with the different configurations.")
+parser.add_argument("--StopAfter_testAccuracy", dest="StopAfter_testAccuracy", action="store_true", default=False, help="When --testAccuracy is specified, the pipeline will stop after testing the accuracy.")
+parser.add_argument("--StopAfter_goldenSetAnalysis", dest="StopAfter_goldenSetAnalysis", action="store_true", default=False, help="When --goldenSet_dir is specified, the pipeline will stop after running the golden set analysis.")
+parser.add_argument("--StopAfter_goldenSetAnalysis_readObtention", dest="StopAfter_goldenSetAnalysis_readObtention", action="store_true", default=False, help="When --goldenSet_dir is specified, the pipeline will stop after running the golden set analysis' read obtention.")
+parser.add_argument("--StopAfter_goldenSetAnalysis_readTrimming", dest="StopAfter_goldenSetAnalysis_readTrimming", action="store_true", default=False, help="When --goldenSet_dir is specified, the pipeline will stop after running the golden set analysis' read trimming.")
+
 parser.add_argument("--StopAfter_replace_SV_CNVcalling", dest="StopAfter_replace_SV_CNVcalling", action="store_true", help="Stop after the removal of files for repeating the CNV calling.")
 
 # testing options
@@ -254,6 +259,7 @@ if opt.previous_repeats_table is not None:
     print("using privided repeats %s"%opt.previous_repeats_table)
 
     if fun.file_is_empty(opt.previous_repeats_table): raise ValueError("The provided repeats table does not exist")
+    
     # softlink
     fun.remove_file(repeats_table_file)
     fun.soft_link_files(opt.previous_repeats_table, repeats_table_file)
@@ -500,14 +506,14 @@ if opt.testAccuracy is True:
 
     # test that you have provided a opt.close_shortReads_table
     if opt.close_shortReads_table is None or opt.fast_SVcalling is True: 
-        raise ValueError("You have to specify a --close_shortReads_table and not run in --fast_SVcalling to test the accuracy of the pipeline on several datasets (--testAccuracy)")
+        raise ValueError("You have to specify a --close_shortReads_table or --real_bedpe_breakpoints and not run in --fast_SVcalling to test the accuracy of the pipeline on several datasets (--testAccuracy)")
 
     ### RUN PERSVADE ###
 
-    dict_perSVade_outdirs = fun.report_accuracy_realSVs_perSVadeRuns(opt.close_shortReads_table, opt.ref, "%s/testing_Accuracy"%opt.outdir, real_bedpe_breakpoints, threads=opt.threads, replace=opt.replace, n_simulated_genomes=opt.nsimulations, mitochondrial_chromosome=opt.mitochondrial_chromosome, simulation_ploidies=simulation_ploidies, range_filtering_benchmark=opt.range_filtering_benchmark, nvars=opt.nvars, job_array_mode=opt.job_array_mode, skip_cleaning_simulations_files_and_parameters=opt.skip_cleaning_simulations_files_and_parameters, skip_cleaning_outdir=opt.skip_cleaning_outdir, parameters_json_file=opt.parameters_json_file, gff=opt.gff, replace_FromGridssRun_final_perSVade_run=opt.replace_FromGridssRun_final_perSVade_run, fraction_available_mem=opt.fraction_available_mem, replace_SV_CNVcalling=opt.replace_SV_CNVcalling, skip_CNV_calling=opt.skip_CNV_calling, outdir_finding_realVars=outdir_finding_realVars)
+    dict_perSVade_outdirs = fun.report_accuracy_realSVs_perSVadeRuns(opt.close_shortReads_table, opt.ref, "%s/testing_Accuracy"%opt.outdir, real_bedpe_breakpoints, threads=opt.threads, replace=opt.replace, n_simulated_genomes=opt.nsimulations, mitochondrial_chromosome=opt.mitochondrial_chromosome, simulation_ploidies=simulation_ploidies, range_filtering_benchmark=opt.range_filtering_benchmark, nvars=opt.nvars, job_array_mode=opt.job_array_mode, parameters_json_file=opt.parameters_json_file, gff=opt.gff, replace_FromGridssRun_final_perSVade_run=opt.replace_FromGridssRun_final_perSVade_run, fraction_available_mem=opt.fraction_available_mem, replace_SV_CNVcalling=opt.replace_SV_CNVcalling, skip_CNV_calling=opt.skip_CNV_calling, outdir_finding_realVars=outdir_finding_realVars)
 
     if opt.StopAfter_testAccuracy_perSVadeRunning is True: 
-        print_if_verbose("You already ran all the configurations of perSVade. Stopping after the running of perSVade on testAccuracy")
+        print("You already ran all the configurations of perSVade. Stopping after the running of perSVade on testAccuracy")
         sys.exit(0)
 
     ####################   
@@ -515,17 +521,23 @@ if opt.testAccuracy is True:
     ### REPORT ACCURACY SINGLE SAMPLE ###
     youhavetoaddcodeof_codeGraveyard_report_accuracy_realSVs
 
+
+    if opt.StopAfter_testAccuracy is True: 
+        print(" Stopping after the running of perSVade on testAccuracy")
+        sys.exit(0)
+
     ##################################### 
 
 
 # get the golden set
 if opt.goldenSet_dir is not None:
 
-    needstoberefactoredwithnewstructure
-
     outdir_goldenSet = "%s/testing_goldenSetAccuracy"%opt.outdir
-    fun.report_accuracy_golden_set(opt.goldenSet_dir, outdir_goldenSet, opt.ref, real_svtype_to_file, threads=opt.threads, replace=opt.replace, n_simulated_genomes=opt.nsimulations, mitochondrial_chromosome=opt.mitochondrial_chromosome, simulation_ploidies=simulation_ploidies, range_filtering_benchmark=opt.range_filtering_benchmark, nvars=opt.nvars, job_array_mode=opt.job_array_mode, StopAfter_sampleIndexingFromSRA=opt.StopAfter_sampleIndexingFromSRA, StopAfterPrefecth_of_reads=opt.StopAfterPrefecth_of_reads_goldenSet, target_taxID=opt.target_taxID, parameters_json_file=opt.parameters_json_file, fraction_available_mem=opt.fraction_available_mem)
+    fun.report_accuracy_golden_set_runJobs(opt.goldenSet_dir, outdir_goldenSet, opt.ref, real_bedpe_breakpoints, threads=opt.threads, replace=opt.replace, n_simulated_genomes=opt.nsimulations, mitochondrial_chromosome=opt.mitochondrial_chromosome, simulation_ploidies=simulation_ploidies, range_filtering_benchmark=opt.range_filtering_benchmark, nvars=opt.nvars, job_array_mode=opt.job_array_mode, StopAfter_sampleIndexingFromSRA=opt.StopAfter_sampleIndexingFromSRA, StopAfterPrefecth_of_reads=opt.StopAfterPrefecth_of_reads_goldenSet, target_taxID=opt.target_taxID, parameters_json_file=opt.parameters_json_file, fraction_available_mem=opt.fraction_available_mem, StopAfter_goldenSetAnalysis_readObtention=opt.StopAfter_goldenSetAnalysis_readObtention, verbose=opt.verbose, StopAfter_goldenSetAnalysis_readTrimming=opt.StopAfter_goldenSetAnalysis_readTrimming)
 
+    if opt.StopAfter_goldenSetAnalysis is True: 
+        print(" Stopping after the running of golden-set analysis")
+        sys.exit(0) 
 
 start_time_SVcalling =  time.time()
 

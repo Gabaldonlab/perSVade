@@ -4,6 +4,11 @@
 
 ######### ENV ########
 
+import os
+import sys
+import pandas as pd
+import numpy as np
+
 # define the parent dir of the cluster or not
 ParentDir = "%s/samba"%(os.getenv("HOME")); # local
 if not os.path.exists(ParentDir): ParentDir = "/gpfs/projects/bsc40/mschikora"
@@ -58,9 +63,37 @@ For C. glabrata I got the nanopore reads from ~/../mmarcet/nanopore/GABALDON02/a
 
 ###############
 
+####### DEFINE VARIABLES ##########
+
+#("7955", "Danio_rerio", 2, "NC_002333.2")]
+#("9606", "Homo_sapiens", 2, "NC_012920.1")]
+
+species_Info = [("5478", "Candida_glabrata", 1, "mito_C_glabrata_CBS138", 10000000000000000),
+                ("5476", "Candida_albicans", 2, "Ca22chrM_C_albicans_SC5314", 10000000000000000),
+                ("5207", "Cryptococcus_neoformans", 1, "CP003834.1", 10000000000000000),
+                ("746128", "Aspergillus_fumigatus", 1, "CM016889.1", 10000000000000000),
+                ("3702", "Arabidopsis_thaliana", 2, "BK010421.1,AP000423.1", 30),
+                ("7227", "Drosophila_melanogaster", 2, "KJ947872.2", 30)]
+
+
+"""
+species_Info = [("5476", "Candida_albicans", 2, "Ca22chrM_C_albicans_SC5314", 10000000000000000),
+                ("5207", "Cryptococcus_neoformans", 1, "CP003834.1", 10000000000000000),
+                ("746128", "Aspergillus_fumigatus", 1, "CM016889.1", 10000000000000000)]
+
+"""
+"""
+species_Info = [("3702", "Arabidopsis_thaliana", 2, "BK010421.1,AP000423.1", 30),
+                ("7227", "Drosophila_melanogaster", 2, "KJ947872.2", 30)]
+"""
+
+###################################
+
 def update_df_resources_nord3Runs_testingAccuracy(df_resources_file, outdir_perSVade, spName, all_STDs_dir):
 
     """Takes the outdir of perSVade for one species and add to df_resources the data of that runID"""
+
+    print("getting resources")
 
     # get the df_resources
     if not fun.file_is_empty(df_resources_file): df_resources = fun.get_tab_as_df_or_empty_df(df_resources_file)
@@ -93,11 +126,26 @@ def update_df_resources_nord3Runs_testingAccuracy(df_resources_file, outdir_perS
             # only keep info about perSVade runs
             if perSVade_was_ran is True:
 
-                # identify the command ID for this STD
+                # get the time
+                time_fields = {"time_GeneralProcessing", "time_alignment", "time_all", "time_obtentionCloseSVs", "time_SVcalling", "time_SVandCNVcalling", "time_smallVarsCNV"}
+                if fun.file_is_empty(final_file):
+                    perSVade_finished = False
+                    time_dict = {t : -1 for t in time_fields}
+
+                else:
+                    perSVade_finished = True
+                    time_dict = {l.split(":")[0] : float(l.strip().split(":")[1]) for l in open(final_file, "r").readlines() if l.startswith("time_")}
+
+                # if this run is already in the dataset, skip
+                if perSVade_finished is True and len(df_resources)>0 and any((df_resources.spName==spName) & (df_resources.typeSim==typeSim) & (df_resources.sampleID==sampleID)): continue
+
+                # identify the command ID for this STD. If it is not there, continue
                 stddir = "%s/testing_Accuracy/STDfiles"%outdir_perSVade
                 commandIDs = [int(f.split("command.")[1]) for f in os.listdir(stddir) if f.startswith("command.") and "/".join(open("%s/%s"%(stddir,f), "r").readlines()[0].strip().split("--outdir ")[1].split()[0].split("/")[-2:])=="%s/%s"%(typeSim, sampleID)]
-                if len(commandIDs)!=1: raise ValueError("There are these possible command IDs: %s"%commandIDs)
-                commandID = commandIDs
+                if len(commandIDs)>1: raise ValueError("There are these possible command IDs: %s. This is the stddir: %s, This is the expected ID: %s/%s"%(commandIDs, stddir, typeSim, sampleID))
+                elif len(commandIDs)==0: continue
+                
+                commandID = commandIDs[0]
 
                 # get the jobID
                 main_stdout_lines = [l.strip() for l in open("%s/%s_jobs_stdout.txt"%(stddir, spName), "r").readlines()]
@@ -139,16 +187,7 @@ def update_df_resources_nord3Runs_testingAccuracy(df_resources_file, outdir_perS
                 for x in [cpu_time, max_mem_Mb, requested_mem_Mb, run_time]:
                     if pd.isna(x) or x<=0.0: raise ValueError("there is an error with the parsing of the output: %s"%x)
 
-                # get the time
-                time_fields = {"time_GeneralProcessing", "time_alignment", "time_all", "time_obtentionCloseSVs", "time_SVcalling", "time_SVandCNVcalling", "time_smallVarsCNV"}
-                if fun.file_is_empty(final_file):
-                    perSVade_finished = False
-                    time_dict = {t : -1 for t in time_fields}
-
-                else:
-                    perSVade_finished = True
-                    time_dict = {l.split(":")[0] : float(l.strip().split(":")[1])/3600 for l in open(final_file, "r").readlines() if l.startswith("time_")}
-
+            
                 # keep as a dict if this job has not already been saved
                 if len(df_resources)==0 or not any((df_resources.spName==spName) & (df_resources.typeSim==typeSim) & (df_resources.sampleID==sampleID) & (df_resources.jobID==jobID) & (df_resources.commandID==commandID) & (df_resources.max_mem_Mb==max_mem_Mb) & (df_resources.perSVade_finished==perSVade_finished) & (df_resources.cpu_time==cpu_time)):
 

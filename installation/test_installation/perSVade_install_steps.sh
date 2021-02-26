@@ -64,7 +64,11 @@ conda install -c bioconda -y bedops=2.4.39 &&
 conda install -c bioconda -y genmap=1.3.0 &&
 conda install -c anaconda -y cython=0.29.21 && # necessary for the cylowess running
 conda install -c anaconda -y xlrd=1.2.0 &&
-conda install -c bioconda entrez-direct=13.3 # would be to install esearch and efetch, but they are already installed with VEP
+conda install -c bioconda -y entrez-direct=13.3 && # would be to install esearch and efetch, but they are already installed with VEP
+conda install -c bioconda -y porechop=0.2.4 &&
+
+conda install -c bioconda svim=1.4.2
+conda install -c bioconda sniffles=1.0.12
 
 
 # export env
