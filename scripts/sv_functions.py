@@ -9342,6 +9342,9 @@ def get_best_parameters_for_GridssClove_run(sorted_bam, reference_genome, outdir
 
     if file_is_empty(df_benchmark_all_file) or file_is_empty(genomeID_to_knownSVdict_file) or replace is True:
 
+        # init all the ploidy dirs
+        dirs_to_remove = []
+
         # go throigh each simulation (these are technical replicates of the pipeline)
         for simulation_ID in range(1, n_simulated_genomes+1):
             print_if_verbose("working on simulation %i"%simulation_ID)
@@ -9383,6 +9386,7 @@ def get_best_parameters_for_GridssClove_run(sorted_bam, reference_genome, outdir
 
                 # write a table and some files with the benchmarking of several filtering strategies of the data
                 ploidy_dir = "%s/benchmark_GridssClove_%s"%(simulation_outdir, ploidy); make_folder(ploidy_dir)
+                dirs_to_remove.append("%s/benchmark_max50000x_ignoreRegionsFalse/several_parameter_combinations_filter_%s_af%.2f"%(ploidy_dir, range_filtering_benchmark, fraction_var))
 
                 # get a df with a benchmark of many different parameters. This will also report some plots with the 
                 benchmarking_df = benchmark_GridssClove_for_knownSV(ploidy_merged_bam, reference_genome, sim_svtype_to_svfile, ploidy_dir, range_filtering=range_filtering_benchmark, expected_AF=fraction_var, replace=replace, threads=threads, median_insert_size=median_insert_size, median_insert_size_sd=median_insert_size_sd, mitochondrial_chromosome=mitochondrial_chromosome)
@@ -9396,6 +9400,10 @@ def get_best_parameters_for_GridssClove_run(sorted_bam, reference_genome, outdir
                 df_benchmark_all = df_benchmark_all.append(benchmarking_df, sort=True)
 
         print_if_verbose("GRIDSS simulation finished correctly")
+
+        # clean the too-many files
+        print_if_verbose("removing unnecessary files")
+        for d in dirs_to_remove: delete_folder(d)
 
         # save important files
         print_if_verbose("saving important files...")
@@ -10274,7 +10282,7 @@ def report_accuracy_realSVs_perSVadeRuns(close_shortReads_table, reference_genom
                 else: raise ValueError("%s is not valid"%job_array_mode)
 
             # keep the simulation files and clean outdir
-            else:
+            elif n_remaining_jobs==0:
 
                 # keeping simulations and cleaning
                 keep_simulation_files_for_perSVade_outdir(outdir_runID, replace=replace, n_simulated_genomes=outdir_runID, simulation_ploidies=simulation_ploidies)
