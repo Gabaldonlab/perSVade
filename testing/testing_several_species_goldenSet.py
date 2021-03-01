@@ -55,7 +55,7 @@ taxIDs_with_noON_overalpping = {"746128"}
 goldenSet_dir_Cglabrata = "%s/scripts/perSVade/perSVade_repository/testing/Cglabrata_goldenSetReads_BG2"%ParentDir
 
 # define the run in cluster (and debug)
-run_in_cluster = False
+run_in_cluster = True
 if running_in_cluster is False: run_in_cluster = False
 
 # go through each species
@@ -71,15 +71,14 @@ for taxID, spName, ploidy, mitochondrial_chromosome, max_coverage_sra_reads in t
     # create an outdir
     outdir_perSVade = "%s/%s_%s"%(outdir_testing, taxID, spName); fun.make_folder(outdir_perSVade)
 
-
     ###### TEST SVIM AND SNIFFLES NORMALISATION ######
-    
+    """
     svtype_to_file_svim = fun.get_svim_output_as_perSVade("%s/testing_goldenSetAccuracy/ONT_SV_calling/svim_output"%outdir_perSVade)
     print(svtype_to_file_svim)
     jagjdadjgadj
     svtype_to_file_sniffles = fun.get_sniffles_output_as_perSVade("%s/testing_goldenSetAccuracy/ONT_SV_calling/sniffles_output"%outdir_perSVade)
     adkhadhjgdahda
-
+    """
 
     ##################################################
 
@@ -95,13 +94,14 @@ for taxID, spName, ploidy, mitochondrial_chromosome, max_coverage_sra_reads in t
 
     # get the golden set running 
     if taxID in taxIDs_with_noON_overalpping: continue
-    cmd = "%s --ref %s --threads %i -o %s --target_taxID %s --real_bedpe_breakpoints %s -f1 skip -f2 skip --mitochondrial_chromosome %s --gff %s --goldenSet_dir %s --skip_SVcalling --verbose --nsimulations 2 --simulation_ploidies haploid,diploid_hetero --previous_repeats_table %s --StopAfter_goldenSetAnalysis --StopAfter_goldenSetAnalysis_readTrimming"%(perSVade_py, genome, threads, outdir_perSVade, taxID, real_bedpe_breakpoints, mitochondrial_chromosome, gff, goldenSet_dir, previous_repeats_table)
+    cmd = "%s --ref %s --threads %i -o %s --target_taxID %s --real_bedpe_breakpoints %s -f1 skip -f2 skip --mitochondrial_chromosome %s --gff %s --goldenSet_dir %s --skip_SVcalling --verbose --nsimulations 2 --simulation_ploidies haploid,diploid_hetero --previous_repeats_table %s --QC_and_trimming_reads --StopAfter_goldenSetAnalysis "%(perSVade_py, genome, threads, outdir_perSVade, taxID, real_bedpe_breakpoints, mitochondrial_chromosome, gff, goldenSet_dir, previous_repeats_table)
 
     """
     StopAfter_goldenSetAnalysis
     StopAfterPrefecth_of_reads_goldenSet
 	StopAfter_goldenSetAnalysis_readObtention
 	StopAfter_goldenSetAnalysis_readTrimming
+    StopAfter_sampleIndexingFromSRA
 
     """
 
@@ -111,8 +111,9 @@ for taxID, spName, ploidy, mitochondrial_chromosome, max_coverage_sra_reads in t
 
     cmd_output = "%s/cmd_testing.std"%outdir_perSVade
     print("running std into %s"%cmd_output)
-    #fun.run_cmd("%s > %s 2>&1"%(cmd, cmd_output)) # run with stdout
-    fun.run_cmd(cmd) # run locally
+    fun.run_cmd("%s > %s 2>&1"%(cmd, cmd_output)) # run with stdout
+    #fun.run_cmd(cmd); continue # run locally 
+
  	
  	###### RUN JOB ARRAYS ######
 
@@ -129,9 +130,9 @@ for taxID, spName, ploidy, mitochondrial_chromosome, max_coverage_sra_reads in t
         # run jobs
         if cluster_name=="MN4": 
 
-            queue = "debug"
-            time = "02:00:00"
-            nodes = 12
+            queue = "bsc_ls"
+            time = "48:00:00"
+            nodes = 2
 
             fun.run_jobarray_file_MN4_greasy(jobs_filename, name, time=time, queue=queue, threads_per_job=threads, nodes=nodes)
 
@@ -146,3 +147,5 @@ for taxID, spName, ploidy, mitochondrial_chromosome, max_coverage_sra_reads in t
     elif len(all_lines_jobfile)!=0: raise ValueError("something went wrong")
 
     ############################
+
+print("Golden set analysis worked")

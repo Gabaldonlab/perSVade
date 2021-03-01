@@ -39,11 +39,14 @@ fun.make_folder(opt.outdir)
 # define the print mode
 fun.printing_verbose_mode = opt.verbose
 
+# run porechop
+fun.print_if_verbose("Running porechop")
+trimmed_reads = fun.run_porechop(opt.input_reads,  replace=opt.replace, threads=opt.threads)
+
 # run svim (and also get bam)
 fun.print_if_verbose("Running SVIM")
 outdir_svim = "%s/svim_output"%opt.outdir
-sorted_bam = fun.run_svim(opt.input_reads, opt.ref, outdir_svim,  threads=opt.threads, replace=opt.replace, aligner=opt.aligner, is_nanopore=True)
-print(sorted_bam)
+sorted_bam = fun.run_svim(trimmed_reads, opt.ref, outdir_svim,  threads=opt.threads, replace=opt.replace, aligner=opt.aligner, is_nanopore=True)
 
 # run SNIFFLES
 fun.print_if_verbose("Running SNIFFLES")

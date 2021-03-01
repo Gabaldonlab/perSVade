@@ -80,7 +80,6 @@ for taxID, spName, ploidy, mitochondrial_chromosome, max_coverage_sra_reads in t
 
     # record the used resources in this run (this should be only implemented when there are no running jobs)
     df_resources, current_roundID = test_fun.update_df_resources_nord3Runs_testingAccuracy(df_resources_file, outdir_perSVade, spName, all_STDs_dir)
-    continue
 
     # define the table with short reads
     if spName=="Candida_glabrata": close_shortReads_table = close_shortReads_table_Cglabrata
