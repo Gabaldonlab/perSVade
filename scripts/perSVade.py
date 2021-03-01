@@ -385,7 +385,24 @@ if not any([x=="skip" for x in {opt.fastq1, opt.fastq2}]):
         # if the reads have to be QC and trimmed:
         if opt.QC_and_trimming_reads is True: 
             print("running trimming and QC of the reads")
+
+            # softlink the reads to the outdir
+            reads_dir = "%s/reads"%opt.outdir; fun.make_folder(reads_dir)
+            dest_fastq1 = "%s/raw_reads1.fastq.gz"%reads_dir
+            dest_fastq2 = "%s/raw_reads2.fastq.gz"%reads_dir
+
+            fun.soft_link_files(opt.fastq1, dest_fastq1)
+            fun.soft_link_files(opt.fastq2, dest_fastq2)
+
+            opt.fastq1 = dest_fastq1
+            opt.fastq2 = dest_fastq2
+
+            # trim
             opt.fastq1, opt.fastq2 = fun.run_trimmomatic(opt.fastq1, opt.fastq2, replace=opt.replace, threads=opt.threads)
+
+            # clean
+            for f in os.listdir(reads_dir): 
+            	if f not in {fun.get_file(opt.fastq1), fun.get_file(opt.fastq2)}: fun.remove_file(f)
 
         print("WORKING ON ALIGNMENT")
         fun.run_bwa_mem(opt.fastq1, opt.fastq2, opt.ref, opt.outdir, bamfile, sorted_bam, index_bam, name_sample, threads=opt.threads, replace=opt.replace)
