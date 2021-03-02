@@ -6732,7 +6732,7 @@ def get_svtype_to_svfile_from_perSVade_outdir(perSVade_outdir):
     return svtype_to_svfile
 
 
-def get_svtype_to_svfile_and_df_gridss_from_perSVade_outdir(perSVade_outdir, reference_genome):
+def get_svtype_to_svfile_and_df_gridss_from_perSVade_outdir(perSVade_outdir, reference_genome, skip_df_gridssObtention=False):
 
     """This function takes from the perSVade outdir the svdict and the df_gridss"""
 
@@ -6756,8 +6756,11 @@ def get_svtype_to_svfile_and_df_gridss_from_perSVade_outdir(perSVade_outdir, ref
         svtype_to_svfile = {file.split(".structural_variants.")[1].split(".")[0] : "%s/%s"%(outdir, file) for file in os.listdir(outdir) if ".structural_variants." in file}
 
     # get the df gridss
-    print_if_verbose("loading df_gridss")
-    df_gridss = add_info_to_gridssDF(load_single_sample_VCF(gridss_vcf), reference_genome)
+    if skip_df_gridssObtention is False:
+        print_if_verbose("loading df_gridss")
+        df_gridss = add_info_to_gridssDF(load_single_sample_VCF(gridss_vcf), reference_genome)
+
+    else: df_gridss = None
 
     # keep only the ones that exist
     svtype_to_svfile = {svtype : file for svtype, file in svtype_to_svfile.items() if not file_is_empty(file)}
@@ -6844,6 +6847,14 @@ def clean_perSVade_outdir(outdir):
 
     # add all the temporary files
     files_to_remove += [f for f in os.listdir(outdir) if "temporary_file" in f or f.endswith(".tmp") or "coverage_per_window.tab." in f] 
+
+    ############ FILES IN reads ################
+
+    # add the files to remove
+    reads_dir = "%s/reads"%outdir
+    files_to_remove += ["reads/%s"%f for f in os.listdir(reads_dir) if f not in {"raw_reads1.fastq.gz.trimmed.fastq.gz", "raw_reads2.fastq.gz.trimmed.fastq.gz"}]
+
+    ############################################
 
     ########## FILES IN final_gridss_running  ######### 
 
@@ -6960,7 +6971,7 @@ def clean_perSVade_outdir(outdir):
 
                 file_to_dest_file_parameter_optimisation = {**file_to_dest_file_parameter_optimisation,
                 **{
-                  "%s/%s/plots_benchmark"%(simDir, ploidyDir): "plots/plots_benchmark_%s"%ploidy,
+                  "%s/%s/plots_benchmark"%(simDir, ploidyDir): "plots/plots_benchmark_%s_%s"%(simDir, ploidy),
                   }             
                 }
 
@@ -10444,6 +10455,9 @@ def keep_simulation_files_for_perSVade_outdir(perSVade_outdir, replace=False, n_
         simName = "simulation_%i"%(Isim+1)
         sim_outdir = "%s/%s"%(parameter_optimisation_dir, simName)
 
+        # debug the fact that the simulation dir does not exist
+        if not os.path.isdir(sim_outdir): continue
+
         # go through each ploidy
         for ploidy in simulation_ploidies:
 
@@ -10617,18 +10631,28 @@ def report_accuracy_golden_set_runJobs(goldenSet_dir, outdir, reference_genome, 
         short_reads1 = "%s/%s/%s.srr_1.fastq.gz"%(goldenSet_dir, short_reads_srr, short_reads_srr)
         short_reads2 = "%s/%s/%s.srr_2.fastq.gz"%(goldenSet_dir, short_reads_srr, short_reads_srr)
 
-        # download each of the reads (raw). Stop after fastqdump
-        for type_data, srr in [("illumina_paired", short_reads_srr), ("nanopore", long_reads_srr)]:
-            print_if_verbose("Getting raw reads for %s"%type_data)
+        if any([file_is_empty(f) for f in [longReads, short_reads1, short_reads2]]):
 
-            # define the outdir
-            outdir_srr = "%s/%s"%(goldenSet_dir, srr)
+            # download each of the reads (raw). Stop after fastqdump
+            for type_data, srr in [("illumina_paired", short_reads_srr), ("nanopore", long_reads_srr)]:
+                print_if_verbose("Getting raw reads for %s"%type_data)
 
-            # define the cmd downloading after the fastq-dump
-            cmd = "%s --srr %s --outdir %s --threads %i --stop_after_fastqdump --type_data %s"%(get_trimmed_reads_for_srr_py, srr, outdir_srr, threads, type_data)
-            if StopAfterPrefecth_of_reads is True: cmd += " --stop_after_prefetch"
+                # define the outdir
+                outdir_srr = "%s/%s"%(goldenSet_dir, srr)
 
-            run_cmd(cmd)
+                # define the cmd downloading after the fastq-dump
+                cmd = "%s --srr %s --outdir %s --threads %i --stop_after_fastqdump --type_data %s"%(get_trimmed_reads_for_srr_py, srr, outdir_srr, threads, type_data)
+                if StopAfterPrefecth_of_reads is True: cmd += " --stop_after_prefetch"
+
+                run_cmd(cmd)
+
+        # clean the long reads srr
+        remove_file("%s/%s/%s.srr"%(goldenSet_dir, long_reads_srr, long_reads_srr))
+
+        # clean the short reads files
+        dir_short_reads = get_dir(short_reads1)
+        for f in os.listdir(dir_short_reads):
+            if f not in {get_file(short_reads1), get_file(short_reads2)}: delete_file_or_folder("%s/%s"%(dir_short_reads, f))
 
     #####################################
     else:
@@ -10668,6 +10692,11 @@ def report_accuracy_golden_set_runJobs(goldenSet_dir, outdir, reference_genome, 
     ####### RUN JOBS ########
     #########################
 
+    print_if_verbose("running jobs golden set")
+
+    # init the final dict
+    final_dict = {}
+
     # init the cmds
     all_cmds = []
 
@@ -10682,13 +10711,20 @@ def report_accuracy_golden_set_runJobs(goldenSet_dir, outdir, reference_genome, 
 
         all_cmds.append(ont_calling_cmd)
 
+    # keep the final dict
+    final_dict["svim_outdir"] = "%s/svim_output"%outdir_ONT_calling
+    final_dict["sniffles_outdir"] = "%s/sniffles_output"%outdir_ONT_calling
+
     # add the perSVade runs in several combinations
-    n_remaining_jobs = sum([file_is_empty("%s/perSVade_calling_%s"%(outdir, typeSimulations)) for typeSimulations in ["uniform", "fast", "realSVs"]])
+    n_remaining_jobs = sum([file_is_empty("%s/perSVade_calling_%s/perSVade_finished_file.txt"%(outdir, typeSimulations)) for typeSimulations in ["uniform", "fast", "realSVs"]])
 
     for typeSimulations, bedpe_breakpoints, fast_SVcalling in [("uniform", None, False), ("realSVs", real_bedpe_breakpoints, False), ("fast", None, True)]:
 
         # define an outdir for this type of simulations
         outdir_typeSimulations = "%s/perSVade_calling_%s"%(outdir, typeSimulations); make_folder(outdir_typeSimulations)
+
+        # keep 
+        final_dict["perSVade_outdir_%s"%typeSimulations] = outdir_typeSimulations
 
         # define the final file 
         final_file = "%s/perSVade_finished_file.txt"%outdir_typeSimulations
@@ -10719,11 +10755,9 @@ def report_accuracy_golden_set_runJobs(goldenSet_dir, outdir, reference_genome, 
             # keeping simulations and cleaning
             keep_simulation_files_for_perSVade_outdir(outdir_typeSimulations, replace=replace, n_simulated_genomes=n_simulated_genomes, simulation_ploidies=simulation_ploidies)
 
-            print(outdir_typeSimulations)
-            stopbeforecleaningtotestthatsimlationkeepingworked_ThisIsTOCkeckThatAllFIleswwereCorrect_GoldenSetTesting
-
             # clean
-            clean_perSVade_outdir(outdir_runID)
+            print_if_verbose("cleaning")
+            clean_perSVade_outdir(outdir_typeSimulations)
 
     # run jobs
     if job_array_mode=="job_array":
@@ -10746,6 +10780,295 @@ def report_accuracy_golden_set_runJobs(goldenSet_dir, outdir, reference_genome, 
     #########################
     #########################
     #########################
+
+    return final_dict
+
+def get_svim_output_as_perSVade(svim_outdir):
+
+    """Takes the outdir of SVIM and """
+
+    pass
+
+def check_that_vcf_has_expected_chroms(vcf_df, reference_genome):
+
+    """Checks that the vcf chroms are correct"""
+
+    all_chroms = set(get_chr_to_len(reference_genome))
+    strange_chroms = set(vcf_df["#CHROM"]).difference(all_chroms)
+
+    if len(strange_chroms)>0: raise ValueError("There are unexpected chroms: %s"%strange_chroms)
+
+def check_that_df_fields_have_noNaNs(df, fields):
+    for f in fields:
+        if any(pd.isna(df[f])): raise ValueError("There are NaNs in %s"%f)
+
+def check_that_ID_is_unique(vcf_df):
+    if len(vcf_df)!=len(set(vcf_df.ID)): raise ValueError("ID is not unique")
+
+def get_strands_from_ALT_vcf_df_r(r):
+
+    """Gets a strand1 and strand2 from ALT field of a vcf_df according to the clove notation (same as gridss)"""
+
+    if r.INFO_SVTYPE=="BND":
+            
+        # ]p]t piece extending to the left of p is joined before t
+        # ]mito_C_glabrata_CBS138:20054]TTA
+        if r["ALT"].count("]")==2  and r["ALT"].startswith("]"): strand1, strand2 = "-+"
+
+        # t]p] reverse comp piece extending left of p is joined after t
+        # TTA]mito_C_glabrata_CBS138:20054]
+        elif r["ALT"].count("]")==2  and r["ALT"].endswith("]"): strand1, strand2 = "++"
+
+        # [p[t reverse comp piece extending right of p is joined before t
+        # [mito_C_glabrata_CBS138:1841[T
+        elif r["ALT"].count("[")==2  and r["ALT"].startswith("["): strand1, strand2 = "--"
+
+        # t[p[ piece extending to the right of p is joined after t
+        # T[mito_C_glabrata_CBS138:1841[
+        elif r["ALT"].count("[")==2  and r["ALT"].endswith("["): strand1, strand2 = "+-"
+
+        else: raise ValueError("The alt %s is  not properly formatted"%r["ALT"])
+
+        return strand1+strand2
+
+    else: return np.nan
+
+def add_perSVade_record_to_sniffles_or_svim_df_r(r, svcaller):
+
+    """Takes a row of the svim or sniffles df and adds two fields. 1) the type of SV as in perSVade and 2) A series with the data as in perSVade. The insertions will not be considered
+
+
+    s t[p[ piece extending to the right of p is joined after t
+    s t]p] reverse comp piece extending left of p is joined after t
+    s ]p]t piece extending to the left of p is joined before t
+    s [p[t reverse comp piece extending right of p is joined before t
+
+    """
+
+    # check that the svtypes are as expected
+    svcaller_to_expected_svtypes = {"svim":{'INS', 'DEL', 'BND', 'DUP:TANDEM', 'INV'}, "sniffles":{'DUP', 'INS', 'INVDUP', 'DEL', 'BND', 'INV'}}
+    if r.INFO_SVTYPE not in svcaller_to_expected_svtypes[svcaller]: raise ValueError("%s is not a valid SVTYPE for %s"%(r.INFO_SVTYPE, svcaller))
+
+    # define the perSVade_dict
+
+    # simple SVTYPES
+    if r.INFO_SVTYPE in {"DEL", "DUP", "DUP:TANDEM", "INV"}:
+
+        # check that the chromosome 2 is the same as chrom, and that the END is before the start
+        if svcaller=="sniffles" and r["#CHROM"]!=r.INFO_CHR2: raise ValueError("chrom should be as chr2 in the simple SVs")
+        if r.INFO_END<=r.POS: raise ValueError("start can't be after the end")
+
+        # define the simple series
+        perSVade_dict = {"Chr":r["#CHROM"], "Start":r.POS, "End":r.INFO_END, "ID":r.ID}
+
+    # breakpoints will be saved in bedpe notation
+    elif r.INFO_SVTYPE=="BND":
+
+        # define the coordinates of the breakends (with no uncertainty)
+        chrom1 = r["#CHROM"]
+        end1 = int(r.POS)
+        start1 = end1-1
+        chrom2, end2 = re.split("\]|\[", r["ALT"])[1].split(":"); end2 = int(end2)
+        start2 = end2-1
+
+        # define the orientations based on the alternate allele
+        if svcaller=="svim": strand1, strand2 = r.strands_from_ALT
+        
+        # define the orientation based on the provided INFO (this may not be perfect, according to this issue https://github.com/fritzsedlazeck/Sniffles/issues/121). I note that ALT just yields -+ and +-, so I rely on strands for SNIFFLES
+        elif svcaller=="sniffles": strand1, strand2 = r.INFO_STRANDS
+
+        # definde the series (which can have a changed order)
+        #perSVade_dict = {"chrom1":chrom1, "start1":start1, "end1":end1, "chrom2":chrom2, "start2":start2, "end2":end2, "ID":r.ID, "score":100.0, "strand1":strand1, "strand2":strand2}
+
+        
+        # change the order in case that the ordering is wrong
+        if (chrom1==chrom2 and end2<=end1) or (chrom1!=chrom2 and chrom2<chrom1): 
+
+            perSVade_dict = pd.Series({"chrom1":chrom2, "start1":start2, "end1":end2, "chrom2":chrom1, "start2":start1, "end2":end1, "ID":r.ID, "score":100.0, "strand1":strand2, "strand2":strand1})
+
+        else:
+
+            # define the bedpe
+            perSVade_dict = pd.Series({"chrom1":chrom1, "start1":start1, "end1":end1, "chrom2":chrom2, "start2":start2, "end2":end2, "ID":r.ID, "score":100.0, "strand1":strand1, "strand2":strand2})
+
+    # COPY-PASTE insertions
+    elif r.INFO_SVTYPE=="DUP:INT": youhavetodefinewhatHappensWithInterSpersedDups_makeSureThatTheOrderIsCorrect
+
+    # not considered events
+    elif r.INFO_SVTYPE in {"INS", "INVDUP"}: perSVade_dict = np.nan
+
+    else: 
+        print(r)
+        raise ValueError("INFO_SVTYPE %s is not valid"%r.INFO_SVTYPE)
+
+    # add to r
+    r["perSVade_svtype"] = {"DEL":"deletions", "DUP":"tandemDuplications", "DUP:TANDEM":"tandemDuplications", "INV":"inversions", "INS":"de_novo_insertion", "INVDUP":"inverted_duplication", "BND":"breakpoints", "DUP:INT":"insertions"}[r.INFO_SVTYPE]
+    r["perSVade_dict"] = perSVade_dict
+
+    return r
+
+def get_svim_as_df(svim_outdir, reference_genome, min_QUAL):
+
+    """Loads the svim df as a vcf and returns it"""
+
+    # get the vcf_df
+    vcf_df = get_vcf_df_with_INFO_as_single_fields(get_df_and_header_from_vcf("%s/variants.vcf"%svim_outdir)[0])
+
+    # filter the min qual
+    vcf_df["QUAL"] = vcf_df["QUAL"].apply(float)
+    vcf_df = vcf_df[vcf_df.QUAL>=min_QUAL]
+
+    # add the strand
+    vcf_df["strands_from_ALT"] = vcf_df.apply(get_strands_from_ALT_vcf_df_r, axis=1)
+
+    # add the perSVade-related info
+    print_if_verbose("SVIM. adding perSVade representation for %i vcf records"%len(vcf_df))
+    vcf_df["unique_rowID"] = list(range(len(vcf_df)))
+    vcf_df = vcf_df.apply(add_perSVade_record_to_sniffles_or_svim_df_r, svcaller="svim", axis=1)
+
+    # checks
+    check_that_df_fields_have_noNaNs(vcf_df, ["QUAL", "INFO_SVTYPE"])
+    check_that_vcf_has_expected_chroms(vcf_df, reference_genome)
+    check_that_ID_is_unique(vcf_df)
+
+    return vcf_df
+
+def get_sniffles_as_df(sniffles_outdir, reference_genome):
+
+    """Gets the sniffles vcf as a df with added fields"""
+
+    # get the vcf_df
+    vcf_df = get_vcf_df_with_INFO_as_single_fields(get_df_and_header_from_vcf("%s/output.vcf"%sniffles_outdir)[0])
+    
+    # remove the 'STRANDBIAS', which does not have the position
+    if any([c.endswith("STRANDBIAS") for c in set(get_chr_to_len(reference_genome))]): raise ValueError("There are chromosome names that end with STRANDBIAS. This is a problem to process the SNIFFLES output")
+    vcf_df = vcf_df[~vcf_df["#CHROM"].apply(lambda x: x.endswith("STRANDBIAS"))]
+
+    # check that the INFO misc is IMPRECISE or PRECISE
+    if any(~vcf_df.INFO_misc.isin({"IMPRECISE", "PRECISE"})): raise ValueError("There are some strange INFO_misc")
+
+    # chage the number of reads to float
+    vcf_df["INFO_RE"] = vcf_df["INFO_RE"].apply(float)
+
+    # add the perSVade-related info
+    print_if_verbose("SNIFFLES. adding perSVade representation for %i vcf records"%len(vcf_df))
+    vcf_df = vcf_df.apply(add_perSVade_record_to_sniffles_or_svim_df_r, svcaller="sniffles", axis=1)
+
+    # checks
+    check_that_df_fields_have_noNaNs(vcf_df, ["INFO_RE", "INFO_misc", "INFO_SVTYPE"])
+    check_that_vcf_has_expected_chroms(vcf_df, reference_genome)
+    check_that_ID_is_unique(vcf_df)
+
+    return vcf_df
+
+
+def get_df_accuracy_perSVade_runs_vs_longReads_oneFilterSet(typeRun_to_svtype_to_svDF, min_QUAL_svim, min_RE_sniffles, filter_IMPRECISE_sniffles, svim_df, sniffles_df, outdir_all):
+
+    """Takes some perSVade-called vars and the output of svim and sniffles as dfs and a set of filters for the latter. It defines an svtype_to_svDF overlapping variants (by taking the known vars and integrating the BNDs with clove+own scripts) and returns the  """
+
+    
+    # define the outdir of this parameter combination
+    outdir = "%s/parameters_%.2f_%.2f_%s"%(outdir_all, min_QUAL_svim, min_RE_sniffles, filter_IMPRECISE_sniffles); make_folder(outdir)
+
+
+    """
+    # run clove without checking filtering
+    outfile_clove = "%s.clove.vcf"%(raw_bedpe_file)
+    run_clove_filtered_bedpe(raw_bedpe_file, outfile_clove, sorted_bam, replace=replace_FromGridssRun, median_coverage=median_coverage, median_coverage_dev=1, check_coverage=False) #  REPLACE debug
+
+    # add the filter of coverage to the clove output
+    df_clove = get_clove_output_with_coverage(outfile_clove, reference_genome, sorted_bam, median_coverage, replace=replace_FromGridssRun, run_in_parallel=run_in_parallel, delete_bams=run_in_parallel, threads=threads)
+
+    if len(df_clove)==0: return {}, df_gridss
+
+    # define the coverage filtering based on the type_coverage_to_filterTANDEL
+    df_clove["coverage_FILTER"] = df_clove.apply(lambda r: get_covfilter_cloveDF_row_according_to_SVTYPE(r, max_rel_coverage_to_consider_del=max_rel_coverage_to_consider_del, min_rel_coverage_to_consider_dup=min_rel_coverage_to_consider_dup, coverage_field="mean_rel_coverage_to_neighbor"), axis=1)
+
+    # annotated clove 
+    fileprefix = "%s.structural_variants"%outfile_clove
+
+    remaining_df_clove, svtype_to_SVtable = write_clove_df_into_bedORbedpe_files_like_RSVSim(df_clove, fileprefix, reference_genome, sorted_bam, tol_bp=tol_bp, replace=replace_FromGridssRun, svtypes_to_consider={"insertions", "deletions", "inversions", "translocations", "tandemDuplications", "remaining"}, run_in_parallel=run_in_parallel, define_insertions_based_on_coverage=define_insertions_based_on_coverage)
+    """
+
+def report_accuracy_golden_set_reportAccuracy(dict_paths, outdir, reference_genome, threads=4, replace=False):
+
+    """Generates the plots of the golden set analysis given a path to the already generated dirs"""
+
+    ######### GET A DF WITH THE ACCURACY OF SEVERAL PERSVADE RUNS ON SEVERAL COMBINATIONS OF REAL DATA ########
+
+    df_accuracy_perSVade_vs_longReads_file = "%s/df_accuracy_perSVade_vs_longReads.tab"%outdir
+    if file_is_empty(df_accuracy_perSVade_vs_longReads_file) or replace is True:
+
+        # map each type of perSVade running to the final set of svs
+        typeRun_to_svtype_to_svDF = {typeRun : {svtype : get_tab_as_df_or_empty_df(svfile) for svtype, svfile in get_svtype_to_svfile_and_df_gridss_from_perSVade_outdir(dict_paths["perSVade_outdir_%s"%typeRun], reference_genome, skip_df_gridssObtention=True)[0].items()} for typeRun in ["fast", "uniform", "realSVs"]}
+
+        # make sure that an example bedpe is properly sorted
+        bedpe_fields = ["chrom1", "start1", "end1", "chrom2", "start2", "end2", "ID", "score", "strand1", "strand2"]
+        df_bedpe = pd.read_csv("%s/SVdetection_output/final_gridss_running/gridss_output.filt.bedpe"%(dict_paths["perSVade_outdir_uniform"]), sep="\t", names=bedpe_fields, header=-1)
+        if any(df_bedpe.chrom1>df_bedpe.chrom2): raise ValueError("The chrom2 should be always after chrom2 in alphaberic order")
+
+        # define parms
+        min_svim_QUAL = 3
+
+        # get the svim and sniffles dfs
+        svim_df = get_svim_as_df(dict_paths["svim_outdir"], reference_genome, min_svim_QUAL)
+        sniffles_df = get_sniffles_as_df(dict_paths["sniffles_outdir"], reference_genome)
+
+        # define filter parms
+        all_min_QUAL_svim = [3, 5, 10, 15, 20, 30, 40]
+        max_sniffles_RE = np.percentile(sniffles_df.INFO_RE, 90)
+
+        # define an outdir for the filtering
+        outdir_calculating_accuracy = "%s/calculating_accuracy_perSVade_vs_longReads"%outdir
+        delete_folder(outdir_calculating_accuracy)
+        make_folder(outdir_calculating_accuracy)
+
+        # define several inputs for the function get_df_accuracy_perSVade_runs_vs_longReads_oneFilterSet
+        inputs_fn = [(typeRun_to_svtype_to_svDF, min_QUAL_svim, min_RE_sniffles, filter_IMPRECISE_sniffles, svim_df, sniffles_df, outdir_calculating_accuracy) for min_QUAL_svim in all_min_QUAL_svim for min_RE_sniffles in np.linspace(min(sniffles_df.INFO_RE), max_sniffles_RE, 6) for filter_IMPRECISE_sniffles in [True, False]]
+
+        # test accuracy on several parameters in parallel
+        print_if_verbose("Testing the accuracy on real Vars for %i parameter combinations"%len(inputs_fn))
+        all_accuracy_dfs = list(map(lambda x: get_df_accuracy_perSVade_runs_vs_longReads_oneFilterSet(x[0], x[1], x[2], x[3], x[4], x[5], x[6]), inputs_fn))
+
+        print(all_accuracy_dfs)
+
+        kagdhjhagjdg
+
+        # clean
+        delete_folder(outdir_calculating_accuracy)
+
+        # save df
+        save_df_as_tab(df_accuracy_perSVade_vs_longReads, df_accuracy_perSVade_vs_longReads_file)
+
+
+    # get accuracy df for several combinations of filterings of SVIM and SNIFFLES
+    """
+    with multiproc
+
+
+                # run in parallel
+            with multiproc.Pool(threads) as pool:
+                list_cross_benchmarking_dfs = pool.starmap(get_benchmarking_df_for_testSVs_from_trainSV_filterSets, list_inputs) # needs if __name__=="__main__" 
+                
+                pool.close()
+                pool.terminate()
+
+    svtype_to_file_svim = fun.get_svim_output_as_perSVade(dict_paths["svim_outdir"])
+    """
+
+    ###########################################################################################################
+
+
+    ###### TEST SVIM AND SNIFFLES NORMALISATION ######
+    """
+    svtype_to_file_svim = fun.get_svim_output_as_perSVade("%s/testing_goldenSetAccuracy/ONT_SV_calling/svim_output"%outdir_perSVade)
+    print(svtype_to_file_svim)
+    jagjdadjgadj
+    svtype_to_file_sniffles = fun.get_sniffles_output_as_perSVade("%s/testing_goldenSetAccuracy/ONT_SV_calling/sniffles_output"%outdir_perSVade)
+    adkhadhjgdahda
+    """
+
+    ##################################################
 
 def remove_smallVarsCNV_nonEssentialFiles(outdir, ploidy):
 

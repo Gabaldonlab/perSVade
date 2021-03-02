@@ -55,7 +55,7 @@ taxIDs_with_noON_overalpping = {"746128"}
 goldenSet_dir_Cglabrata = "%s/scripts/perSVade/perSVade_repository/testing/Cglabrata_goldenSetReads_BG2"%ParentDir
 
 # define the run in cluster (and debug)
-run_in_cluster = True
+run_in_cluster = False
 if running_in_cluster is False: run_in_cluster = False
 
 # go through each species
@@ -68,17 +68,6 @@ for taxID, spName, ploidy, mitochondrial_chromosome, max_coverage_sra_reads in t
 
     # create an outdir
     outdir_perSVade = "%s/%s_%s"%(outdir_testing, taxID, spName); fun.make_folder(outdir_perSVade)
-
-    ###### TEST SVIM AND SNIFFLES NORMALISATION ######
-    """
-    svtype_to_file_svim = fun.get_svim_output_as_perSVade("%s/testing_goldenSetAccuracy/ONT_SV_calling/svim_output"%outdir_perSVade)
-    print(svtype_to_file_svim)
-    jagjdadjgadj
-    svtype_to_file_sniffles = fun.get_sniffles_output_as_perSVade("%s/testing_goldenSetAccuracy/ONT_SV_calling/sniffles_output"%outdir_perSVade)
-    adkhadhjgdahda
-    """
-
-    ##################################################
 
     # get the repeats for this genome
     previous_repeats_table = fun.get_repeat_maskerDF(genome, threads=threads, replace=False)[1]
@@ -111,8 +100,8 @@ for taxID, spName, ploidy, mitochondrial_chromosome, max_coverage_sra_reads in t
 
     cmd_output = "%s/cmd_testing.std"%outdir_perSVade
     print("running std into %s"%cmd_output)
-    fun.run_cmd("%s > %s 2>&1"%(cmd, cmd_output)) # run with stdout
-    #fun.run_cmd(cmd); continue # run locally 
+    #fun.run_cmd("%s > %s 2>&1"%(cmd, cmd_output)) # run with stdout
+    fun.run_cmd(cmd); continue # run locally 
 
  	
  	###### RUN JOB ARRAYS ######
@@ -132,7 +121,7 @@ for taxID, spName, ploidy, mitochondrial_chromosome, max_coverage_sra_reads in t
 
             queue = "bsc_ls"
             time = "24:00:00"
-            nodes = 2
+            nodes = 1
 
             fun.run_jobarray_file_MN4_greasy(jobs_filename, name, time=time, queue=queue, threads_per_job=threads, nodes=nodes)
 

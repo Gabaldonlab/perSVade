@@ -552,8 +552,12 @@ if opt.testAccuracy is True:
 # get the golden set
 if opt.goldenSet_dir is not None:
 
+	# run jobs golden set testing
     outdir_goldenSet = "%s/testing_goldenSetAccuracy"%opt.outdir
-    fun.report_accuracy_golden_set_runJobs(opt.goldenSet_dir, outdir_goldenSet, opt.ref, real_bedpe_breakpoints, threads=opt.threads, replace=opt.replace, n_simulated_genomes=opt.nsimulations, mitochondrial_chromosome=opt.mitochondrial_chromosome, simulation_ploidies=simulation_ploidies, range_filtering_benchmark=opt.range_filtering_benchmark, nvars=opt.nvars, job_array_mode=opt.job_array_mode, StopAfter_sampleIndexingFromSRA=opt.StopAfter_sampleIndexingFromSRA, StopAfterPrefecth_of_reads=opt.StopAfterPrefecth_of_reads_goldenSet, target_taxID=opt.target_taxID, parameters_json_file=opt.parameters_json_file, fraction_available_mem=opt.fraction_available_mem, StopAfter_goldenSetAnalysis_readObtention=opt.StopAfter_goldenSetAnalysis_readObtention, verbose=opt.verbose, StopAfter_goldenSetAnalysis_readTrimming=opt.StopAfter_goldenSetAnalysis_readTrimming)
+    dict_paths_goldenSetAnalysis = fun.report_accuracy_golden_set_runJobs(opt.goldenSet_dir, outdir_goldenSet, opt.ref, real_bedpe_breakpoints, threads=opt.threads, replace=opt.replace, n_simulated_genomes=opt.nsimulations, mitochondrial_chromosome=opt.mitochondrial_chromosome, simulation_ploidies=simulation_ploidies, range_filtering_benchmark=opt.range_filtering_benchmark, nvars=opt.nvars, job_array_mode=opt.job_array_mode, StopAfter_sampleIndexingFromSRA=opt.StopAfter_sampleIndexingFromSRA, StopAfterPrefecth_of_reads=opt.StopAfterPrefecth_of_reads_goldenSet, target_taxID=opt.target_taxID, parameters_json_file=opt.parameters_json_file, fraction_available_mem=opt.fraction_available_mem, StopAfter_goldenSetAnalysis_readObtention=opt.StopAfter_goldenSetAnalysis_readObtention, verbose=opt.verbose, StopAfter_goldenSetAnalysis_readTrimming=opt.StopAfter_goldenSetAnalysis_readTrimming)
+
+    # plot the accurac
+    fun.report_accuracy_golden_set_reportAccuracy(dict_paths_goldenSetAnalysis, outdir_goldenSet, opt.ref, threads=opt.threads, replace=opt.replace)
 
     if opt.StopAfter_goldenSetAnalysis is True: 
         print(" Stopping after the running of golden-set analysis")
