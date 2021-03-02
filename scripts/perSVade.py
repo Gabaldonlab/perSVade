@@ -402,7 +402,7 @@ if not any([x=="skip" for x in {opt.fastq1, opt.fastq2}]):
 
             # clean
             for f in os.listdir(reads_dir): 
-            	if f not in {fun.get_file(opt.fastq1), fun.get_file(opt.fastq2)}: fun.remove_file(f)
+            	if f not in {fun.get_file(opt.fastq1), fun.get_file(opt.fastq2)}: fun.delete_file_or_folder("%s/%s"%(reads_dir, f))
 
         print("WORKING ON ALIGNMENT")
         fun.run_bwa_mem(opt.fastq1, opt.fastq2, opt.ref, opt.outdir, bamfile, sorted_bam, index_bam, name_sample, threads=opt.threads, replace=opt.replace)
@@ -513,6 +513,9 @@ if opt.StopAfter_obtentionOFcloseSVs:
     sys.exit(0)
 
 end_time_obtentionCloseSVs =  time.time()
+
+# test that the real_bedpe_breakpoints are correct
+if real_bedpe_breakpoints is not None and not os.path.isfile(real_bedpe_breakpoints): raise ValueError("The provided real bedpe breakpoints %s are incorrect."%real_bedpe_breakpoints)
 
 ###################################################################################################
 

@@ -41,7 +41,8 @@ fun.printing_verbose_mode = opt.verbose
 
 # run porechop
 fun.print_if_verbose("Running porechop")
-trimmed_reads = fun.run_porechop(opt.input_reads,  replace=opt.replace, threads=opt.threads)
+#trimmed_reads = fun.run_porechop(opt.input_reads,  replace=opt.replace, threads=opt.threads)
+trimmed_reads = fun.run_porechop_parallel(opt.input_reads, replace=opt.replace, threads=opt.threads, reads_per_chunk=8000)
 
 # run svim (and also get bam)
 fun.print_if_verbose("Running SVIM")

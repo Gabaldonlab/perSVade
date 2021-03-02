@@ -62,8 +62,6 @@ if running_in_cluster is False: run_in_cluster = False
 for taxID, spName, ploidy, mitochondrial_chromosome, max_coverage_sra_reads in test_fun.species_Info:
     print(taxID, spName)
 
-    #if spName=="Candida_glabrata": continue # debug
-
     # define  the genome and annotations
     genome = "%s/%s.fasta"%(outdir_genomes_and_annotations, spName)
     gff = "%s/%s.gff"%(outdir_genomes_and_annotations, spName)
@@ -85,13 +83,15 @@ for taxID, spName, ploidy, mitochondrial_chromosome, max_coverage_sra_reads in t
     # get the repeats for this genome
     previous_repeats_table = fun.get_repeat_maskerDF(genome, threads=threads, replace=False)[1]
 
-    # define the goldenSet_dir
-    if spName=="Candida_glabrata": goldenSet_dir = goldenSet_dir_Cglabrata
-    else: goldenSet_dir = "auto"
+    # define the goldenSet_dir and the real bedpe breakpoints
+    if spName=="Candida_glabrata": 
+        goldenSet_dir = goldenSet_dir_Cglabrata
+        real_bedpe_breakpoints = "%s/outdirs_testing_severalSpecies/%s_%s/findingRealSVs_providedCloseReads/integrated_breakpoints.bedpe"%(CurDir, taxID, spName)
 
-    # define the real bedepe breakpoints
-    real_bedpe_breakpoints = "%s/"%outdir_perSVade
-
+    else: 
+        goldenSet_dir = "auto"
+        real_bedpe_breakpoints = "%s/outdirs_testing_severalSpecies/%s_%s/findingRealSVs_automaticFindingOfCloseReads/integrated_breakpoints.bedpe"%(CurDir, taxID, spName)
+    
     # get the golden set running 
     if taxID in taxIDs_with_noON_overalpping: continue
     cmd = "%s --ref %s --threads %i -o %s --target_taxID %s --real_bedpe_breakpoints %s -f1 skip -f2 skip --mitochondrial_chromosome %s --gff %s --goldenSet_dir %s --skip_SVcalling --verbose --nsimulations 2 --simulation_ploidies haploid,diploid_hetero --previous_repeats_table %s --QC_and_trimming_reads --StopAfter_goldenSetAnalysis "%(perSVade_py, genome, threads, outdir_perSVade, taxID, real_bedpe_breakpoints, mitochondrial_chromosome, gff, goldenSet_dir, previous_repeats_table)
@@ -131,7 +131,7 @@ for taxID, spName, ploidy, mitochondrial_chromosome, max_coverage_sra_reads in t
         if cluster_name=="MN4": 
 
             queue = "bsc_ls"
-            time = "48:00:00"
+            time = "24:00:00"
             nodes = 2
 
             fun.run_jobarray_file_MN4_greasy(jobs_filename, name, time=time, queue=queue, threads_per_job=threads, nodes=nodes)
