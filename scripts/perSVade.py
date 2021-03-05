@@ -180,6 +180,8 @@ parser.add_argument("--run_ploidy2_ifHaploid", dest="run_ploidy2_ifHaploid", act
 parser.add_argument("--consider_repeats_smallVarCall", dest="consider_repeats_smallVarCall", action="store_true", default=False, help="If --run_smallVarsCNV, this option will imply that each small  variant will have an annotation of whether it overlaps a repeat region.")
 parser.add_argument("--previous_repeats_table", dest="previous_repeats_table", default=None, help="This may be the path to a file that contains the processed output of RepeatMasker (such as the one output by the function get_repeat_maskerDF). This should be a table with the following header: 'SW_score, perc_div, perc_del, perc_ins, chromosome, begin_repeat, end_repeat, left_repeat, strand, repeat, type, position_inRepeat_begin, position_inRepeat_end, left_positionINrepeat, IDrepeat'. It is created by parsing the tabular output of RepeatMasker and putting into a real .tab format.")
 
+parser.add_argument("--simulate_SVs_arround_repeats", dest="simulate_SVs_arround_repeats", action="store_true", default=False, help="Simulate SVs arround repeats. This requires that there are some repeats inferred. This option will generate a simulated set of breakpoints arround repeats, if possible of the same family, and with random orientations.")
+
 parser.add_argument("--bg_sorted_bam_CNV", dest="bg_sorted_bam_CNV", default=None, help="This is a sorted bam (with duplicated marked) that is taken as a 'reference' background in the CNV calling. By default, perSVade corrects the coverage by GC content, mappability and the distance to the telomere. If --bg_sorted_bam_CNV, the coverage will be normalised by the coverage of this sorted bam.")
 
 
@@ -266,7 +268,6 @@ if opt.previous_repeats_table is not None:
 
 ###############################################
 
-
 #### define misc args ####
 
 # get the simulation ploidies
@@ -337,9 +338,24 @@ else:
     print("skipping the repeats analysis")
     fun.write_repeats_table_file(repeats_table_file)
 
+
 if opt.StopAfter_repeatsObtention is True:
     print("Stopping after the obtention of repeats")
     sys.exit(0)
+
+####### GENERATE A real_bedpe_breakpoints ARROUND REPEATS IF NECESSARY ##########
+
+if opt.simulate_SVs_arround_repeats is True:
+    print("simulating arround repeats")
+    
+    # debug
+    if opt.real_bedpe_breakpoints is not None: raise ValueError("You can not specify --simulate_SVs_arround_repeats and --real_bedpe_breakpoints. You may definir either of both.")
+    if opt.skip_repeat_analysis is True: raise ValueError("You should not skip the repeats analysis (with --skip_repeat_analysis) if you want to simulate SVs arround repeats.")
+
+    # override the real_bedpe_breakpoints with the bedpe comming from repeats
+    opt.real_bedpe_breakpoints = fun.get_bedpe_breakpoints_arround_repeats(repeats_table_file, replace=opt.replace, max_breakpoints=(opt.nvars*2000), max_breakpoints_per_repeat=20)
+
+################################################################################
 
 #############################
 
@@ -402,7 +418,7 @@ if not any([x=="skip" for x in {opt.fastq1, opt.fastq2}]):
 
             # clean
             for f in os.listdir(reads_dir): 
-            	if f not in {fun.get_file(opt.fastq1), fun.get_file(opt.fastq2)}: fun.delete_file_or_folder("%s/%s"%(reads_dir, f))
+                if f not in {fun.get_file(opt.fastq1), fun.get_file(opt.fastq2)}: fun.delete_file_or_folder("%s/%s"%(reads_dir, f))
 
         print("WORKING ON ALIGNMENT")
         fun.run_bwa_mem(opt.fastq1, opt.fastq2, opt.ref, opt.outdir, bamfile, sorted_bam, index_bam, name_sample, threads=opt.threads, replace=opt.replace)
@@ -458,8 +474,7 @@ if opt.StopAfter_bamFileObtention is True:
 
 start_time_obtentionCloseSVs =  time.time()
 
-##### find a dict that maps each svtype to a file with a set of real SVs (real_svtype_to_file) #####
-all_svs = {'translocations', 'insertions', 'deletions', 'inversions', 'tandemDuplications'}
+##### find a set of 'real_bedpe_breakpoints' that will be used for the simulations #####
 
 if opt.real_bedpe_breakpoints is not None and opt.fast_SVcalling is False: 
     print("using the set of real variants from %s"%opt.real_bedpe_breakpoints)
@@ -552,7 +567,7 @@ if opt.testAccuracy is True:
 # get the golden set
 if opt.goldenSet_dir is not None:
 
-	# run jobs golden set testing
+    # run jobs golden set testing
     outdir_goldenSet = "%s/testing_goldenSetAccuracy"%opt.outdir
     dict_paths_goldenSetAnalysis = fun.report_accuracy_golden_set_runJobs(opt.goldenSet_dir, outdir_goldenSet, opt.ref, real_bedpe_breakpoints, threads=opt.threads, replace=opt.replace, n_simulated_genomes=opt.nsimulations, mitochondrial_chromosome=opt.mitochondrial_chromosome, simulation_ploidies=simulation_ploidies, range_filtering_benchmark=opt.range_filtering_benchmark, nvars=opt.nvars, job_array_mode=opt.job_array_mode, StopAfter_sampleIndexingFromSRA=opt.StopAfter_sampleIndexingFromSRA, StopAfterPrefecth_of_reads=opt.StopAfterPrefecth_of_reads_goldenSet, target_taxID=opt.target_taxID, parameters_json_file=opt.parameters_json_file, fraction_available_mem=opt.fraction_available_mem, StopAfter_goldenSetAnalysis_readObtention=opt.StopAfter_goldenSetAnalysis_readObtention, verbose=opt.verbose, StopAfter_goldenSetAnalysis_readTrimming=opt.StopAfter_goldenSetAnalysis_readTrimming)
 

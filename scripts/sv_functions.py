@@ -6867,7 +6867,7 @@ def clean_perSVade_outdir(outdir):
 
     # add the files to remove
     reads_dir = "%s/reads"%outdir
-    files_to_remove += ["reads/%s"%f for f in os.listdir(reads_dir) if f not in {"raw_reads1.fastq.gz.trimmed.fastq.gz", "raw_reads2.fastq.gz.trimmed.fastq.gz"}]
+    if os.path.isdir(reads_dir): files_to_remove += ["reads/%s"%f for f in os.listdir(reads_dir) if f not in {"raw_reads1.fastq.gz.trimmed.fastq.gz", "raw_reads2.fastq.gz.trimmed.fastq.gz"}]
 
     ############################################
 
@@ -10296,6 +10296,155 @@ def plot_accuracy_of_parameters_on_test_samples(parameters_df, test_df, outdir, 
     # plot heatmap of cross accuracy
     generate_heatmap_accuracy_of_parameters_on_test_samples(df_benchmark, plots_dir, replace=replace, threads=threads)
 
+def get_bedpe_breakpoints_arround_repeats(repeats_table_file, replace=False, min_sv_size=50, max_breakpoints=10000, max_breakpoints_per_repeat=50):
+
+    """ Takes a repeats file and returns a bedpe with breakpoints arround the repeats. There will be one breakpoint for each repeat against another one (each breakpoint used only once) with random orientations and at least min_sv_size if they are equal. If the repeat has another repeat of the same "repeat" name, it will be picked first. """
+
+    # define the output file
+    bedpe_breakpoints = "%s.breakpoints_max%i.bedpe"%(repeats_table_file, max_breakpoints) # this will be a bedpe with no fields
+
+    if file_is_empty(bedpe_breakpoints) or replace is True:
+        print_if_verbose("Generating %s"%bedpe_breakpoints)
+
+        # load the df and debug
+        df_repeats = get_tab_as_df_or_empty_df(repeats_table_file)
+        if len(df_repeats)==0: raise ValueError("There should be some repeats in %s"%repeats_table_file)
+        if len(df_repeats)!=len(set(df_repeats.IDrepeat)): raise ValueError("The ID of the repeats should be unique")
+        df_repeats = df_repeats.drop_duplicates(subset=["chromosome", "begin_repeat", "end_repeat", "repeat"]).sample(frac=1)
+
+        # add fields
+        repeat_to_Nrepeats = df_repeats.groupby("repeat").apply(len)
+        df_repeats["n_same_repeat"] = df_repeats["repeat"].apply(lambda x: repeat_to_Nrepeats[x])
+        df_repeats["repeat_position"] = (df_repeats.begin_repeat + (df_repeats.end_repeat - df_repeats.begin_repeat)/2).apply(int)
+
+        # filter low complexity regions
+        df_repeats = df_repeats[~(df_repeats.type.isin({"Low_complexity"}))]
+
+        # debugs
+        if any(df_repeats.repeat_position<0): raise ValueError("There should be no negative repeat positions") 
+
+        # sort by the type of repeats
+        type_repeat_to_importance = {"Unknown":10, "Simple_repeat":1, "Low_complexity":0}
+        def get_repeat_importance(x):
+            if x in type_repeat_to_importance: return type_repeat_to_importance[x]
+            else: return 9
+        df_repeats["repeat_importance"] = df_repeats.type.apply(get_repeat_importance)
+        df_repeats = df_repeats.sort_values(by=["repeat_importance"], ascending=False)
+
+        # change the ID
+        df_repeats["ID"] = list(range(len(df_repeats)))
+        df_repeats = df_repeats.set_index("ID", drop=False)[["chromosome", "repeat_position", "ID", "repeat"]]
+
+        # define dicts
+        all_chroms = sorted(set(df_repeats.chromosome))
+        chrom_to_dfSameChrom = dict(zip(all_chroms, map(lambda c: df_repeats[df_repeats.chromosome==c], all_chroms)))
+        chrom_to_IDsDifferenChroms = dict(zip(all_chroms, map(lambda c: set(df_repeats[df_repeats.chromosome!=c].ID), all_chroms)))
+
+        # add the set of compatible IDs, those that are different chromosomes or less than min_sv_size appart
+        def get_set_compatibleIDs(r): 
+
+            IDs_different_chroms = chrom_to_IDsDifferenChroms[r.chromosome]
+
+            df_sameChrom = chrom_to_dfSameChrom[r.chromosome]
+            IDs_same_chrom =  set(df_sameChrom[(df_sameChrom.repeat_position-r.repeat_position).apply(abs)>=min_sv_size].ID)
+
+            return IDs_different_chroms.union(IDs_same_chrom)
+
+        df_repeats["compatible_repeatIDs"] = df_repeats.apply(get_set_compatibleIDs, axis=1)
+
+        ##### DEFINE THE PAIRS OF COMPATIBLE REPEATS #######
+
+        # init the repeat pairs
+        all_repeat_pairs = []
+
+        # go through each repeat
+        for Ifrom in list(df_repeats.index):
+
+            # init the number of repeats on Ifrom
+            n_pairs_on_Ifrom = 0
+
+            # define the series
+            r_from = df_repeats.loc[Ifrom]
+
+            # repeats that have a member of the same faimily will be joined to them. The others will be treated independently
+            if repeat_to_Nrepeats[r_from["repeat"]]>1: df_rep = df_repeats[(df_repeats.ID.isin(r_from.compatible_repeatIDs)) & (df_repeats["repeat"]==r_from["repeat"])]
+
+            else: df_rep = df_repeats[(df_repeats.ID.isin(r_from.compatible_repeatIDs))]
+
+            # go through  the compatible repeat pairs
+            for Ito in list(df_rep.index):
+
+                # define the repeat pairs
+                repeat_pair = tuple(sorted([Ifrom, Ito]))
+
+                # endings
+                if repeat_pair in all_repeat_pairs: break
+                if len(all_repeat_pairs)>=max_breakpoints: break
+                if n_pairs_on_Ifrom>=max_breakpoints_per_repeat: break
+
+                # keep pairs
+                all_repeat_pairs.append(repeat_pair)
+                n_pairs_on_Ifrom+=1
+
+            if len(all_repeat_pairs)>=max_breakpoints: break
+
+        print_if_verbose("There are %i breakpoints arround repeats"%(len(all_repeat_pairs)))
+
+        ##################################################
+
+        ###### GENERATE A BEDPE WITH THE PAIRS OF COMPATIBLE REPEATS, ASSIGNING RANDOM ORIENTATIONS #######
+
+        # init dict
+        def get_bedpe_dict_fromPair_repeats(x):
+
+            # define the rows
+            r_from = df_repeats.loc[x[0]]
+            r_to = df_repeats.loc[x[1]]
+
+            # define the r1 and r2, whcih have to be sorted
+            if r_from.chromosome==r_to.chromosome: 
+                
+                if r_from.repeat_position<r_to.repeat_position: 
+                    r1 = r_from
+                    r2 = r_to
+
+                elif r_from.repeat_position>r_to.repeat_position:
+                    r2 = r_from
+                    r1 = r_to
+
+            else:
+
+                if r_from.chromosome<r_to.chromosome: 
+                    r1 = r_from
+                    r2 = r_to
+
+                elif r_from.chromosome>r_to.chromosome:
+                    r2 = r_from
+                    r1 = r_to
+
+
+            # define strands randomly
+            strands = ["+", "-"]
+            strand1 = random.choice(strands)
+            strand2 = random.choice(strands)
+
+            # get the bedpe dict
+            return {"chrom1":r1.chromosome, "start1":r1.repeat_position, "end1":r1.repeat_position+1, "chrom2":r2.chromosome, "start2":r2.repeat_position, "end2":r2.repeat_position+1, "name":"%s_%s||%s_%s"%(r1["repeat"], r1.ID, r2["repeat"], r2.ID), "score":100.0, "strand1":strand1, "strand2":strand2}
+
+
+        bedpe_df = pd.DataFrame(dict(zip(all_repeat_pairs, map(get_bedpe_dict_fromPair_repeats, all_repeat_pairs)))).transpose()[["chrom1", "start1", "end1", "chrom2", "start2", "end2", "name", "score", "strand1", "strand2"]]
+
+        # write
+        bedpe_breakpoints_tmp = "%s.tmp"%bedpe_breakpoints
+        bedpe_df.to_csv(bedpe_breakpoints_tmp, sep="\t", header=False, index=False)
+        os.rename(bedpe_breakpoints_tmp, bedpe_breakpoints)
+
+        ###################################################################################################
+
+    return bedpe_breakpoints
+
+
+
 def report_accuracy_realSVs_perSVadeRuns(close_shortReads_table, reference_genome, outdir, real_bedpe_breakpoints, threads=4, replace=False, n_simulated_genomes=2, mitochondrial_chromosome="mito_C_glabrata_CBS138", simulation_ploidies=["haploid", "diploid_homo", "diploid_hetero", "ref:2_var:1", "ref:3_var:1", "ref:4_var:1", "ref:5_var:1", "ref:9_var:1", "ref:19_var:1", "ref:99_var:1"], range_filtering_benchmark="theoretically_meaningful", nvars=100, job_array_mode="local", skip_cleaning_simulations_files_and_parameters=False, skip_cleaning_outdir=False, parameters_json_file=None, gff=None, replace_FromGridssRun_final_perSVade_run=False, fraction_available_mem=None, skip_CNV_calling=False, outdir_finding_realVars=None, replace_SV_CNVcalling=False):
 
 
@@ -10342,11 +10491,11 @@ def report_accuracy_realSVs_perSVadeRuns(close_shortReads_table, reference_genom
     all_cmds = []
 
     # predefine if some jobs need to be ran
-    n_remaining_jobs = sum([sum([file_is_empty("%s/%s/%s/perSVade_finished_file.txt"%(outdir, typeSimulations, runID)) for runID in set(df_reads.runID)]) for typeSimulations in ["uniform", "fast", "realSVs"]])
+    n_remaining_jobs = sum([sum([file_is_empty("%s/%s/%s/perSVade_finished_file.txt"%(outdir, typeSimulations, runID)) for runID in set(df_reads.runID)]) for typeSimulations in ["arroundRepeats", "uniform", "fast", "realSVs"]])
     print_if_verbose("There are %i remaining jobs"%n_remaining_jobs)
 
     # go through each run and configuration
-    for typeSimulations, bedpe_breakpoints, fast_SVcalling in [("uniform", None, False), ("realSVs", real_bedpe_breakpoints, False), ("fast", None, True)]:
+    for typeSimulations, bedpe_breakpoints, fast_SVcalling, simulate_SVs_arround_repeats in [("arroundRepeats", None, False, True), ("uniform", None, False, False), ("realSVs", real_bedpe_breakpoints, False, False), ("fast", None, True, False)]:
 
         # define an outdir for this type of simulations
         outdir_typeSimulations = "%s/%s"%(outdir, typeSimulations); make_folder(outdir_typeSimulations)
@@ -10397,7 +10546,7 @@ def report_accuracy_realSVs_perSVadeRuns(close_shortReads_table, reference_genom
                 if fraction_available_mem is not None: cmd += " --fraction_available_mem %.3f"%(float(fraction_available_mem))
                 if replace_SV_CNVcalling is True: cmd += " --replace_SV_CNVcalling"
                 if skip_CNV_calling is True: cmd += " --skip_CNV_calling"
-
+                if simulate_SVs_arround_repeats is True: cmd += " --simulate_SVs_arround_repeats"
 
                 # if the running in slurm is false, just run the cmd
                 if job_array_mode=="local": run_cmd(cmd)
@@ -10409,6 +10558,9 @@ def report_accuracy_realSVs_perSVadeRuns(close_shortReads_table, reference_genom
 
             # keep the simulation files and clean outdir
             elif n_remaining_jobs==0:
+
+                print_if_verbose("perSVade testing finished")
+                sys.exit(0)
 
                 # keeping simulations and cleaning
                 keep_simulation_files_for_perSVade_outdir(outdir_runID, replace=replace, n_simulated_genomes=n_simulated_genomes, simulation_ploidies=simulation_ploidies)
