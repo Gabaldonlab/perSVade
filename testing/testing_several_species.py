@@ -34,7 +34,7 @@ import testing_functions as test_fun
 if running_in_cluster is True:
 
     cluster_name = fun.get_current_clusterName_mareNostrum()
-    if cluster_name=="MN4": threads = 48
+    if cluster_name=="MN4": threads = 24
     elif cluster_name=="Nord3": threads = 16
     else: raise ValueError("cluster could not be identified")
 
@@ -53,6 +53,7 @@ close_shortReads_table_Cglabrata = "%s/scripts/perSVade/perSVade_repository/test
 
 # define the type of run
 run_in_cluster = True
+if running_in_cluster is False: run_in_cluster = False
 
 # init a df that has the timing and memoryrecordings
 df_resources_file = "%s/resources_consumption.tab"%outdir_testing 
@@ -79,14 +80,19 @@ for taxID, spName, ploidy, mitochondrial_chromosome, max_coverage_sra_reads in t
     # this is testing the whole perSVade pipeline on 3 runs of 3 close taxIDs to the reference genome. It will run only SV calling.
 
     # record the used resources in this run (this should be only implemented when there are no running jobs)
-    df_resources, current_roundID = test_fun.update_df_resources_nord3Runs_testingAccuracy(df_resources_file, outdir_perSVade, spName, all_STDs_dir)
+    #df_resources, current_roundID = test_fun.update_df_resources_nord3Runs_testingAccuracy(df_resources_file, outdir_perSVade, spName, all_STDs_dir)    
 
     # define the table with short reads
     if spName=="Candida_glabrata": close_shortReads_table = close_shortReads_table_Cglabrata
     else: close_shortReads_table = "auto"
 
+    # define the simulation ploidies
+    if ploidy==2: simulation_ploidies = "haploid"
+    elif ploidy==1: simulation_ploidies = "haploid"
+    else: raise ValueError("ploidy is not correct")
+
     # get the reads from SRA. 3 samples, 3 runs per sample. Process with the. --verbose
-    cmd = "%s --ref %s --threads %i -o %s --close_shortReads_table %s --target_taxID %s --n_close_samples 3 --nruns_per_sample 3 -f1 skip -f2 skip --mitochondrial_chromosome %s --testAccuracy --verbose --max_coverage_sra_reads %i --gff %s --nsimulations 2 --skip_CNV_calling --simulation_ploidies haploid,diploid_hetero --previous_repeats_table %s --StopAfter_testAccuracy "%(perSVade_py, genome, threads, outdir_perSVade, close_shortReads_table, taxID, mitochondrial_chromosome, max_coverage_sra_reads, gff, previous_repeats_table)
+    cmd = "%s --ref %s --threads %i -o %s --close_shortReads_table %s --target_taxID %s --n_close_samples 3 --nruns_per_sample 3 -f1 skip -f2 skip --mitochondrial_chromosome %s --testAccuracy --verbose --max_coverage_sra_reads %i --gff %s --nsimulations 2 --skip_CNV_calling --simulation_ploidies %s --previous_repeats_table %s --StopAfter_testAccuracy "%(perSVade_py, genome, threads, outdir_perSVade, close_shortReads_table, taxID, mitochondrial_chromosome, max_coverage_sra_reads, gff, simulation_ploidies, previous_repeats_table)
 
     """ 
     Relevant args
@@ -125,14 +131,14 @@ for taxID, spName, ploidy, mitochondrial_chromosome, max_coverage_sra_reads in t
 
             queue = "bsc_ls"
             time = "48:00:00"
-            nodes = 1
+            nodes = 3
 
             fun.run_jobarray_file_MN4_greasy(jobs_filename, name, time=time, queue=queue, threads_per_job=threads, nodes=nodes)
 
         elif cluster_name=="Nord3": 
 
             queue = "bsc_ls"; 
-            RAM_per_thread = 5000; # 1800 or 5000 
+            RAM_per_thread = 4000; # 1800 or 5000 
             time = "48:00:00" # per job
 
             fun.run_jobarray_file_Nord3(jobs_filename, name, time=time, queue=queue, threads_per_job=threads, RAM_per_thread=RAM_per_thread, max_njobs_to_run=10000)
