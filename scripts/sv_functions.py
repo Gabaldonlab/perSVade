@@ -2087,7 +2087,7 @@ def get_df_bedpe_with_nonOverlappingBreakpoints(df_bedpe):
 
 def get_SVs_arround_breakpoints(genome_file, df_bedpe, nvars, outdir, svtypes, replace=False, max_ninsertions=100):
 
-    """This function takes a df bedpe and defines svtypes arround these breakpoints. interchromosomal breakpoints will be equally distributed to """
+    """This function takes a df bedpe and defines svtypes arround these breakpoints. """
 
     # get the dir
     make_folder(outdir)
@@ -2111,7 +2111,7 @@ def get_SVs_arround_breakpoints(genome_file, df_bedpe, nvars, outdir, svtypes, r
         df_bedpe.index = list(range(0, len(df_bedpe)))
 
         # set the max_n_breakpoints, 
-        max_n_breakpoints = nvars*3000
+        max_n_breakpoints = nvars*100000
         if len(df_bedpe)>max_n_breakpoints: 
         
             """
@@ -3176,24 +3176,23 @@ def generate_nt_content_file(genome, target_nts="GC", replace=False):
     return target_nt_content_file
 
 
-def get_distanceToTelomere_chromosome_GCcontent_to_coverage_fn(df_coverage_train, genome, outdir, expected_coverage_per_bp, mitochondrial_chromosome="mito_C_glabrata_CBS138", replace=False):
+def get_distanceToTelomere_chromosome_GCcontent_to_coverage_fn(df_coverage_train, genome, outdir, expected_coverage_per_bp, mitochondrial_chromosome="mito_C_glabrata_CBS138", replace=False, threads=4, min_windows_to_model_coverage=10):
 
-    """This function takes a training df_coverage (with windows of a genome) and returns a lambda function that takes GC content, chromosome and  distance to the telomere and returns coverage according to the model.
+    """This function takes a training df_coverage (with windows of a genome) and returns a lambda function that takes GC content, chromosome and  distance to the telomere and returns coverage (not relative) according to the model."""
 
-    Your genome graph can also be a linear genome, you just have to create it without considering breakpoints"""
     print_if_verbose("getting coverage-predictor function")
 
+
+    ######### DEFINE INTERPOLATION FUNCTIONS #########
+
     # rename the training df
-    df = df_coverage_train.rename(columns={"#chrom":"chromosome", "mediancov_1":"coverage"})
+    df = df_coverage_train.rename(columns={"#chrom":"chromosome"})
 
-    # add the distance to the telomere
-    chr_to_len = get_chr_to_len(genome)
-    df["middle_position"] = (df.start + (df.end - df.start)/2).apply(int)
-    df["distance_to_telomere"] = df.apply(lambda r: min([r["middle_position"], chr_to_len[r["chromosome"]]-r["middle_position"]]), axis=1)
+    # get a df with coverage predicted from several GC content and then the distance to the telomere (same for all chromosomes)
+    df = get_df_coverage_with_corrected_coverage(df, genome, outdir, replace, threads, mitochondrial_chromosome, None, initial_predictor_fields=["GCcontent"])
 
-    # add the gc content
-    gcontent_outfile = "%s/GCcontent.py"%outdir
-    df = get_df_with_GCcontent(df, genome, gcontent_outfile, replace=replace)
+    # define the relative coverage of all
+    median_coverage_all = get_median_coverage(df, mitochondrial_chromosome)
 
     # define the set of each type of chromosomes
     all_chromosomes = set(df.chromosome)
@@ -3201,154 +3200,100 @@ def get_distanceToTelomere_chromosome_GCcontent_to_coverage_fn(df_coverage_train
     else: mtDNA_chromosomes = set()
     gDNA_chromosomes = all_chromosomes.difference(mtDNA_chromosomes)
 
-    # load the genome
-    chr_to_len = get_chr_to_len(genome)
-    print_if_verbose("there are %i/%i chromsomes above window_l"%(sum([l>=window_l for l in chr_to_len.values()]), len(chr_to_len)))
+    # go through each coverage df and define 2 functions:   
+    # 1) takes GC content and returns predicted absolute coverage (fn_cov_fromGCcontent)
+    # 2) takes the the distance to the telomere and returns a weight that would be applied on 1) (fn_weight_fromDistTelomere)
 
-    ######## find the coeficients for each chromosome #########
+    chrom_to_fn_cov_fromGCcontent = {}
+    chrom_to_fn_weight_fromDistTelomere = {}
 
-    # map each chromosome to the coefs of the quadratic fit that explains coverage form the distance to the telomere and also the coefs of the GC content explaining the resiudal of this fit
-    chrom_to_coefType_to_coefs = {}
-
-    # go through each type of genome
     for type_genome, chroms in [("mtDNA", mtDNA_chromosomes), ("gDNA", gDNA_chromosomes)]:
         print_if_verbose("investigating %s"%type_genome)
 
-        # define the training df
-        df_g = df[df.chromosome.isin(chroms)]
+        # get the df and median coverage
+        df_cov = df[df.type_genome==type_genome]
+        median_coverage_genome = get_median_coverage(df_cov, mitochondrial_chromosome)
 
-        # define the relative coverage of each window of this genome
-        median_coverage = np.median(df_g[df_g.coverage>0].coverage)
-        df_g["relative_coverage"] = df_g.coverage / median_coverage
+        # for short type genomes, just take the median coverage
+        if len(df_cov)<min_windows_to_model_coverage:
 
-        # go through each chrom and identify that it is duplicated if the quadratic fit from the prediction of the distance to the telomere suggests a minimum of >=1.6. Also discard chromosomes where the size is below window_l
-        bad_chroms = set()
-        duplicated_chroms = set()
-        for chrom in chroms:
+            fn_cov_fromGCcontent = (lambda GC: median_coverage_genome)
+            fn_weight_fromDistTelomere = (lambda dist_telomere: 1.0)
 
-            # get df of this chrom
-            df_c = df_g[df_g.chromosome==chrom]
+        else: 
 
-            # flag dup chromosomes
-            if np.median(df_c.relative_coverage)>=1.7: duplicated_chroms.add(chrom)
+            # define a function that returns coverage from the GC content
+            df_cov = df_cov.sort_values(by="GCcontent")
+            fn_rel_cov_fromGCcontent = scipy_interpolate.interp1d(df_cov.GCcontent, df_cov.relative_coverage_predicted_from_GCcontent, bounds_error=False, kind="linear", assume_sorted=True, fill_value="extrapolate")
 
-            # flag short chromosomes
-            if chr_to_len[chrom]<window_l: bad_chroms.add(chrom)
+            fn_cov_fromGCcontent = (lambda GC: fn_rel_cov_fromGCcontent(GC)*median_coverage_all)
 
-        # define the training set for the modelling
-        df_correct = df_g[(df_g.relative_coverage<=5) & (df_g.relative_coverage>0.05) & ~(df_g.chromosome.isin(duplicated_chroms)) & ~(df_g.chromosome.isin(bad_chroms))]
+            # define a function that returns a weight (applied to the result of fn_cov_fromGCcontent) from dist_telomere
+            df_cov = df_cov.sort_values(by="raw_distance_to_telomere")
+            fn_weight_fromDistTelomere = scipy_interpolate.interp1d(df_cov.raw_distance_to_telomere, df_cov.relative_coverage_predicted_from_raw_distance_to_telomere_aferCorrBy_GCcontent, bounds_error=False, kind="linear", assume_sorted=True, fill_value="extrapolate")
 
-        # if the filtering is useless, use all the df. This is a way to skip the modelling.
-        if len(df_correct)==0: df_correct = df_g[~(df_g.chromosome.isin(bad_chroms))]
+        # keep functions
+        for chrom in chroms: 
+            chrom_to_fn_cov_fromGCcontent[chrom] = fn_cov_fromGCcontent
+            chrom_to_fn_weight_fromDistTelomere[chrom] = fn_weight_fromDistTelomere
 
-        # if still empty, use all
-        if len(df_correct)==0: df_correct = df_g
+    ###################################################
 
-        # now fit the model that predicts coverage from the distance to the telomere
-        coefs_dist_to_telomere = poly.polyfit(df_correct.distance_to_telomere, df_correct.coverage, 2)
+    ######## FINAL FUNCTION ##########
 
-        # get the residual variation in coverage
-        df_correct["coverage_from_dist_to_telomere"] = poly.polyval(df_correct.distance_to_telomere, coefs_dist_to_telomere)
-        df_correct["residualCoverage_from_dist_to_telomere"] = df_correct.coverage - df_correct.coverage_from_dist_to_telomere
-
-        # get a quadratic fit that predicts coverage from GC content
-        coefs_GCcontent = poly.polyfit(df_correct.GCcontent, df_correct.residualCoverage_from_dist_to_telomere, 2)
-        df_correct["residualCoverage_from_dist_to_telomere_from_GC_content"] = poly.polyval(df_correct.GCcontent, coefs_GCcontent)
-
-        df_correct["coverage_from_dist_to_telomere_and_GC_content"] = df_correct["coverage_from_dist_to_telomere"] + df_correct["residualCoverage_from_dist_to_telomere_from_GC_content"]
-
-
-        ### calculate the r2 based on all windows ###
-
-        # get r2
-        r2 = r2_score(df_correct.coverage, df_correct.coverage_from_dist_to_telomere_and_GC_content)
-        fraction_windows_considered = len(df_correct)/len(df_g)
-
-        # get the pval of the coverage not being a normal distriburion
-        if len(df_g)>10:
-
-            pvalNormDist_rel_coverage = get_pvalue_is_normal_distribution(df_g.relative_coverage)
-            print(pvalNormDist_rel_coverage)
-
-        else: pvalNormDist_rel_coverage = 1
-
-        print_if_verbose("The rsquare for %s is %.3f. %.3f pct of the windows are included. The p of not being a normal distribution is %.6f"%(type_genome, r2, fraction_windows_considered*100, pvalNormDist_rel_coverage))
-
-        # change coefs so that there is no modelling if the fit is bad
-        if r2<0.2 or pd.isna(r2) or fraction_windows_considered<0.5 or pvalNormDist_rel_coverage>0.05:
-            print_if_verbose("not modelling coverage per window")
-            coefs_dist_to_telomere = [expected_coverage_per_bp, 0, 0]
-            coefs_GCcontent = [0, 0, 0]
-
-        # re-calculate
-        df_g["coverage_from_dist_to_telomere"] = poly.polyval(df_g.distance_to_telomere, coefs_dist_to_telomere)
-        df_g["residualCoverage_from_dist_to_telomere"] = df_g.coverage - df_g.coverage_from_dist_to_telomere
-        df_g["residualCoverage_from_dist_to_telomere_from_GC_content"] = poly.polyval(df_g.GCcontent, coefs_GCcontent)
-        df_g["coverage_from_dist_to_telomere_and_GC_content"] = df_g["coverage_from_dist_to_telomere"] + df_g["residualCoverage_from_dist_to_telomere_from_GC_content"]
-
-        #############################################
-
-        # save the coefficients
-        for chrom in chroms: chrom_to_coefType_to_coefs[chrom] = {"dist_telomere":coefs_dist_to_telomere, "GCcontent":coefs_GCcontent}
-
-        # plot
-        outfile = "%s/coverage_modelling_%s.pdf"%(outdir, type_genome)
-
-        if file_is_empty(outfile) or replace is True:
-
-            # define the chroms to plot
-            if len(chroms)<10: chroms_plot = sorted(chroms)
-            else: chroms_plot = sorted(chroms.difference(bad_chroms))
-            print_if_verbose("plotting coverage modelling for %i chroms"%len(chroms_plot))
-
-            # plot the coverage for each of the chromosomes
-            fig = plt.figure(figsize=(7, len(chroms_plot)*5))
-
-            for I, chrom in enumerate(chroms_plot):
-
-                # initialize a subplot, where each row is one chromosome
-                ax = plt.subplot(len(chroms_plot), 1, I+1)
-
-                # get df of this chrom
-                df_c = df_g[df_g.chromosome==chrom]
-
-                # make a line plot for the real coverage
-                plt.scatter(df_c.start, df_c.coverage, marker="o", color="gray", label="data")
-
-                # make a line for the prediction from the distance to the telomere
-                plt.plot(df_c.start, df_c.coverage_from_dist_to_telomere, linestyle="-", color="blue", label="pred_dist_telomere")
-
-                # make a line for the prediction for both
-                plt.plot(df_c.start, df_c.coverage_from_dist_to_telomere_and_GC_content, linestyle="-", color="red", label="pred_dist_and_gc_content")
-
-                # add a line with the distance to the telomere
-                #plt.plot(df_c.start, df_c.distance_to_telomere, linestyle="-", color="green", label="dist_telomere")
-
-                ax.legend()
-                ax.set_ylabel("coverage")
-                ax.set_xlabel("position (bp)")
-                ax.set_title(chrom)
-
-            # save
-            fig.savefig(outfile, bbox_inches="tight")
-
-    ###############################################################
-
-    # define the function that takes a tuple of (distToTelomere, chromosome and GCcontent) and returns the predicted relative coverage
+    # define the function that takes a tuple of (distToTelomere, chromosome and GCcontent) and returns the absolute predicted coverage
     final_function = (lambda dist_telomere, chrom, GCcontent:  # this is suposed to be the tuple
 
-                        (poly.polyval([dist_telomere], chrom_to_coefType_to_coefs[chrom]["dist_telomere"]) + # from the dist to tel
-                        poly.polyval([GCcontent], chrom_to_coefType_to_coefs[chrom]["GCcontent"]))[0] # residual predicted from GC
+                        (chrom_to_fn_cov_fromGCcontent[chrom](GCcontent)*chrom_to_fn_weight_fromDistTelomere[chrom](dist_telomere))
 
                      )
 
+    ##################################
+
+    ########## CHECKS ############
+
     # check that it works
-    df_g["cov_predicted_from_final_lambda"] = df_g.apply(lambda r: final_function(r["distance_to_telomere"], r["chromosome"], r["GCcontent"]), axis=1)
+    df["cov_predicted_from_final_lambda"] = df.apply(lambda r: final_function(r["raw_distance_to_telomere"], r["chromosome"], r["GCcontent"]), axis=1)
 
-    if any(((df_g["coverage_from_dist_to_telomere_and_GC_content"]-df_g["cov_predicted_from_final_lambda"]).apply(abs))>0.01): raise ValueError("error in lambda function generation for coverage")
+    if any(pd.isna(df.cov_predicted_from_final_lambda)): raise ValueError("There can't be NaNs in the cov_predicted_from_final_lambda")
 
-      
+    # print the final r2
+    final_r2 = r2_score(df.mediancov_1, df.cov_predicted_from_final_lambda)
+    print_if_verbose("coverage predicted from GC content and distance to telomere: %.3f"%final_r2)
+    
+    # plot the coverages
+    outfile = "%s/coverage_modelling.pdf"%(outdir)
+    print_if_verbose("plotting into %s"%outfile)
+
+    sorted_chroms = sorted(all_chromosomes)
+    ncols = len(sorted_chroms)
+    nrows = 1
+    fig = plt.figure(figsize=(ncols*5, nrows*4))
+    for Ic, chrom in enumerate(all_chromosomes):
+
+        # get chrom
+        df_c = df[df.chromosome==chrom].sort_values(by="middle_position")
+
+        # add several scatters for each type of data
+        ax = plt.subplot(nrows, ncols, Ic+1)
+        plt.scatter(df_c.middle_position, df_c.mediancov_1, marker="o", color="gray", label="data")
+        plt.plot(df_c.middle_position, df_c.cov_predicted_from_final_lambda, linestyle="-", color="blue", label="predicted from GC +  distance to telomere")
+
+        # define axes
+        if Ic!=(len(sorted_chroms)-1): pass
+        else: ax.legend(bbox_to_anchor=(1, 1))
+
+        ax.set_ylabel("coverage")
+        ax.set_xlabel("position (bp)")
+        ax.set_title(chrom)
+
+    # adjust positions
+    plt.subplots_adjust(wspace=0.3, hspace=0.08)
+    fig.savefig(outfile, bbox_inches="tight")
+
     return final_function
+
+    ##############################
 
 
 def get_clove_output(output_vcf_clove, getID_as_gridss=True):
@@ -9431,7 +9376,7 @@ def get_best_parameters_for_GridssClove_run(sorted_bam, reference_genome, outdir
     outdir_coverage_calculation = "%s/coverage_per_regions%ibb"%(outdir, window_l); make_folder(outdir_coverage_calculation)
     df_coverage_train = pd.read_csv(generate_coverage_per_window_file_parallel(reference_genome, outdir_coverage_calculation, sorted_bam, windows_file="none", replace=replace, threads=threads), sep="\t")
 
-    distToTel_chrom_GC_to_coverage_fn = get_distanceToTelomere_chromosome_GCcontent_to_coverage_fn(df_coverage_train, reference_genome, outdir_coverage_calculation, expected_coverage_per_bp, mitochondrial_chromosome=mitochondrial_chromosome, replace=replace)
+    distToTel_chrom_GC_to_coverage_fn = get_distanceToTelomere_chromosome_GCcontent_to_coverage_fn(df_coverage_train, reference_genome, outdir_coverage_calculation, expected_coverage_per_bp, mitochondrial_chromosome=mitochondrial_chromosome, replace=replace, threads=threads)
 
     print_if_verbose("coverage model obtained")
 
@@ -10296,9 +10241,21 @@ def plot_accuracy_of_parameters_on_test_samples(parameters_df, test_df, outdir, 
     # plot heatmap of cross accuracy
     generate_heatmap_accuracy_of_parameters_on_test_samples(df_benchmark, plots_dir, replace=replace, threads=threads)
 
-def get_bedpe_breakpoints_arround_repeats(repeats_table_file, replace=False, min_sv_size=50, max_breakpoints=10000, max_breakpoints_per_repeat=50):
+def get_df_repeats_from_df_repeats_r(r, window_size):
 
-    """ Takes a repeats file and returns a bedpe with breakpoints arround the repeats. There will be one breakpoint for each repeat against another one (each breakpoint used only once) with random orientations and at least min_sv_size if they are equal. If the repeat has another repeat of the same "repeat" name, it will be picked first. """
+    """Takes a df of df_repeats and returns a df of the repeats subdivided into chunks of window_size"""
+
+    len_repeat = r.end_repeat-r.begin_repeat
+    #if (r.)
+    print(r)
+
+    kuadgdkua
+
+def get_bedpe_breakpoints_arround_repeats(repeats_table_file, replace=False, min_sv_size=50, max_breakpoints=10000, max_breakpoints_per_repeat=1, window_size_subdivide_repeats=100):
+
+    """ Takes a repeats file and returns a bedpe with breakpoints arround the repeats. There will be one breakpoint for each repeat against another one (each breakpoint used only once) with random orientations and at least min_sv_size if they are equal. If the repeat has another repeat of the same "repeat" name, it will be picked first. 
+
+    This should be 1, because all the regions with more than 1 will fail"""
 
     # define the output file
     bedpe_breakpoints = "%s.breakpoints_max%i.bedpe"%(repeats_table_file, max_breakpoints) # this will be a bedpe with no fields
@@ -10315,13 +10272,9 @@ def get_bedpe_breakpoints_arround_repeats(repeats_table_file, replace=False, min
         # add fields
         repeat_to_Nrepeats = df_repeats.groupby("repeat").apply(len)
         df_repeats["n_same_repeat"] = df_repeats["repeat"].apply(lambda x: repeat_to_Nrepeats[x])
-        df_repeats["repeat_position"] = (df_repeats.begin_repeat + (df_repeats.end_repeat - df_repeats.begin_repeat)/2).apply(int)
 
         # filter low complexity regions
-        df_repeats = df_repeats[~(df_repeats.type.isin({"Low_complexity"}))]
-
-        # debugs
-        if any(df_repeats.repeat_position<0): raise ValueError("There should be no negative repeat positions") 
+        #df_repeats = df_repeats[~(df_repeats.type.isin({"Low_complexity"}))]
 
         # sort by the type of repeats
         type_repeat_to_importance = {"Unknown":10, "Simple_repeat":1, "Low_complexity":0}
@@ -10329,11 +10282,26 @@ def get_bedpe_breakpoints_arround_repeats(repeats_table_file, replace=False, min
             if x in type_repeat_to_importance: return type_repeat_to_importance[x]
             else: return 9
         df_repeats["repeat_importance"] = df_repeats.type.apply(get_repeat_importance)
-        df_repeats = df_repeats.sort_values(by=["repeat_importance"], ascending=False)
+        df_repeats = df_repeats.sort_values(by=["repeat_importance", "chromosome"], ascending=False)
 
-        # change the ID
+        # define a set of repeats in some windows
+        df_repeats = df_repeats[["chromosome", "repeat", "n_same_repeat", "begin_repeat", "end_repeat"]]
+        df_repeats = pd.concat(df_repeats.apply(get_df_repeats_from_df_repeats_r, window_size=window_size_subdivide_repeats,  axis=1))
+
+        # add the position
+        df_repeats["repeat_position"] = (df_repeats.begin_repeat + (df_repeats.end_repeat - df_repeats.begin_repeat)/2).apply(int)
+        if any(df_repeats.repeat_position<0): raise ValueError("There should be no negative repeat positions") 
+
+
+
+        print(df_repeats)
+
+        jhadghjgajdgjadhg
+
+
+        # add the ID
         df_repeats["ID"] = list(range(len(df_repeats)))
-        df_repeats = df_repeats.set_index("ID", drop=False)[["chromosome", "repeat_position", "ID", "repeat"]]
+        df_repeats = df_repeats.set_index("ID", drop=False)
 
         # define dicts
         all_chroms = sorted(set(df_repeats.chromosome))
@@ -10366,10 +10334,11 @@ def get_bedpe_breakpoints_arround_repeats(repeats_table_file, replace=False, min
             # define the series
             r_from = df_repeats.loc[Ifrom]
 
-            # repeats that have a member of the same faimily will be joined to them. The others will be treated independently
+            # repeats that have a member of the same faimily will be joined to them. 
             if repeat_to_Nrepeats[r_from["repeat"]]>1: df_rep = df_repeats[(df_repeats.ID.isin(r_from.compatible_repeatIDs)) & (df_repeats["repeat"]==r_from["repeat"])]
 
-            else: df_rep = df_repeats[(df_repeats.ID.isin(r_from.compatible_repeatIDs))]
+            # repeats with no partner will be joined to other repeats with no partner
+            else: df_rep = df_repeats[(df_repeats.ID.isin(r_from.compatible_repeatIDs)) & (df_repeats.n_same_repeat==1)]
 
             # go through  the compatible repeat pairs
             for Ito in list(df_rep.index):
@@ -10507,6 +10476,10 @@ def report_accuracy_realSVs_perSVadeRuns(close_shortReads_table, reference_genom
             # define an outdir for this runID
             outdir_runID = "%s/%s"%(outdir_typeSimulations, runID); make_folder(outdir_runID)
 
+            # remove the dir to repeat (debug)
+            #delete_folder(outdir_runID)
+            #continue
+
             # keep
             final_dict.setdefault(typeSimulations, {}).setdefault(runID, outdir_runID)
 
@@ -10585,6 +10558,8 @@ def report_accuracy_realSVs_perSVadeRuns(close_shortReads_table, reference_genom
             sys.exit(0)
 
     #####################
+
+    #sys.exit(0)
 
     return final_dict
 
@@ -10883,12 +10858,26 @@ def report_accuracy_golden_set_runJobs(goldenSet_dir, outdir, reference_genome, 
     final_dict["sniffles_outdir"] = "%s/sniffles_output"%outdir_ONT_calling
 
     # add the perSVade runs in several combinations
-    n_remaining_jobs = sum([file_is_empty("%s/perSVade_calling_%s/perSVade_finished_file.txt"%(outdir, typeSimulations)) for typeSimulations in ["uniform", "fast", "realSVs"]])
+    n_remaining_jobs = sum([file_is_empty("%s/perSVade_calling_%s/perSVade_finished_file.txt"%(outdir, typeSimulations)) for typeSimulations in ["arroundRepeats", "uniform", "fast", "realSVs"]])
 
-    for typeSimulations, bedpe_breakpoints, fast_SVcalling in [("uniform", None, False), ("realSVs", real_bedpe_breakpoints, False), ("fast", None, True)]:
+    print_if_verbose("There are %i remaining jobs"%n_remaining_jobs)
+
+    # go through each run and configuration
+    for typeSimulations, bedpe_breakpoints, fast_SVcalling, simulate_SVs_arround_repeats in [("arroundRepeats", None, False, True), ("uniform", None, False, False), ("realSVs", real_bedpe_breakpoints, False, False), ("fast", None, True, False)]:
 
         # define an outdir for this type of simulations
         outdir_typeSimulations = "%s/perSVade_calling_%s"%(outdir, typeSimulations); make_folder(outdir_typeSimulations)
+
+        #### REMOVE SIMULATIONS FILES ####
+
+        """
+        print(outdir_typeSimulations)
+        for f in ["aligned_reads.bam.sorted.flagstat", "perSVade_finished_file.txt", "reference_genome_dir", "SVdetection_output", "simulations_files_and_parameters"]: delete_file_or_folder("%s/%s"%(outdir_typeSimulations, f))
+        continue
+        """
+        
+
+        ###################################
 
         # keep 
         final_dict["perSVade_outdir_%s"%typeSimulations] = outdir_typeSimulations
@@ -10913,6 +10902,8 @@ def report_accuracy_golden_set_runJobs(goldenSet_dir, outdir, reference_genome, 
             if printing_verbose_mode is True: cmd += " --verbose"
             if parameters_json_file is not None: cmd += " --parameters_json_file %s"%parameters_json_file
             if fraction_available_mem is not None: cmd += " --fraction_available_mem %.3f"%(float(fraction_available_mem))
+            if simulate_SVs_arround_repeats is True: cmd += " --simulate_SVs_arround_repeats"
+
 
             all_cmds.append(cmd)
 
@@ -10947,6 +10938,8 @@ def report_accuracy_golden_set_runJobs(goldenSet_dir, outdir, reference_genome, 
     #########################
     #########################
     #########################
+
+    #sys.exit(0)
 
     return final_dict
 
@@ -13174,9 +13167,11 @@ def verify_no_NaNs(series):
 
 
 
-def get_df_coverage_with_corrected_coverage(df_coverage, reference_genome, outdir, replace, threads, mitochondrial_chromosome, df_gridss):
+def get_df_coverage_with_corrected_coverage(df_coverage, reference_genome, outdir, replace, threads, mitochondrial_chromosome, df_gridss, initial_predictor_fields=["GCcontent", "median_mappability"]):
 
-    """This function will take a df_coverage that has coverage_field as a proxy for coverage. It will add <coverage_field> which is a value that will be a ratio between the coverage_field and the coverage_field predicted from a loess regression taking into account mappability, GC content and distance to the telomere across the windows. The resulting value will be centered arround 1.  """
+    """This function will take a df_coverage that has coverage_field as a proxy for coverage. It will add <coverage_field> which is a value that will be a ratio between the coverage_field and the coverage_field predicted from a loess regression taking into account mappability, GC content and distance to the telomere across the windows. The resulting value will be centered arround 1.  
+
+    initial_predictor_fields indicates which fields will be used for the correction """
 
     # define the initial cols
     initial_cols = list(df_coverage.columns)
@@ -13209,8 +13204,10 @@ def get_df_coverage_with_corrected_coverage(df_coverage, reference_genome, outdi
         df_coverage = get_df_with_GCcontent(df_coverage, reference_genome, gcontent_outfile, replace=replace)
 
         # add the median mappability
-        mappability_outfile = "%s/df_coverage_with_mappability.tab"%working_outdir
-        df_coverage = get_df_windows_with_median_mappability(df_coverage, reference_genome, mappability_outfile, replace, threads)
+        if "median_mappability" in initial_predictor_fields:
+
+            mappability_outfile = "%s/df_coverage_with_mappability.tab"%working_outdir
+            df_coverage = get_df_windows_with_median_mappability(df_coverage, reference_genome, mappability_outfile, replace, threads)
 
         # add the raw distance to the telomere, in linear space
         chr_to_len = get_chr_to_len(reference_genome)
@@ -13248,7 +13245,7 @@ def get_df_coverage_with_corrected_coverage(df_coverage, reference_genome, outdi
             #make_plots_coverage_parameters(df_cov, plots_dir)
 
             # init the predictor fields of coverage
-            predictor_fields = ["GCcontent", "median_mappability"]
+            predictor_fields = initial_predictor_fields
 
             # add the distance to the telomere if necessary
 
@@ -13296,12 +13293,18 @@ def get_df_coverage_with_corrected_coverage(df_coverage, reference_genome, outdi
             predictor_to_rsquare["no_prediction"] = r2_score(df_cov.relative_coverage, df_cov.median_relative_coverage)
 
             # go through each final predictor
+            already_included_predictors = []
             for pID, predictor in enumerate(predictor_fields):
+
+                # define the field of the predicted coverage from the predictors
+                predicted_coverage_field = "relative_coverage_predicted_from_%s_aferCorrBy_%s"%(predictor, "-".join(already_included_predictors))
 
                 # correct the coverage 
                 plots_prefix = "%s/final_fitting_round%i"%(plots_dir, pID+1)
                 outdir_lowess = "%s/final_fitting_%s_round%i"%(calculate_rsquares_dir, predictor, pID+1)
-                df_cov["corrected_relative_coverage"], rsquare = get_y_corrected_by_x_LOWESS_crossValidation(df_cov, predictor, "corrected_relative_coverage", outdir_lowess, threads, replace, plots_prefix, max_relative_coverage)[0:2]
+                df_cov["corrected_relative_coverage"], rsquare, df_cov[predicted_coverage_field] = get_y_corrected_by_x_LOWESS_crossValidation(df_cov, predictor, "corrected_relative_coverage", outdir_lowess, threads, replace, plots_prefix, max_relative_coverage)
+
+                already_included_predictors.append(predictor)
 
                 # add the rsquare
                 predictor_to_rsquare["final_rsquare_round%i_from_%s"%(pID+1, predictor)] = rsquare
@@ -13310,6 +13313,9 @@ def get_df_coverage_with_corrected_coverage(df_coverage, reference_genome, outdi
             df_rsquares = pd.DataFrame({"rsquare":predictor_to_rsquare})
             df_rsquares["type_fit"] = df_rsquares.index
             df_rsquares["type_genome"] = type_genome
+
+            # add the type genome
+            df_cov["type_genome"] = type_genome
 
             #############################################
 
