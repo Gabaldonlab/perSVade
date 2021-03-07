@@ -353,7 +353,7 @@ if opt.simulate_SVs_arround_repeats is True:
     if opt.skip_repeat_analysis is True: raise ValueError("You should not skip the repeats analysis (with --skip_repeat_analysis) if you want to simulate SVs arround repeats.")
 
     # override the real_bedpe_breakpoints with the bedpe comming from repeats
-    opt.real_bedpe_breakpoints = fun.get_bedpe_breakpoints_arround_repeats(repeats_table_file, replace=opt.replace, max_breakpoints=(opt.nvars*2000), max_breakpoints_per_repeat=20)
+    opt.real_bedpe_breakpoints = fun.get_bedpe_breakpoints_arround_repeats(repeats_table_file, replace=opt.replace, max_breakpoints=(opt.nvars*5*10000), max_breakpoints_per_repeat=1)
 
 ################################################################################
 
