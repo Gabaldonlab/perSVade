@@ -102,7 +102,6 @@ for taxID, spName, ploidy, mitochondrial_chromosome, max_coverage_sra_reads in t
     print("running std into %s"%cmd_output)
     fun.run_cmd("%s > %s 2>&1"%(cmd, cmd_output)) # run with stdout
     #fun.run_cmd(cmd); continue # run locally 
-
  	
  	###### RUN JOB ARRAYS ######
 
@@ -129,9 +128,10 @@ for taxID, spName, ploidy, mitochondrial_chromosome, max_coverage_sra_reads in t
 
             queue = "bsc_ls"; 
             RAM_per_thread = 4000; # 1800 or 5000 
-            time = "24:00:00" # per job
+            time = "48:00:00" # per job
 
-            fun.run_jobarray_file_Nord3(jobs_filename, name, time=time, queue=queue, threads_per_job=threads, RAM_per_thread=RAM_per_thread, max_njobs_to_run=10000)
+            #fun.run_jobarray_file_Nord3(jobs_filename, name, time=time, queue=queue, threads_per_job=threads, RAM_per_thread=RAM_per_thread, max_njobs_to_run=10000)
+            fun.run_jobarray_file_Nord3_greasy(jobs_filename, name, time=time, queue=queue, threads_per_job=threads, RAM_per_thread=RAM_per_thread, nodes=3)
 
     elif len(all_lines_jobfile)!=0: raise ValueError("something went wrong")
 

@@ -192,6 +192,7 @@ repeatmoder_dir = "%s/share/RepeatModeler"%RepeatMasker_EnvDir
 repeat_modeller = "%s/bin/RepeatModeler"%RepeatMasker_EnvDir
 repeatmasker_dir = "%s/share/RepeatMasker"%RepeatMasker_EnvDir
 makeblastdb = "%s/bin/makeblastdb"%RepeatMasker_EnvDir
+blastn = "%s/bin/blastn"%RepeatMasker_EnvDir
 repeat_modeller_BuildDatabase = "%s/bin/BuildDatabase"%RepeatMasker_EnvDir
 abblast_dir = "%s/bin"%RepeatMasker_EnvDir
 cdhit_dir = "%s/bin"%RepeatMasker_EnvDir
@@ -2111,7 +2112,7 @@ def get_SVs_arround_breakpoints(genome_file, df_bedpe, nvars, outdir, svtypes, r
         df_bedpe.index = list(range(0, len(df_bedpe)))
 
         # set the max_n_breakpoints, 
-        max_n_breakpoints = nvars*100000
+        max_n_breakpoints = nvars*1000000
         if len(df_bedpe)>max_n_breakpoints: 
         
             """
@@ -10241,17 +10242,247 @@ def plot_accuracy_of_parameters_on_test_samples(parameters_df, test_df, outdir, 
     # plot heatmap of cross accuracy
     generate_heatmap_accuracy_of_parameters_on_test_samples(df_benchmark, plots_dir, replace=replace, threads=threads)
 
-def get_df_repeats_from_df_repeats_r(r, window_size):
+
+def link_files_from_other_perSVade_outdirs_reads_and_alignment(outdir, other_perSVade_outdirs_sameReadsANDalignment):
+
+    """This function mines data from other dirs into the current perSVade outdir"""
+
+    ###### READS #####
+
+    # go through each dir
+    for other_outdir in other_perSVade_outdirs_sameReadsANDalignment.split(","):
+
+        # define the possible reads
+        reads_dir = "%s/reads"%other_outdir
+        trimmed_reads1 = "%s/raw_reads1.fastq.gz.trimmed.fastq.gz"%reads_dir
+        trimmed_reads2 = "%s/raw_reads2.fastq.gz.trimmed.fastq.gz"%reads_dir
+
+        if not file_is_empty(trimmed_reads1) and not file_is_empty(trimmed_reads2):
+
+            # softlink to the outdir
+            target_reads_dir = "%s/reads"%outdir; make_folder(target_reads_dir)
+            target_trimmed_reads1 = "%s/raw_reads1.fastq.gz.trimmed.fastq.gz"%target_reads_dir
+            target_trimmed_reads2 = "%s/raw_reads2.fastq.gz.trimmed.fastq.gz"%target_reads_dir
+
+            if file_is_empty(target_trimmed_reads1) and file_is_empty(target_trimmed_reads2):
+                soft_link_files(trimmed_reads1, target_trimmed_reads1)
+                soft_link_files(trimmed_reads2, target_trimmed_reads2)
+
+            break
+
+    ##################
+
+    ######## BAM FILE #########
+
+    for other_outdir in other_perSVade_outdirs_sameReadsANDalignment.split(","):
+
+        sorted_bam = "%s/aligned_reads.bam.sorted"%other_outdir
+        if not file_is_empty(sorted_bam) and not file_is_empty(sorted_bam+".bai"):
+
+            target_sorted_bam = "%s/aligned_reads.bam.sorted"%outdir
+            if file_is_empty(target_sorted_bam) and file_is_empty(target_sorted_bam+".bai"):
+
+                soft_link_files(sorted_bam, target_sorted_bam)
+                soft_link_files(sorted_bam+".bai", target_sorted_bam+".bai")
+
+            break
+
+    ###########################
+
+def get_multifasta_genome_split_into_windows(reference_genome, window_size, replace):
+
+    """Splits a genome into windows of window_size"""
+
+    windows_multifasta = "%s.windows_%ibp.fasta"%(reference_genome, window_size)
+    if file_is_empty(windows_multifasta) or replace is True:
+        print_if_verbose("generating %s"%windows_multifasta)
+
+        # load genome
+        chr_to_len = get_chr_to_len(reference_genome)
+        chr_to_seq = {seq.id : seq for seq in SeqIO.parse(reference_genome, "fasta")}
+
+        # index it
+        index_genome(reference_genome, replace=replace)
+
+        # make windows of the genome
+        windows_file = "%s.windows%ibp.bed"%(reference_genome, window_size)
+        windows_file_stderr = "%s.generating.stderr"%windows_file
+        run_cmd("%s makewindows -g %s.fai -w %i > %s 2>%s"%(bedtools, reference_genome, window_size, windows_file, windows_file_stderr)) # debug
+        df_windows = pd.read_csv(windows_file, sep="\t", header=-1, names=["chromosome", "start", "end"])
+
+        # clean
+        for f in [windows_file, windows_file_stderr]: remove_file(f)
+
+        # generate the multifasta
+        all_records = [SeqRecord(chr_to_seq[r.chromosome][r.start:r.end].seq, id="%s||%i||%i"%(r.chromosome, r.start, r.end), name="", description="") for I,r in df_windows.iterrows()]
+
+        windows_multifasta_tmp = "%s.tmp"%windows_multifasta
+        SeqIO.write(all_records, windows_multifasta_tmp, "fasta")
+        os.rename(windows_multifasta_tmp, windows_multifasta)
+
+    return windows_multifasta
+        
+def blastn_query_against_subject(query_fasta, database_multifasta, blast_outfile, outdir, threads, replace, max_eval=1e-5):
+
+    """This function blastn's query_multifasta against database_multifasta writing the blast_outfile as tab"""
+
+    # define the outfields
+    out_fields = ["qseqid", "qlen", "sseqid", "slen", "qstart", "qend", "sstart", "send", "evalue", "bitscore", "score", "length", "pident", "nident", "qcovs"]
+
+    if file_is_empty(blast_outfile) or replace is True:
+        print_if_verbose("generating %s"%blast_outfile)
+
+        # put the under outdir
+        query = "%s/query.fasta"%outdir
+        database = "%s/database.fasta"%outdir
+
+        soft_link_files(query_fasta, query)
+        soft_link_files(database_multifasta, database)
+
+        # make blast db
+        run_cmd("%s -in %s -dbtype nucl"%(makeblastdb, database), env=EnvName_RepeatMasker)
+
+        # run blast
+        blast_outfile_tmp = "%s.tmp"%blast_outfile
+        blast_std = "%s.generating.std"%blast_outfile
+
+        run_cmd('%s -query %s -out %s -evalue %.10f -db %s -num_threads %i -outfmt "6 %s" '%(blastn, query, blast_outfile_tmp, max_eval, database, threads, " ".join(out_fields)), env=EnvName_RepeatMasker)
+
+        remove_file(blast_std)
+        os.rename(blast_outfile_tmp, blast_outfile)
+
+    # load into df and return
+    df_blast = pd.read_csv(blast_outfile, sep="\t", header=-1, names=out_fields)
+
+    return df_blast
+
+
+def get_bedpe_breakpoints_arround_homologousRegions(reference_genome, outdir, bedpe_breakpoints, replace=False, threads=4, max_eval=1e-5, query_window_size=500, min_qcovs=50, min_sv_size=50):
+
+    """This function generates a bedpe (like get_bedpe_breakpoints_arround_repeats) arround regions with some homology according to max_eval. It subdivides the genome into windows of  query_window_size bp and blasts them against the genome. It defines as 'homologous regions' those that have an eval < max_eval and are not the same region. It returns some real_bedpe_breakpoints. """
+
+    # run if empty
+    if file_is_empty(bedpe_breakpoints) or replace is True:
+        print_if_verbose("generating %s"%bedpe_breakpoints)
+
+        # make the outdir
+        make_folder(outdir)
+
+        # get a genome of windows of query_window_size
+        query_multifasta = get_multifasta_genome_split_into_windows(reference_genome, query_window_size, replace)
+        nwindows_query = len(get_chr_to_len(query_multifasta))
+
+        # blast the query multifasta against the genome
+        blast_outfile = "%s/blastn_subdividedRegions_against_genome.tab"%outdir
+        blast_df = blastn_query_against_subject(query_multifasta, reference_genome, blast_outfile, outdir, threads, replace, max_eval=max_eval)
+
+        # filter so that you don't keep the same region
+        blast_df["sstart_0based"] = blast_df.sstart - 1
+        blast_df["subject_like_qseqid"] = blast_df.sseqid + "||" + blast_df.sstart_0based.apply(str) + "||" + blast_df.send.apply(str)
+
+        initial_len_blast_df = len(blast_df)
+        blast_df = blast_df[(blast_df.qseqid!=blast_df.subject_like_qseqid)]
+        nhits_related_to_same_region = initial_len_blast_df - len(blast_df)
+
+        # add the distance between hits
+        blast_df["query_chromosome"] = blast_df.qseqid.apply(lambda x: x.split("||")[0])
+        blast_df["query_start"] = blast_df.qseqid.apply(lambda x: x.split("||")[1]).apply(int)
+        blast_df["query_end"] = blast_df.qseqid.apply(lambda x: x.split("||")[2]).apply(int)
+
+        blast_df["subject_chromosome"] = blast_df.sseqid
+        blast_df["query_center"] = blast_df.query_start + ((blast_df.query_end-blast_df.query_start)/2).apply(int)
+        blast_df["subject_center"] = blast_df.sstart + ((blast_df.send-blast_df.sstart)/2).apply(int)
+
+        def get_distance_btwHits(r):
+            if r.query_chromosome!=r.subject_chromosome: return (min_sv_size*1000)
+            else: return abs(r.query_center-r.subject_center)
+        blast_df["distance_btw_hits"] = blast_df.apply(get_distance_btwHits, axis=1)
+
+
+        # filter according to evalue, qcovs and size
+        blast_df = blast_df[(blast_df["evalue"]<max_eval) & (blast_df.qcovs>=min_qcovs) & (blast_df.distance_btw_hits>=min_sv_size)].sample(frac=1)
+        print_if_verbose("There are %i regions with homology"%len(blast_df))
+
+        # sort by being in the same chromosome and then eval. This is to ensure that interchromosomal breakpoints are taken first
+        isSameChrom_to_number = {True:0, False:1}
+        blast_df["is_same_chromosomeNumber"] = (blast_df.query_chromosome==blast_df.subject_chromosome).apply(lambda x: isSameChrom_to_number[x])
+        blast_df = blast_df.sort_values(by=["is_same_chromosomeNumber", "evalue"])
+
+        # add the ID
+        blast_df["ID"] = ["blastnHit_%i"%I for I in range(len(blast_df))]
+
+        # generate one breakpoint for each of the overlapping regions
+        def get_bedpe_series_for_blast_df_r(r):
+
+            # in the right orientation
+            if (r.query_chromosome==r.subject_chromosome and r.query_center<r.subject_center) or (r.query_chromosome<r.subject_chromosome): 
+
+                dict_bedpe = {"chrom1":r.query_chromosome, "start1":r.query_center-1, "end1":r.query_center, "chrom2":r.subject_chromosome, "start2": r.subject_center-1, "end2":r.subject_center}
+
+            # in the reverse orientation
+            elif (r.query_chromosome==r.subject_chromosome and r.query_center>r.subject_center) or (r.query_chromosome>r.subject_chromosome):
+
+                dict_bedpe = {"chrom1":r.subject_chromosome, "start1":r.subject_center-1, "end1":r.subject_center, "chrom2":r.query_chromosome, "start2": r.query_center-1, "end2":r.query_center}
+
+            else: raise ValueError("incorrect r: %s"%r)
+
+            # add general things
+            strands = ["+", "-"]
+            dict_bedpe["ID"] = r.ID
+            dict_bedpe["score"] = 100.0
+            dict_bedpe["strand1"] = random.choice(strands)
+            dict_bedpe["strand2"] = random.choice(strands)
+
+            return pd.Series(dict_bedpe)
+
+        bedpe_df = blast_df.apply(get_bedpe_series_for_blast_df_r, axis=1)
+
+        # clean
+        delete_folder(outdir)
+
+        # write
+        bedpe_breakpoints_tmp = "%s.tmp"%bedpe_breakpoints
+        bedpe_fields = ["chrom1", "start1", "end1", "chrom2", "start2", "end2", "ID", "score", "strand1", "strand2"]
+        bedpe_df[bedpe_fields].to_csv(bedpe_breakpoints_tmp, sep="\t", header=False, index=False)
+        os.rename(bedpe_breakpoints_tmp, bedpe_breakpoints)
+
+    return bedpe_breakpoints
+
+
+def get_df_repeats_from_df_repeats_r(r, window_size, bedfile_prefix):
 
     """Takes a df of df_repeats and returns a df of the repeats subdivided into chunks of window_size"""
 
+    # calculate the length of the repeat
     len_repeat = r.end_repeat-r.begin_repeat
-    #if (r.)
-    print(r)
 
-    kuadgdkua
+    # if the repeat is short, return it as it is
+    if len_repeat<=window_size: df = pd.DataFrame({0 : r}).transpose()
 
-def get_bedpe_breakpoints_arround_repeats(repeats_table_file, replace=False, min_sv_size=50, max_breakpoints=10000, max_breakpoints_per_repeat=1, window_size_subdivide_repeats=100):
+    # subdivide into several repeats
+    else:
+
+        # make a bed that has this interval
+        bedfile = "%s.%i.bed"%(bedfile_prefix, r.name)
+        pd.DataFrame({0 : r}).transpose()[["chromosome", "begin_repeat", "end_repeat"]].to_csv(bedfile, sep="\t", index=False, header=False)
+
+        # run makewindows to get the windows
+        windows_file = "%s.windows.bed"%bedfile
+        windows_file_stderr = "%s.generate.stderr"%windows_file
+        run_cmd("%s makewindows -b %s -w %i > %s 2>%s"%(bedtools, bedfile, window_size, windows_file, windows_file_stderr)) # debug
+        df_windows = pd.read_csv(windows_file, sep="\t", header=-1, names=["chromosome", "begin_repeat", "end_repeat"])
+
+        # add things
+        df = df_windows
+        df["repeat"] = r["repeat"]
+        df["type"] = r["type"]
+
+        # clean
+        for f in [bedfile, windows_file, windows_file_stderr]: remove_file(f)
+
+    return df
+
+def get_bedpe_breakpoints_arround_repeats(repeats_table_file, replace=False, min_sv_size=50, max_breakpoints=10000, max_breakpoints_per_repeat=1, window_size_subdivide_repeats=300, threads=4):
 
     """ Takes a repeats file and returns a bedpe with breakpoints arround the repeats. There will be one breakpoint for each repeat against another one (each breakpoint used only once) with random orientations and at least min_sv_size if they are equal. If the repeat has another repeat of the same "repeat" name, it will be picked first. 
 
@@ -10267,37 +10498,45 @@ def get_bedpe_breakpoints_arround_repeats(repeats_table_file, replace=False, min
         df_repeats = get_tab_as_df_or_empty_df(repeats_table_file)
         if len(df_repeats)==0: raise ValueError("There should be some repeats in %s"%repeats_table_file)
         if len(df_repeats)!=len(set(df_repeats.IDrepeat)): raise ValueError("The ID of the repeats should be unique")
-        df_repeats = df_repeats.drop_duplicates(subset=["chromosome", "begin_repeat", "end_repeat", "repeat"]).sample(frac=1)
-
-        # add fields
-        repeat_to_Nrepeats = df_repeats.groupby("repeat").apply(len)
-        df_repeats["n_same_repeat"] = df_repeats["repeat"].apply(lambda x: repeat_to_Nrepeats[x])
+        df_repeats = df_repeats.drop_duplicates(subset=["chromosome", "begin_repeat", "end_repeat", "repeat"])
 
         # filter low complexity regions
         #df_repeats = df_repeats[~(df_repeats.type.isin({"Low_complexity"}))]
 
-        # sort by the type of repeats
+        # filter the important fields
+        df_repeats = df_repeats[["chromosome", "repeat", "begin_repeat", "end_repeat", "type"]]
+        initial_len_df_repeats = len(df_repeats)
+        df_repeats.index = list(range(len(df_repeats)))
+
+        # subdivide repeats into chunks of window_size_subdivide_repeats
+        print_if_verbose("getting subdivided repeats")
+        bedfile_subdivide_repeats_prefix = "%s.subdivide_repeats"%bedpe_breakpoints
+        inputs_fn  = [(r, window_size_subdivide_repeats, bedfile_subdivide_repeats_prefix) for I, r in df_repeats.iterrows()]
+
+        with multiproc.Pool(threads) as pool:
+            list_repeats_dfs = pool.starmap(get_df_repeats_from_df_repeats_r, inputs_fn) # needs if __name__=="__main__" 
+                
+            pool.close()
+            pool.terminate()
+
+        df_repeats = pd.concat(list_repeats_dfs)
+        print_if_verbose("you got from %i to %i repeats in windows of %i bp"%(initial_len_df_repeats, len(df_repeats), window_size_subdivide_repeats))
+
+        # sort randomly, and then by the type of repeats and chromosome
         type_repeat_to_importance = {"Unknown":10, "Simple_repeat":1, "Low_complexity":0}
         def get_repeat_importance(x):
             if x in type_repeat_to_importance: return type_repeat_to_importance[x]
             else: return 9
         df_repeats["repeat_importance"] = df_repeats.type.apply(get_repeat_importance)
-        df_repeats = df_repeats.sort_values(by=["repeat_importance", "chromosome"], ascending=False)
+        df_repeats = df_repeats.sample(frac=1).sort_values(by=["repeat_importance", "chromosome"], ascending=False)
 
-        # define a set of repeats in some windows
-        df_repeats = df_repeats[["chromosome", "repeat", "n_same_repeat", "begin_repeat", "end_repeat"]]
-        df_repeats = pd.concat(df_repeats.apply(get_df_repeats_from_df_repeats_r, window_size=window_size_subdivide_repeats,  axis=1))
+        # add the number of repeats that are shared
+        repeat_to_Nrepeats = df_repeats.groupby("repeat").apply(len)
+        df_repeats["n_same_repeat"] = df_repeats["repeat"].apply(lambda x: repeat_to_Nrepeats[x])
 
         # add the position
         df_repeats["repeat_position"] = (df_repeats.begin_repeat + (df_repeats.end_repeat - df_repeats.begin_repeat)/2).apply(int)
         if any(df_repeats.repeat_position<0): raise ValueError("There should be no negative repeat positions") 
-
-
-
-        print(df_repeats)
-
-        jhadghjgajdgjadhg
-
 
         # add the ID
         df_repeats["ID"] = list(range(len(df_repeats)))
@@ -10858,12 +11097,16 @@ def report_accuracy_golden_set_runJobs(goldenSet_dir, outdir, reference_genome, 
     final_dict["sniffles_outdir"] = "%s/sniffles_output"%outdir_ONT_calling
 
     # add the perSVade runs in several combinations
-    n_remaining_jobs = sum([file_is_empty("%s/perSVade_calling_%s/perSVade_finished_file.txt"%(outdir, typeSimulations)) for typeSimulations in ["arroundRepeats", "uniform", "fast", "realSVs"]])
+    types_simulations = ["arroundHomRegions", "arroundRepeats", "uniform", "fast", "realSVs"]
+    n_remaining_jobs = sum([file_is_empty("%s/perSVade_calling_%s/perSVade_finished_file.txt"%(outdir, typeSimulations)) for typeSimulations in types_simulations])
 
     print_if_verbose("There are %i remaining jobs"%n_remaining_jobs)
 
+    # define the other_perSVade_outdirs_sameReadsANDalignment (for which reads should be taken)
+    other_perSVade_outdirs_sameReadsANDalignment = ",".join(["%s/perSVade_calling_%s"%(outdir, typeSimulations) for typeSimulations in types_simulations])
+
     # go through each run and configuration
-    for typeSimulations, bedpe_breakpoints, fast_SVcalling, simulate_SVs_arround_repeats in [("arroundRepeats", None, False, True), ("uniform", None, False, False), ("realSVs", real_bedpe_breakpoints, False, False), ("fast", None, True, False)]:
+    for typeSimulations, bedpe_breakpoints, fast_SVcalling, simulate_SVs_arround_repeats, simulate_SVs_arround_HomologousRegions in [("arroundHomRegions", None, False, False, True), ("arroundRepeats", None, False, True, False), ("uniform", None, False, False, False), ("realSVs", real_bedpe_breakpoints, False, False, False), ("fast", None, True, False, False)]:
 
         # define an outdir for this type of simulations
         outdir_typeSimulations = "%s/perSVade_calling_%s"%(outdir, typeSimulations); make_folder(outdir_typeSimulations)
@@ -10893,7 +11136,7 @@ def report_accuracy_golden_set_runJobs(goldenSet_dir, outdir, reference_genome, 
         if file_is_empty(final_file) or replace is True:
 
             # define the cmd. This is a normal perSvade.py run with the vars of the previous dir  
-            cmd = "python %s -r %s --threads %i --outdir %s --nvars %i --nsimulations %i --simulation_ploidies %s --range_filtering_benchmark %s --mitochondrial_chromosome %s -f1 %s -f2 %s --previous_repeats_table %s --skip_cleaning_outdir --skip_SV_CNV_calling --QC_and_trimming_reads"%(perSVade_py, reference_genome, threads, outdir_typeSimulations, nvars, n_simulated_genomes, ",".join(simulation_ploidies), range_filtering_benchmark, mitochondrial_chromosome, short_reads1, short_reads2, previous_repeats_table)
+            cmd = "python %s -r %s --threads %i --outdir %s --nvars %i --nsimulations %i --simulation_ploidies %s --range_filtering_benchmark %s --mitochondrial_chromosome %s -f1 %s -f2 %s --previous_repeats_table %s --skip_cleaning_outdir --skip_SV_CNV_calling --QC_and_trimming_reads --other_perSVade_outdirs_sameReadsANDalignment %s"%(perSVade_py, reference_genome, threads, outdir_typeSimulations, nvars, n_simulated_genomes, ",".join(simulation_ploidies), range_filtering_benchmark, mitochondrial_chromosome, short_reads1, short_reads2, previous_repeats_table, other_perSVade_outdirs_sameReadsANDalignment)
 
             # add arguments depending on the pipeline
             if replace is True: cmd += " --replace"
@@ -10903,6 +11146,7 @@ def report_accuracy_golden_set_runJobs(goldenSet_dir, outdir, reference_genome, 
             if parameters_json_file is not None: cmd += " --parameters_json_file %s"%parameters_json_file
             if fraction_available_mem is not None: cmd += " --fraction_available_mem %.3f"%(float(fraction_available_mem))
             if simulate_SVs_arround_repeats is True: cmd += " --simulate_SVs_arround_repeats"
+            if simulate_SVs_arround_HomologousRegions is True: cmd += " --simulate_SVs_arround_HomologousRegions"
 
 
             all_cmds.append(cmd)
@@ -17274,6 +17518,61 @@ def run_jobarray_file_Nord3(jobs_filename, name, time="12:00:00", queue="bsc_ls"
     
     # run in cluster if specified
     print("Submiting jobfile to the cluster from stddir %s"%(stddir))
+    run_cmd("bsub < %s"%jobs_filename_run)
+
+
+
+def run_jobarray_file_Nord3_greasy(jobs_filename, name, time="12:00:00", queue="bsc_ls", threads_per_job=4, RAM_per_thread=1800, nodes=4):
+
+    """
+    This function takes a jobs filename and creates a jobscript with args (which is a list of lines to be written to the jobs cript). It works in Nord3 for greasy    
+
+    """
+
+    # define dirs
+    outdir = get_dir(jobs_filename)
+    stddir = "%s/STDfiles"%outdir; 
+
+    delete_folder(stddir); make_folder(stddir)
+
+    # define the std files
+    greasy_logfile = "%s/%s_greasy.log"%(stddir, name)
+    stderr_file = "%s/%s_stderr.txt"%(stddir, name)
+    stdout_file = "%s/%s_stdout.txt"%(stddir, name)
+
+    # define the job script
+    jobs_filename_run = "%s.run"%jobs_filename
+
+    # define the number of jobs in the job array
+    njobs = len(open(jobs_filename, "r").readlines())
+
+    # change the time
+    time = ":".join(time.split(":")[0:2])
+
+    # define the total threads
+    max_necessary_threads = njobs*threads_per_job
+    total_threads = min([threads_per_job*nodes, max_necessary_threads])
+
+    # define the arguments
+    arguments = [ "#!/bin/sh",
+                  "#BSUB -e  %s"%stderr_file,
+                  "#BSUB -o %s"%stdout_file,
+                  "#BSUB -cwd %s"%outdir,
+                  "#BSUB -W %s"%time,
+                  "#BSUB -q %s"%queue,
+                  "#BSUB -n %i"%total_threads, # the number of processes
+                  "#BSUB -M %i"%RAM_per_thread, # the ram per thread in Mb
+                  "",
+                  "module load greasy",
+                  "export GREASY_LOGFILE=%s;"%(greasy_logfile),
+                  "echo 'running pipeline';",
+                  "greasy %s"%jobs_filename
+                ]
+
+    # define and write the run filename
+    with open(jobs_filename_run, "w") as fd: fd.write("\n".join(arguments))
+    
+    # run in cluster if specified
     run_cmd("bsub < %s"%jobs_filename_run)
 
 

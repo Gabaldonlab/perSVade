@@ -182,6 +182,15 @@ parser.add_argument("--previous_repeats_table", dest="previous_repeats_table", d
 
 parser.add_argument("--simulate_SVs_arround_repeats", dest="simulate_SVs_arround_repeats", action="store_true", default=False, help="Simulate SVs arround repeats. This requires that there are some repeats inferred. This option will generate a simulated set of breakpoints arround repeats, if possible of the same family, and with random orientations.")
 
+parser.add_argument("--simulate_SVs_arround_HomologousRegions", dest="simulate_SVs_arround_HomologousRegions", action="store_true", default=False, help="Simulate SVs arround regions that have high similarity.")
+parser.add_argument("--simulate_SVs_arround_HomologousRegions_queryWindowSize", dest="simulate_SVs_arround_HomologousRegions_queryWindowSize",  default=500, type=int, help="The window size used for finding regions with high similarity. This only works if --simulate_SVs_arround_HomologousRegions is specified.")
+parser.add_argument("--simulate_SVs_arround_HomologousRegions_maxEvalue", dest="simulate_SVs_arround_HomologousRegions_maxEvalue",  default=1e-5, type=float, help="The maximum evalue by which two regions will be said to have high similarity. This only works if --simulate_SVs_arround_HomologousRegions is specified.")
+parser.add_argument("--simulate_SVs_arround_HomologousRegions_minPctOverlap", dest="simulate_SVs_arround_HomologousRegions_minPctOverlap",  default=50, type=int, help="The minimum percentage of overlap between two homologous regions so that there can be a brèkpoint drawn in between. This only works if --simulate_SVs_arround_HomologousRegions is specified.")
+
+
+parser.add_argument("--other_perSVade_outdirs_sameReadsANDalignment", dest="other_perSVade_outdirs_sameReadsANDalignment",  default=None, help="A comma-sepparated set of full paths to perSVade outdirs that can be used to replace the sorted bam and reads dir.")
+
+
 parser.add_argument("--bg_sorted_bam_CNV", dest="bg_sorted_bam_CNV", default=None, help="This is a sorted bam (with duplicated marked) that is taken as a 'reference' background in the CNV calling. By default, perSVade corrects the coverage by GC content, mappability and the distance to the telomere. If --bg_sorted_bam_CNV, the coverage will be normalised by the coverage of this sorted bam.")
 
 
@@ -268,6 +277,10 @@ if opt.previous_repeats_table is not None:
 
 ###############################################
 
+
+# GENERATE READS FROM OTHER perSVade_outdirs
+if opt.other_perSVade_outdirs_sameReadsANDalignment is not None: fun.link_files_from_other_perSVade_outdirs_reads_and_alignment(opt.outdir, opt.other_perSVade_outdirs_sameReadsANDalignment)
+
 #### define misc args ####
 
 # get the simulation ploidies
@@ -351,11 +364,29 @@ if opt.simulate_SVs_arround_repeats is True:
     # debug
     if opt.real_bedpe_breakpoints is not None: raise ValueError("You can not specify --simulate_SVs_arround_repeats and --real_bedpe_breakpoints. You may definir either of both.")
     if opt.skip_repeat_analysis is True: raise ValueError("You should not skip the repeats analysis (with --skip_repeat_analysis) if you want to simulate SVs arround repeats.")
+    if opt.simulate_SVs_arround_HomologousRegions is True: raise ValueError("You can not specify --simulate_SVs_arround_repeats and --simulate_SVs_arround_HomologousRegions.")
+
 
     # override the real_bedpe_breakpoints with the bedpe comming from repeats
-    opt.real_bedpe_breakpoints = fun.get_bedpe_breakpoints_arround_repeats(repeats_table_file, replace=opt.replace, max_breakpoints=(opt.nvars*5*10000), max_breakpoints_per_repeat=1)
+    opt.real_bedpe_breakpoints = fun.get_bedpe_breakpoints_arround_repeats(repeats_table_file, replace=opt.replace, max_breakpoints=(opt.nvars*5*10000), max_breakpoints_per_repeat=1, threads=opt.threads)
 
 ################################################################################
+
+####### GENERATE real_bedpe_breakpoints ARROUND HOMOLOGOUS REGIONS #########
+
+if opt.simulate_SVs_arround_HomologousRegions is True:
+    print("simulating arround Homologous regions")
+
+    # debug
+    if opt.real_bedpe_breakpoints is not None: raise ValueError("You can not specify --simulate_SVs_arround_repeats and --real_bedpe_breakpoints. You may definie either of both.") 
+    if opt.simulate_SVs_arround_repeats is True: raise ValueError("You can not specify --simulate_SVs_arround_repeats and --simulate_SVs_arround_HomologousRegions.")
+
+    # override the real_bedpe_breakpoints with the bedpe comming from homologous regions
+    outdir_simulating_breakpoints_arround_homRegions = "%s/generating_breakpoints_arround_homologousRegions"%opt.outdir
+    bedpe_breakpoints = "%s/breakpoints_arrounHomRegions_wsize=%ibp_maxEval=%s.bedpe"%(opt.outdir, opt.simulate_SVs_arround_HomologousRegions_queryWindowSize, opt.simulate_SVs_arround_HomologousRegions_maxEvalue)
+    opt.real_bedpe_breakpoints = fun.get_bedpe_breakpoints_arround_homologousRegions(opt.ref, outdir_simulating_breakpoints_arround_homRegions, bedpe_breakpoints, replace=opt.replace, threads=opt.threads, max_eval=opt.simulate_SVs_arround_HomologousRegions_maxEvalue, query_window_size=opt.simulate_SVs_arround_HomologousRegions_queryWindowSize, min_qcovs=opt.simulate_SVs_arround_HomologousRegions_minPctOverlap)
+
+############################################################################
 
 #############################
 
