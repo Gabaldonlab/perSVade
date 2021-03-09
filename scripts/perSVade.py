@@ -187,6 +187,10 @@ parser.add_argument("--simulate_SVs_arround_HomologousRegions_queryWindowSize", 
 parser.add_argument("--simulate_SVs_arround_HomologousRegions_maxEvalue", dest="simulate_SVs_arround_HomologousRegions_maxEvalue",  default=1e-5, type=float, help="The maximum evalue by which two regions will be said to have high similarity. This only works if --simulate_SVs_arround_HomologousRegions is specified.")
 parser.add_argument("--simulate_SVs_arround_HomologousRegions_minPctOverlap", dest="simulate_SVs_arround_HomologousRegions_minPctOverlap",  default=50, type=int, help="The minimum percentage of overlap between two homologous regions so that there can be a brèkpoint drawn in between. This only works if --simulate_SVs_arround_HomologousRegions is specified.")
 
+parser.add_argument("--simulate_SVs_arround_HomologousRegions_previousBlastnFile", dest="simulate_SVs_arround_HomologousRegions_previousBlastnFile",  default=None, help="A file that contains the output of blastn of regions of the genome against itself. It will be put under refetence genome dir")
+
+
+
 
 parser.add_argument("--other_perSVade_outdirs_sameReadsANDalignment", dest="other_perSVade_outdirs_sameReadsANDalignment",  default=None, help="A comma-sepparated set of full paths to perSVade outdirs that can be used to replace the sorted bam and reads dir.")
 
@@ -381,10 +385,15 @@ if opt.simulate_SVs_arround_HomologousRegions is True:
     if opt.real_bedpe_breakpoints is not None: raise ValueError("You can not specify --simulate_SVs_arround_repeats and --real_bedpe_breakpoints. You may definie either of both.") 
     if opt.simulate_SVs_arround_repeats is True: raise ValueError("You can not specify --simulate_SVs_arround_repeats and --simulate_SVs_arround_HomologousRegions.")
 
-    # override the real_bedpe_breakpoints with the bedpe comming from homologous regions
-    outdir_simulating_breakpoints_arround_homRegions = "%s/generating_breakpoints_arround_homologousRegions"%opt.outdir
-    bedpe_breakpoints = "%s/breakpoints_arrounHomRegions_wsize=%ibp_maxEval=%s.bedpe"%(opt.outdir, opt.simulate_SVs_arround_HomologousRegions_queryWindowSize, opt.simulate_SVs_arround_HomologousRegions_maxEvalue)
-    opt.real_bedpe_breakpoints = fun.get_bedpe_breakpoints_arround_homologousRegions(opt.ref, outdir_simulating_breakpoints_arround_homRegions, bedpe_breakpoints, replace=opt.replace, threads=opt.threads, max_eval=opt.simulate_SVs_arround_HomologousRegions_maxEvalue, query_window_size=opt.simulate_SVs_arround_HomologousRegions_queryWindowSize, min_qcovs=opt.simulate_SVs_arround_HomologousRegions_minPctOverlap)
+    # get a file that contains the blastn of some regions of the genome
+    if opt.simulate_SVs_arround_HomologousRegions_previousBlastnFile is None: blastn_file = fun.get_blastn_regions_genome_against_itself(opt.ref, opt.simulate_SVs_arround_HomologousRegions_maxEvalue, opt.simulate_SVs_arround_HomologousRegions_queryWindowSize, opt.replace, opt.threads)
+
+    else: blastn_file = opt.simulate_SVs_arround_HomologousRegions_previousBlastnFile
+
+    # define the bedpe breakpoints arround the homologous regions
+    bedpe_breakpoints = "%s/breakpoints_arrounHomRegions_wsize=%ibp_maxEval=%s_minQcovS=%i.bedpe"%(opt.outdir, opt.simulate_SVs_arround_HomologousRegions_queryWindowSize, opt.simulate_SVs_arround_HomologousRegions_maxEvalue, opt.simulate_SVs_arround_HomologousRegions_minPctOverlap)
+
+    opt.real_bedpe_breakpoints = fun.get_bedpe_breakpoints_arround_homologousRegions(blastn_file, bedpe_breakpoints, replace=opt.replace, threads=opt.threads, max_eval=opt.simulate_SVs_arround_HomologousRegions_maxEvalue, query_window_size=opt.simulate_SVs_arround_HomologousRegions_queryWindowSize, min_qcovs=opt.simulate_SVs_arround_HomologousRegions_minPctOverlap)
 
 ############################################################################
 
@@ -600,7 +609,7 @@ if opt.goldenSet_dir is not None:
 
     # run jobs golden set testing
     outdir_goldenSet = "%s/testing_goldenSetAccuracy"%opt.outdir
-    dict_paths_goldenSetAnalysis = fun.report_accuracy_golden_set_runJobs(opt.goldenSet_dir, outdir_goldenSet, opt.ref, real_bedpe_breakpoints, threads=opt.threads, replace=opt.replace, n_simulated_genomes=opt.nsimulations, mitochondrial_chromosome=opt.mitochondrial_chromosome, simulation_ploidies=simulation_ploidies, range_filtering_benchmark=opt.range_filtering_benchmark, nvars=opt.nvars, job_array_mode=opt.job_array_mode, StopAfter_sampleIndexingFromSRA=opt.StopAfter_sampleIndexingFromSRA, StopAfterPrefecth_of_reads=opt.StopAfterPrefecth_of_reads_goldenSet, target_taxID=opt.target_taxID, parameters_json_file=opt.parameters_json_file, fraction_available_mem=opt.fraction_available_mem, StopAfter_goldenSetAnalysis_readObtention=opt.StopAfter_goldenSetAnalysis_readObtention, verbose=opt.verbose, StopAfter_goldenSetAnalysis_readTrimming=opt.StopAfter_goldenSetAnalysis_readTrimming)
+    dict_paths_goldenSetAnalysis = fun.report_accuracy_golden_set_runJobs(opt.goldenSet_dir, outdir_goldenSet, opt.ref, real_bedpe_breakpoints, threads=opt.threads, replace=opt.replace, n_simulated_genomes=opt.nsimulations, mitochondrial_chromosome=opt.mitochondrial_chromosome, simulation_ploidies=simulation_ploidies, range_filtering_benchmark=opt.range_filtering_benchmark, nvars=opt.nvars, job_array_mode=opt.job_array_mode, StopAfter_sampleIndexingFromSRA=opt.StopAfter_sampleIndexingFromSRA, StopAfterPrefecth_of_reads=opt.StopAfterPrefecth_of_reads_goldenSet, target_taxID=opt.target_taxID, parameters_json_file=opt.parameters_json_file, fraction_available_mem=opt.fraction_available_mem, StopAfter_goldenSetAnalysis_readObtention=opt.StopAfter_goldenSetAnalysis_readObtention, verbose=opt.verbose, StopAfter_goldenSetAnalysis_readTrimming=opt.StopAfter_goldenSetAnalysis_readTrimming, simulate_SVs_arround_HomologousRegions_previousBlastnFile=opt.simulate_SVs_arround_HomologousRegions_previousBlastnFile, simulate_SVs_arround_HomologousRegions_maxEvalue=opt.simulate_SVs_arround_HomologousRegions_maxEvalue, simulate_SVs_arround_HomologousRegions_queryWindowSize=opt.simulate_SVs_arround_HomologousRegions_queryWindowSize)
 
     # plot the accurac
     fun.report_accuracy_golden_set_reportAccuracy(dict_paths_goldenSetAnalysis, outdir_goldenSet, opt.ref, threads=opt.threads, replace=opt.replace)

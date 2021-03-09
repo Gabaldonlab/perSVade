@@ -55,7 +55,7 @@ taxIDs_with_noON_overalpping = {"746128"}
 goldenSet_dir_Cglabrata = "%s/scripts/perSVade/perSVade_repository/testing/Cglabrata_goldenSetReads_BG2"%ParentDir
 
 # define the run in cluster (and debug)
-run_in_cluster = True
+run_in_cluster = False
 if running_in_cluster is False: run_in_cluster = False
 
 # go through each species
@@ -72,6 +72,12 @@ for taxID, spName, ploidy, mitochondrial_chromosome, max_coverage_sra_reads in t
     # get the repeats for this genome
     previous_repeats_table = fun.get_repeat_maskerDF(genome, threads=threads, replace=False)[1]
 
+    # get the blastn of the genome against itself
+    simulate_SVs_arround_HomologousRegions_maxEvalue = 0.00001
+    simulate_SVs_arround_HomologousRegions_queryWindowSize = 500
+    simulate_SVs_arround_HomologousRegions_previousBlastnFile = fun.get_blastn_regions_genome_against_itself(genome, simulate_SVs_arround_HomologousRegions_maxEvalue, simulate_SVs_arround_HomologousRegions_queryWindowSize, False, threads)
+
+
     # define the goldenSet_dir and the real bedpe breakpoints
     if spName=="Candida_glabrata": 
         goldenSet_dir = goldenSet_dir_Cglabrata
@@ -83,7 +89,7 @@ for taxID, spName, ploidy, mitochondrial_chromosome, max_coverage_sra_reads in t
     
     # get the golden set running 
     if taxID in taxIDs_with_noON_overalpping: continue
-    cmd = "%s --ref %s --threads %i -o %s --target_taxID %s --real_bedpe_breakpoints %s -f1 skip -f2 skip --mitochondrial_chromosome %s --gff %s --goldenSet_dir %s --skip_SVcalling --verbose --nsimulations 2 --simulation_ploidies haploid --previous_repeats_table %s --QC_and_trimming_reads --StopAfter_goldenSetAnalysis "%(perSVade_py, genome, threads, outdir_perSVade, taxID, real_bedpe_breakpoints, mitochondrial_chromosome, gff, goldenSet_dir, previous_repeats_table)
+    cmd = "%s --ref %s --threads %i -o %s --target_taxID %s --real_bedpe_breakpoints %s -f1 skip -f2 skip --mitochondrial_chromosome %s --gff %s --goldenSet_dir %s --skip_SVcalling --verbose --nsimulations 2 --simulation_ploidies haploid --previous_repeats_table %s --QC_and_trimming_reads --StopAfter_goldenSetAnalysis --simulate_SVs_arround_HomologousRegions_previousBlastnFile %s --simulate_SVs_arround_HomologousRegions_maxEvalue %.10f --simulate_SVs_arround_HomologousRegions_queryWindowSize %i"%(perSVade_py, genome, threads, outdir_perSVade, taxID, real_bedpe_breakpoints, mitochondrial_chromosome, gff, goldenSet_dir, previous_repeats_table, simulate_SVs_arround_HomologousRegions_previousBlastnFile, simulate_SVs_arround_HomologousRegions_maxEvalue, simulate_SVs_arround_HomologousRegions_queryWindowSize)
 
     """
     StopAfter_goldenSetAnalysis
@@ -100,8 +106,8 @@ for taxID, spName, ploidy, mitochondrial_chromosome, max_coverage_sra_reads in t
 
     cmd_output = "%s/cmd_testing.std"%outdir_perSVade
     print("running std into %s"%cmd_output)
-    fun.run_cmd("%s > %s 2>&1"%(cmd, cmd_output)) # run with stdout
-    #fun.run_cmd(cmd); continue # run locally 
+    #fun.run_cmd("%s > %s 2>&1"%(cmd, cmd_output)) # run with stdout
+    fun.run_cmd(cmd); continue # run locally 
  	
  	###### RUN JOB ARRAYS ######
 

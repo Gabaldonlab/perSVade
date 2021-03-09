@@ -16179,3 +16179,59 @@ def get_distanceToTelomere_chromosome_GCcontent_to_coverage_fn(df_coverage_train
 
 
 
+
+def get_best_most_conservative_row_df_benchmark(df_benchmark):
+
+    """Takes a df_benchmark, and returns the row with the most conservative row, given that it has the highest Fvalue. The least conservative is made in a step wise way filtering several things one after the other"""
+
+    # get the maximum df
+    df_best = df_benchmark[df_benchmark.Fvalue==max(df_benchmark.Fvalue)]
+    if len(df_best)==1: return df_best.iloc[0]
+    
+    # get the df with the highest precision
+    df_best = df_best[df_best.precision==max(df_best.precision)]
+    if len(df_best)==1: return df_best.iloc[0]
+
+    # get the one with the highest recall
+    df_best = df_best[df_best.recall==max(df_best.recall)]
+    if len(df_best)==1: return df_best.iloc[0]
+
+    # get the most conservative set of filters for gridss
+    most_conservative_filtersDict_tuple = get_dict_as_tuple(get_represenative_filtersDict_for_filtersDict_list(df_best.filters_dict, type_filters="most_conservative"))
+    df_best = df_best[df_best.filters_dict.apply(get_dict_as_tuple)==most_conservative_filtersDict_tuple]
+    if len(df_best)==1: return df_best.iloc[0]
+
+    # get the minimum clove_max_rel_coverage_to_consider_del
+    df_best = df_best[df_best.clove_max_rel_coverage_to_consider_del==min(df_best.clove_max_rel_coverage_to_consider_del)]
+    if len(df_best)==1: return df_best.iloc[0]
+
+    # get the max clove_min_rel_coverage_to_consider_dup
+    df_best = df_best[df_best.clove_min_rel_coverage_to_consider_dup==max(df_best.clove_min_rel_coverage_to_consider_dup)]
+    if len(df_best)==1: return df_best.iloc[0]
+
+    # get filters with min tolerated cov
+    if "gridss_maxcoverage" in df_best.keys():
+        df_best = df_best[df_best.gridss_maxcoverage==min(df_best.gridss_maxcoverage)]
+        if len(df_best)==1: return df_best.iloc[0]
+
+    # if any, take the ones filtering regions in gridss
+    if "gridss_regionsToIgnoreBed" in df_best.keys():
+        
+        if any(df_best.gridss_regionsToIgnoreBed!=""):    
+            df_best = df_best[df_best.gridss_regionsToIgnoreBed!=""]
+            if len(df_best)==1: return df_best.iloc[0]
+
+
+    # at the end just return the best one
+    print_if_verbose("Warning: there is no single type of filtering that can fullfill all the requirements") 
+
+    # if you didn't find a single best, raise error
+    print_if_verbose("\nthis is the best df:\n", df_best, "printing the non equal fields across all rows:\n")
+    changing_fields = get_changing_fields_in_df_benchmark(df_best)
+    for f in changing_fields:
+        print_if_verbose("\t", f)
+        for Irow in range(len(df_best)): print_if_verbose("\t\t", df_best[f].iloc[Irow])
+
+
+    raise ValueError("There is not a single best filtering")
+
