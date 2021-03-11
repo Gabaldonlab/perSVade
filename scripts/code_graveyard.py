@@ -16235,3 +16235,207 @@ def get_best_most_conservative_row_df_benchmark(df_benchmark):
 
     raise ValueError("There is not a single best filtering")
 
+
+
+def get_df_repeats_from_df_repeats_r(r, window_size, bedfile_prefix):
+
+    """Takes a df of df_repeats and returns a df of the repeats subdivided into chunks of window_size"""
+
+    # calculate the length of the repeat
+    len_repeat = r.end_repeat-r.begin_repeat
+
+    # if the repeat is short, return it as it is
+    if len_repeat<=window_size: df = pd.DataFrame({0 : r}).transpose()
+
+    # subdivide into several repeats
+    else:
+
+        # make a bed that has this interval
+        bedfile = "%s.%i.bed"%(bedfile_prefix, r.name)
+        pd.DataFrame({0 : r}).transpose()[["chromosome", "begin_repeat", "end_repeat"]].to_csv(bedfile, sep="\t", index=False, header=False)
+
+        # run makewindows to get the windows
+        windows_file = "%s.windows.bed"%bedfile
+        windows_file_stderr = "%s.generate.stderr"%windows_file
+        run_cmd("%s makewindows -b %s -w %i > %s 2>%s"%(bedtools, bedfile, window_size, windows_file, windows_file_stderr)) # debug
+        df_windows = pd.read_csv(windows_file, sep="\t", header=-1, names=["chromosome", "begin_repeat", "end_repeat"])
+
+        # add things
+        df = df_windows
+        df["repeat"] = r["repeat"]
+        df["type"] = r["type"]
+
+        # clean
+        for f in [bedfile, windows_file, windows_file_stderr]: remove_file(f)
+
+    return df
+
+def get_bedpe_breakpoints_arround_repeats(repeats_table_file, replace=False, min_sv_size=50, max_breakpoints=10000, max_breakpoints_per_repeat=1, window_size_subdivide_repeats=300, threads=4, max_repeats=10000):
+
+    """ Takes a repeats file and returns a bedpe with breakpoints arround the repeats. There will be one breakpoint for each repeat against another one (each breakpoint used only once) with random orientations and at least min_sv_size if they are equal. If the repeat has another repeat of the same "repeat" name, it will be picked first. 
+
+    This should be 1, because all the regions with more than 1 will fail"""
+
+    # define the output file
+    bedpe_breakpoints = "%s.breakpoints_max%i.bedpe"%(repeats_table_file, max_breakpoints) # this will be a bedpe with no fields
+
+    if file_is_empty(bedpe_breakpoints) or replace is True:
+        print_if_verbose("Generating %s"%bedpe_breakpoints)
+
+        # load the df and debug
+        df_repeats = get_tab_as_df_or_empty_df(repeats_table_file)
+        if len(df_repeats)==0: raise ValueError("There should be some repeats in %s"%repeats_table_file)
+        if len(df_repeats)!=len(set(df_repeats.IDrepeat)): raise ValueError("The ID of the repeats should be unique")
+        df_repeats = df_repeats.drop_duplicates(subset=["chromosome", "begin_repeat", "end_repeat", "repeat"]).iloc[0:max_repeats]
+
+        # filter low complexity regions
+        #df_repeats = df_repeats[~(df_repeats.type.isin({"Low_complexity"}))]
+
+        # filter the important fields
+        df_repeats = df_repeats[["chromosome", "repeat", "begin_repeat", "end_repeat", "type"]]
+        initial_len_df_repeats = len(df_repeats)
+        df_repeats.index = list(range(len(df_repeats)))
+
+        # subdivide repeats into chunks of window_size_subdivide_repeats
+        print_if_verbose("getting subdivided repeats")
+        bedfile_subdivide_repeats_prefix = "%s.subdivide_repeats"%bedpe_breakpoints
+        inputs_fn  = [(r, window_size_subdivide_repeats, bedfile_subdivide_repeats_prefix) for I, r in df_repeats.iterrows()]
+
+        with multiproc.Pool(threads) as pool:
+            list_repeats_dfs = pool.starmap(get_df_repeats_from_df_repeats_r, inputs_fn) # needs if __name__=="__main__" 
+                
+            pool.close()
+            pool.terminate()
+
+        df_repeats = pd.concat(list_repeats_dfs)
+        print_if_verbose("you got from %i to %i repeats in windows of %i bp"%(initial_len_df_repeats, len(df_repeats), window_size_subdivide_repeats))
+
+        # sort randomly, and then by the type of repeats and chromosome
+        type_repeat_to_importance = {"Unknown":10, "Simple_repeat":1, "Low_complexity":0}
+        def get_repeat_importance(x):
+            if x in type_repeat_to_importance: return type_repeat_to_importance[x]
+            else: return 9
+        df_repeats["repeat_importance"] = df_repeats.type.apply(get_repeat_importance)
+        df_repeats = df_repeats.sample(frac=1).sort_values(by=["repeat_importance", "chromosome"], ascending=False).iloc[0:max_repeats]
+
+        # add the number of repeats that are shared
+        repeat_to_Nrepeats = df_repeats.groupby("repeat").apply(len)
+        df_repeats["n_same_repeat"] = df_repeats["repeat"].apply(lambda x: repeat_to_Nrepeats[x])
+
+        # add the position
+        df_repeats["repeat_position"] = (df_repeats.begin_repeat + (df_repeats.end_repeat - df_repeats.begin_repeat)/2).apply(int)
+        if any(df_repeats.repeat_position<0): raise ValueError("There should be no negative repeat positions") 
+
+        # add the ID
+        df_repeats["ID"] = list(range(len(df_repeats)))
+        df_repeats = df_repeats.set_index("ID", drop=False)
+
+        # define dicts
+        all_chroms = sorted(set(df_repeats.chromosome))
+        chrom_to_dfSameChrom = dict(zip(all_chroms, map(lambda c: df_repeats[df_repeats.chromosome==c], all_chroms)))
+        chrom_to_IDsDifferenChroms = dict(zip(all_chroms, map(lambda c: set(df_repeats[df_repeats.chromosome!=c].ID), all_chroms)))
+
+        # add the set of compatible IDs, those that are different chromosomes or less than min_sv_size appart
+        def get_set_compatibleIDs(r): 
+
+            IDs_different_chroms = chrom_to_IDsDifferenChroms[r.chromosome]
+
+            df_sameChrom = chrom_to_dfSameChrom[r.chromosome]
+            IDs_same_chrom =  set(df_sameChrom[(df_sameChrom.repeat_position-r.repeat_position).apply(abs)>=min_sv_size].ID)
+
+            return IDs_different_chroms.union(IDs_same_chrom)
+
+        df_repeats["compatible_repeatIDs"] = df_repeats.apply(get_set_compatibleIDs, axis=1)
+
+        ##### DEFINE THE PAIRS OF COMPATIBLE REPEATS #######
+
+        # init the repeat pairs
+        all_repeat_pairs = []
+
+        # go through each repeat
+        for Ifrom in list(df_repeats.index):
+
+            # init the number of repeats on Ifrom
+            n_pairs_on_Ifrom = 0
+
+            # define the series
+            r_from = df_repeats.loc[Ifrom]
+
+            # repeats that have a member of the same faimily will be joined to them. 
+            if repeat_to_Nrepeats[r_from["repeat"]]>1: df_rep = df_repeats[(df_repeats.ID.isin(r_from.compatible_repeatIDs)) & (df_repeats["repeat"]==r_from["repeat"])]
+
+            # repeats with no partner will be joined to other repeats with no partner
+            else: df_rep = df_repeats[(df_repeats.ID.isin(r_from.compatible_repeatIDs)) & (df_repeats.n_same_repeat==1)]
+
+            # go through  the compatible repeat pairs
+            for Ito in list(df_rep.index):
+
+                # define the repeat pairs
+                repeat_pair = tuple(sorted([Ifrom, Ito]))
+
+                # endings
+                if repeat_pair in all_repeat_pairs: break
+                if len(all_repeat_pairs)>=max_breakpoints: break
+                if n_pairs_on_Ifrom>=max_breakpoints_per_repeat: break
+
+                # keep pairs
+                all_repeat_pairs.append(repeat_pair)
+                n_pairs_on_Ifrom+=1
+
+            if len(all_repeat_pairs)>=max_breakpoints: break
+
+        print_if_verbose("There are %i breakpoints arround repeats"%(len(all_repeat_pairs)))
+
+        ##################################################
+
+        ###### GENERATE A BEDPE WITH THE PAIRS OF COMPATIBLE REPEATS, ASSIGNING RANDOM ORIENTATIONS #######
+
+        # init dict
+        def get_bedpe_dict_fromPair_repeats(x):
+
+            # define the rows
+            r_from = df_repeats.loc[x[0]]
+            r_to = df_repeats.loc[x[1]]
+
+            # define the r1 and r2, whcih have to be sorted
+            if r_from.chromosome==r_to.chromosome: 
+                
+                if r_from.repeat_position<r_to.repeat_position: 
+                    r1 = r_from
+                    r2 = r_to
+
+                elif r_from.repeat_position>r_to.repeat_position:
+                    r2 = r_from
+                    r1 = r_to
+
+            else:
+
+                if r_from.chromosome<r_to.chromosome: 
+                    r1 = r_from
+                    r2 = r_to
+
+                elif r_from.chromosome>r_to.chromosome:
+                    r2 = r_from
+                    r1 = r_to
+
+
+            # define strands randomly
+            strands = ["+", "-"]
+            strand1 = random.choice(strands)
+            strand2 = random.choice(strands)
+
+            # get the bedpe dict
+            return {"chrom1":r1.chromosome, "start1":r1.repeat_position, "end1":r1.repeat_position+1, "chrom2":r2.chromosome, "start2":r2.repeat_position, "end2":r2.repeat_position+1, "name":"%s_%s||%s_%s"%(r1["repeat"], r1.ID, r2["repeat"], r2.ID), "score":100.0, "strand1":strand1, "strand2":strand2}
+
+
+        bedpe_df = pd.DataFrame(dict(zip(all_repeat_pairs, map(get_bedpe_dict_fromPair_repeats, all_repeat_pairs)))).transpose()[["chrom1", "start1", "end1", "chrom2", "start2", "end2", "name", "score", "strand1", "strand2"]]
+
+        # write
+        bedpe_breakpoints_tmp = "%s.tmp"%bedpe_breakpoints
+        bedpe_df.to_csv(bedpe_breakpoints_tmp, sep="\t", header=False, index=False)
+        os.rename(bedpe_breakpoints_tmp, bedpe_breakpoints)
+
+        ###################################################################################################
+
+    return bedpe_breakpoints
+

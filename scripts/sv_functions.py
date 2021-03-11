@@ -2112,7 +2112,7 @@ def get_SVs_arround_breakpoints(genome_file, df_bedpe, nvars, outdir, svtypes, r
         df_bedpe.index = list(range(0, len(df_bedpe)))
 
         # set the max_n_breakpoints, 
-        max_n_breakpoints = nvars*1000000
+        max_n_breakpoints = nvars*5*1000
         if len(df_bedpe)>max_n_breakpoints: 
         
             """
@@ -2136,7 +2136,8 @@ def get_SVs_arround_breakpoints(genome_file, df_bedpe, nvars, outdir, svtypes, r
             add_interval_bp = 100
 
             # add things
-            df_bedpe["affected_positions_arroundBp"] = df_bedpe.apply(lambda r: get_affected_positions_from_bedpe_r(r, extra_bp=add_interval_bp), axis=1)
+            print_if_verbose("getting affected positions arround Bps for %i breakpoints"%len(df_bedpe))
+            df_bedpe["affected_positions_arroundBp"] = df_bedpe.apply(get_affected_positions_from_bedpe_r, extra_bp=add_interval_bp, axis=1)
             df_bedpe["medium1"] = (df_bedpe.start1 + (df_bedpe.end1 - df_bedpe.start1)/2).apply(int)
             df_bedpe["medium2"] = (df_bedpe.start2 + (df_bedpe.end2 - df_bedpe.start2)/2).apply(int)
             df_bedpe["length"] = df_bedpe.apply(get_length_bedpe_r, axis=1)
@@ -2172,14 +2173,17 @@ def get_SVs_arround_breakpoints(genome_file, df_bedpe, nvars, outdir, svtypes, r
             # sort the bedpe so that interchromosomal events are first
             df_bedpe["order_by_chrom"] =  df_bedpe.apply(lambda r: {True:10, False:1}[r["chrom1"]==r["chrom2"]], axis=1)
 
-            print("There are %i/%i interchromosomal breakpoints"%(sum(df_bedpe.order_by_chrom==1), len(df_bedpe)))
+            # define the sorted svtypes, depending on the numbers of breakpoints of each type
+            n_intrachromosomal = sum(df_bedpe.order_by_chrom==10)
+            n_interchromosomal = sum(df_bedpe.order_by_chrom==1)
+            print("There are %i/%i interchromosomal breakpoints"%(n_interchromosomal, len(df_bedpe)))
+
+            # define the sorted svtypes
+            sorted_svtypes = [x for x in ["translocations", "tandemDuplications", "deletions", "inversions", "insertions"] if x in svtypes]
 
             # go through each breakpoint and assign it to a cahegory. Break if a
             while len(df_bedpe)>0:
                 print_if_verbose("already traversed %i/%i breakpoints. There are %i affected positions"%(original_n_breakpoints - len(df_bedpe), original_n_breakpoints, len(already_affected_positions)))
-
-                # get the sorted svtypes
-                sorted_svtypes = [x for x in ["translocations", "tandemDuplications", "deletions", "inversions", "insertions"] if x in svtypes]
 
                 # print the current numbers
                 for svtype in sorted_svtypes: print_if_verbose("%i/%i %s defined"%(len(svtype_to_svDF[svtype]), nvars, svtype))
@@ -2195,7 +2199,8 @@ def get_SVs_arround_breakpoints(genome_file, df_bedpe, nvars, outdir, svtypes, r
                 for svtype in sorted_svtypes:  
 
                     # get only bedpe rows that are not overlapping the current positions, in terms of breakpoints
-                    df_bedpe = df_bedpe[(df_bedpe.affected_positions_arroundBp.apply(lambda positions: positions.intersection(already_affected_positions)).apply(len))==0]
+                    def get_positions_intersecting_already_affected_positions(positions): return positions.intersection(already_affected_positions)
+                    df_bedpe = df_bedpe[(df_bedpe.affected_positions_arroundBp.apply(get_positions_intersecting_already_affected_positions).apply(len))==0]
 
                     # get only bedpe rows that have not already been tried to assign to all svtypes
                     good_bpIDs = {bpID for bpID, tried_svtypes in bpID_to_tried_svtypes.items() if tried_svtypes!=svtypes}.intersection(set(df_bedpe.index))
@@ -2204,8 +2209,10 @@ def get_SVs_arround_breakpoints(genome_file, df_bedpe, nvars, outdir, svtypes, r
                     # if empty, continue
                     if len(df_bedpe)==0: continue
 
-                    # get the first bedpe row. Sorting in a way that the interchromosomal events will happen always first. This is to prioritize translocations
-                    df_bedpe = df_bedpe.sort_values(by="order_by_chrom")
+                    # get the first bedpe row. Sorting in a way that the interchromosomal events will happen always first. This is to prioritize translocations. Do this unless there are more interchromosomal regions
+                    if n_intrachromosomal>n_interchromosomal: df_bedpe = df_bedpe.sort_values(by="order_by_chrom")
+                    else: df_bedpe = df_bedpe.sort_values(by="order_by_chrom", ascending=False)
+
                     r = df_bedpe.iloc[0]
 
                     # record that this was already tried
@@ -3190,7 +3197,7 @@ def get_distanceToTelomere_chromosome_GCcontent_to_coverage_fn(df_coverage_train
     df = df_coverage_train.rename(columns={"#chrom":"chromosome"})
 
     # get a df with coverage predicted from several GC content and then the distance to the telomere (same for all chromosomes)
-    df = get_df_coverage_with_corrected_coverage(df, genome, outdir, replace, threads, mitochondrial_chromosome, None, initial_predictor_fields=["GCcontent"])
+    df = get_df_coverage_with_corrected_coverage(df, genome, outdir, replace, threads, mitochondrial_chromosome, None, initial_predictor_fields=["GCcontent"], fill_value_interpolation_finalFitting=1.0)
 
     # define the relative coverage of all
     median_coverage_all = get_median_coverage(df, mitochondrial_chromosome)
@@ -3225,13 +3232,13 @@ def get_distanceToTelomere_chromosome_GCcontent_to_coverage_fn(df_coverage_train
 
             # define a function that returns coverage from the GC content
             df_cov = df_cov.sort_values(by="GCcontent")
-            fn_rel_cov_fromGCcontent = scipy_interpolate.interp1d(df_cov.GCcontent, df_cov.relative_coverage_predicted_from_GCcontent, bounds_error=False, kind="linear", assume_sorted=True, fill_value="extrapolate")
+            fn_rel_cov_fromGCcontent = scipy_interpolate.interp1d(df_cov.GCcontent, df_cov.relative_coverage_predicted_from_GCcontent, bounds_error=False, kind="linear", assume_sorted=True, fill_value=1.0)
 
             fn_cov_fromGCcontent = (lambda GC: fn_rel_cov_fromGCcontent(GC)*median_coverage_all)
 
             # define a function that returns a weight (applied to the result of fn_cov_fromGCcontent) from dist_telomere
             df_cov = df_cov.sort_values(by="raw_distance_to_telomere")
-            fn_weight_fromDistTelomere = scipy_interpolate.interp1d(df_cov.raw_distance_to_telomere, df_cov.relative_coverage_predicted_from_raw_distance_to_telomere_aferCorrBy_GCcontent, bounds_error=False, kind="linear", assume_sorted=True, fill_value="extrapolate")
+            fn_weight_fromDistTelomere = scipy_interpolate.interp1d(df_cov.raw_distance_to_telomere, df_cov.relative_coverage_predicted_from_raw_distance_to_telomere_aferCorrBy_GCcontent, bounds_error=False, kind="linear", assume_sorted=True, fill_value=1.0)
 
         # keep functions
         for chrom in chroms: 
@@ -3264,13 +3271,15 @@ def get_distanceToTelomere_chromosome_GCcontent_to_coverage_fn(df_coverage_train
     
     # plot the coverages
     outfile = "%s/coverage_modelling.pdf"%(outdir)
-    print_if_verbose("plotting into %s"%outfile)
+    
+    chr_to_len = get_chr_to_len(genome)
+    sorted_chroms = sorted([c for c in all_chromosomes if chr_to_len[c]>=window_l])
+    print_if_verbose("plotting into %s for %i chromosomes"%(outfile, len(sorted_chroms)))
 
-    sorted_chroms = sorted(all_chromosomes)
     ncols = len(sorted_chroms)
     nrows = 1
     fig = plt.figure(figsize=(ncols*5, nrows*4))
-    for Ic, chrom in enumerate(all_chromosomes):
+    for Ic, chrom in enumerate(sorted_chroms):
 
         # get chrom
         df_c = df[df.chromosome==chrom].sort_values(by="middle_position")
@@ -10569,40 +10578,8 @@ def get_bedpe_breakpoints_arround_homologousRegions(blastn_file, bedpe_breakpoin
     return bedpe_breakpoints
 
 
-def get_df_repeats_from_df_repeats_r(r, window_size, bedfile_prefix):
 
-    """Takes a df of df_repeats and returns a df of the repeats subdivided into chunks of window_size"""
-
-    # calculate the length of the repeat
-    len_repeat = r.end_repeat-r.begin_repeat
-
-    # if the repeat is short, return it as it is
-    if len_repeat<=window_size: df = pd.DataFrame({0 : r}).transpose()
-
-    # subdivide into several repeats
-    else:
-
-        # make a bed that has this interval
-        bedfile = "%s.%i.bed"%(bedfile_prefix, r.name)
-        pd.DataFrame({0 : r}).transpose()[["chromosome", "begin_repeat", "end_repeat"]].to_csv(bedfile, sep="\t", index=False, header=False)
-
-        # run makewindows to get the windows
-        windows_file = "%s.windows.bed"%bedfile
-        windows_file_stderr = "%s.generate.stderr"%windows_file
-        run_cmd("%s makewindows -b %s -w %i > %s 2>%s"%(bedtools, bedfile, window_size, windows_file, windows_file_stderr)) # debug
-        df_windows = pd.read_csv(windows_file, sep="\t", header=-1, names=["chromosome", "begin_repeat", "end_repeat"])
-
-        # add things
-        df = df_windows
-        df["repeat"] = r["repeat"]
-        df["type"] = r["type"]
-
-        # clean
-        for f in [bedfile, windows_file, windows_file_stderr]: remove_file(f)
-
-    return df
-
-def get_bedpe_breakpoints_arround_repeats(repeats_table_file, replace=False, min_sv_size=50, max_breakpoints=10000, max_breakpoints_per_repeat=1, window_size_subdivide_repeats=300, threads=4):
+def get_bedpe_breakpoints_arround_repeats(repeats_table_file, replace=False, min_sv_size=50, max_breakpoints=10000, max_breakpoints_per_repeat=1, threads=4, max_repeats=10000):
 
     """ Takes a repeats file and returns a bedpe with breakpoints arround the repeats. There will be one breakpoint for each repeat against another one (each breakpoint used only once) with random orientations and at least min_sv_size if they are equal. If the repeat has another repeat of the same "repeat" name, it will be picked first. 
 
@@ -10621,44 +10598,32 @@ def get_bedpe_breakpoints_arround_repeats(repeats_table_file, replace=False, min
         df_repeats = df_repeats.drop_duplicates(subset=["chromosome", "begin_repeat", "end_repeat", "repeat"])
 
         # filter low complexity regions
-        #df_repeats = df_repeats[~(df_repeats.type.isin({"Low_complexity"}))]
+        df_repeats = df_repeats[~(df_repeats["type"].isin({"Low_complexity"}))]
 
         # filter the important fields
         df_repeats = df_repeats[["chromosome", "repeat", "begin_repeat", "end_repeat", "type"]]
-        initial_len_df_repeats = len(df_repeats)
         df_repeats.index = list(range(len(df_repeats)))
-
-        # subdivide repeats into chunks of window_size_subdivide_repeats
-        print_if_verbose("getting subdivided repeats")
-        bedfile_subdivide_repeats_prefix = "%s.subdivide_repeats"%bedpe_breakpoints
-        inputs_fn  = [(r, window_size_subdivide_repeats, bedfile_subdivide_repeats_prefix) for I, r in df_repeats.iterrows()]
-
-        with multiproc.Pool(threads) as pool:
-            list_repeats_dfs = pool.starmap(get_df_repeats_from_df_repeats_r, inputs_fn) # needs if __name__=="__main__" 
-                
-            pool.close()
-            pool.terminate()
-
-        df_repeats = pd.concat(list_repeats_dfs)
-        print_if_verbose("you got from %i to %i repeats in windows of %i bp"%(initial_len_df_repeats, len(df_repeats), window_size_subdivide_repeats))
-
-        # sort randomly, and then by the type of repeats and chromosome
-        type_repeat_to_importance = {"Unknown":10, "Simple_repeat":1, "Low_complexity":0}
-        def get_repeat_importance(x):
-            if x in type_repeat_to_importance: return type_repeat_to_importance[x]
-            else: return 9
-        df_repeats["repeat_importance"] = df_repeats.type.apply(get_repeat_importance)
-        df_repeats = df_repeats.sample(frac=1).sort_values(by=["repeat_importance", "chromosome"], ascending=False)
 
         # add the number of repeats that are shared
         repeat_to_Nrepeats = df_repeats.groupby("repeat").apply(len)
         df_repeats["n_same_repeat"] = df_repeats["repeat"].apply(lambda x: repeat_to_Nrepeats[x])
+
+        # sort randomly, keeping first the repeats that are annotated by repeat modeller ("Unknown") and then those that have more than 1 repeat
+        type_repeat_to_importance = {"Unknown":10, "Simple_repeat":1, "Low_complexity":0}
+        def get_repeat_importance(r):
+            if r["type"] in type_repeat_to_importance: return type_repeat_to_importance[r["type"]]
+            elif repeat_to_Nrepeats[r["repeat"]]>1: return 9
+            else: return 8
+
+        df_repeats["repeat_importance"] = df_repeats.apply(get_repeat_importance, axis=1)
+        df_repeats = df_repeats.sample(frac=1).sort_values(by=["repeat_importance", "repeat"], ascending=False).iloc[0:max_repeats] # we get truly randomised repeats
 
         # add the position
         df_repeats["repeat_position"] = (df_repeats.begin_repeat + (df_repeats.end_repeat - df_repeats.begin_repeat)/2).apply(int)
         if any(df_repeats.repeat_position<0): raise ValueError("There should be no negative repeat positions") 
 
         # add the ID
+        print_if_verbose("getting compatible repeats for %i repeats"%len(df_repeats))
         df_repeats["ID"] = list(range(len(df_repeats)))
         df_repeats = df_repeats.set_index("ID", drop=False)
 
@@ -10667,25 +10632,23 @@ def get_bedpe_breakpoints_arround_repeats(repeats_table_file, replace=False, min
         chrom_to_dfSameChrom = dict(zip(all_chroms, map(lambda c: df_repeats[df_repeats.chromosome==c], all_chroms)))
         chrom_to_IDsDifferenChroms = dict(zip(all_chroms, map(lambda c: set(df_repeats[df_repeats.chromosome!=c].ID), all_chroms)))
 
-        # add the set of compatible IDs, those that are different chromosomes or less than min_sv_size appart
-        def get_set_compatibleIDs(r): 
-
-            IDs_different_chroms = chrom_to_IDsDifferenChroms[r.chromosome]
-
-            df_sameChrom = chrom_to_dfSameChrom[r.chromosome]
-            IDs_same_chrom =  set(df_sameChrom[(df_sameChrom.repeat_position-r.repeat_position).apply(abs)>=min_sv_size].ID)
-
-            return IDs_different_chroms.union(IDs_same_chrom)
-
-        df_repeats["compatible_repeatIDs"] = df_repeats.apply(get_set_compatibleIDs, axis=1)
-
         ##### DEFINE THE PAIRS OF COMPATIBLE REPEATS #######
+        print_if_verbose("getting pairs of repeats. max_breakpoints:%i max_breakpoints_per_repeat:%i"%(max_breakpoints, max_breakpoints_per_repeat))
 
         # init the repeat pairs
         all_repeat_pairs = []
+        previous_pct_breakpoints_generated = ""
+        max_possible_breakpoints = min([max_breakpoints_per_repeat*len(df_repeats), max_breakpoints])
 
         # go through each repeat
         for Ifrom in list(df_repeats.index):
+
+            # report progress
+            pct_breakpoints_generated = "%.1f"%((len(all_repeat_pairs)/max_possible_breakpoints)*100)
+                
+            if pct_breakpoints_generated!=previous_pct_breakpoints_generated:
+                print_if_verbose("%s%s of breakpoints arround repeats generated from max"%(pct_breakpoints_generated, "%"))
+                previous_pct_breakpoints_generated = pct_breakpoints_generated
 
             # init the number of repeats on Ifrom
             n_pairs_on_Ifrom = 0
@@ -10693,11 +10656,17 @@ def get_bedpe_breakpoints_arround_repeats(repeats_table_file, replace=False, min
             # define the series
             r_from = df_repeats.loc[Ifrom]
 
+            # generate a series that indicates the compatible repeats
+            compatible_repeatIDs_differentChrom = chrom_to_IDsDifferenChroms[r_from.chromosome]
+            df_sameChrom = chrom_to_dfSameChrom[r_from.chromosome]
+            compatible_repeatIDs_sameChrom = set(df_sameChrom[(df_sameChrom.repeat_position-r_from.repeat_position).apply(abs)>=min_sv_size].ID)
+            compatible_repeatIDs = compatible_repeatIDs_differentChrom.union(compatible_repeatIDs_sameChrom)
+
             # repeats that have a member of the same faimily will be joined to them. 
-            if repeat_to_Nrepeats[r_from["repeat"]]>1: df_rep = df_repeats[(df_repeats.ID.isin(r_from.compatible_repeatIDs)) & (df_repeats["repeat"]==r_from["repeat"])]
+            if repeat_to_Nrepeats[r_from["repeat"]]>1: df_rep = df_repeats[(df_repeats.ID.isin(compatible_repeatIDs)) & (df_repeats["repeat"]==r_from["repeat"])]
 
             # repeats with no partner will be joined to other repeats with no partner
-            else: df_rep = df_repeats[(df_repeats.ID.isin(r_from.compatible_repeatIDs)) & (df_repeats.n_same_repeat==1)]
+            else: df_rep = df_repeats[(df_repeats.ID.isin(compatible_repeatIDs)) & (df_repeats.n_same_repeat==1)]
 
             # go through  the compatible repeat pairs
             for Ito in list(df_rep.index):
@@ -11216,6 +11185,9 @@ def report_accuracy_golden_set_runJobs(goldenSet_dir, outdir, reference_genome, 
     final_dict["svim_outdir"] = "%s/svim_output"%outdir_ONT_calling
     final_dict["sniffles_outdir"] = "%s/sniffles_output"%outdir_ONT_calling
 
+    # remove files (debug)
+    #delete_folder("%s/perSVade_calling_arroundRepeats"%outdir)
+
     # add the perSVade runs in several combinations
     types_simulations = ["arroundHomRegions", "arroundRepeats", "uniform", "fast", "realSVs"]
     n_remaining_jobs = sum([file_is_empty("%s/perSVade_calling_%s/perSVade_finished_file.txt"%(outdir, typeSimulations)) for typeSimulations in types_simulations])
@@ -11228,7 +11200,8 @@ def report_accuracy_golden_set_runJobs(goldenSet_dir, outdir, reference_genome, 
     # go through each run and configuration
     for typeSimulations, bedpe_breakpoints, fast_SVcalling, simulate_SVs_arround_repeats, simulate_SVs_arround_HomologousRegions in [("arroundHomRegions", None, False, False, True), ("arroundRepeats", None, False, True, False), ("uniform", None, False, False, False), ("realSVs", real_bedpe_breakpoints, False, False, False), ("fast", None, True, False, False)]:
 
-        if typeSimulations=="arroundHomRegions": continue # debug
+        # skip
+        #if typeSimulations!="arroundRepeats": continue # debug
 
         # define an outdir for this type of simulations
         outdir_typeSimulations = "%s/perSVade_calling_%s"%(outdir, typeSimulations); make_folder(outdir_typeSimulations)
@@ -11241,7 +11214,6 @@ def report_accuracy_golden_set_runJobs(goldenSet_dir, outdir, reference_genome, 
         continue
         """
         
-
         ###################################
 
         # keep 
@@ -13382,7 +13354,7 @@ def get_LOWESS_benchmarking_series_CV(kfold, frac, it, df, xfield, yfield, min_t
     return benchmarking_series
     
 
-def get_y_corrected_by_x_LOWESS_crossValidation(df, xfield, yfield, outdir, threads, replace, plots_prefix, max_y, min_test_points_CV=10):
+def get_y_corrected_by_x_LOWESS_crossValidation(df, xfield, yfield, outdir, threads, replace, plots_prefix, max_y, min_test_points_CV=10, fill_value_interpolation_finalFitting="extrapolate"):
 
     """This function takes an x and a y series, returning the y corrected by x. This y corrected is y/(y predicted from LOWESS from x). The index must be unique. The best parameters are taken with 10 fold cross validation"""
 
@@ -13474,12 +13446,15 @@ def get_y_corrected_by_x_LOWESS_crossValidation(df, xfield, yfield, outdir, thre
         #outprefix = "%s/final_loess_fitting"%(outdir)
 
         # get the final fitting from training based on the df_fitting, but testing on the real df. The interpolation 
-        fill_value_interpolation = "extrapolate"
-        df["predicted_yvalues"] = get_lowess_fit_y(df_fitting[xfield].values, df_fitting[yfield].values, df[xfield].values, best_frac, best_it, fill_value_interpolation)
+        df["predicted_yvalues"] = get_lowess_fit_y(df_fitting[xfield].values, df_fitting[yfield].values, df[xfield].values, best_frac, best_it, fill_value_interpolation_finalFitting)
 
-        # correct the predicted_yvalues so that if they are negative thet'd be set to 0 given that the input is also negative
+        # get the minimum non-0 coverage
+        min_non0_predicted_coverage = min(df[df.predicted_yvalues>0].predicted_yvalues)
+
+        # correct the predicted_yvalues so that if they are negative thet'd be set to 0 given that the input is also negative. In addition, if the input is not negative the prediction is set to be the minimum non negative coverage
         def get_predicted_yvalues(r):
             if r["predicted_yvalues"]<=0.0 and r[yfield]==0.0: return 0.0
+            elif r["predicted_yvalues"]<=0.0 and r[yfield]>0.0: return min_non0_predicted_coverage
             else: return r["predicted_yvalues"]
 
         df["predicted_yvalues"] = df.apply(get_predicted_yvalues, axis=1)
@@ -13555,7 +13530,7 @@ def get_y_corrected_by_x_LOWESS_crossValidation(df, xfield, yfield, outdir, thre
         # get the corrected vals. If there is no prediction just return the raw vals
         def divide_with_noNaN_correction(r):
 
-            # if the yfield is 0, return it as it is
+            # if both are 0, return it as it is
             if r[yfield]==0 and r["predicted_yvalues"]==0: return 0.0
 
             # predicted yvalues can't be 0 unless yfield is also
@@ -13586,7 +13561,7 @@ def verify_no_NaNs(series):
 
 
 
-def get_df_coverage_with_corrected_coverage(df_coverage, reference_genome, outdir, replace, threads, mitochondrial_chromosome, df_gridss, initial_predictor_fields=["GCcontent", "median_mappability"]):
+def get_df_coverage_with_corrected_coverage(df_coverage, reference_genome, outdir, replace, threads, mitochondrial_chromosome, df_gridss, initial_predictor_fields=["GCcontent", "median_mappability"], fill_value_interpolation_finalFitting="extrapolate"):
 
     """This function will take a df_coverage that has coverage_field as a proxy for coverage. It will add <coverage_field> which is a value that will be a ratio between the coverage_field and the coverage_field predicted from a loess regression taking into account mappability, GC content and distance to the telomere across the windows. The resulting value will be centered arround 1.  
 
@@ -13686,7 +13661,7 @@ def get_df_coverage_with_corrected_coverage(df_coverage, reference_genome, outdi
                 # fit the data
                 plots_prefix = "%s/single_predictors"%plots_dir
                 lowess_dir_p = "%s/%s"%(calculate_rsquares_dir, p)
-                y_corrected, rsquare, y_predicted = get_y_corrected_by_x_LOWESS_crossValidation(df_cov, p, "relative_coverage", lowess_dir_p, threads, replace, plots_prefix, max_relative_coverage)
+                y_corrected, rsquare, y_predicted = get_y_corrected_by_x_LOWESS_crossValidation(df_cov, p, "relative_coverage", lowess_dir_p, threads, replace, plots_prefix, max_relative_coverage, fill_value_interpolation_finalFitting=fill_value_interpolation_finalFitting)
 
                 # add the correction based on the p
                 df_cov["relative_coverage_corrected_by_%s"%p] = y_corrected
@@ -13721,7 +13696,7 @@ def get_df_coverage_with_corrected_coverage(df_coverage, reference_genome, outdi
                 # correct the coverage 
                 plots_prefix = "%s/final_fitting_round%i"%(plots_dir, pID+1)
                 outdir_lowess = "%s/final_fitting_%s_round%i"%(calculate_rsquares_dir, predictor, pID+1)
-                df_cov["corrected_relative_coverage"], rsquare, df_cov[predicted_coverage_field] = get_y_corrected_by_x_LOWESS_crossValidation(df_cov, predictor, "corrected_relative_coverage", outdir_lowess, threads, replace, plots_prefix, max_relative_coverage)
+                df_cov["corrected_relative_coverage"], rsquare, df_cov[predicted_coverage_field] = get_y_corrected_by_x_LOWESS_crossValidation(df_cov, predictor, "corrected_relative_coverage", outdir_lowess, threads, replace, plots_prefix, max_relative_coverage, fill_value_interpolation_finalFitting=fill_value_interpolation_finalFitting)
 
                 already_included_predictors.append(predictor)
 
@@ -17712,8 +17687,8 @@ def run_jobarray_file_Nord3_greasy(jobs_filename, name, time="12:00:00", queue="
 
     # define the std files
     greasy_logfile = "%s/%s_greasy.log"%(stddir, name)
-    stderr_file = "%s/%s_stderr.txt"%(stddir, name)
-    stdout_file = "%s/%s_stdout.txt"%(stddir, name)
+    stderr_prefix = "%s/%s_stderr"%(stddir, name)
+    stdout_prefix = "%s/%s_stdout"%(stddir, name)
 
     # define the job script
     jobs_filename_run = "%s.run"%jobs_filename
@@ -17730,8 +17705,9 @@ def run_jobarray_file_Nord3_greasy(jobs_filename, name, time="12:00:00", queue="
 
     # define the arguments
     arguments = [ "#!/bin/sh",
-                  "#BSUB -e  %s"%stderr_file,
-                  "#BSUB -o %s"%stdout_file,
+                  "#BSUB -J greasy_%s"%name,
+                  "#BSUB -eo %s-%sJ.err"%(stderr_prefix, "%"),
+                  "#BSUB -oo %s-%sJ.out"%(stdout_prefix, "%"),
                   "#BSUB -cwd %s"%outdir,
                   "#BSUB -W %s"%time,
                   "#BSUB -q %s"%queue,

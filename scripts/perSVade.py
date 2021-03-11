@@ -372,7 +372,7 @@ if opt.simulate_SVs_arround_repeats is True:
 
 
     # override the real_bedpe_breakpoints with the bedpe comming from repeats
-    opt.real_bedpe_breakpoints = fun.get_bedpe_breakpoints_arround_repeats(repeats_table_file, replace=opt.replace, max_breakpoints=(opt.nvars*5*10000), max_breakpoints_per_repeat=1, threads=opt.threads)
+    opt.real_bedpe_breakpoints = fun.get_bedpe_breakpoints_arround_repeats(repeats_table_file, replace=opt.replace, max_breakpoints=(opt.nvars*5*10000), max_breakpoints_per_repeat=1, threads=opt.threads, max_repeats=(opt.nvars*5*2500))
 
 ################################################################################
 

@@ -55,7 +55,7 @@ taxIDs_with_noON_overalpping = {"746128"}
 goldenSet_dir_Cglabrata = "%s/scripts/perSVade/perSVade_repository/testing/Cglabrata_goldenSetReads_BG2"%ParentDir
 
 # define the run in cluster (and debug)
-run_in_cluster = False
+run_in_cluster = True
 if running_in_cluster is False: run_in_cluster = False
 
 # go through each species
@@ -106,8 +106,8 @@ for taxID, spName, ploidy, mitochondrial_chromosome, max_coverage_sra_reads in t
 
     cmd_output = "%s/cmd_testing.std"%outdir_perSVade
     print("running std into %s"%cmd_output)
-    #fun.run_cmd("%s > %s 2>&1"%(cmd, cmd_output)) # run with stdout
-    fun.run_cmd(cmd); continue # run locally 
+    fun.run_cmd("%s > %s 2>&1"%(cmd, cmd_output)) # run with stdout
+    #fun.run_cmd(cmd); continue # run locally 
  	
  	###### RUN JOB ARRAYS ######
 
