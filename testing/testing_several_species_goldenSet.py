@@ -51,9 +51,6 @@ outdir_genomes_and_annotations = "%s/scripts/perSVade/perSVade_repository/testin
 # define the taxIDs that have no
 taxIDs_with_noON_overalpping = {"746128"}
 
-# define the golden set dir of C. glabrata
-goldenSet_dir_Cglabrata = "%s/scripts/perSVade/perSVade_repository/testing/Cglabrata_goldenSetReads_BG2"%ParentDir
-
 # define the run in cluster (and debug)
 run_in_cluster = True
 if running_in_cluster is False: run_in_cluster = False
@@ -80,16 +77,21 @@ for taxID, spName, ploidy, mitochondrial_chromosome, max_coverage_sra_reads in t
 
     # define the goldenSet_dir and the real bedpe breakpoints
     if spName=="Candida_glabrata": 
-        goldenSet_dir = goldenSet_dir_Cglabrata
+        goldenSet_table = test_fun.get_goldenSetTable_Cglabrata(CurDir)
         real_bedpe_breakpoints = "%s/outdirs_testing_severalSpecies/%s_%s/findingRealSVs_providedCloseReads/integrated_breakpoints.bedpe"%(CurDir, taxID, spName)
 
     else: 
-        goldenSet_dir = "auto"
+        goldenSet_table = "auto"
         real_bedpe_breakpoints = "%s/outdirs_testing_severalSpecies/%s_%s/findingRealSVs_automaticFindingOfCloseReads/integrated_breakpoints.bedpe"%(CurDir, taxID, spName)
-    
+
+    # define the ploidy
+    if ploidy==1: simulation_ploidies = "haploid"
+    elif ploidy==2: simulation_ploidies = "diploid_hetero"
+    else: raise ValueError("ploidy %i is not valid"%ploidy)
+
     # get the golden set running 
     if taxID in taxIDs_with_noON_overalpping: continue
-    cmd = "%s --ref %s --threads %i -o %s --target_taxID %s --real_bedpe_breakpoints %s -f1 skip -f2 skip --mitochondrial_chromosome %s --gff %s --goldenSet_dir %s --skip_SVcalling --verbose --nsimulations 2 --simulation_ploidies haploid --previous_repeats_table %s --QC_and_trimming_reads --StopAfter_goldenSetAnalysis --simulate_SVs_arround_HomologousRegions_previousBlastnFile %s --simulate_SVs_arround_HomologousRegions_maxEvalue %.10f --simulate_SVs_arround_HomologousRegions_queryWindowSize %i"%(perSVade_py, genome, threads, outdir_perSVade, taxID, real_bedpe_breakpoints, mitochondrial_chromosome, gff, goldenSet_dir, previous_repeats_table, simulate_SVs_arround_HomologousRegions_previousBlastnFile, simulate_SVs_arround_HomologousRegions_maxEvalue, simulate_SVs_arround_HomologousRegions_queryWindowSize)
+    cmd = "%s --ref %s --threads %i -o %s --target_taxID %s --real_bedpe_breakpoints %s -f1 skip -f2 skip --mitochondrial_chromosome %s --gff %s --goldenSet_table %s --skip_SVcalling --verbose --nsimulations 2 --simulation_ploidies %s --previous_repeats_table %s --QC_and_trimming_reads --StopAfter_goldenSetAnalysis --simulate_SVs_arround_HomologousRegions_previousBlastnFile %s --simulate_SVs_arround_HomologousRegions_maxEvalue %.10f --simulate_SVs_arround_HomologousRegions_queryWindowSize %i --StopAfterPrefecth_of_reads_goldenSet"%(perSVade_py, genome, threads, outdir_perSVade, taxID, real_bedpe_breakpoints, mitochondrial_chromosome, gff, goldenSet_table, simulation_ploidies, previous_repeats_table, simulate_SVs_arround_HomologousRegions_previousBlastnFile, simulate_SVs_arround_HomologousRegions_maxEvalue, simulate_SVs_arround_HomologousRegions_queryWindowSize)
 
     """
     StopAfter_goldenSetAnalysis
@@ -137,7 +139,7 @@ for taxID, spName, ploidy, mitochondrial_chromosome, max_coverage_sra_reads in t
             time = "48:00:00" # per job
 
             #fun.run_jobarray_file_Nord3(jobs_filename, name, time=time, queue=queue, threads_per_job=threads, RAM_per_thread=RAM_per_thread, max_njobs_to_run=10000)
-            fun.run_jobarray_file_Nord3_greasy(jobs_filename, name, time=time, queue=queue, threads_per_job=threads, RAM_per_thread=RAM_per_thread, nodes=3)
+            fun.run_jobarray_file_Nord3_greasy(jobs_filename, name, time=time, queue=queue, threads_per_job=threads, RAM_per_thread=RAM_per_thread, nodes=4)
 
     elif len(all_lines_jobfile)!=0: raise ValueError("something went wrong")
 

@@ -3236,9 +3236,14 @@ def get_distanceToTelomere_chromosome_GCcontent_to_coverage_fn(df_coverage_train
 
             fn_cov_fromGCcontent = (lambda GC: fn_rel_cov_fromGCcontent(GC)*median_coverage_all)
 
-            # define a function that returns a weight (applied to the result of fn_cov_fromGCcontent) from dist_telomere
-            df_cov = df_cov.sort_values(by="raw_distance_to_telomere")
-            fn_weight_fromDistTelomere = scipy_interpolate.interp1d(df_cov.raw_distance_to_telomere, df_cov.relative_coverage_predicted_from_raw_distance_to_telomere_aferCorrBy_GCcontent, bounds_error=False, kind="linear", assume_sorted=True, fill_value=1.0)
+            # define a function that returns a weight (applied to the result of fn_cov_fromGCcontent) from dist_telomere. Only do this if there was such correction applied (sometimes it makes no sense)
+
+            if "relative_coverage_predicted_from_raw_distance_to_telomere_aferCorrBy_GCcontent" in set(df_cov.keys()):
+
+                df_cov = df_cov.sort_values(by="raw_distance_to_telomere")
+                fn_weight_fromDistTelomere = scipy_interpolate.interp1d(df_cov.raw_distance_to_telomere, df_cov.relative_coverage_predicted_from_raw_distance_to_telomere_aferCorrBy_GCcontent, bounds_error=False, kind="linear", assume_sorted=True, fill_value=1.0)
+
+            else: fn_weight_fromDistTelomere = (lambda dist_telomere: 1.0)
 
         # keep functions
         for chrom in chroms: 
@@ -5220,15 +5225,6 @@ def run_svim(reads, reference_genome, outdir,  threads=4, replace=False, min_sv_
 
     return sorted_bam_short
 
-def get_svim_output_as_perSVade(svim_outdir, min_QUAL=10):
-
-    """Takes an outdir of svim and returns a dict mapping each svtype to the svfile as in the perSVade output. For high-coverage datasets we should take a quality threshold of 10-15."""
-
-    output_vcf = "%s/"
-
-    adhgadgjg
-
-
 
 def run_sniffles(sorted_bam, outdir, replace, threads, minimum_depth=5, min_sv_size=50):
 
@@ -7009,7 +7005,8 @@ def clean_perSVade_outdir(outdir):
     file_to_dest_file_parameter_optimisation  = {
     "coverage_per_regions%ibb/coverage_modelling_mtDNA.pdf"%window_l: "plots/coverage_modelling_mtDNA.pdf",
     "coverage_per_regions%ibb/coverage_modelling_gDNA.pdf"%window_l: "plots/coverage_modelling_gDNA.pdf",
-    "benchmarking_all_filters_for_all_genomes_and_ploidies/plots/cross_accuracy_heatmaps": "plots/cross_accuracy_heatmaps",
+    "coverage_per_regions%ibb/coverage_modelling.pdf"%window_l: "plots/coverage_modelling.pdf",
+    "benchmarking_all_filters_for_all_genomes_and_ploidies/plots/cross_accuracy_heatmaps": "plots/cross_accuracy_heatmaps"
     }  
     
     # make the simulations' SVfiles directiory
@@ -10743,7 +10740,7 @@ def get_bedpe_breakpoints_arround_repeats(repeats_table_file, replace=False, min
 
 
 
-def report_accuracy_realSVs_perSVadeRuns(close_shortReads_table, reference_genome, outdir, real_bedpe_breakpoints, threads=4, replace=False, n_simulated_genomes=2, mitochondrial_chromosome="mito_C_glabrata_CBS138", simulation_ploidies=["haploid", "diploid_homo", "diploid_hetero", "ref:2_var:1", "ref:3_var:1", "ref:4_var:1", "ref:5_var:1", "ref:9_var:1", "ref:19_var:1", "ref:99_var:1"], range_filtering_benchmark="theoretically_meaningful", nvars=100, job_array_mode="local", skip_cleaning_simulations_files_and_parameters=False, skip_cleaning_outdir=False, parameters_json_file=None, gff=None, replace_FromGridssRun_final_perSVade_run=False, fraction_available_mem=None, skip_CNV_calling=False, outdir_finding_realVars=None, replace_SV_CNVcalling=False):
+def report_accuracy_realSVs_perSVadeRuns(close_shortReads_table, reference_genome, outdir, real_bedpe_breakpoints, threads=4, replace=False, n_simulated_genomes=2, mitochondrial_chromosome="mito_C_glabrata_CBS138", simulation_ploidies=["haploid", "diploid_homo", "diploid_hetero", "ref:2_var:1", "ref:3_var:1", "ref:4_var:1", "ref:5_var:1", "ref:9_var:1", "ref:19_var:1", "ref:99_var:1"], range_filtering_benchmark="theoretically_meaningful", nvars=100, job_array_mode="local", skip_cleaning_simulations_files_and_parameters=False, skip_cleaning_outdir=False, parameters_json_file=None, gff=None, replace_FromGridssRun_final_perSVade_run=False, fraction_available_mem=None, skip_CNV_calling=False, outdir_finding_realVars=None, replace_SV_CNVcalling=False, simulate_SVs_arround_HomologousRegions_previousBlastnFile=None, simulate_SVs_arround_HomologousRegions_maxEvalue=1e-5, simulate_SVs_arround_HomologousRegions_queryWindowSize=500):
 
 
     """This function runs the SV pipeline for all the datasets in close_shortReads_table with the fastSV, optimisation based on uniform parameters and optimisation based on realSVs (specified in real_svtype_to_file). The latter is skipped if real_svtype_to_file is empty.
@@ -10787,13 +10784,14 @@ def report_accuracy_realSVs_perSVadeRuns(close_shortReads_table, reference_genom
 
     # initialize the cmds to run 
     all_cmds = []
-
+    
     # predefine if some jobs need to be ran
-    n_remaining_jobs = sum([sum([file_is_empty("%s/%s/%s/perSVade_finished_file.txt"%(outdir, typeSimulations, runID)) for runID in set(df_reads.runID)]) for typeSimulations in ["arroundRepeats", "uniform", "fast", "realSVs"]])
+    types_simulations = ["arroundHomRegions", "arroundRepeats", "uniform", "fast", "realSVs"]
+    n_remaining_jobs = sum([sum([file_is_empty("%s/%s/%s/perSVade_finished_file.txt"%(outdir, typeSimulations, runID)) for runID in set(df_reads.runID)]) for typeSimulations in types_simulations])
     print_if_verbose("There are %i remaining jobs"%n_remaining_jobs)
 
     # go through each run and configuration
-    for typeSimulations, bedpe_breakpoints, fast_SVcalling, simulate_SVs_arround_repeats in [("arroundRepeats", None, False, True), ("uniform", None, False, False), ("realSVs", real_bedpe_breakpoints, False, False), ("fast", None, True, False)]:
+    for typeSimulations, bedpe_breakpoints, fast_SVcalling, simulate_SVs_arround_repeats, simulate_SVs_arround_HomologousRegions in [("arroundHomRegions", None, False, False, True), ("arroundRepeats", None, False, True, False), ("uniform", None, False, False, False), ("realSVs", real_bedpe_breakpoints, False, False, False), ("fast", None, True, False, False)]:
 
         # define an outdir for this type of simulations
         outdir_typeSimulations = "%s/%s"%(outdir, typeSimulations); make_folder(outdir_typeSimulations)
@@ -10835,7 +10833,8 @@ def report_accuracy_realSVs_perSVadeRuns(close_shortReads_table, reference_genom
             if file_is_empty(final_file) or replace is True:# or file_is_empty(parameters_file):
 
                 # define the cmd. This is a normal perSvade.py run with the vars of the previous dir  
-                cmd = "python %s -r %s --threads %i --outdir %s --nvars %i --nsimulations %i --simulation_ploidies %s --range_filtering_benchmark %s --mitochondrial_chromosome %s -f1 %s -f2 %s --previous_repeats_table %s --min_CNVsize_coverageBased %i --skip_cleaning_outdir --skip_SV_CNV_calling"%(perSVade_py, reference_genome, threads, outdir_runID, nvars, n_simulated_genomes, ",".join(simulation_ploidies), range_filtering_benchmark, mitochondrial_chromosome, r1, r2, previous_repeats_table, min_CNVsize_coverageBased)
+                cmd = "python %s -r %s --threads %i --outdir %s --nvars %i --nsimulations %i --simulation_ploidies %s --range_filtering_benchmark %s --mitochondrial_chromosome %s -f1 %s -f2 %s --previous_repeats_table %s --min_CNVsize_coverageBased %i --skip_cleaning_outdir --skip_SV_CNV_calling --simulate_SVs_arround_HomologousRegions_maxEvalue %.10f --simulate_SVs_arround_HomologousRegions_queryWindowSize %i"%(perSVade_py, reference_genome, threads, outdir_runID, nvars, n_simulated_genomes, ",".join(simulation_ploidies), range_filtering_benchmark, mitochondrial_chromosome, r1, r2, previous_repeats_table, min_CNVsize_coverageBased, simulate_SVs_arround_HomologousRegions_maxEvalue, simulate_SVs_arround_HomologousRegions_queryWindowSize)
+
 
                 # add arguments depending on the pipeline
                 if replace is True: cmd += " --replace"
@@ -10849,6 +10848,8 @@ def report_accuracy_realSVs_perSVadeRuns(close_shortReads_table, reference_genom
                 if replace_SV_CNVcalling is True: cmd += " --replace_SV_CNVcalling"
                 if skip_CNV_calling is True: cmd += " --skip_CNV_calling"
                 if simulate_SVs_arround_repeats is True: cmd += " --simulate_SVs_arround_repeats"
+                if simulate_SVs_arround_HomologousRegions is True: cmd += " --simulate_SVs_arround_HomologousRegions"
+                if simulate_SVs_arround_HomologousRegions_previousBlastnFile is not None: cmd += " --simulate_SVs_arround_HomologousRegions_previousBlastnFile %s"%simulate_SVs_arround_HomologousRegions_previousBlastnFile
 
                 # if the running in slurm is false, just run the cmd
                 if job_array_mode=="local": run_cmd(cmd)
@@ -11002,7 +11003,7 @@ def get_simulated_bamFile(outdir, reference_genome, replace=False, threads=4, to
     return simulated_sorted_bam, index_bam
 
 
-def get_short_and_long_reads_sameBioSample(outdir, taxID, reference_genome, replace=False, min_coverage=30):
+def get_short_and_long_reads_sameBioSample_severalSamples(outdir, taxID, reference_genome, replace=False, min_coverage=30, max_n_samples=6):
 
     """This function takes a taxID and looks in the SRA database if there are short paired Illumina reads and MinION ONT reads for the same BioSample, returning the SRRs."""
 
@@ -11022,11 +11023,12 @@ def get_short_and_long_reads_sameBioSample(outdir, taxID, reference_genome, repl
     # debug the fact that there are empty datasets
     if len(intersecting_biosamples)==0: raise ValueError("There are no intersecting BioSamples")
 
-    # map each biosample to the ilumina coverage
-    interseting_BioSamples = wgs_runInfo_df[wgs_runInfo_df.BioSample.isin(intersecting_biosamples)].sort_values("expected_coverage", ascending=False)["BioSample"]
+    # define the interesting biosamples
+    interesting_Biosamples = wgs_runInfo_df[wgs_runInfo_df.BioSample.isin(intersecting_biosamples)].sort_values("expected_coverage", ascending=False)["BioSample"]
+    biosample_to_srrs = {}
 
     # get the best SRR
-    for bioSample in interseting_BioSamples:
+    for I, bioSample in enumerate(interesting_Biosamples):
         print_if_verbose("\n\n", bioSample)
 
         # get the df for each
@@ -11039,9 +11041,11 @@ def get_short_and_long_reads_sameBioSample(outdir, taxID, reference_genome, repl
         print_if_verbose("These are the Illumina reads:\n:", df_wgs[["Run", "SampleName"]].iloc[0])
         print_if_verbose("These are the ONT reads:\n:", df_ONT[["Run", "SampleName"]].iloc[0])
 
-        break
+        biosample_to_srrs[bioSample] = {"nanopore":ONT_run, "illumina_paired":wgs_run}
 
-    return wgs_run, ONT_run
+        if I==(max_n_samples-1): break
+
+    return biosample_to_srrs
 
 
 def generate_final_file_report(final_file, start_time_GeneralProcessing, end_time_GeneralProcessing, start_time_alignment, end_time_alignment, start_time_all, end_time_all, start_time_obtentionCloseSVs, end_time_obtentionCloseSVs, start_time_SVcalling, end_time_SVcalling, start_time_SVandCNVcalling, end_time_SVandCNVcalling, start_time_smallVarsCNV, end_time_smallVarsCNV):
@@ -11064,20 +11068,98 @@ def generate_final_file_report(final_file, start_time_GeneralProcessing, end_tim
     open(final_file, "w").write("\n".join(lines))
 
 
-def report_accuracy_golden_set_runJobs(goldenSet_dir, outdir, reference_genome, real_bedpe_breakpoints, threads=4, replace=False, n_simulated_genomes=2, mitochondrial_chromosome="mito_C_glabrata_CBS138", simulation_ploidies=["haploid", "diploid_homo", "diploid_hetero", "ref:2_var:1", "ref:3_var:1", "ref:4_var:1", "ref:5_var:1", "ref:9_var:1", "ref:19_var:1", "ref:99_var:1"], range_filtering_benchmark="theoretically_meaningful", nvars=100, job_array_mode="local", StopAfter_sampleIndexingFromSRA=False, StopAfterPrefecth_of_reads=False, target_taxID=None, parameters_json_file=None, fraction_available_mem=None, StopAfter_goldenSetAnalysis_readObtention=False, verbose=False, StopAfter_goldenSetAnalysis_readTrimming=False, min_coverage=30, simulate_SVs_arround_HomologousRegions_previousBlastnFile=None, simulate_SVs_arround_HomologousRegions_maxEvalue=1e-5, simulate_SVs_arround_HomologousRegions_queryWindowSize=500):
+def get_goldenSet_table_fromSRA(target_taxID, reference_genome, outdir, min_coverage, replace, threads, max_n_samples):
+
+    """This function takes a taxID and downloads a set of .srr files for each fo them. It needs internet"""
+
+    # define the table 
+    make_folder(outdir)
+    goldenSet_table = "%s/goldenSet_table_%i_samples_taxID=%i.tab"%(outdir, max_n_samples, target_taxID)
+
+    # check if the table is correct
+    def goldenSet_table_is_incorrect(goldenSet_table): return file_is_empty(goldenSet_table) or any(get_tab_as_df_or_empty_df(goldenSet_table).apply(lambda r: any([file_is_empty(r[k]) for k in ["short_reads_SRRfile", "long_reads_SRRfile"]]), axis=1))
+
+    if goldenSet_table_is_incorrect(goldenSet_table) or replace is True:
+        print_if_verbose("obtaining golden set srr files")
+
+        # get a dict that maps several biosamples to srrs
+        biosample_to_type_data_to_srr = get_short_and_long_reads_sameBioSample_severalSamples("%s/querying_SRA"%outdir, target_taxID, reference_genome, replace=replace, min_coverage=min_coverage, max_n_samples=max_n_samples)
+
+        # define a dir for the srr files
+        reads_dir = "%s/reads"%outdir
+        if replace is True: delete_folder(reads_dir)
+        make_folder(reads_dir)
+
+        # define jobs to run prefetch
+        all_cmds = []
+        for biosample, type_data_to_srr in biosample_to_type_data_to_srr.items():
+            for type_data, srr in type_data_to_srr.items():
+
+                final_file = "%s/%s.srr"%(reads_dir, srr)
+                if file_is_empty(final_file): all_cmds.append("%s --srr %s --outdir %s --threads %i --stop_after_prefetch --type_data %s"%(get_trimmed_reads_for_srr_py, srr, reads_dir, 1, type_data))
+
+        # download prefetched files
+        if len(all_cmds)>0:
+
+            print_if_verbose("Downloading %i srrs"%len(all_cmds))
+            inputs_fn = [(x,) for x in all_cmds]
+            with multiproc.Pool(threads) as pool:
+                pool.starmap(run_cmd, inputs_fn)
+                pool.close()
+
+        # define df
+        df = pd.DataFrame({biosample : {"sampleID":biosample, "long_reads_SRRfile":"%s/%s.srr"%(reads_dir, type_data_to_srr["nanopore"]), "short_reads_SRRfile":"%s/%s.srr"%(reads_dir, type_data_to_srr["illumina_paired"])} for biosample, type_data_to_srr in biosample_to_type_data_to_srr.items()}).transpose()
+
+        save_df_as_tab()
+        print(reads_dir)
+
+        adkghadg
+        biosample_to_srrs[bioSample] = {"nanopore":ONT_run, "illumina_paired":wgs_run}
 
 
-    """This function takes a directory that has the golden set vars and generates plots reporting the accuracy. If auto, it will find them in the SRA and write them under outdir."""
+        adkgdjhdjgda
+
+
+
+def report_accuracy_golden_set_runJobs(goldenSet_table, outdir, reference_genome, real_bedpe_breakpoints, threads=4, replace=False, n_simulated_genomes=2, mitochondrial_chromosome="mito_C_glabrata_CBS138", simulation_ploidies=["haploid", "diploid_homo", "diploid_hetero", "ref:2_var:1", "ref:3_var:1", "ref:4_var:1", "ref:5_var:1", "ref:9_var:1", "ref:19_var:1", "ref:99_var:1"], range_filtering_benchmark="theoretically_meaningful", nvars=100, job_array_mode="local", StopAfter_sampleIndexingFromSRA=False, StopAfterPrefecth_of_reads=False, target_taxID=None, parameters_json_file=None, fraction_available_mem=None, verbose=False, min_coverage=30, simulate_SVs_arround_HomologousRegions_previousBlastnFile=None, simulate_SVs_arround_HomologousRegions_maxEvalue=1e-5, simulate_SVs_arround_HomologousRegions_queryWindowSize=500, max_n_samples=6):
+
+
+    """Takes a table that has sampleID, short_reads_1, short_reads_2, long_reads. Each row has one sample. This fun"""
 
     print_if_verbose("calculating accuracy for golden set SVcalls")
     make_folder(outdir)
+
+
+    ##########################
+    ####### GET READS ########
+    ##########################
+
+    # redefine the goldenSet_table by one created automatically by parsing the SRA
+    if goldenSet_table=="auto": goldenSet_table = get_goldenSet_table_fromSRA(target_taxID, reference_genome, "%s/downloading_reads_SRA"%outdir, min_coverage, replace, threads, max_n_samples)
+
+    if StopAfterPrefecth_of_reads is True:
+        print("WARNING: exiting after prefetch of reads")
+        sys.exit(0)
+
+
+
+    # link the reads under outdir
+
+
+
+    dakdakhkdakjhadkjhad
+
+
+    ##########################
+    ##########################
+    ##########################
 
     ##########################
     ####### GET READS ########
     ##########################
 
     ### automatic obtention of golden set reads ###
-    if goldenSet_dir=="auto":
+    if goldenSet_table=="auto": 
 
         # create this dir un
         goldenSet_dir = "%s/automatic_obtention_goldenSetReads"%outdir; make_folder(goldenSet_dir)
@@ -11187,7 +11269,13 @@ def report_accuracy_golden_set_runJobs(goldenSet_dir, outdir, reference_genome, 
     final_dict["sniffles_outdir"] = "%s/sniffles_output"%outdir_ONT_calling
 
     # remove files (debug)
-    #delete_folder("%s/perSVade_calling_arroundRepeats"%outdir)
+    """
+    delete_folder("%s/perSVade_calling_arroundRepeats"%outdir)
+    delete_folder("%s/perSVade_calling_uniform"%outdir)
+    delete_folder("%s/perSVade_calling_realSVs"%outdir)
+    delete_folder("%s/perSVade_calling_arroundHomRegions"%outdir)
+    sys.exit(0)
+    """
 
     # add the perSVade runs in several combinations
     types_simulations = ["arroundHomRegions", "arroundRepeats", "uniform", "fast", "realSVs"]
@@ -11283,11 +11371,6 @@ def report_accuracy_golden_set_runJobs(goldenSet_dir, outdir, reference_genome, 
 
     return final_dict
 
-def get_svim_output_as_perSVade(svim_outdir):
-
-    """Takes the outdir of SVIM and """
-
-    pass
 
 def check_that_vcf_has_expected_chroms(vcf_df, reference_genome):
 
@@ -11738,8 +11821,6 @@ def plot_accuracy_perSVade_vs_longReads(df_accuracy_all, PlotsDir, min_nvars_to_
 
     print_if_verbose("Testing how perSVade works on different datasets")
 
-    print(set(df_accuracy_all.comparisonID))
-
     # keep only those comparisons that are from the perSVade vs long reads
     df_accuracy = df_accuracy_all[df_accuracy_all.comparisonID.apply(lambda x: x.startswith("perSVade-"))]
     
@@ -11754,10 +11835,6 @@ def plot_accuracy_perSVade_vs_longReads(df_accuracy_all, PlotsDir, min_nvars_to_
     all_accuracy_fields = ["recall", "precision", "Fvalue"]
     all_tol_bp = list(reversed(sorted(set(df_accuracy.tol_bp))))
 
-    
-
-    adkdahkadkad
-
     # make one figure for each type RealVars,  accuracy measure and genotypes_longReadsSVs
     for type_RealVars in all_types_RealVars:
         for genotypes_longReadsSVs in all_GTs_longReads:
@@ -11767,11 +11844,10 @@ def plot_accuracy_perSVade_vs_longReads(df_accuracy_all, PlotsDir, min_nvars_to_
 
             for accuracy_f in all_accuracy_fields:
                 print_if_verbose(type_RealVars, genotypes_longReadsSVs, accuracy_f)
-
-                print(df_plot_fig)
             
                 # redefine the svtypes that will go to this figure 
                 all_svtypes_fig = [s for s in all_svtypes if any(df_plot_fig[df_plot_fig.svtype==s].nevents>=min_nvars_to_consider_svtype)]
+                if len(all_svtypes_fig)==0: all_svtypes_fig = all_svtypes
 
                 # define the max accuracy
                 max_accuracy = max(df_plot_fig[df_plot_fig.svtype.isin(set(all_svtypes_fig))][accuracy_f])
@@ -11799,8 +11875,9 @@ def plot_accuracy_perSVade_vs_longReads(df_accuracy_all, PlotsDir, min_nvars_to_
                         df_plot = df_plot_fig[(df_plot_fig.svtype==svtype) & (df_plot_fig.tol_bp==tol_bp)].sort_values(by=["nevents"])
 
                         # plot main line
-                        typeRun_to_color = {"perSVade-uniform":"blue", "perSVade-fast":"gray", "perSVade-realSVs":"red"}
-                        typeRun_to_marker = {"perSVade-uniform":"^", "perSVade-fast":"s", "perSVade-realSVs":"o"}
+                        typeRun_to_color = {"perSVade-uniform":"blue", "perSVade-fast":"gray", "perSVade-realSVs":"red", 'perSVade-arroundHomRegions':"olive", 'perSVade-arroundRepeats':"black"}
+
+                        typeRun_to_marker = {"perSVade-uniform":"^", "perSVade-fast":"s", "perSVade-realSVs":"o", 'perSVade-arroundHomRegions':"v", 'perSVade-arroundRepeats':"*"}
 
                         #ax = sns.scatterplot(data=df_plot, x="nevents", y=accuracy_f, hue="perSVade_parameters", style="perSVade_parameters", palette=typeRun_to_color, alpha=.6, edgecolors="None")
                         ax = sns.lineplot(data=df_plot, x="nevents", y=accuracy_f, hue="perSVade_parameters", style="perSVade_parameters", palette=typeRun_to_color,  markers=typeRun_to_marker, dashes=False, ci="sd", markeredgecolor=None, linewidth=1.8, markersize=4, alpha=.7, markeredgewidth=0)
@@ -11839,8 +11916,6 @@ def plot_accuracy_perSVade_vs_longReads(df_accuracy_all, PlotsDir, min_nvars_to_
                 plt.subplots_adjust(wspace=0.08, hspace=0.17)
                 fig.savefig("%s/perSVade_vs_longReads_%srealVars_%s_%s.pdf"%(PlotsDir, type_RealVars, accuracy_f, genotypes_longReadsSVs), bbox_inches='tight')
                 plt.close(fig)
-
-    jdagdjhagjhagjhad
 
 
 def plot_accuracy_SNIFFLES_vs_SVIM_perSVade_representation(df_accuracy, PlotsDir):
@@ -11886,7 +11961,7 @@ def report_accuracy_golden_set_reportAccuracy(dict_paths, outdir, reference_geno
     ######### GET A DF WITH THE ACCURACY OF SEVERAL PERSVADE RUNS ON SEVERAL COMBINATIONS OF REAL DATA ########
 
     df_accuracy_perSVade_vs_longReads_file = "%s/df_accuracy_perSVade_vs_longReads.tab"%outdir
-    remove_file(df_accuracy_perSVade_vs_longReads_file); sys.exit(0) # debug
+    #remove_file(df_accuracy_perSVade_vs_longReads_file); sys.exit(0) # debug
 
     if file_is_empty(df_accuracy_perSVade_vs_longReads_file) or replace is True:
 
@@ -11963,6 +12038,7 @@ def report_accuracy_golden_set_reportAccuracy(dict_paths, outdir, reference_geno
     # plot the cross accuracy between SNIFFLES and SVIM
     #plot_accuracy_SNIFFLES_vs_SVIM_perSVade_representation(df_accuracy_perSVade_vs_longReads, PlotsDir)
 
+    sys.exit(0)
 
 
 
