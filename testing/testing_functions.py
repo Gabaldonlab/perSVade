@@ -78,16 +78,30 @@ species_Info = [("5478", "Candida_glabrata", 1, "mito_C_glabrata_CBS138", 100000
 """
 
 """
+species_Info = [("5478", "Candida_glabrata", 1, "mito_C_glabrata_CBS138", 10000000000000000),
+                ("5476", "Candida_albicans", 2, "Ca22chrM_C_albicans_SC5314", 10000000000000000),
+                ("5207", "Cryptococcus_neoformans", 1, "CP003834.1", 10000000000000000),
+                ("3702", "Arabidopsis_thaliana", 2, "BK010421.1,AP000423.1", 30),
+                ("7227", "Drosophila_melanogaster", 2, "KJ947872.2", 30)]
+"""
+
+
+"""
+species_Info = [("5476", "Candida_albicans", 2, "Ca22chrM_C_albicans_SC5314", 10000000000000000),
+                ("3702", "Arabidopsis_thaliana", 2, "BK010421.1,AP000423.1", 30),
+                ("7227", "Drosophila_melanogaster", 2, "KJ947872.2", 30)]
+"""
+
+"""
 species_Info = [("5207", "Cryptococcus_neoformans", 1, "CP003834.1", 10000000000000000),
                 ("746128", "Aspergillus_fumigatus", 1, "CM016889.1", 10000000000000000),
                 ("3702", "Arabidopsis_thaliana", 2, "BK010421.1,AP000423.1", 30),
                 ("7227", "Drosophila_melanogaster", 2, "KJ947872.2", 30)]
 """
-
+"""
 species_Info = [("5478", "Candida_glabrata", 1, "mito_C_glabrata_CBS138", 10000000000000000),
-                ("5476", "Candida_albicans", 2, "Ca22chrM_C_albicans_SC5314", 10000000000000000),
                 ("5207", "Cryptococcus_neoformans", 1, "CP003834.1", 10000000000000000)]
-                
+"""
 """
 species_Info = [
                 ("746128", "Aspergillus_fumigatus", 1, "CM016889.1", 10000000000000000),
@@ -97,7 +111,7 @@ species_Info = [
 
 #species_Info = [("5478", "Candida_glabrata", 1, "mito_C_glabrata_CBS138", 10000000000000000)]
 #species_Info = [("5207", "Cryptococcus_neoformans", 1, "CP003834.1", 10000000000000000)]
-#species_Info = [("5476", "Candida_albicans", 2, "Ca22chrM_C_albicans_SC5314", 10000000000000000)]
+species_Info = [("5476", "Candida_albicans", 2, "Ca22chrM_C_albicans_SC5314", 10000000000000000)]
 
 #species_Info = [("3702", "Arabidopsis_thaliana", 2, "BK010421.1,AP000423.1", 30)]
 
@@ -106,6 +120,7 @@ species_Info = [
 species_Info = [("3702", "Arabidopsis_thaliana", 2, "BK010421.1,AP000423.1", 30),
                 ("7227", "Drosophila_melanogaster", 2, "KJ947872.2", 30)]
 """
+
 
 ###################################
 
@@ -264,3 +279,63 @@ def update_df_resources_nord3Runs_testingAccuracy(df_resources_file, outdir_perS
     fun.save_df_as_tab(df_resources, df_resources_file)
 
     return df_resources, roundID
+
+
+def get_goldenSetTable_Cglabrata(CurDir):
+
+    """Generates a table with the golden set reads for C. glabrata"""
+
+    # define file
+    table_file = "%s/goldenSet_table_Cglabrata_ONTreads.tab"%CurDir
+
+    print("getting C. glabrata golden set table")
+
+    # init
+    data_dict = {}
+
+    # define the parent dir
+    ParentDir = "%s/samba_bsc40"%(os.getenv("HOME")); # local
+    if not os.path.exists(ParentDir): ParentDir = "/gpfs/projects/bsc40"
+
+    # move the reads of Marina's assemblies
+    marina_dir = "%s/current/mmarcet/nanopore/GABALDON02/assembly_files"%ParentDir
+    dest_reads_dir = "%s/Cglabrata_reads"%CurDir; fun.make_folder(dest_reads_dir)
+    for sampleID in ["B1012M", "BG2", "CST110", "EB0911Sto", "M12", "P35-2"]:
+
+        # define origin files
+        origin_nanoporeFile = "%s/%s/nanopore.pass.fastq.gz"%(marina_dir, sampleID)
+        if fun.file_is_empty(origin_nanoporeFile): origin_nanoporeFile = "%s/%s/nanopore.reads.pass.fastq.gz"%(marina_dir, sampleID)
+        if fun.file_is_empty(origin_nanoporeFile): origin_nanoporeFile = "%s/%s/nanopore.fastq.gz"%(marina_dir, sampleID)
+
+        illumina_reads_dir = "%s/%s/illumina"%(marina_dir, sampleID)
+
+        # define the origin illumina based on the reads
+        if sampleID!="BG2":
+
+            origin_reads1 = ["%s/%s"%(illumina_reads_dir, f) for f in os.listdir(illumina_reads_dir) if "_1." in f][0]
+            origin_reads2 = ["%s/%s"%(illumina_reads_dir, f) for f in os.listdir(illumina_reads_dir) if "_2." in f][0]
+
+        else:
+
+            origin_reads1 = "%s/mschikora/Cglabrata_antifungals/data/raw_reads/RUN4_BG2_SRA_WT_R1.fq.gz"%ParentDir
+            origin_reads2 = "%s/mschikora/Cglabrata_antifungals/data/raw_reads/RUN4_BG2_SRA_WT_R2.fq.gz"%ParentDir
+
+
+        if any([fun.file_is_empty(f) for f in [origin_nanoporeFile, origin_reads1, origin_reads2]]): raise ValueError("There origin files should be defined in %s"%sampleID)
+
+        # dest files
+        dest_nanopore_file = "%s/%s_nanopore.fastq.gz"%(dest_reads_dir, sampleID)
+        dest_reads_1 = "%s/%s_illumina_1.fastq.gz"%(dest_reads_dir, sampleID)
+        dest_reads_2 = "%s/%s_illumina_2.fastq.gz"%(dest_reads_dir, sampleID)
+
+        # rsync
+        fun.rsync_file(origin_nanoporeFile, dest_nanopore_file)
+        fun.rsync_file(origin_reads1, dest_reads_1)
+        fun.rsync_file(origin_reads2, dest_reads_2)
+
+        data_dict[sampleID] = {"sampleID":sampleID, "short_reads_1":dest_reads_1, "short_reads_2":dest_reads_2, "long_reads":dest_nanopore_file}
+
+    df = pd.DataFrame(data_dict).transpose()
+    fun.save_df_as_tab(df, table_file)
+
+    return table_file

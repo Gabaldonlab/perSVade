@@ -12,6 +12,7 @@ testing/taxdump.tar.gz
 testing/std_files_testingAccuracy
 testing/Cglabrata_testingSimulations
 testing/testing_HrantCalbicansInput
+testing/Cglabrata_reads
 installation/external_software
 sync_git.py
 installation/test_installation/__pycache__

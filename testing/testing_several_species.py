@@ -86,13 +86,18 @@ for taxID, spName, ploidy, mitochondrial_chromosome, max_coverage_sra_reads in t
     if spName=="Candida_glabrata": close_shortReads_table = close_shortReads_table_Cglabrata
     else: close_shortReads_table = "auto"
 
-    # define the simulation ploidies
-    if ploidy==2: simulation_ploidies = "haploid"
-    elif ploidy==1: simulation_ploidies = "haploid"
-    else: raise ValueError("ploidy is not correct")
+    # define the ploidy
+    if ploidy==1: simulation_ploidies = "haploid"
+    elif ploidy==2: simulation_ploidies = "diploid_hetero"
+    else: raise ValueError("ploidy %i is not valid"%ploidy)
+
+    # get the blastn of the genome against itself
+    simulate_SVs_arround_HomologousRegions_maxEvalue = 0.00001
+    simulate_SVs_arround_HomologousRegions_queryWindowSize = 500
+    simulate_SVs_arround_HomologousRegions_previousBlastnFile = fun.get_blastn_regions_genome_against_itself(genome, simulate_SVs_arround_HomologousRegions_maxEvalue, simulate_SVs_arround_HomologousRegions_queryWindowSize, False, threads)
 
     # get the reads from SRA. 3 samples, 3 runs per sample. Process with the. --verbose
-    cmd = "%s --ref %s --threads %i -o %s --close_shortReads_table %s --target_taxID %s --n_close_samples 3 --nruns_per_sample 3 -f1 skip -f2 skip --mitochondrial_chromosome %s --testAccuracy --verbose --max_coverage_sra_reads %i --gff %s --nsimulations 2 --skip_CNV_calling --simulation_ploidies %s --previous_repeats_table %s --StopAfter_testAccuracy "%(perSVade_py, genome, threads, outdir_perSVade, close_shortReads_table, taxID, mitochondrial_chromosome, max_coverage_sra_reads, gff, simulation_ploidies, previous_repeats_table)
+    cmd = "%s --ref %s --threads %i -o %s --close_shortReads_table %s --target_taxID %s --n_close_samples 3 --nruns_per_sample 3 -f1 skip -f2 skip --mitochondrial_chromosome %s --testAccuracy --verbose --max_coverage_sra_reads %i --gff %s --nsimulations 2 --skip_CNV_calling --simulation_ploidies %s --previous_repeats_table %s --StopAfter_testAccuracy --simulate_SVs_arround_HomologousRegions_maxEvalue %.10f --simulate_SVs_arround_HomologousRegions_queryWindowSize %i --simulate_SVs_arround_HomologousRegions_previousBlastnFile %s"%(perSVade_py, genome, threads, outdir_perSVade, close_shortReads_table, taxID, mitochondrial_chromosome, max_coverage_sra_reads, gff, simulation_ploidies, previous_repeats_table, simulate_SVs_arround_HomologousRegions_maxEvalue, simulate_SVs_arround_HomologousRegions_queryWindowSize, simulate_SVs_arround_HomologousRegions_previousBlastnFile)
 
     """ 
     Relevant args
@@ -137,11 +142,19 @@ for taxID, spName, ploidy, mitochondrial_chromosome, max_coverage_sra_reads in t
 
         elif cluster_name=="Nord3": 
 
-            queue = "bsc_ls"; 
-            RAM_per_thread = 4000; # 1800 or 5000 
-            time = "48:00:00" # per job
+            # define resources
+            if spName in {"Candida_glabrata", "Candida_albicans", "Cryptococcus_neoformans"}:
+                time = "12:00:00"
+                RAM_per_thread = 2000
 
-            fun.run_jobarray_file_Nord3(jobs_filename, name, time=time, queue=queue, threads_per_job=threads, RAM_per_thread=RAM_per_thread, max_njobs_to_run=10000)
+            elif spName in {"Arabidopsis_thaliana", "Drosophila_melanogaster"}:
+                time = "48:00:00"
+                RAM_per_thread = 3600
+
+            else: raise ValueError("%s is not a valid spName"%spName)
+
+            # run
+            fun.run_jobarray_file_Nord3(jobs_filename, name, time=time, queue="bsc_ls", threads_per_job=threads, RAM_per_thread=RAM_per_thread, max_njobs_to_run=10000)
 
     elif len(all_lines_jobfile)!=0: raise ValueError("something went wrong")
 
