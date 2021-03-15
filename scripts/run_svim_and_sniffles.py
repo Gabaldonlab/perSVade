@@ -39,6 +39,11 @@ fun.make_folder(opt.outdir)
 # define the print mode
 fun.printing_verbose_mode = opt.verbose
 
+# run fastqdump if the provided reads are an SRR file
+if opt.input_reads.endswith(".srr"):
+	print("Assuming that the input_reads %s are an SRR file obtained with prefetch"%opt.input_reads)
+	opt.input_reads = fun.run_parallelFastqDump_on_prefetched_SRRfile_nanopore(opt.input_reads, replace=opt.replace, threads=opt.threads)
+
 # run porechop
 fun.print_if_verbose("Running porechop")
 #trimmed_reads = fun.run_porechop(opt.input_reads,  replace=opt.replace, threads=opt.threads)

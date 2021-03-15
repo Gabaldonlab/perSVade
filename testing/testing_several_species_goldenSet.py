@@ -90,7 +90,7 @@ for taxID, spName, ploidy, mitochondrial_chromosome, max_coverage_sra_reads in t
 
     # get the golden set running 
     if taxID in taxIDs_with_noON_overalpping: continue
-    cmd = "%s --ref %s --threads %i -o %s --target_taxID %s --real_bedpe_breakpoints %s -f1 skip -f2 skip --mitochondrial_chromosome %s --gff %s --goldenSet_table %s --skip_SVcalling --verbose --nsimulations 2 --simulation_ploidies %s --previous_repeats_table %s --QC_and_trimming_reads --StopAfter_goldenSetAnalysis --simulate_SVs_arround_HomologousRegions_previousBlastnFile %s --simulate_SVs_arround_HomologousRegions_maxEvalue %.10f --simulate_SVs_arround_HomologousRegions_queryWindowSize %i --StopAfterPrefecth_of_reads_goldenSet"%(perSVade_py, genome, threads, outdir_perSVade, taxID, real_bedpe_breakpoints, mitochondrial_chromosome, gff, goldenSet_table, simulation_ploidies, previous_repeats_table, simulate_SVs_arround_HomologousRegions_previousBlastnFile, simulate_SVs_arround_HomologousRegions_maxEvalue, simulate_SVs_arround_HomologousRegions_queryWindowSize)
+    cmd = "%s --ref %s --threads %i -o %s --target_taxID %s --real_bedpe_breakpoints %s -f1 skip -f2 skip --mitochondrial_chromosome %s --gff %s --goldenSet_table %s --skip_SVcalling --verbose --nsimulations 2 --simulation_ploidies %s --previous_repeats_table %s --QC_and_trimming_reads --StopAfter_goldenSetAnalysis --simulate_SVs_arround_HomologousRegions_previousBlastnFile %s --simulate_SVs_arround_HomologousRegions_maxEvalue %.10f --simulate_SVs_arround_HomologousRegions_queryWindowSize %i"%(perSVade_py, genome, threads, outdir_perSVade, taxID, real_bedpe_breakpoints, mitochondrial_chromosome, gff, goldenSet_table, simulation_ploidies, previous_repeats_table, simulate_SVs_arround_HomologousRegions_previousBlastnFile, simulate_SVs_arround_HomologousRegions_maxEvalue, simulate_SVs_arround_HomologousRegions_queryWindowSize)
 
     """
     StopAfter_goldenSetAnalysis
@@ -107,8 +107,8 @@ for taxID, spName, ploidy, mitochondrial_chromosome, max_coverage_sra_reads in t
 
     cmd_output = "%s/cmd_testing.std"%outdir_perSVade
     print("running std into %s"%cmd_output)
-    #fun.run_cmd("%s > %s 2>&1"%(cmd, cmd_output)) # run with stdout
-    fun.run_cmd(cmd); continue # run locally 
+    fun.run_cmd("%s > %s 2>&1"%(cmd, cmd_output)) # run with stdout
+    #fun.run_cmd(cmd); continue # run locally 
  	
  	###### RUN JOB ARRAYS ######
 
@@ -126,8 +126,8 @@ for taxID, spName, ploidy, mitochondrial_chromosome, max_coverage_sra_reads in t
         if cluster_name=="MN4": 
 
             queue = "bsc_ls"
-            time = "24:00:00"
-            nodes = 1
+            time = "48:00:00"
+            nodes = 3
 
             fun.run_jobarray_file_MN4_greasy(jobs_filename, name, time=time, queue=queue, threads_per_job=threads, nodes=nodes)
 
