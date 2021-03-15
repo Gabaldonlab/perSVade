@@ -16710,3 +16710,55 @@ def get_short_and_long_reads_sameBioSample(outdir, taxID, reference_genome, repl
 
     return wgs_run, ONT_run
 
+
+
+def download_srr_with_prefetch(srr, SRRfile, replace=False):
+
+    """This function downloads an srr file for an srr if not already done"""
+
+    # define the downloading dir
+    downloading_dir = get_dir(SRRfile)
+
+    # make the downloading dir
+    make_folder(downloading_dir)
+
+    # define the std files
+    prefetch_std = "%s.std.txt"%SRRfile
+    prefetch_std_copy = "%s.copy"%prefetch_std
+
+    # try a couple of times
+    for Itry in range(2):
+
+        if file_is_empty(SRRfile) or replace is True:
+            print_if_verbose("running prefetch for %s"%srr)
+
+            # remove the locks of previous runs
+            for file in ["%s/%s"%(downloading_dir, f) for f in os.listdir(downloading_dir) if ".lock" in f or ".tmp." in f]: remove_file(file)
+
+            # remove the actual srr
+            remove_file(SRRfile)
+
+            # run prefetch
+            print_if_verbose("running prefetch. The std can be found in %s"%prefetch_std)
+            try: run_cmd("%s -o %s --max-size 500G --progress 1 %s > %s 2>&1"%(prefetch, SRRfile, srr, prefetch_std))
+            except: print_if_verbose("prefetch did not work for %s"%srr)
+
+            # test that the std of prefetch states that there are no unresolved dependencies
+            std_lines = open(prefetch_std, "r").readlines()
+            successful_download = any(["was downloaded successfully" in l for l in std_lines])
+            no_dependencies_left = any(["has 0 unresolved dependencies" in l for l in std_lines])
+            has_dependencies_line = any(["unresolved dependencies" in l for l in std_lines])
+
+            if not successful_download or (has_dependencies_line and not no_dependencies_left): 
+                run_cmd("cp %s %s"%(prefetch_std, prefetch_std_copy))
+                print_if_verbose("prefetch did not work for %s. Test the log in %s"%(srr, prefetch_std_copy))
+                remove_file(SRRfile)
+
+    # check that the prefetch works 
+    if file_is_empty(SRRfile): 
+        raise ValueError("prefetch did not work for %s"%srr)
+
+    remove_file(prefetch_std)
+    remove_file(prefetch_std_copy)
+
+    return SRRfile
