@@ -74,7 +74,6 @@ for taxID, spName, ploidy, mitochondrial_chromosome, max_coverage_sra_reads in t
     simulate_SVs_arround_HomologousRegions_queryWindowSize = 500
     simulate_SVs_arround_HomologousRegions_previousBlastnFile = fun.get_blastn_regions_genome_against_itself(genome, simulate_SVs_arround_HomologousRegions_maxEvalue, simulate_SVs_arround_HomologousRegions_queryWindowSize, False, threads)
 
-
     # define the goldenSet_dir and the real bedpe breakpoints
     if spName=="Candida_glabrata": 
         goldenSet_table = test_fun.get_goldenSetTable_Cglabrata(CurDir)

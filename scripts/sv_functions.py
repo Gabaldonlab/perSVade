@@ -4863,15 +4863,19 @@ def download_srr_with_prefetch(srr, SRRfile, replace=False):
         if file_is_empty(SRRfile) or replace is True:
             print_if_verbose("running prefetch for %s"%srr)
 
+            # get the dir where the outputs will be
+            dest_dir = "%s/%s"%(downloading_dir, srr); delete_folder(dest_dir)
+
             # remove the locks of previous runs
-            for file in ["%s/%s"%(downloading_dir, f) for f in os.listdir(downloading_dir) if ".lock" in f or ".tmp." in f]: remove_file(file)
+            if os.path.isdir(dest_dir):
+                for file in ["%s/%s"%(dest_dir, f) for f in os.listdir(dest_dir) if ".lock" in f or ".tmp." in f]: remove_file(file)
 
             # remove the actual srr
             remove_file(SRRfile)
 
-            # run prefetch
+            # run prefetch into dest_dir
             print_if_verbose("running prefetch. The std can be found in %s"%prefetch_std)
-            try: run_cmd("%s -o %s --max-size 500G --progress 1 %s > %s 2>&1"%(prefetch, SRRfile, srr, prefetch_std))
+            try: run_cmd("%s --output-directory %s --max-size 500G --progress %s > %s 2>&1"%(prefetch, downloading_dir, srr, prefetch_std))
             except: print_if_verbose("prefetch did not work for %s"%srr)
 
             # test that the std of prefetch states that there are no unresolved dependencies
@@ -4880,10 +4884,16 @@ def download_srr_with_prefetch(srr, SRRfile, replace=False):
             no_dependencies_left = any(["has 0 unresolved dependencies" in l for l in std_lines])
             has_dependencies_line = any(["unresolved dependencies" in l for l in std_lines])
 
+            # if there was something wrong, try again
             if not successful_download or (has_dependencies_line and not no_dependencies_left): 
                 run_cmd("cp %s %s"%(prefetch_std, prefetch_std_copy))
                 print_if_verbose("prefetch did not work for %s. Test the log in %s"%(srr, prefetch_std_copy))
                 remove_file(SRRfile)
+                continue
+
+            # move to the correct destination
+            os.rename("%s/%s.sra"%(dest_dir, srr), SRRfile)
+            delete_folder(dest_dir)
 
     # check that the prefetch works 
     if file_is_empty(SRRfile): 
@@ -11068,7 +11078,7 @@ def generate_final_file_report(final_file, start_time_GeneralProcessing, end_tim
     open(final_file, "w").write("\n".join(lines))
 
 
-def get_goldenSet_table_fromSRA(target_taxID, reference_genome, outdir, min_coverage, replace, threads, max_n_samples):
+def get_goldenSet_table_fromSRA(target_taxID, reference_genome, outdir, min_coverage, replace, threads, max_n_samples, run_in_parallel=False):
 
     """This function takes a taxID and downloads a set of .srr files for each fo them. It needs internet"""
 
@@ -11096,39 +11106,87 @@ def get_goldenSet_table_fromSRA(target_taxID, reference_genome, outdir, min_cove
             for type_data, srr in type_data_to_srr.items():
 
                 final_file = "%s/%s.srr"%(reads_dir, srr)
-                if file_is_empty(final_file): all_cmds.append("%s --srr %s --outdir %s --threads %i --stop_after_prefetch --type_data %s"%(get_trimmed_reads_for_srr_py, srr, reads_dir, 1, type_data))
+                if file_is_empty(final_file): all_cmds.append("%s --srr %s --outdir %s --threads %i --stop_after_prefetch --type_data %s"%(get_trimmed_reads_for_srr_py, srr, reads_dir, 1, type_data)) # append job
 
         # download prefetched files
         if len(all_cmds)>0:
 
             print_if_verbose("Downloading %i srrs"%len(all_cmds))
-            inputs_fn = [(x,) for x in all_cmds]
-            with multiproc.Pool(threads) as pool:
-                pool.starmap(run_cmd, inputs_fn)
-                pool.close()
+
+            if run_in_parallel is True:
+
+                inputs_fn = [(x,) for x in all_cmds]
+                with multiproc.Pool(threads) as pool:
+                    pool.starmap(run_cmd, inputs_fn)
+                    pool.close()
+                    pool.terminate()
+
+            else:
+                for cmd in all_cmds: run_cmd(cmd)
 
         # define df
         df = pd.DataFrame({biosample : {"sampleID":biosample, "long_reads_SRRfile":"%s/%s.srr"%(reads_dir, type_data_to_srr["nanopore"]), "short_reads_SRRfile":"%s/%s.srr"%(reads_dir, type_data_to_srr["illumina_paired"])} for biosample, type_data_to_srr in biosample_to_type_data_to_srr.items()}).transpose()
 
-        save_df_as_tab()
-        print(reads_dir)
+        # clean non-SRR files
+        for f in os.listdir(reads_dir): 
+            if not f.endswith(".srr"): delete_file_or_folder("%s/%s"%(reads_dir, f))
 
-        adkghadg
-        biosample_to_srrs[bioSample] = {"nanopore":ONT_run, "illumina_paired":wgs_run}
+        # save
+        save_df_as_tab(df, goldenSet_table)
+
+def get_goldenSet_table_softlinked_under_outdir(goldenSet_table, outdir):
+
+    """This function takes some golden set table and returns the equivalent one with the files softlinked into outdir"""
+
+    # define a function that defines if the golden set table is incorrect
+    def goldenSet_table_is_incorrect(test_goldenSet_table): return file_is_empty(test_goldenSet_table) or any(get_tab_as_df_or_empty_df(test_goldenSet_table).apply(lambda r: any([file_is_empty(r[k]) for k in ["short_reads_1", "short_reads_2", "long_reads"]]), axis=1))
+
+    # make outdir
+    make_folder(outdir)
+
+    # define the final goldenSet table
+    final_goldenSet_table = "%s/golden_set_table.tab"%outdir
+
+    if goldenSet_table_is_incorrect(final_goldenSet_table):
+
+        # init dict
+        dict_data = {}
+
+        # get the df_input and check that it is ok
+        df_input = get_tab_as_df_or_empty_df(goldenSet_table)
+        if len(set(df_input.sampleID))!=len(df_input): raise ValueError("sampleID should be unique in %s"%goldenSet_table)
+
+        # go through each sample
+        for I,r in df_input.iterrows():
+
+            # define final names
+            final_short_reads_1 = "%s/%s_short_reads_1.fastq.gz"%(outdir, r.sampleID)
+            final_short_reads_2 = "%s/%s_short_reads_2.fastq.gz"%(outdir, r.sampleID)
+            final_long_reads = "%s/%s_long_reads.fastq.gz"%(outdir, r.sampleID)
+
+            # move them
+            soft_link_files(r.short_reads_1, final_short_reads_1)
+            soft_link_files(r.short_reads_2, final_short_reads_2)
+            soft_link_files(r.long_reads, final_long_reads)
+
+            # keep dict
+            dict_data[r.sampleID] = {"sampleID":r.sampleID, "short_reads_1":final_short_reads_1, "short_reads_2":final_short_reads_2, "long_reads":final_long_reads}
 
 
-        adkgdjhdjgda
+        # get dict and save
+        df_final = pd.DataFrame(dict_data).transpose()
+        save_df_as_tab(df_final, final_goldenSet_table) 
 
+    return final_goldenSet_table
 
 
 def report_accuracy_golden_set_runJobs(goldenSet_table, outdir, reference_genome, real_bedpe_breakpoints, threads=4, replace=False, n_simulated_genomes=2, mitochondrial_chromosome="mito_C_glabrata_CBS138", simulation_ploidies=["haploid", "diploid_homo", "diploid_hetero", "ref:2_var:1", "ref:3_var:1", "ref:4_var:1", "ref:5_var:1", "ref:9_var:1", "ref:19_var:1", "ref:99_var:1"], range_filtering_benchmark="theoretically_meaningful", nvars=100, job_array_mode="local", StopAfter_sampleIndexingFromSRA=False, StopAfterPrefecth_of_reads=False, target_taxID=None, parameters_json_file=None, fraction_available_mem=None, verbose=False, min_coverage=30, simulate_SVs_arround_HomologousRegions_previousBlastnFile=None, simulate_SVs_arround_HomologousRegions_maxEvalue=1e-5, simulate_SVs_arround_HomologousRegions_queryWindowSize=500, max_n_samples=6):
 
 
-    """Takes a table that has sampleID, short_reads_1, short_reads_2, long_reads. Each row has one sample. This fun"""
+    """Takes a table that has sampleID, short_reads_1, short_reads_2, long_reads. Each row has one sample. This function runs perSVade with different options for each of the samples in the goldenSet_table. It will run the first max_n_samples.  """
 
     print_if_verbose("calculating accuracy for golden set SVcalls")
     make_folder(outdir)
-
 
     ##########################
     ####### GET READS ########
@@ -11137,109 +11195,19 @@ def report_accuracy_golden_set_runJobs(goldenSet_table, outdir, reference_genome
     # redefine the goldenSet_table by one created automatically by parsing the SRA
     if goldenSet_table=="auto": goldenSet_table = get_goldenSet_table_fromSRA(target_taxID, reference_genome, "%s/downloading_reads_SRA"%outdir, min_coverage, replace, threads, max_n_samples)
 
+    else: goldenSet_table = get_goldenSet_table_softlinked_under_outdir(goldenSet_table, "%s/provided_reads"%outdir)
+
     if StopAfterPrefecth_of_reads is True:
         print("WARNING: exiting after prefetch of reads")
         sys.exit(0)
 
-
-
-    # link the reads under outdir
-
-
-
-    dakdakhkdakjhadkjhad
-
+    # load into a df that has the jobs, and filter by the number of jobs
+    goldenSet_df = get_tab_as_df_or_empty_df(goldenSet_table).iloc[0:max_n_samples]
 
     ##########################
     ##########################
     ##########################
 
-    ##########################
-    ####### GET READS ########
-    ##########################
-
-    ### automatic obtention of golden set reads ###
-    if goldenSet_table=="auto": 
-
-        # create this dir un
-        goldenSet_dir = "%s/automatic_obtention_goldenSetReads"%outdir; make_folder(goldenSet_dir)
-
-        #### define the SRRs to download ####
-
-        # if the tax ID is in taxID_to_srrs_goldenSet, get it
-        if target_taxID in taxID_to_srrs_goldenSet: 
-            short_reads_srr = taxID_to_srrs_goldenSet[target_taxID]["short_reads"]
-            long_reads_srr = taxID_to_srrs_goldenSet[target_taxID]["long_reads"]
-
-        else: short_reads_srr, long_reads_srr = get_short_and_long_reads_sameBioSample("%s/finding_sameBioSample_srrs"%goldenSet_dir, target_taxID, reference_genome, min_coverage=min_coverage, replace=replace)
-
-        if StopAfter_sampleIndexingFromSRA:
-            print("Golden set analysis. Stop after indexing from SRA")
-            sys.exit(0)
-
-        #####################################
-
-        # define the reads
-        longReads = "%s/%s/%s.srr.fastq.gz"%(goldenSet_dir, long_reads_srr, long_reads_srr)
-        short_reads1 = "%s/%s/%s.srr_1.fastq.gz"%(goldenSet_dir, short_reads_srr, short_reads_srr)
-        short_reads2 = "%s/%s/%s.srr_2.fastq.gz"%(goldenSet_dir, short_reads_srr, short_reads_srr)
-
-        if any([file_is_empty(f) for f in [longReads, short_reads1, short_reads2]]):
-
-            # download each of the reads (raw). Stop after fastqdump
-            for type_data, srr in [("illumina_paired", short_reads_srr), ("nanopore", long_reads_srr)]:
-                print_if_verbose("Getting raw reads for %s"%type_data)
-
-                # define the outdir
-                outdir_srr = "%s/%s"%(goldenSet_dir, srr)
-
-                # define the cmd downloading after the fastq-dump
-                cmd = "%s --srr %s --outdir %s --threads %i --stop_after_fastqdump --type_data %s"%(get_trimmed_reads_for_srr_py, srr, outdir_srr, threads, type_data)
-                if StopAfterPrefecth_of_reads is True: cmd += " --stop_after_prefetch"
-
-                run_cmd(cmd)
-
-        # clean the long reads srr
-        remove_file("%s/%s/%s.srr"%(goldenSet_dir, long_reads_srr, long_reads_srr))
-
-        # clean the short reads files
-        dir_short_reads = get_dir(short_reads1)
-        for f in os.listdir(dir_short_reads):
-            if f not in {get_file(short_reads1), get_file(short_reads2)}: delete_file_or_folder("%s/%s"%(dir_short_reads, f))
-
-    #####################################
-    else:
-
-        # define the reads, they are suposed to be called like this
-        origin_longReads = "%s/long_reads.fastq.gz"%goldenSet_dir
-        origin_short_reads1 = "%s/short_reads_1.fastq.gz"%goldenSet_dir
-        origin_short_reads2 = "%s/short_reads_2.fastq.gz"%goldenSet_dir
-
-        # copy under provided_goldenSetReads/
-        provided_goldenSetReads_dir = "%s/provided_goldenSetReads"%(outdir); make_folder(provided_goldenSetReads_dir)
-        longReads = "%s/long_reads.fastq.gz"%provided_goldenSetReads_dir
-        short_reads1 = "%s/short_reads_1.fastq.gz"%provided_goldenSetReads_dir
-        short_reads2 = "%s/short_reads_2.fastq.gz"%provided_goldenSetReads_dir
-
-        soft_link_files(origin_longReads, longReads)
-        soft_link_files(origin_short_reads1, short_reads1)
-        soft_link_files(origin_short_reads2, short_reads2)
-
-    # debug
-    if any([StopAfter_sampleIndexingFromSRA, StopAfterPrefecth_of_reads]): 
-        print("Golden set analysis. Exiting after sample Indexing or prefetch")
-        sys.exit(0)
-
-    if any([file_is_empty(f) for f in [longReads, short_reads1, short_reads2]]): raise ValueError("Your golden dir %s should contain long_reads.fasta, short_reads_1.fastq.gz and short_reads_2.fastq.gz"%goldenSet_dir)
-
-    if StopAfter_goldenSetAnalysis_readObtention:
-        print("Golden set analysis. Exiting after sample Indexing or prefetch")
-        sys.exit(0)
-
-
-    ##########################
-    ##########################
-    ##########################
 
     #########################
     ####### RUN JOBS ########
@@ -11253,97 +11221,90 @@ def report_accuracy_golden_set_runJobs(goldenSet_table, outdir, reference_genome
     # init the cmds
     all_cmds = []
 
-    # add the run svim and sniffles job
-    outdir_ONT_calling = "%s/ONT_SV_calling"%outdir; make_folder(outdir_ONT_calling)
-    final_file_ONT_calling = "%s/ONT_SV_calling_finished.txt"%outdir_ONT_calling
-    if file_is_empty(final_file_ONT_calling) or replace is True: 
+    gothroughrunningParmsFirts
 
-        ont_calling_cmd = "%s --ref %s --input_reads %s --outdir %s --aligner ngmlr --threads %i"%(run_svim_and_sniffles_py, reference_genome, longReads, outdir_ONT_calling, threads)
-        if replace is True: ont_calling_cmd += " --replace"
-        if verbose is True: ont_calling_cmd += " --verbose"
+    # go through each of the samples
+    for Isample, r in goldenSet_df.iterrows():
 
-        all_cmds.append(ont_calling_cmd)
+        # define the outdir for this sample
+        outdir_SVcallings = "%s/SVcalling_several_parameters"%outdir; make_folder(outdir_SVcallings)
+        outdir_sample = "%s/%s"%(outdir_SVcallings, r.sampleID); make_folder(outdir_sample)
 
-    # keep the final dict
-    final_dict["svim_outdir"] = "%s/svim_output"%outdir_ONT_calling
-    final_dict["sniffles_outdir"] = "%s/sniffles_output"%outdir_ONT_calling
+        # define a string that has the inputs
+        if set(r.keys())=={"long_reads_SRRfile", "short_reads_SRRfile", "sampleID"}: 
 
-    # remove files (debug)
-    """
-    delete_folder("%s/perSVade_calling_arroundRepeats"%outdir)
-    delete_folder("%s/perSVade_calling_uniform"%outdir)
-    delete_folder("%s/perSVade_calling_realSVs"%outdir)
-    delete_folder("%s/perSVade_calling_arroundHomRegions"%outdir)
-    sys.exit(0)
-    """
+            input_long_reads_str = "--input_reads %s"%(r.long_reads_SRRfile)
+            input_short_reads_str = "--input_SRRfile %s"%(r.short_reads_SRRfile)
 
-    # add the perSVade runs in several combinations
-    types_simulations = ["arroundHomRegions", "arroundRepeats", "uniform", "fast", "realSVs"]
-    n_remaining_jobs = sum([file_is_empty("%s/perSVade_calling_%s/perSVade_finished_file.txt"%(outdir, typeSimulations)) for typeSimulations in types_simulations])
+        elif set(r.keys())=={"long_reads", "short_reads_1", "short_reads_2", "sampleID"}: 
 
-    print_if_verbose("There are %i remaining jobs"%n_remaining_jobs)
+            input_long_reads_str = "--input_reads %s"%(r.long_reads)
+            input_short_reads_str = "-f1 %s -f2 %s "%(r.short_reads_1, r.short_reads_2)
 
-    # define the other_perSVade_outdirs_sameReadsANDalignment (for which reads should be taken)
-    other_perSVade_outdirs_sameReadsANDalignment = ",".join(["%s/perSVade_calling_%s"%(outdir, typeSimulations) for typeSimulations in types_simulations])
-
-    # go through each run and configuration
-    for typeSimulations, bedpe_breakpoints, fast_SVcalling, simulate_SVs_arround_repeats, simulate_SVs_arround_HomologousRegions in [("arroundHomRegions", None, False, False, True), ("arroundRepeats", None, False, True, False), ("uniform", None, False, False, False), ("realSVs", real_bedpe_breakpoints, False, False, False), ("fast", None, True, False, False)]:
-
-        # skip
-        #if typeSimulations!="arroundRepeats": continue # debug
-
-        # define an outdir for this type of simulations
-        outdir_typeSimulations = "%s/perSVade_calling_%s"%(outdir, typeSimulations); make_folder(outdir_typeSimulations)
-
-        #### REMOVE SIMULATIONS FILES ####
-
-        """
-        print(outdir_typeSimulations)
-        for f in ["aligned_reads.bam.sorted.flagstat", "perSVade_finished_file.txt", "reference_genome_dir", "SVdetection_output", "simulations_files_and_parameters"]: delete_file_or_folder("%s/%s"%(outdir_typeSimulations, f))
-        continue
-        """
-        
-        ###################################
-
-        # keep 
-        final_dict["perSVade_outdir_%s"%typeSimulations] = outdir_typeSimulations
-
-        # define the final file 
-        final_file = "%s/perSVade_finished_file.txt"%outdir_typeSimulations
-
-        # define the previous repeats file 
-        previous_repeats_table = "%s.repeats.tab"%reference_genome
-        if file_is_empty(previous_repeats_table): raise ValueError("%s should exist"%previous_repeats_table)
-            
-        # only contine if the final file is not defined
-        if file_is_empty(final_file) or replace is True:
-
-            # define the cmd. This is a normal perSvade.py run with the vars of the previous dir  
-            cmd = "python %s -r %s --threads %i --outdir %s --nvars %i --nsimulations %i --simulation_ploidies %s --range_filtering_benchmark %s --mitochondrial_chromosome %s -f1 %s -f2 %s --previous_repeats_table %s --skip_cleaning_outdir --skip_SV_CNV_calling --QC_and_trimming_reads --other_perSVade_outdirs_sameReadsANDalignment %s --simulate_SVs_arround_HomologousRegions_maxEvalue %.10f --simulate_SVs_arround_HomologousRegions_queryWindowSize %i"%(perSVade_py, reference_genome, threads, outdir_typeSimulations, nvars, n_simulated_genomes, ",".join(simulation_ploidies), range_filtering_benchmark, mitochondrial_chromosome, short_reads1, short_reads2, previous_repeats_table, other_perSVade_outdirs_sameReadsANDalignment, simulate_SVs_arround_HomologousRegions_maxEvalue, simulate_SVs_arround_HomologousRegions_queryWindowSize)
-
-            # add arguments depending on the pipeline
-            if replace is True: cmd += " --replace"
-            if fast_SVcalling is True: cmd += " --fast_SVcalling"
-            if bedpe_breakpoints is not None: cmd += " --real_bedpe_breakpoints %s"%bedpe_breakpoints
-            if printing_verbose_mode is True: cmd += " --verbose"
-            if parameters_json_file is not None: cmd += " --parameters_json_file %s"%parameters_json_file
-            if fraction_available_mem is not None: cmd += " --fraction_available_mem %.3f"%(float(fraction_available_mem))
-            if simulate_SVs_arround_repeats is True: cmd += " --simulate_SVs_arround_repeats"
-            if simulate_SVs_arround_HomologousRegions is True: cmd += " --simulate_SVs_arround_HomologousRegions"
-            if simulate_SVs_arround_HomologousRegions_previousBlastnFile is not None: cmd += " --simulate_SVs_arround_HomologousRegions_previousBlastnFile %s"%simulate_SVs_arround_HomologousRegions_previousBlastnFile
+        else: raise ValueError("The fields in the golden set table are not valid")
 
 
-            all_cmds.append(cmd)
+        needtToAdaptTheINputSTringsToThecode
 
-        # keep the simulation files and clean outdir
-        elif n_remaining_jobs==0:
+        # add the run svim and sniffles job
+        outdir_ONT_calling = "%s/ONT_SV_calling"%outdir_sample; make_folder(outdir_ONT_calling)
+        final_file_ONT_calling = "%s/ONT_SV_calling_finished.txt"%outdir_ONT_calling
+        if file_is_empty(final_file_ONT_calling) or replace is True: 
 
-            # keeping simulations and cleaning
-            keep_simulation_files_for_perSVade_outdir(outdir_typeSimulations, replace=replace, n_simulated_genomes=n_simulated_genomes, simulation_ploidies=simulation_ploidies)
+            ont_calling_cmd = "%s --ref %s --input_reads %s --outdir %s --aligner ngmlr --threads %i"%(run_svim_and_sniffles_py, reference_genome, longReads, outdir_ONT_calling, threads)
+            if replace is True: ont_calling_cmd += " --replace"
+            if verbose is True: ont_calling_cmd += " --verbose"
 
-            # clean
-            print_if_verbose("cleaning")
-            clean_perSVade_outdir(outdir_typeSimulations)
+            all_cmds.append(ont_calling_cmd)
+
+        # keep the final dict
+        final_dict["svim_outdir"] = "%s/svim_output"%outdir_ONT_calling
+        final_dict["sniffles_outdir"] = "%s/sniffles_output"%outdir_ONT_calling
+
+        # define the other_perSVade_outdirs_sameReadsANDalignment (for which reads should be taken)
+        types_simulations = ["arroundHomRegions", "arroundRepeats", "uniform", "fast", "realSVs"]
+        other_perSVade_outdirs_sameReadsANDalignment = ",".join(["%s/perSVade_calling_%s"%(outdir_sample, typeSimulations) for typeSimulations in types_simulations])
+
+        # go through each run and configuration
+        for typeSimulations, bedpe_breakpoints, fast_SVcalling, simulate_SVs_arround_repeats, simulate_SVs_arround_HomologousRegions in [("arroundHomRegions", None, False, False, True), ("arroundRepeats", None, False, True, False), ("uniform", None, False, False, False), ("realSVs", real_bedpe_breakpoints, False, False, False), ("fast", None, True, False, False)]:
+
+            # skip
+            #if typeSimulations!="arroundRepeats": continue # debug
+
+            # define an outdir for this type of simulations
+            outdir_typeSimulations = "%s/perSVade_calling_%s"%(outdir_sample, typeSimulations); make_folder(outdir_typeSimulations)
+
+
+            # keep 
+            final_dict["perSVade_outdir_%s"%typeSimulations] = outdir_typeSimulations
+
+            # define the final file 
+            final_file = "%s/perSVade_finished_file.txt"%outdir_typeSimulations
+
+            # define the previous repeats file 
+            previous_repeats_table = "%s.repeats.tab"%reference_genome
+            if file_is_empty(previous_repeats_table): raise ValueError("%s should exist"%previous_repeats_table)
+                
+            # only contine if the final file is not defined
+            if file_is_empty(final_file) or replace is True:
+
+                # define the cmd. This is a normal perSvade.py run with the vars of the previous dir  
+                cmd = "python %s -r %s --threads %i --outdir %s --nvars %i --nsimulations %i --simulation_ploidies %s --range_filtering_benchmark %s --mitochondrial_chromosome %s -f1 %s -f2 %s --previous_repeats_table %s --skip_SV_CNV_calling --QC_and_trimming_reads --other_perSVade_outdirs_sameReadsANDalignment %s --simulate_SVs_arround_HomologousRegions_maxEvalue %.10f --simulate_SVs_arround_HomologousRegions_queryWindowSize %i --keep_simulation_files"%(perSVade_py, reference_genome, threads, outdir_typeSimulations, nvars, n_simulated_genomes, ",".join(simulation_ploidies), range_filtering_benchmark, mitochondrial_chromosome, short_reads1, short_reads2, previous_repeats_table, other_perSVade_outdirs_sameReadsANDalignment, simulate_SVs_arround_HomologousRegions_maxEvalue, simulate_SVs_arround_HomologousRegions_queryWindowSize)
+
+                # add arguments depending on the pipeline
+                if replace is True: cmd += " --replace"
+                if fast_SVcalling is True: cmd += " --fast_SVcalling"
+                if bedpe_breakpoints is not None: cmd += " --real_bedpe_breakpoints %s"%bedpe_breakpoints
+                if printing_verbose_mode is True: cmd += " --verbose"
+                if parameters_json_file is not None: cmd += " --parameters_json_file %s"%parameters_json_file
+                if fraction_available_mem is not None: cmd += " --fraction_available_mem %.3f"%(float(fraction_available_mem))
+                if simulate_SVs_arround_repeats is True: cmd += " --simulate_SVs_arround_repeats"
+                if simulate_SVs_arround_HomologousRegions is True: cmd += " --simulate_SVs_arround_HomologousRegions"
+                if simulate_SVs_arround_HomologousRegions_previousBlastnFile is not None: cmd += " --simulate_SVs_arround_HomologousRegions_previousBlastnFile %s"%simulate_SVs_arround_HomologousRegions_previousBlastnFile
+
+
+                all_cmds.append(cmd)
+
 
     # run jobs
     if job_array_mode=="job_array":
@@ -11708,7 +11669,7 @@ def get_svtype_to_svDF_from_svimSniffles_vcf_df(vcf_df, outdir, sorted_bam_longR
 
     return final_svtype_to_svDF
 
-def get_df_accuracy_perSVade_runs_vs_longReads_oneFilterSet(typeRun_to_svtype_to_svDF, min_QUAL_svim, min_RE_sniffles, filter_IMPRECISE_sniffles, svim_df, sniffles_df, outdir_all, sorted_bam_longReads, reference_genome, tol_bp, filterID):
+def get_df_accuracy_perSVade_runs_vs_longReads_oneFilterSet(typeRun_to_svtype_to_svDF_original, min_QUAL_svim, min_RE_sniffles, filter_IMPRECISE_sniffles, svim_df, sniffles_df, outdir_all, sorted_bam_longReads, reference_genome, tol_bp, filterID):
 
     """Takes some perSVade-called vars and the output of svim and sniffles as dfs and a set of filters for the latter. It defines an svtype_to_svDF overlapping variants (by taking the known vars and integrating the BNDs with clove+own scripts) and returns the  """
 
@@ -11728,7 +11689,11 @@ def get_df_accuracy_perSVade_runs_vs_longReads_oneFilterSet(typeRun_to_svtype_to
         df_accuracy_all = pd.DataFrame()
 
         # go through different types of vars
-        for type_SVs_longReads, GTs in [("all_SVs", {"homozygous", "heterozygous", "not_called"}), ("only_homozygous",  {"homozygous"}), ("only_heterozygous",  {"heterozygous"}), ("only_calledSVs", {"homozygous", "heterozygous"})]:
+        #for type_SVs_longReads, GTs in [("all_SVs", {"homozygous", "heterozygous", "not_called"}), ("only_homozygous",  {"homozygous"}), ("only_heterozygous",  {"heterozygous"}), ("only_calledSVs", {"homozygous", "heterozygous"})]:
+        for type_SVs_longReads, GTs in [("all_SVs", {"homozygous", "heterozygous", "not_called"})]:
+
+            # define an outdir for this GTs
+            outdir_type_SVs_longReads = "%s/%s"%(outdir, type_SVs_longReads); make_folder(outdir_type_SVs_longReads)
 
             # get the filtered dfs
             svim_df_filt = svim_df[(svim_df.QUAL>=min_QUAL_svim) & (svim_df.GT.isin(GTs))]
@@ -11736,69 +11701,91 @@ def get_df_accuracy_perSVade_runs_vs_longReads_oneFilterSet(typeRun_to_svtype_to
             if filter_IMPRECISE_sniffles is True: sniffles_df_filt = sniffles_df_filt[sniffles_df_filt.INFO_misc=="PRECISE"]
 
             # get the svtype_to_svDF for each long SV caller
-            svim_svtype_to_svDF =  get_svtype_to_svDF_from_svimSniffles_vcf_df(svim_df_filt[["perSVade_svtype", "perSVade_dict"]], "%s/getting_perSVadeLike_svim"%outdir, sorted_bam_longReads, reference_genome, tol_bp)    
-            sniffles_svtype_to_svDF =  get_svtype_to_svDF_from_svimSniffles_vcf_df(sniffles_df_filt[["perSVade_svtype", "perSVade_dict"]], "%s/getting_perSVadeLike_sniffles"%outdir, sorted_bam_longReads, reference_genome, tol_bp)
+            svim_svtype_to_svDF_original =  get_svtype_to_svDF_from_svimSniffles_vcf_df(svim_df_filt[["perSVade_svtype", "perSVade_dict"]], "%s/getting_perSVadeLike_svim"%outdir_type_SVs_longReads, sorted_bam_longReads, reference_genome, tol_bp)    
+            sniffles_svtype_to_svDF_original =  get_svtype_to_svDF_from_svimSniffles_vcf_df(sniffles_df_filt[["perSVade_svtype", "perSVade_dict"]], "%s/getting_perSVadeLike_sniffles"%outdir_type_SVs_longReads, sorted_bam_longReads, reference_genome, tol_bp)
 
-            # get the accuracy of each of the long read callers on the other with the benchmark_processedSVs_against_knownSVs_inHouse
-            df_accuracy_SVIMvsSNIFFLES = benchmark_processedSVs_against_knownSVs_inHouse(svim_svtype_to_svDF, sniffles_svtype_to_svDF, fileprefix_accuracy, replace=False, add_integrated_benchmarking=True, consider_all_svtypes=True, tol_bp=tol_bp, fast_mode=True)
-            df_accuracy_SVIMvsSNIFFLES["comparisonID"] = "SVIM_vs_SNIFFLES"
+            # define the 'remaining SV'
+            remaining_svDF_fields = svtype_to_fieldsDict["remaining"]["all_fields"]
 
-            df_accuracy_SNIFFLESvsSVIM = benchmark_processedSVs_against_knownSVs_inHouse(sniffles_svtype_to_svDF, svim_svtype_to_svDF, fileprefix_accuracy, replace=False, add_integrated_benchmarking=True, consider_all_svtypes=True, tol_bp=tol_bp, fast_mode=True)
-            df_accuracy_SNIFFLESvsSVIM["comparisonID"] = "SNIFFLES_vs_SVIM"
+            # go through keeping remaining or not (The 'drop has to be at the end')
+            for remaining_treatment in ["keep", "drop"]:
 
-            # init the dfs_to_concat list
-            dfs_to_concat = [df_accuracy_SVIMvsSNIFFLES, df_accuracy_SNIFFLESvsSVIM]
+                # keep the svDFs
+                svim_svtype_to_svDF = cp.deepcopy(svim_svtype_to_svDF_original)
+                sniffles_svtype_to_svDF = cp.deepcopy(sniffles_svtype_to_svDF_original)
+                typeRun_to_svtype_to_svDF = cp.deepcopy(typeRun_to_svtype_to_svDF_original)
 
-            # get the common vars between SVIM and SNIFFLES
-            bothLongReads_svtype_to_svDF = {}
-            for svtype, svDF in svim_svtype_to_svDF.items():
-                true_positive_IDs = set.union(*df_accuracy_SVIMvsSNIFFLES[df_accuracy_SVIMvsSNIFFLES.svtype==svtype].true_positives_predictedIDs.apply(lambda ids: set(ids.split("||")))).difference({""})
-                missing_IDs = true_positive_IDs.difference(set(svDF.ID))
-                if len(missing_IDs)>0: raise ValueError("There are missing IDs: %s"%missing_IDs)
-                bothLongReads_svtype_to_svDF[svtype] = svDF[svDF.ID.isin(true_positive_IDs)]
+                # drop 'remaining SVs' if indicated
+                if remaining_treatment=="drop":
+                    svim_svtype_to_svDF["remaining"] = pd.DataFrame(columns=remaining_svDF_fields)
+                    sniffles_svtype_to_svDF["remaining"] = pd.DataFrame(columns=remaining_svDF_fields)
 
-            # get all the vars called by SVIM and SNUIFFLES
-            anyLongReads_svtype_to_svDF = {}
-            all_svtypes = set(svim_svtype_to_svDF.keys()).union(sniffles_svtype_to_svDF.keys())
-            for svtype in all_svtypes:
-                svtype_fields = svtype_to_fieldsDict[svtype]["all_fields"]
+                # get the accuracy of each of the long read callers on the other with the benchmark_processedSVs_against_knownSVs_inHouse
+                df_accuracy_SVIMvsSNIFFLES = benchmark_processedSVs_against_knownSVs_inHouse(svim_svtype_to_svDF, sniffles_svtype_to_svDF, fileprefix_accuracy, replace=False, add_integrated_benchmarking=True, consider_all_svtypes=True, tol_bp=tol_bp, fast_mode=True)
+                df_accuracy_SVIMvsSNIFFLES["comparisonID"] = "SVIM_vs_SNIFFLES"
 
-                if svtype in svim_svtype_to_svDF: svim_svDF = svim_svtype_to_svDF[svtype][svtype_fields]
-                else: svim_svDF = pd.DataFrame(columns=svtype_fields)
+                df_accuracy_SNIFFLESvsSVIM = benchmark_processedSVs_against_knownSVs_inHouse(sniffles_svtype_to_svDF, svim_svtype_to_svDF, fileprefix_accuracy, replace=False, add_integrated_benchmarking=True, consider_all_svtypes=True, tol_bp=tol_bp, fast_mode=True)
+                df_accuracy_SNIFFLESvsSVIM["comparisonID"] = "SNIFFLES_vs_SVIM"
 
-                if svtype in sniffles_svtype_to_svDF: sniffles_svDF = sniffles_svtype_to_svDF[svtype][svtype_fields]
-                else: sniffles_svDF = pd.DataFrame(columns=svtype_fields)
+                # init the dfs_to_concat list
+                dfs_to_concat = [df_accuracy_SVIMvsSNIFFLES, df_accuracy_SNIFFLESvsSVIM]
 
-                anyLongReads_svtype_to_svDF[svtype] = svim_svDF.append(sniffles_svDF)
+                # get the common vars between SVIM and SNIFFLES
+                bothLongReads_svtype_to_svDF = {}
+                for svtype, svDF in svim_svtype_to_svDF.items():
+                    true_positive_IDs = set.union(*df_accuracy_SVIMvsSNIFFLES[df_accuracy_SVIMvsSNIFFLES.svtype==svtype].true_positives_predictedIDs.apply(lambda ids: set(ids.split("||")))).difference({""})
+                    missing_IDs = true_positive_IDs.difference(set(svDF.ID))
+                    if len(missing_IDs)>0: raise ValueError("There are missing IDs: %s"%missing_IDs)
+                    bothLongReads_svtype_to_svDF[svtype] = svDF[svDF.ID.isin(true_positive_IDs)]
 
-            # get the accuracy of each perSVade run against the long reads
-            for typeRun_perSVade, svtype_to_svDF_perSVade in typeRun_to_svtype_to_svDF.items():
+                # get all the vars called by SVIM and SNUIFFLES
+                anyLongReads_svtype_to_svDF = {}
+                all_svtypes = set(svim_svtype_to_svDF.keys()).union(sniffles_svtype_to_svDF.keys())
+                for svtype in all_svtypes:
+                    svtype_fields = svtype_to_fieldsDict[svtype]["all_fields"]
 
-                # vs SVIM
-                df_perSVAde_vs_svim = benchmark_processedSVs_against_knownSVs_inHouse(svtype_to_svDF_perSVade, svim_svtype_to_svDF, fileprefix_accuracy, replace=False, add_integrated_benchmarking=True, consider_all_svtypes=True, tol_bp=tol_bp, fast_mode=True)
-                df_perSVAde_vs_svim["comparisonID"] = "perSVade-%s_vs_SVIM"%typeRun_perSVade
+                    if svtype in svim_svtype_to_svDF: svim_svDF = svim_svtype_to_svDF[svtype][svtype_fields]
+                    else: svim_svDF = pd.DataFrame(columns=svtype_fields)
 
-                # VS SNIFFLES
-                df_perSVAde_vs_sniffles = benchmark_processedSVs_against_knownSVs_inHouse(svtype_to_svDF_perSVade, sniffles_svtype_to_svDF, fileprefix_accuracy, replace=False, add_integrated_benchmarking=True, consider_all_svtypes=True, tol_bp=tol_bp, fast_mode=True)
-                df_perSVAde_vs_sniffles["comparisonID"] = "perSVade-%s_vs_SNIFFLES"%typeRun_perSVade
+                    if svtype in sniffles_svtype_to_svDF: sniffles_svDF = sniffles_svtype_to_svDF[svtype][svtype_fields]
+                    else: sniffles_svDF = pd.DataFrame(columns=svtype_fields)
 
-                # vs MERGED
-                df_perSVAde_vs_merged = benchmark_processedSVs_against_knownSVs_inHouse(svtype_to_svDF_perSVade, bothLongReads_svtype_to_svDF, fileprefix_accuracy, replace=False, add_integrated_benchmarking=True, consider_all_svtypes=True, tol_bp=tol_bp, fast_mode=True)
-                df_perSVAde_vs_merged["comparisonID"] = "perSVade-%s_vs_COMMON"%typeRun_perSVade
+                    anyLongReads_svtype_to_svDF[svtype] = svim_svDF.append(sniffles_svDF)
 
-                # vs ANY-CALLED
-                df_perSVAde_vs_union = benchmark_processedSVs_against_knownSVs_inHouse(svtype_to_svDF_perSVade, anyLongReads_svtype_to_svDF, fileprefix_accuracy, replace=False, add_integrated_benchmarking=True, consider_all_svtypes=True, tol_bp=tol_bp, fast_mode=True)
-                df_perSVAde_vs_union["comparisonID"] = "perSVade-%s_vs_UNION"%typeRun_perSVade
+                # get the accuracy of each perSVade run against the long reads
+                for typeRun_perSVade, svtype_to_svDF_perSVade in typeRun_to_svtype_to_svDF.items():
 
-                # keep
-                dfs_to_concat += [df_perSVAde_vs_svim, df_perSVAde_vs_sniffles, df_perSVAde_vs_merged, df_perSVAde_vs_union]
+                    # drop 'remaining SVs' if indicated
+                    if remaining_treatment=="drop":
+                        svtype_to_svDF_perSVade["remaining"] = pd.DataFrame(columns=remaining_svDF_fields)
+                        svtype_to_svDF_perSVade["remaining"] = pd.DataFrame(columns=remaining_svDF_fields)
 
-            # integrate all the accuracy dfs into one df
-            df_accuracy = pd.concat(dfs_to_concat)
+                    # vs SVIM
+                    df_perSVAde_vs_svim = benchmark_processedSVs_against_knownSVs_inHouse(svtype_to_svDF_perSVade, svim_svtype_to_svDF, fileprefix_accuracy, replace=False, add_integrated_benchmarking=True, consider_all_svtypes=True, tol_bp=tol_bp, fast_mode=True)
+                    df_perSVAde_vs_svim["comparisonID"] = "perSVade-%s_vs_SVIM"%typeRun_perSVade
 
-            # add the type of GTs and 
-            df_accuracy["genotypes_longReadsSVs"] =  type_SVs_longReads
-            df_accuracy_all = df_accuracy_all.append(df_accuracy)
+                    # VS SNIFFLES
+                    df_perSVAde_vs_sniffles = benchmark_processedSVs_against_knownSVs_inHouse(svtype_to_svDF_perSVade, sniffles_svtype_to_svDF, fileprefix_accuracy, replace=False, add_integrated_benchmarking=True, consider_all_svtypes=True, tol_bp=tol_bp, fast_mode=True)
+                    df_perSVAde_vs_sniffles["comparisonID"] = "perSVade-%s_vs_SNIFFLES"%typeRun_perSVade
+
+                    # vs MERGED
+                    df_perSVAde_vs_merged = benchmark_processedSVs_against_knownSVs_inHouse(svtype_to_svDF_perSVade, bothLongReads_svtype_to_svDF, fileprefix_accuracy, replace=False, add_integrated_benchmarking=True, consider_all_svtypes=True, tol_bp=tol_bp, fast_mode=True)
+                    df_perSVAde_vs_merged["comparisonID"] = "perSVade-%s_vs_COMMON"%typeRun_perSVade
+
+                    # vs ANY-CALLED
+                    df_perSVAde_vs_union = benchmark_processedSVs_against_knownSVs_inHouse(svtype_to_svDF_perSVade, anyLongReads_svtype_to_svDF, fileprefix_accuracy, replace=False, add_integrated_benchmarking=True, consider_all_svtypes=True, tol_bp=tol_bp, fast_mode=True)
+                    df_perSVAde_vs_union["comparisonID"] = "perSVade-%s_vs_UNION"%typeRun_perSVade
+
+                    # keep
+                    dfs_to_concat += [df_perSVAde_vs_svim, df_perSVAde_vs_sniffles, df_perSVAde_vs_merged, df_perSVAde_vs_union]
+
+                # integrate all the accuracy dfs into one df
+                df_accuracy = pd.concat(dfs_to_concat)
+
+                # add the type of GTs and remaining_treatment
+                df_accuracy["genotypes_longReadsSVs"] =  type_SVs_longReads
+                df_accuracy["remaining_treatment"] = remaining_treatment
+                df_accuracy_all = df_accuracy_all.append(df_accuracy)
 
         # add data about this filter set
         df_accuracy_all["filterID"] = filterID
@@ -11994,6 +11981,9 @@ def report_accuracy_golden_set_reportAccuracy(dict_paths, outdir, reference_geno
 
         # define the sorted bam of the long reads
         sorted_bam_longReads =  "%s/aligned_reads.sorted.bam"%dict_paths["svim_outdir"]
+
+
+        addPctOverlap50pctToFiltersGoldenSet
 
         # define several inputs for the function get_df_accuracy_perSVade_runs_vs_longReads_oneFilterSet
         inputs_fn = [(typeRun_to_svtype_to_svDF, min_QUAL_svim, min_RE_sniffles, filter_IMPRECISE_sniffles, svim_df, sniffles_df, outdir_calculating_accuracy, sorted_bam_longReads, reference_genome, tol_bp) for min_QUAL_svim in all_min_QUAL_svim for min_RE_sniffles in np.linspace(min(sniffles_df.INFO_RE), max_sniffles_RE, 6) for filter_IMPRECISE_sniffles in [True] for tol_bp in [50, 500, 1000]]

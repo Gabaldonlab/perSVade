@@ -183,6 +183,9 @@ parser.add_argument("--previous_repeats_table", dest="previous_repeats_table", d
 
 parser.add_argument("--simulate_SVs_arround_repeats", dest="simulate_SVs_arround_repeats", action="store_true", default=False, help="Simulate SVs arround repeats. This requires that there are some repeats inferred. This option will generate a simulated set of breakpoints arround repeats, if possible of the same family, and with random orientations.")
 
+parser.add_argument("--keep_simulation_files", dest="keep_simulation_files", action="store_true", default=False, help="Keeps the simulation files from perSVade.")
+
+
 parser.add_argument("--simulate_SVs_arround_HomologousRegions", dest="simulate_SVs_arround_HomologousRegions", action="store_true", default=False, help="Simulate SVs arround regions that have high similarity.")
 parser.add_argument("--simulate_SVs_arround_HomologousRegions_queryWindowSize", dest="simulate_SVs_arround_HomologousRegions_queryWindowSize",  default=500, type=int, help="The window size used for finding regions with high similarity. This only works if --simulate_SVs_arround_HomologousRegions is specified.")
 parser.add_argument("--simulate_SVs_arround_HomologousRegions_maxEvalue", dest="simulate_SVs_arround_HomologousRegions_maxEvalue",  default=1e-5, type=float, help="The maximum evalue by which two regions will be said to have high similarity. This only works if --simulate_SVs_arround_HomologousRegions is specified.")
@@ -785,6 +788,9 @@ if (opt.skip_SVcalling is False or opt.run_smallVarsCNV is True) and not any([x=
 #####################################
 #####################################
 #####################################
+
+# keep the simulation files
+if opt.keep_simulation_files is True: fun.keep_simulation_files_for_perSVade_outdir(opt.outdir, replace=opt.replace, n_simulated_genomes=opt.nsimulations, simulation_ploidies=simulation_ploidies)
 
 # at the end you want to clean the outdir to keep only the essential files
 if opt.skip_cleaning_outdir is False: fun.clean_perSVade_outdir(opt.outdir)

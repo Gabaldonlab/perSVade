@@ -56,7 +56,9 @@ conda install -c bioconda -y freebayes=1.3.1 &&
 conda install -c bioconda -y mosdepth=0.2.6 &&
 conda install -c bioconda -y ensembl-vep=100.2 && # downgrades libtiff 4.1.0-hc7e4089_6 --> 4.1.0-hc3755c2_3. libwebp-base-1.1.0-h516909a_3 is removed
 conda install -c bioconda -y vcflib=1.0.0_rc2 &&
-conda install -c bioconda -y sra-tools=2.10.0 &&
+#conda install -c bioconda -y sra-tools=2.10.0 && # this was originally throught to work
+conda install -c bioconda -y sra-tools=2.10.9 && # this solves some problems with prefetch
+
 conda install -c bioconda -y trimmomatic=0.38 &&
 conda install -c bioconda -y parallel-fastq-dump=0.6.3 &&
 conda install -c bioconda -y fastqc=0.11.9 &&
