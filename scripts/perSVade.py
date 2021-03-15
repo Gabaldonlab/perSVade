@@ -163,6 +163,7 @@ parser.add_argument("--skip_cnv_analysis", dest="skip_cnv_analysis", default=Fal
 parser.add_argument("--window_size_CNVcalling", dest="window_size_CNVcalling", default=100, type=int, help="The window size in which the genome will be fragmented for CNV calling.")
 parser.add_argument("--cnv_calling_algs", dest="cnv_calling_algs", default="HMMcopy,CONY", type=str, help="A comma-sepparated string thatindicates which programs should be used for the CNV calling. It can be any of HMMcopy,CONY,AneuFinder. We note that CONY does not work well for small chromosomes or large binned windows.")
 
+parser.add_argument("--input_SRRfile", dest="input_SRRfile", default=None, help="An input srr file that can be provided instead of the fastq files. If this is provided the pipeline will run fastqdump on the reads.")
 
 # visualization
 parser.add_argument("--visualization_results", dest="visualization_results", default=False, action="store_true", help="Visualize the results")
@@ -418,6 +419,11 @@ end_time_GeneralProcessing =  time.time()
 start_time_alignment =  time.time()
 
 if not any([x=="skip" for x in {opt.fastq1, opt.fastq2}]):
+
+
+    ######### REDEFINE THE READS FROM AN SRR FILE ##########
+    if opt.fastq1 is None and opt.fastq2 is None and opt.input_SRRfile is not None: opt.fastq1, opt.fastq2 = fun.run_parallelFastqDump_on_prefetched_SRRfile(opt.input_SRRfile, replace=opt.replace, threads=opt.threads)
+    ########################################################
 
     ##### DEFINE THE SORTED BAM #####
 
