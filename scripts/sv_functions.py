@@ -466,7 +466,7 @@ svtype_to_fieldsDict = {"inversions": {"equal_fields": ["Chr"],
                                       }}
 
 # define the golden set reads
-taxID_to_srrs_goldenSet = {3702: {"short_reads":"ERR2173372", "long_reads":"ERR2173373"}} # arabidopsis thaliana sample
+taxID_to_sampleID_to_srrs_goldenSet = {3702: {"Athaliana_sample" : {"illumina_paired":"ERR2173372", "nanopore":"ERR2173373"} } } 
 
 ####################################
 ####################################
@@ -11095,6 +11095,10 @@ def get_goldenSet_table_fromSRA(target_taxID, reference_genome, outdir, min_cove
         # get a dict that maps several biosamples to srrs
         biosample_to_type_data_to_srr = get_short_and_long_reads_sameBioSample_severalSamples("%s/querying_SRA"%outdir, target_taxID, reference_genome, replace=replace, min_coverage=min_coverage, max_n_samples=max_n_samples)
 
+        # add samples from taxID_to_sampleID_to_srrs_goldenSet
+        if target_taxID in taxID_to_sampleID_to_srrs_goldenSet: 
+            for sampleID, type_data_to_srr in taxID_to_sampleID_to_srrs_goldenSet[target_taxID].items(): biosample_to_type_data_to_srr[sampleID] = type_data_to_srr
+
         # define a dir for the srr files
         reads_dir = "%s/reads"%outdir
         if replace is True: delete_folder(reads_dir)
@@ -11125,9 +11129,9 @@ def get_goldenSet_table_fromSRA(target_taxID, reference_genome, outdir, min_cove
                 for cmd in all_cmds: run_cmd(cmd)
 
         # define df
-        df = pd.DataFrame({biosample : {"sampleID":biosample, "long_reads_SRRfile":"%s/%s.srr"%(reads_dir, type_data_to_srr["nanopore"]), "short_reads_SRRfile":"%s/%s.srr"%(reads_dir, type_data_to_srr["illumina_paired"])} for biosample, type_data_to_srr in biosample_to_type_data_to_srr.items()}).transpose()
+        df = pd.DataFrame({biosample : {"sampleID":biosample, "long_reads_SRRfile":"%s/%s.srr"%(reads_dir, type_data_to_srr["nanopore"]), "short_reads_SRRfile":"%s/%s.srr"%(reads_dir, type_data_to_srr["illumina_paired"])} for biosample, type_data_to_srr in biosample_to_type_data_to_srr.items()}).transpose().drop_duplicates(subset=["long_reads_SRRfile", "short_reads_SRRfile"])
 
-        # clean non-SRR files
+        # clean non-SRR  and non fastq.gz files
         for f in os.listdir(reads_dir): 
             if not f.endswith(".srr"): delete_file_or_folder("%s/%s"%(reads_dir, f))
 
