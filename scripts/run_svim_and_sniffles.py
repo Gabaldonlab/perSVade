@@ -39,6 +39,12 @@ fun.make_folder(opt.outdir)
 # define the print mode
 fun.printing_verbose_mode = opt.verbose
 
+# put the input reads under outdir
+reads_dir = "%s/reads"%opt.outdir; fun.make_folder(reads_dir)
+dest_input_reads = "%s/%s"%(reads_dir, fun.get_file(opt.input_reads))
+fun.soft_link_files(opt.input_reads, dest_input_reads)
+opt.input_reads = dest_input_reads
+
 # run fastqdump if the provided reads are an SRR file
 if opt.input_reads.endswith(".srr"):
 	print("Assuming that the input_reads %s are an SRR file obtained with prefetch"%opt.input_reads)

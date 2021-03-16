@@ -34,7 +34,7 @@ import testing_functions as test_fun
 if running_in_cluster is True:
 
     cluster_name = fun.get_current_clusterName_mareNostrum()
-    if cluster_name=="MN4": threads = 48
+    if cluster_name=="MN4": threads = 24
     elif cluster_name=="Nord3": threads = 16
     else: raise ValueError("cluster could not be identified")
 
@@ -127,7 +127,7 @@ for taxID, spName, ploidy, mitochondrial_chromosome, max_coverage_sra_reads in t
 
             queue = "bsc_ls"
             time = "48:00:00"
-            nodes = 3
+            nodes = 4
 
             fun.run_jobarray_file_MN4_greasy(jobs_filename, name, time=time, queue=queue, threads_per_job=threads, nodes=nodes)
 

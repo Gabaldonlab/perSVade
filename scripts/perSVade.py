@@ -420,11 +420,6 @@ start_time_alignment =  time.time()
 
 if not any([x=="skip" for x in {opt.fastq1, opt.fastq2}]):
 
-
-    ######### REDEFINE THE READS FROM AN SRR FILE ##########
-    if opt.fastq1 is None and opt.fastq2 is None and opt.input_SRRfile is not None: opt.fastq1, opt.fastq2 = fun.run_parallelFastqDump_on_prefetched_SRRfile(opt.input_SRRfile, replace=opt.replace, threads=opt.threads)
-    ########################################################
-
     ##### DEFINE THE SORTED BAM #####
 
     # define files that may be used in many steps of the pipeline
@@ -446,25 +441,39 @@ if not any([x=="skip" for x in {opt.fastq1, opt.fastq2}]):
     ###################################
 
     # normal alignment of provided reads
-    if all([not x is None for x in {opt.fastq1, opt.fastq2}]):
+    if all([not x is None for x in {opt.fastq1, opt.fastq2}]) or opt.input_SRRfile is not None:
 
         # if the reads have to be QC and trimmed:
-        if opt.QC_and_trimming_reads is True: 
-            print("running trimming and QC of the reads")
+        if opt.QC_and_trimming_reads is True or opt.input_SRRfile is not None: 
 
-            # softlink the reads to the outdir
+            # define the reads dir
             reads_dir = "%s/reads"%opt.outdir; fun.make_folder(reads_dir)
+
+            # define the raw reads under reads dir
             dest_fastq1 = "%s/raw_reads1.fastq.gz"%reads_dir
             dest_fastq2 = "%s/raw_reads2.fastq.gz"%reads_dir
 
-            fun.soft_link_files(opt.fastq1, dest_fastq1)
-            fun.soft_link_files(opt.fastq2, dest_fastq2)
+            # define the trimmed reads
+            trimmed_reads1 = "%s.trimmed.fastq.gz"%dest_fastq1
+            trimmed_reads2 = "%s.trimmed.fastq.gz"%dest_fastq2
 
-            opt.fastq1 = dest_fastq1
-            opt.fastq2 = dest_fastq2
+            if fun.file_is_empty(trimmed_reads1) or fun.file_is_empty(trimmed_reads2) or opt.replace is True:
+                print("running trimming and QC of the reads")
 
-            # trim
-            opt.fastq1, opt.fastq2 = fun.run_trimmomatic(opt.fastq1, opt.fastq2, replace=opt.replace, threads=opt.threads)
+                # get reads from prefetch
+                if opt.input_SRRfile is not None and opt.fastq1 is None and opt.fastq2 is None:
+                    print("Getting raw reads from SRR file")
+
+                    dest_input_SRRfile = "%s/input_SRRfile.srr"%reads_dir
+                    fun.soft_link_files(opt.input_SRRfile, dest_input_SRRfile)
+                    opt.fastq1, opt.fastq2 = fun.run_parallelFastqDump_on_prefetched_SRRfile(dest_input_SRRfile, replace=opt.replace, threads=opt.threads)
+
+                # get the reads under outdir
+                fun.soft_link_files(opt.fastq1, dest_fastq1)
+                fun.soft_link_files(opt.fastq2, dest_fastq2)
+
+            # trim reads
+            opt.fastq1, opt.fastq2 = fun.run_trimmomatic(dest_fastq1, dest_fastq2, replace=opt.replace, threads=opt.threads)
 
             # clean
             for f in os.listdir(reads_dir): 
@@ -472,7 +481,6 @@ if not any([x=="skip" for x in {opt.fastq1, opt.fastq2}]):
 
         print("WORKING ON ALIGNMENT")
         fun.run_bwa_mem(opt.fastq1, opt.fastq2, opt.ref, opt.outdir, bamfile, sorted_bam, index_bam, name_sample, threads=opt.threads, replace=opt.replace)
-
         fun.clean_sorted_bam_coverage_per_window_files(sorted_bam)
 
     else: print("Warning: No fastq file given, assuming that you provided a bam file")
