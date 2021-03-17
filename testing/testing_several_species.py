@@ -55,9 +55,6 @@ close_shortReads_table_Cglabrata = "%s/scripts/perSVade/perSVade_repository/test
 run_in_cluster = True
 if running_in_cluster is False: run_in_cluster = False
 
-# init a df that has the timing and memoryrecordings
-df_resources_file = "%s/resources_consumption.tab"%outdir_testing 
-
 # define a dir with the STDs of the normal run's testing accuracy
 all_STDs_dir = "%s/all_STDs_testingAccuracySeveralSpecies"%outdir_testing; fun.make_folder(all_STDs_dir)
 
@@ -80,7 +77,7 @@ for taxID, spName, ploidy, mitochondrial_chromosome, max_coverage_sra_reads in t
     # this is testing the whole perSVade pipeline on 3 runs of 3 close taxIDs to the reference genome. It will run only SV calling.
 
     # record the used resources in this run (this should be only implemented when there are no running jobs)
-    #df_resources, current_roundID = test_fun.update_df_resources_nord3Runs_testingAccuracy(df_resources_file, outdir_perSVade, spName, all_STDs_dir)    
+    test_fun.keep_STDfiles_nord3Runs_testingAccuracy(all_STDs_dir, outdir_perSVade, spName) 
 
     # define the table with short reads
     if spName=="Candida_glabrata": close_shortReads_table = close_shortReads_table_Cglabrata
@@ -149,7 +146,7 @@ for taxID, spName, ploidy, mitochondrial_chromosome, max_coverage_sra_reads in t
 
             elif spName in {"Arabidopsis_thaliana", "Drosophila_melanogaster"}:
                 time = "48:00:00"
-                RAM_per_thread = 3600
+                RAM_per_thread = 4000 # first 3600
 
             else: raise ValueError("%s is not a valid spName"%spName)
 

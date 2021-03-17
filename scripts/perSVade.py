@@ -398,7 +398,7 @@ if opt.simulate_SVs_arround_HomologousRegions is True:
     # define the bedpe breakpoints arround the homologous regions
     bedpe_breakpoints = "%s/breakpoints_arrounHomRegions_wsize=%ibp_maxEval=%s_minQcovS=%i.bedpe"%(opt.outdir, opt.simulate_SVs_arround_HomologousRegions_queryWindowSize, opt.simulate_SVs_arround_HomologousRegions_maxEvalue, opt.simulate_SVs_arround_HomologousRegions_minPctOverlap)
 
-    opt.real_bedpe_breakpoints = fun.get_bedpe_breakpoints_arround_homologousRegions(blastn_file, bedpe_breakpoints, replace=opt.replace, threads=opt.threads, max_eval=opt.simulate_SVs_arround_HomologousRegions_maxEvalue, query_window_size=opt.simulate_SVs_arround_HomologousRegions_queryWindowSize, min_qcovs=opt.simulate_SVs_arround_HomologousRegions_minPctOverlap)
+    opt.real_bedpe_breakpoints = fun.get_bedpe_breakpoints_arround_homologousRegions(blastn_file, bedpe_breakpoints, replace=opt.replace, threads=opt.threads, max_eval=opt.simulate_SVs_arround_HomologousRegions_maxEvalue, query_window_size=opt.simulate_SVs_arround_HomologousRegions_queryWindowSize, min_qcovs=opt.simulate_SVs_arround_HomologousRegions_minPctOverlap, max_n_hits=(opt.nvars*5*2500))
 
 ############################################################################
 

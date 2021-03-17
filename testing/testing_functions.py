@@ -76,19 +76,22 @@ species_Info = [("5478", "Candida_glabrata", 1, "mito_C_glabrata_CBS138", 100000
                 ("3702", "Arabidopsis_thaliana", 2, "BK010421.1,AP000423.1", 30),
                 ("7227", "Drosophila_melanogaster", 2, "KJ947872.2", 30)]
 """
+
 """
 species_Info = [("5478", "Candida_glabrata", 1, "mito_C_glabrata_CBS138", 10000000000000000),
                 ("5476", "Candida_albicans", 2, "Ca22chrM_C_albicans_SC5314", 10000000000000000),
                 ("5207", "Cryptococcus_neoformans", 1, "CP003834.1", 10000000000000000),
                 ("3702", "Arabidopsis_thaliana", 2, "BK010421.1,AP000423.1", 30),
                 ("7227", "Drosophila_melanogaster", 2, "KJ947872.2", 30)]
+"""
+
 
 """
 species_Info = [("5207", "Cryptococcus_neoformans", 1, "CP003834.1", 10000000000000000),
                 ("3702", "Arabidopsis_thaliana", 2, "BK010421.1,AP000423.1", 30),
                 ("7227", "Drosophila_melanogaster", 2, "KJ947872.2", 30)]
 
-
+"""
 
 """
 species_Info = [("5478", "Candida_glabrata", 1, "mito_C_glabrata_CBS138", 10000000000000000),
@@ -126,7 +129,7 @@ species_Info = [
 
 #species_Info = [("3702", "Arabidopsis_thaliana", 2, "BK010421.1,AP000423.1", 30)]
 
-#species_Info = [("7227", "Drosophila_melanogaster", 2, "KJ947872.2", 30)]
+species_Info = [("7227", "Drosophila_melanogaster", 2, "KJ947872.2", 30)]
 
 """
 species_Info = [("3702", "Arabidopsis_thaliana", 2, "BK010421.1,AP000423.1", 30),
@@ -292,6 +295,67 @@ def update_df_resources_nord3Runs_testingAccuracy(df_resources_file, outdir_perS
     return df_resources, roundID
 
 
+def keep_STDfiles_nord3Runs_testingAccuracy(all_STDs_dir, outdir_perSVade, spName):
+
+    """This function records all the new files from outdir_perSVade testing accuracy"""
+
+    fun.make_folder(all_STDs_dir)
+
+    # define the dirs
+    testing_Accuracy_dir = "%s/testing_Accuracy"%outdir_perSVade
+    stddir = "%s/STDfiles"%testing_Accuracy_dir
+
+    # get the current STD file metadata. This indicates the run
+    stdout_report = "%s/%s_jobs_stdout.txt"%(stddir, spName)
+    stderr_report = "%s/%s_jobs_stderr.txt"%(stddir, spName)
+
+    if fun.file_is_empty(stdout_report): return
+
+    jobIDs = {int(l.split("Subject: Job ")[1].split("[")[0]) for l in open(stdout_report, "r").readlines() if l.startswith("Subject:")}
+    if len(jobIDs)!=1: raise ValueError("There has to be some jobID")
+    jobID = next(iter(jobIDs))
+
+    taskIDs =  {int(l.split("Subject: Job ")[1].split("[")[1].split("]")[0]) for l in open(stdout_report, "r").readlines() if l.startswith("Subject:")}
+    if taskIDs!=set(range(1, max(taskIDs)+1)): raise ValueError("The task IDs should be from 1 to the max")
+
+    nlines = len(open(stdout_report, "r").readlines())
+        
+    # define some destination files
+    prefix_stds = "%s/%s_job=%i_tasks=[1-%i]_%ilines"%(all_STDs_dir, spName, jobID, max(taskIDs), nlines)
+    dest_stdout_report = "%s_stdout_report.txt"%prefix_stds
+    dest_stderr_report = "%s_stderr_report.txt"%prefix_stds
+    dest_jobs_file = "%s_jobsfile.txt"%prefix_stds
+    dest_jobEndingStatus_file = "%s_jobEnding.txt"%prefix_stds
+
+    # if the dest report has not been written, continue
+    if fun.file_is_empty(dest_stdout_report):
+        print("getting STDs")
+
+        # define the jobs file
+        jobs_file = "%s/jobs.testingRealDataAccuracy"%(testing_Accuracy_dir)
+        if fun.file_is_empty(jobs_file): raise ValueError("The jobs file should exist")
+
+        # define a file for each job that indicates whether it finished or it was ran
+        dict_data = {}
+        for taskID, task_str in enumerate(open(jobs_file, "r").readlines()):
+
+            # get the outdir
+            outdir_task = task_str.split("--outdir ")[1].split()[0].replace("/gpfs/projects/bsc40/mschikora", ParentDir)
+
+            # define the exit stats
+            perSVade_was_ran = os.path.isdir(outdir_task) and any([f not in {"aligned_reads.bam.sorted", "aligned_reads.bam.sorted.bai"} for f in os.listdir(outdir_task)])
+            perSVade_finished = (not fun.file_is_empty("%s/perSVade_finished_file.txt"%(outdir_task)))
+
+            dict_data[taskID] = {"taskID":taskID+1, "outdir_task":outdir_task, "perSVade_was_ran":perSVade_was_ran, "perSVade_finished":perSVade_finished, "dest_stdout":fun.get_file(dest_stdout_report), "jobs_file":fun.get_file(dest_jobs_file)}
+
+        df_data = pd.DataFrame(dict_data).transpose()
+        fun.save_df_as_tab(df_data, dest_jobEndingStatus_file)
+
+        # at the end keep the report with all files
+        fun.rsync_file(jobs_file, dest_jobs_file)
+        fun.rsync_file(stderr_report, dest_stderr_report)
+        fun.rsync_file(stdout_report, dest_stdout_report)
+        
 def get_goldenSetTable_Cglabrata(CurDir):
 
     """Generates a table with the golden set reads for C. glabrata"""
