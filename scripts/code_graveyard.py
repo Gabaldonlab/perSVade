@@ -16762,3 +16762,228 @@ def download_srr_with_prefetch(srr, SRRfile, replace=False):
     remove_file(prefetch_std_copy)
 
     return SRRfile
+
+####### ONE SAMPLE
+
+
+def report_accuracy_golden_set_reportAccuracy(dict_paths, outdir, reference_genome, threads=4, replace=False, run_in_parallel=True):
+
+    """Generates the plots of the golden set analysis given a path to the already generated dirs"""
+
+    ######### GET A DF WITH THE ACCURACY OF SEVERAL PERSVADE RUNS ON SEVERAL COMBINATIONS OF REAL DATA ########
+
+    df_accuracy_perSVade_vs_longReads_file = "%s/df_accuracy_perSVade_vs_longReads.tab"%outdir
+    #remove_file(df_accuracy_perSVade_vs_longReads_file); sys.exit(0) # debug
+
+    if file_is_empty(df_accuracy_perSVade_vs_longReads_file) or replace is True:
+
+        # map each type of perSVade running to the final set of svs
+        typeRun_to_svtype_to_svDF = {typeRun : {svtype : get_tab_as_df_or_empty_df(svfile) for svtype, svfile in get_svtype_to_svfile_and_df_gridss_from_perSVade_outdir(dict_paths["perSVade_outdir_%s"%typeRun], reference_genome, skip_df_gridssObtention=True)[0].items()} for typeRun in ["fast", "uniform", "realSVs", "arroundRepeats", "arroundHomRegions"]}
+
+        # make sure that an example bedpe is properly sorted
+        bedpe_fields = ["chrom1", "start1", "end1", "chrom2", "start2", "end2", "ID", "score", "strand1", "strand2"]
+        bedpe_file = "%s/SVdetection_output/final_gridss_running/gridss_output.filt.bedpe"%(dict_paths["perSVade_outdir_uniform"])
+        if not file_is_empty(bedpe_file):
+            df_bedpe = pd.read_csv(bedpe_file, sep="\t", names=bedpe_fields, header=-1)
+            if any(df_bedpe.chrom1>df_bedpe.chrom2): raise ValueError("The chrom2 should be always after chrom2 in alphaberic order")
+        
+        # define parms
+        min_svim_QUAL = 2
+
+        # get the svim and sniffles dfs
+        svim_df = get_svim_as_df(dict_paths["svim_outdir"], reference_genome, min_svim_QUAL)
+        sniffles_df = get_sniffles_as_df(dict_paths["sniffles_outdir"], reference_genome)
+
+        # define filter parms
+        all_min_QUAL_svim = [3, 5, 7, 10, 12, 15, 20, 30, 40, 50, 60]
+        max_sniffles_RE = np.percentile(sniffles_df.INFO_RE, 90)
+
+        # define an outdir for the filtering
+        outdir_calculating_accuracy = "%s/calculating_accuracy_perSVade_vs_longReads"%outdir
+        if replace is True: delete_folder(outdir_calculating_accuracy)
+        #delete_folder(outdir_calculating_accuracy) # debug
+        make_folder(outdir_calculating_accuracy)
+
+        # define the sorted bam of the long reads
+        sorted_bam_longReads =  "%s/aligned_reads.sorted.bam"%dict_paths["svim_outdir"]
+
+
+        addPctOverlap50pctToFiltersGoldenSet
+
+        # define several inputs for the function get_df_accuracy_perSVade_runs_vs_longReads_oneFilterSet
+        inputs_fn = [(typeRun_to_svtype_to_svDF, min_QUAL_svim, min_RE_sniffles, filter_IMPRECISE_sniffles, svim_df, sniffles_df, outdir_calculating_accuracy, sorted_bam_longReads, reference_genome, tol_bp) for min_QUAL_svim in all_min_QUAL_svim for min_RE_sniffles in np.linspace(min(sniffles_df.INFO_RE), max_sniffles_RE, 6) for filter_IMPRECISE_sniffles in [True] for tol_bp in [50, 500, 1000]]
+
+        inputs_fn = [tuple(list(x)+[I]) for I,x in enumerate(inputs_fn)]
+
+        # test accuracy on several parameters in parallel
+        print_if_verbose("Testing the accuracy on real Vars for %i parameter combinations"%len(inputs_fn))
+        
+        if run_in_parallel is False: all_accuracy_dfs = list(map(lambda x: get_df_accuracy_perSVade_runs_vs_longReads_oneFilterSet(x[0], x[1], x[2], x[3], x[4], x[5], x[6], x[7], x[8], x[9], x[10]), inputs_fn))
+
+        else:
+
+            with multiproc.Pool(threads) as pool:
+                all_accuracy_dfs = pool.starmap(get_df_accuracy_perSVade_runs_vs_longReads_oneFilterSet, inputs_fn)
+                
+                pool.close()
+                pool.terminate()
+
+        # get the accuracy df
+        df_accuracy_perSVade_vs_longReads = pd.concat(all_accuracy_dfs)
+
+        # clean
+        delete_folder(outdir_calculating_accuracy)
+
+        # save df
+        save_df_as_tab(df_accuracy_perSVade_vs_longReads, df_accuracy_perSVade_vs_longReads_file)
+
+    # load
+    df_accuracy_perSVade_vs_longReads = get_tab_as_df_or_empty_df(df_accuracy_perSVade_vs_longReads_file)
+
+    ###########################################################################################################
+
+    ######## GENERATE REPORTING PLOTS ########
+
+    # define the dir
+    PlotsDir = "%s/plots"%outdir; make_folder(PlotsDir)
+
+    # plot the accuracy of each perSVade configuration on long-read based calls
+    plot_accuracy_perSVade_vs_longReads(df_accuracy_perSVade_vs_longReads, PlotsDir)
+
+    # plot the cross accuracy between SNIFFLES and SVIM
+    #plot_accuracy_SNIFFLES_vs_SVIM_perSVade_representation(df_accuracy_perSVade_vs_longReads, PlotsDir)
+
+    sys.exit(0)
+
+
+
+
+    print(df_accuracy_perSVade_vs_longReads)
+
+    ###########################################
+
+    jkadhgahjda
+
+
+
+
+def plot_accuracy_perSVade_vs_longReads(df_accuracy_all, PlotsDir, min_nvars_to_consider_svtype=5):
+
+    """Plots a matrix plot were the columns are svtypes and the rows are different sets of 'true vars' """
+
+    """
+
+    Index(['FN', 'FP', 'Fvalue', 'TP', 'TP_predictedIDs',
+       'false_negatives_knownIDs', 'false_positives_predictedIDs', 'nevents',
+       'precision', 'recall', 'svtype', 'true_positives_knownIDs',
+       'true_positives_predictedIDs', 
+
+       'comparisonID', 'remaining_treatment',
+       'filterID', 'min_QUAL_svim', 'min_RE_sniffles',
+       'filter_IMPRECISE_sniffles', 'tol_bp', 'pct_overlap',
+       'type_SVs_longReads', 'sampleID'],
+
+    """
+    print_if_verbose("Testing how perSVade works on different datasets")
+
+    # keep only those comparisons that are from the perSVade vs long reads
+    df_accuracy = df_accuracy_all[df_accuracy_all.comparisonID.apply(lambda x: x.startswith("perSVade-"))]
+    
+    # add fields
+    df_accuracy["type_RealVars"] = df_accuracy.comparisonID.apply(lambda x: x.split("_vs_")[1])
+    df_accuracy["perSVade_parameters"] = df_accuracy.comparisonID.apply(lambda x: x.split("_vs_")[0])
+    df_accuracy["tolerance"] = "bp=" + df_accuracy.tol_bp.apply(str) + ";pct=" + df_accuracy.pct_overlap.apply(str)
+
+    # define groups
+    all_GTs_longReads = sorted(set(df_accuracy.type_SVs_longReads))
+    all_types_RealVars = sorted(set(df_accuracy.type_RealVars))
+    all_svtypes = sorted(set(df_accuracy.svtype))
+    all_accuracy_fields = ["recall", "precision", "Fvalue"]
+    all_tolerances = list(reversed(sorted(set(df_accuracy.tolerance))))
+    all_remaining_treatment = sorted(set(df_accuracy.remaining_treatment))
+
+    # make one figure for each type RealVars,  accuracy measure, genotypes_longReadsSVs, svtype and remaining_treatment
+    for type_RealVars in all_types_RealVars:
+        for genotypes_longReadsSVs in all_GTs_longReads:
+            for svtype in all_svtypes:
+                for remaining_treatment in all_remaining_treatment:
+                    
+        
+                # get the plot of the figure
+                df_plot_fig = df_accuracy[(df_accuracy.type_RealVars==type_RealVars) & (df_accuracy.type_SVs_longReads==genotypes_longReadsSVs)]
+
+                for accuracy_f in all_accuracy_fields:
+                    print_if_verbose(type_RealVars, genotypes_longReadsSVs, accuracy_f)
+                
+                    # redefine the svtypes that will go to this figure 
+                    all_svtypes_fig = [s for s in all_svtypes if any(df_plot_fig[df_plot_fig.svtype==s].nevents>=min_nvars_to_consider_svtype)]
+                    if len(all_svtypes_fig)==0: all_svtypes_fig = all_svtypes
+
+                    # define the max accuracy
+                    max_accuracy = max(df_plot_fig[df_plot_fig.svtype.isin(set(all_svtypes_fig))][accuracy_f])
+
+                    # init fig
+                    ncols = len(all_svtypes_fig)
+                    nrows = len(all_tol_bp)
+                    fig = plt.figure(figsize=(ncols*1.9, nrows*1.9)); I=0
+
+                    for Itol, tol_bp in enumerate(all_tol_bp):
+                        for Isv, svtype in enumerate(all_svtypes_fig):
+
+                            # define the optimum number as the filterID where there is the best overlap between SNIFFLES and SVIM
+                            def calculate_Fvalue_Fvalues(f1, f2):
+                                if f1<=0.0 or f2<=0.0: return 0.0
+                                else: return (2*f1*f2)/(f1+f2)
+
+                            filterID_to_meanFvalue = df_accuracy_all[(df_accuracy_all.svtype==svtype) & (df_accuracy_all.comparisonID.isin({"SVIM_vs_SNIFFLES", "SNIFFLES_vs_SVIM"})) & (df_accuracy_all.tol_bp==tol_bp)].groupby("filterID").apply(lambda df_ID: calculate_Fvalue_Fvalues(df_ID.Fvalue.iloc[0], df_ID.Fvalue.iloc[1]))
+                            optimum_filterID = filterID_to_meanFvalue.sort_values().index[-1]
+
+                            # init ax
+                            ax = plt.subplot(nrows, ncols, I+1); I+=1
+
+                            # get the df
+                            df_plot = df_plot_fig[(df_plot_fig.svtype==svtype) & (df_plot_fig.tol_bp==tol_bp)].sort_values(by=["nevents"])
+
+                            # plot main line
+                            typeRun_to_color = {"perSVade-uniform":"blue", "perSVade-fast":"gray", "perSVade-realSVs":"red", 'perSVade-arroundHomRegions':"olive", 'perSVade-arroundRepeats':"black"}
+
+                            typeRun_to_marker = {"perSVade-uniform":"^", "perSVade-fast":"s", "perSVade-realSVs":"o", 'perSVade-arroundHomRegions':"v", 'perSVade-arroundRepeats':"*"}
+
+                            #ax = sns.scatterplot(data=df_plot, x="nevents", y=accuracy_f, hue="perSVade_parameters", style="perSVade_parameters", palette=typeRun_to_color, alpha=.6, edgecolors="None")
+                            ax = sns.lineplot(data=df_plot, x="nevents", y=accuracy_f, hue="perSVade_parameters", style="perSVade_parameters", palette=typeRun_to_color,  markers=typeRun_to_marker, dashes=False, ci="sd", markeredgecolor=None, linewidth=1.8, markersize=4, alpha=.7, markeredgewidth=0)
+
+                            # outline the best filterID
+                            df_optimum = df_plot[df_plot.filterID==optimum_filterID]
+                            if len(df_optimum)!=len(set(df_plot.perSVade_parameters)): raise ValueError("the optimum filter ID is wrong")
+                            #plt.axvline(df_optimum.nevents.iloc[0], color="k", linestyle="--", linewidth=.9, zorder=10)
+                            
+                            for perSVade_parm in df_optimum.perSVade_parameters:
+                                series_parm = df_optimum[df_optimum.perSVade_parameters==perSVade_parm].iloc[0]
+                                plt.scatter([series_parm.nevents], [series_parm[accuracy_f]], facecolors="None", s=110, edgecolors=typeRun_to_color[perSVade_parm],  lw=1.5, marker=typeRun_to_marker[perSVade_parm], zorder=10)
+                            
+                            # format legend
+                            if Isv!=(len(all_svtypes_fig)-1): ax.get_legend().remove()
+                            else: ax.legend(bbox_to_anchor=(2.7,1))
+                                    
+                            # title
+                            svtype_to_shortSVtype = {"deletions":"del", "tandemDuplications":"tan", "insertions":"ins", "translocations":"tra", "inversions":"inv", "integrated":"all", "remaining":"rem"}
+                            if Itol==0: ax.set_title("%s"%(svtype_to_shortSVtype[svtype]))
+
+                            # format axes
+                            if Isv!=0: 
+                                ax.set_yticklabels([])
+                                ax.set_ylabel("")
+
+                            else: ax.set_ylabel("%s (tol=%i)"%(accuracy_f, tol_bp))
+
+                            ax.set_ylim([0, max_accuracy+0.1])
+
+                            if Itol!=(len(all_tol_bp)-1):
+                                #ax.set_xticklabels([])
+                                ax.set_xlabel("")
+                            
+                    # save the fig
+                    plt.subplots_adjust(wspace=0.08, hspace=0.17)
+                    fig.savefig("%s/perSVade_vs_longReads_%srealVars_%s_%s.pdf"%(PlotsDir, type_RealVars, accuracy_f, genotypes_longReadsSVs), bbox_inches='tight')
+                    plt.close(fig)
+
