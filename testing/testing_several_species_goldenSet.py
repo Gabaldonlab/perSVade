@@ -34,7 +34,7 @@ import testing_functions as test_fun
 if running_in_cluster is True:
 
     cluster_name = fun.get_current_clusterName_mareNostrum()
-    if cluster_name=="MN4": threads = 48
+    if cluster_name=="MN4": threads = 24
     elif cluster_name=="Nord3": threads = 16
     else: raise ValueError("cluster could not be identified")
 
@@ -107,8 +107,8 @@ for taxID, spName, ploidy, mitochondrial_chromosome, max_coverage_sra_reads in t
 
     cmd_output = "%s/cmd_testing.std"%outdir_perSVade
     print("running std into %s"%cmd_output)
-    #fun.run_cmd("%s > %s 2>&1"%(cmd, cmd_output)) # run with stdout
-    fun.run_cmd(cmd); continue # run locally 
+    fun.run_cmd("%s > %s 2>&1"%(cmd, cmd_output)) # run with stdout
+    #fun.run_cmd(cmd); continue # run locally 
  	
  	###### RUN JOB ARRAYS ######
 
