@@ -11372,7 +11372,7 @@ def report_accuracy_golden_set_runJobs(goldenSet_table, outdir, reference_genome
     #########################
     #########################
 
-    sys.exit(0) # debug
+    #sys.exit(0) # debug
 
     return final_dict
 
@@ -11707,322 +11707,191 @@ def get_svtype_to_svDF_from_svimSniffles_vcf_df(vcf_df, outdir, sorted_bam_longR
 
         # merge
         final_svDF = vcf_df_svDF.append(bndBased_svDF)
-        if len(final_svDF)>0: final_svtype_to_svDF[svtype] = final_svDF
+        #if len(final_svDF)>0: final_svtype_to_svDF[svtype] = final_svDF
+        final_svtype_to_svDF[svtype] = final_svDF
 
     ################################################
 
     return final_svtype_to_svDF
 
-def get_df_accuracy_perSVade_runs_vs_longReads_oneFilterSet(typeRun_to_svtype_to_svDF_original, min_QUAL_svim, min_RE_sniffles, filter_IMPRECISE_sniffles, svim_df, sniffles_df, outdir_all, sorted_bam_longReads, reference_genome, tol_bp, pct_overlap, type_SVs_longReads, filterID):
+def get_svtype_to_svDF_withFiltering(min_val_filt, tol_bp, type_caller, min_val_field, vars_df, outdir_all, sorted_bam_longReads, reference_genome, type_SVs_longReads, filter_IMPRECISE_sniffles, remaining_treatment, filterID):
 
-    """Takes some perSVade-called vars and the output of svim and sniffles as dfs and a set of filters for the latter. It defines an svtype_to_svDF overlapping variants (by taking the known vars and integrating the BNDs with clove+own scripts) and returns the  """
-
-    print_if_verbose("Working on filter set %i"%(filterID+1))
+    """THis funtion takes a df with vars, runs clove and returns an svtype_to_svDF"""
 
     # define the outdir of this parameter combination
-    outdir = "%s/parameters_%.2f_%.2f_%s_%i_%.2f_%s"%(outdir_all, min_QUAL_svim, min_RE_sniffles, filter_IMPRECISE_sniffles, tol_bp, pct_overlap, type_SVs_longReads); make_folder(outdir)
+    outdir = "%s/parameters_%s_%s_%s_%s_%s_%s_%s"%(outdir_all, min_val_filt, tol_bp, type_caller, min_val_field, type_SVs_longReads, filter_IMPRECISE_sniffles, remaining_treatment); make_folder(outdir)
 
-    # define the df_accuracy_file
-    df_accuracy_file = "%s/df_accuracy.py"%outdir
-    if file_is_empty(df_accuracy_file):
+    # define the genotypes
+    type_SVs_longReads_to_GTs = {"all_SVs" : {"homozygous", "heterozygous", "not_called"}}
+    GTs = type_SVs_longReads_to_GTs[type_SVs_longReads]
+    vars_df = vars_df[vars_df.GT.isin(GTs)]
 
-        # define a fileprefix, which will be used to write the tmpdirs of the accuracy measurements
-        fileprefix_accuracy = "%s_measuring_accuracy"%outdir
+    # get the filtered dfs by min_val_filt
+    vars_df = vars_df[(vars_df[min_val_field]>=min_val_filt)]
 
-        # init df accuracy
+    # if sniffles, get the filter_IMPRECISE_sniffles
+    if type_caller=="sniffles" and filter_IMPRECISE_sniffles is True: vars_df = vars_df[vars_df.INFO_misc=="PRECISE"]
+
+    # get the svtype_to_svDF
+    svtype_to_svDF =  get_svtype_to_svDF_from_svimSniffles_vcf_df(vars_df[["perSVade_svtype", "perSVade_dict"]], outdir, sorted_bam_longReads, reference_genome, tol_bp)   
+
+    # remove the "remaining if specified"
+    remaining_svDF_fields = svtype_to_fieldsDict["remaining"]["all_fields"]
+    if remaining_treatment=="drop": svtype_to_svDF["remaining"] = pd.DataFrame(columns=remaining_svDF_fields)
+    elif remaining_treatment!="keep": raise ValueError("%s is not a valid remaining_treatment"%remaining_treatment) 
+
+    return filterID, type_caller, min_val_filt, svtype_to_svDF
+
+def process_list_tuples_svtype_to_svDF_ON_to_add_commonID(list_tuples_svtype_to_svDF_ON, outdir_SVIMandSNIFFLEScalling,  tol_bp, pct_overlap):
+
+    """This function processes list_tuples_svtype_to_svDF_ON to add a commonID in each svDF"""
+    
+    # define a set of overlapping variants 
+    all_svtypes_called = ['translocations', 'tandemDuplications', 'remaining', 'inversions', 'deletions', 'insertions']
+    svtype_to_ID_to_commonID = {}
+    for svtype in all_svtypes_called:
+
+        # get the concatenated df for each caller
+        all_svDF_svim = pd.concat([x[3][svtype] for x in list_tuples_svtype_to_svDF_ON if x[1]=="svim"]).drop_duplicates()
+        all_svDF_sniffles = pd.concat([x[3][svtype] for x in list_tuples_svtype_to_svDF_ON if x[1]=="sniffles"]).drop_duplicates()
+
+        # define a merged unique df where the SVIM SVs that are also found in SNIFFLES get merged
+        if len(all_svDF_sniffles)>0 and len(all_svDF_svim)>0:
+
+            # define the dfs with the overlaps
+            equal_fields = svtype_to_fieldsDict[svtype]["equal_fields"]
+            approximate_fields = svtype_to_fieldsDict[svtype]["approximate_fields"]
+            chromField_to_posFields = svtype_to_fieldsDict[svtype]["chromField_to_posFields"]
+
+            tmpdir = "%s/calculating_SVIMvsSNIFFLES_overlaps"%outdir_SVIMandSNIFFLEScalling
+            all_svDF_svim, all_svDF_sniffles = get_df_known_with_predictedSV_IDs(all_svDF_svim, all_svDF_sniffles, equal_fields, approximate_fields, chromField_to_posFields, tol_bp, pct_overlap, tmpdir, "ID", "ID")
+
+            # add the common ID (sniffles one)
+            def get_commonID_all_svDF_svim_r(r):
+                if len(r.predictedSV_IDs)>0: return next(iter(r.predictedSV_IDs))
+                else: return r.ID
+
+            all_svDF_svim["commonID"] = all_svDF_svim.apply(get_commonID_all_svDF_svim_r, axis=1)
+            all_svDF_sniffles["commonID"] = all_svDF_sniffles.ID
+
+            # merge
+            all_svDF_svim = all_svDF_svim[svtype_to_fieldsDict[svtype]["all_fields"] + ["commonID"]]
+            all_svDF = all_svDF_svim.append(all_svDF_sniffles)
+
+        else: 
+
+            all_svDF = all_svDF_svim.append(all_svDF_sniffles)
+            all_svDF["commonID"] = all_svDF.ID
+        
+        # map each sv ID to a common ID
+        ID_to_commonID = dict(all_svDF.set_index("ID")["commonID"])
+        if len(ID_to_commonID)!=len(all_svDF): raise ValueError("The IDs should be unique")
+        svtype_to_ID_to_commonID[svtype] = ID_to_commonID
+
+
+
+        # add the common ID to list_tuples_svtype_to_svDF_ON
+        #for filterID, type_caller, min_val_filt, svtype_to_svDF
+
+
+        print(svtype_to_ID_to_commonID)
+
+        adkjdkahdkadhkd
+
+
+
+
+def get_df_accuracy_perSVade_vs_longReads_one_sample(sampleID, outdir_shortVsLong, dict_paths, df_accuracy_perSVade_vs_longReads_file, reference_genome, replace=False,  threads=4, run_in_parallel=False):
+
+    """This function returns a df with the accuracy for several thresholds of overlapping SVs when testing perSVade vs ON reads calling"""
+
+    if file_is_empty(df_accuracy_perSVade_vs_longReads_file) or replace is True:
+
+        # define parms
+        min_svim_QUAL = 2
+
+        # get the svim and sniffles dfs
+        svim_df = get_svim_as_df(dict_paths["svim_outdir"], reference_genome, min_svim_QUAL)
+        sniffles_df = get_sniffles_as_df(dict_paths["sniffles_outdir"], reference_genome)
+
+        # define all the interesting simulations
+        all_types_simulations =  ["fast", "uniform", "realSVs", "arroundRepeats", "arroundHomRegions"]
+
+        # define SVIM and SNIFFLES filters (same number each)
+        all_min_QUAL_svim = [3, 5, 7, 10, 12, 15, 20, 30, 40, 50] # max of 100
+        all_min_RE_sniffles = np.linspace(min(sniffles_df.INFO_RE), np.percentile(sniffles_df.INFO_RE, 90), len(all_min_QUAL_svim))
+
+        # define necessary things for clove runs
+        sorted_bam_longReads =  "%s/aligned_reads.sorted.bam"%dict_paths["svim_outdir"]
+
+        # define an outdir for the filtering
+        outdir_calculating_accuracy = "%s/calculating_accuracy_perSVade_vs_longReads_%s"%(outdir_shortVsLong, sampleID)
+        if replace is True: delete_folder(outdir_calculating_accuracy)
+        #delete_folder(outdir_calculating_accuracy) # debug
+        make_folder(outdir_calculating_accuracy)
+
+        # init df 
         df_accuracy_all = pd.DataFrame()
 
-        # define the genotypes
-        type_SVs_longReads_to_GTs = {"all_SVs" : {"homozygous", "heterozygous", "not_called"}}
-        GTs = type_SVs_longReads_to_GTs[type_SVs_longReads]
-
-        # get the filtered dfs
-        svim_df_filt = svim_df[(svim_df.QUAL>=min_QUAL_svim) & (svim_df.GT.isin(GTs))]
-        sniffles_df_filt = sniffles_df[(sniffles_df.INFO_RE>=min_RE_sniffles) & (sniffles_df.GT.isin(GTs))]
-        if filter_IMPRECISE_sniffles is True: sniffles_df_filt = sniffles_df_filt[sniffles_df_filt.INFO_misc=="PRECISE"]
-
-        # get the svtype_to_svDF for each long SV caller
-        svim_svtype_to_svDF_original =  get_svtype_to_svDF_from_svimSniffles_vcf_df(svim_df_filt[["perSVade_svtype", "perSVade_dict"]], "%s/getting_perSVadeLike_svim"%outdir, sorted_bam_longReads, reference_genome, tol_bp)    
-        sniffles_svtype_to_svDF_original =  get_svtype_to_svDF_from_svimSniffles_vcf_df(sniffles_df_filt[["perSVade_svtype", "perSVade_dict"]], "%s/getting_perSVadeLike_sniffles"%outdir, sorted_bam_longReads, reference_genome, tol_bp)
+        # go through different filters
+        for type_SVs_longReads in ["all_SVs"]:
+            for filter_IMPRECISE_sniffles in [True]:
+                for remaining_treatment in ["drop"]: # keep or drop
+                    for tol_bp in [50, 500]:
 
-        # define the 'remaining SV'
-        remaining_svDF_fields = svtype_to_fieldsDict["remaining"]["all_fields"]
+                            print_if_verbose(sampleID, type_SVs_longReads, filter_IMPRECISE_sniffles, remaining_treatment, tol_bp)
 
-        # go through keeping remaining or not (The 'drop has to be at the end')
-        for remaining_treatment in ["keep", "drop"]:
+                            ########### DEFINE ON VARIANTS ##########
 
-            # keep the svDFs
-            svim_svtype_to_svDF = cp.deepcopy(svim_svtype_to_svDF_original)
-            sniffles_svtype_to_svDF = cp.deepcopy(sniffles_svtype_to_svDF_original)
-            typeRun_to_svtype_to_svDF = cp.deepcopy(typeRun_to_svtype_to_svDF_original)
+                            # define an outdir
+                            outdir_SVIMandSNIFFLEScalling = "%s/svim_and_snifflesCalling_%s_%s_%s_%s"%(outdir_calculating_accuracy, type_SVs_longReads, filter_IMPRECISE_sniffles, remaining_treatment, tol_bp); make_folder(outdir_SVIMandSNIFFLEScalling)
 
-            # drop 'remaining SVs' if indicated
-            if remaining_treatment=="drop":
-                svim_svtype_to_svDF["remaining"] = pd.DataFrame(columns=remaining_svDF_fields)
-                sniffles_svtype_to_svDF["remaining"] = pd.DataFrame(columns=remaining_svDF_fields)
+                            # define the inputs of 
+                            svim_inputs = [(min_QUAL_svim, tol_bp, "svim", "QUAL", svim_df, outdir_SVIMandSNIFFLEScalling, sorted_bam_longReads, reference_genome, type_SVs_longReads, filter_IMPRECISE_sniffles, remaining_treatment) for min_QUAL_svim in all_min_QUAL_svim]
 
-            # get the accuracy of each of the long read callers on the other with the benchmark_processedSVs_against_knownSVs_inHouse
-            df_accuracy_SVIMvsSNIFFLES = benchmark_processedSVs_against_knownSVs_inHouse(svim_svtype_to_svDF, sniffles_svtype_to_svDF, fileprefix_accuracy, replace=False, add_integrated_benchmarking=True, consider_all_svtypes=True, tol_bp=tol_bp, fast_mode=True, pct_overlap=pct_overlap)
-            df_accuracy_SVIMvsSNIFFLES["comparisonID"] = "SVIM_vs_SNIFFLES"
+                            sniffles_inputs = [(min_RE_sniffles, tol_bp, "sniffles", "INFO_RE", sniffles_df, outdir_SVIMandSNIFFLEScalling, sorted_bam_longReads, reference_genome, type_SVs_longReads, filter_IMPRECISE_sniffles, remaining_treatment) for min_RE_sniffles in all_min_RE_sniffles]
 
-            df_accuracy_SNIFFLESvsSVIM = benchmark_processedSVs_against_knownSVs_inHouse(sniffles_svtype_to_svDF, svim_svtype_to_svDF, fileprefix_accuracy, replace=False, add_integrated_benchmarking=True, consider_all_svtypes=True, tol_bp=tol_bp, fast_mode=True, pct_overlap=pct_overlap)
-            df_accuracy_SNIFFLESvsSVIM["comparisonID"] = "SNIFFLES_vs_SVIM"
+                            inputs_fn = svim_inputs + sniffles_inputs
+                            inputs_fn = [tuple(list(x)+[I]) for I,x in enumerate(inputs_fn)]
 
-            # init the dfs_to_concat list
-            dfs_to_concat = [df_accuracy_SVIMvsSNIFFLES, df_accuracy_SNIFFLESvsSVIM]
+                            # run fn
+                            print_if_verbose("getting SVIM and SNIFFLES sv_to_svdf for %i filters"%(len(inputs_fn)))
+                            
+                            if run_in_parallel is False: list_tuples_svtype_to_svDF_ON = list(map(lambda x: get_svtype_to_svDF_withFiltering(x[0], x[1], x[2], x[3], x[4], x[5], x[6], x[7], x[8], x[9], x[10], x[11]), inputs_fn))
 
-            # get the common vars between SVIM and SNIFFLES
-            bothLongReads_svtype_to_svDF = {}
-            for svtype, svDF in svim_svtype_to_svDF.items():
-                true_positive_IDs = set.union(*df_accuracy_SVIMvsSNIFFLES[df_accuracy_SVIMvsSNIFFLES.svtype==svtype].true_positives_predictedIDs.apply(lambda ids: set(ids.split("||")))).difference({""})
-                missing_IDs = true_positive_IDs.difference(set(svDF.ID))
-                if len(missing_IDs)>0: raise ValueError("There are missing IDs: %s"%missing_IDs)
-                bothLongReads_svtype_to_svDF[svtype] = svDF[svDF.ID.isin(true_positive_IDs)]
-
-            # get all the vars called by SVIM and SNUIFFLES
-            anyLongReads_svtype_to_svDF = {}
-            all_svtypes = set(svim_svtype_to_svDF.keys()).union(sniffles_svtype_to_svDF.keys())
-            for svtype in all_svtypes:
-                svtype_fields = svtype_to_fieldsDict[svtype]["all_fields"]
-
-                if svtype in svim_svtype_to_svDF: svim_svDF = svim_svtype_to_svDF[svtype][svtype_fields]
-                else: svim_svDF = pd.DataFrame(columns=svtype_fields)
-
-                if svtype in sniffles_svtype_to_svDF: sniffles_svDF = sniffles_svtype_to_svDF[svtype][svtype_fields]
-                else: sniffles_svDF = pd.DataFrame(columns=svtype_fields)
-
-                anyLongReads_svtype_to_svDF[svtype] = svim_svDF.append(sniffles_svDF)
+                            else:
+                                with multiproc.Pool(threads) as pool:
+                                    list_tuples_svtype_to_svDF_ON = pool.starmap(get_svtype_to_svDF_withFiltering, inputs_fn)
+                                    
+                                    pool.close()
+                                    pool.terminate()
 
-            # get the accuracy of each perSVade run against the long reads
-            for typeRun_perSVade, svtype_to_svDF_perSVade in typeRun_to_svtype_to_svDF.items():
-
-                # drop 'remaining SVs' if indicated
-                if remaining_treatment=="drop":
-                    svtype_to_svDF_perSVade["remaining"] = pd.DataFrame(columns=remaining_svDF_fields)
-                    svtype_to_svDF_perSVade["remaining"] = pd.DataFrame(columns=remaining_svDF_fields)
+                            #########################################
 
-                # vs SVIM
-                df_perSVAde_vs_svim = benchmark_processedSVs_against_knownSVs_inHouse(svtype_to_svDF_perSVade, svim_svtype_to_svDF, fileprefix_accuracy, replace=False, add_integrated_benchmarking=True, consider_all_svtypes=True, tol_bp=tol_bp, fast_mode=True, pct_overlap=pct_overlap)
-                df_perSVAde_vs_svim["comparisonID"] = "perSVade-%s_vs_SVIM"%typeRun_perSVade
+                            # go through different pct_overlaps
+                            for pct_overlap in [0.5, 0.75]:
 
-                # VS SNIFFLES
-                df_perSVAde_vs_sniffles = benchmark_processedSVs_against_knownSVs_inHouse(svtype_to_svDF_perSVade, sniffles_svtype_to_svDF, fileprefix_accuracy, replace=False, add_integrated_benchmarking=True, consider_all_svtypes=True, tol_bp=tol_bp, fast_mode=True, pct_overlap=pct_overlap)
-                df_perSVAde_vs_sniffles["comparisonID"] = "perSVade-%s_vs_SNIFFLES"%typeRun_perSVade
+                                # get the commonID between svim and sniffles
+                                process_list_tuples_svtype_to_svDF_ON_to_add_commonID(list_tuples_svtype_to_svDF_ON, outdir_SVIMandSNIFFLEScalling,  tol_bp, pct_overlap)
 
-                # vs MERGED
-                df_perSVAde_vs_merged = benchmark_processedSVs_against_knownSVs_inHouse(svtype_to_svDF_perSVade, bothLongReads_svtype_to_svDF, fileprefix_accuracy, replace=False, add_integrated_benchmarking=True, consider_all_svtypes=True, tol_bp=tol_bp, fast_mode=True, pct_overlap=pct_overlap)
-                df_perSVAde_vs_merged["comparisonID"] = "perSVade-%s_vs_COMMON"%typeRun_perSVade
+                                adigdagdh
 
-                # vs ANY-CALLED
-                df_perSVAde_vs_union = benchmark_processedSVs_against_knownSVs_inHouse(svtype_to_svDF_perSVade, anyLongReads_svtype_to_svDF, fileprefix_accuracy, replace=False, add_integrated_benchmarking=True, consider_all_svtypes=True, tol_bp=tol_bp, fast_mode=True, pct_overlap=pct_overlap)
-                df_perSVAde_vs_union["comparisonID"] = "perSVade-%s_vs_UNION"%typeRun_perSVade
 
-                # keep
-                dfs_to_concat += [df_perSVAde_vs_svim, df_perSVAde_vs_sniffles, df_perSVAde_vs_merged, df_perSVAde_vs_union]
+                             
 
-            # integrate all the accuracy dfs into one df
-            df_accuracy = pd.concat(dfs_to_concat)
-
-            # add the remaining_treatment
-            df_accuracy["remaining_treatment"] = remaining_treatment
-            df_accuracy_all = df_accuracy_all.append(df_accuracy)
-
-        # add data about this filter set
-        df_accuracy_all["filterID"] = filterID
-        df_accuracy_all["min_QUAL_svim"] = min_QUAL_svim
-        df_accuracy_all["min_RE_sniffles"] = min_RE_sniffles
-        df_accuracy_all["filter_IMPRECISE_sniffles"] = filter_IMPRECISE_sniffles
-        df_accuracy_all["tol_bp"] = tol_bp
-        df_accuracy_all["pct_overlap"] = pct_overlap
-        df_accuracy_all["type_SVs_longReads"] =  type_SVs_longReads
 
-        # save
-        save_object(df_accuracy_all, df_accuracy_file)
 
-    # load
-    df_accuracy_all = load_object(df_accuracy_file)
+                            print(list_tuples_svtype_to_svDF_ON[0])
 
-    return df_accuracy_all
+                            dakhgahjadgjhagd
 
-def plot_accuracy_perSVade_vs_longReads(df_accuracy_all, PlotsDir, min_nvars=10):
+                            
 
-    """Plots a matrix plot were the columns are svtypes and the rows are different sets of 'true vars' """
+                            khadgdhjgadjhadg
 
-    """
+    df_accuracy_perSVade_vs_longReads = get_tab_as_df_or_empty_df(df_accuracy_perSVade_vs_longReads_file)
 
-    Index(['FN', 'FP', 'Fvalue', 'TP', 'TP_predictedIDs',
-       'false_negatives_knownIDs', 'false_positives_predictedIDs', 'nevents',
-       'precision', 'recall', 'svtype', 'true_positives_knownIDs',
-       'true_positives_predictedIDs', 
-
-       'comparisonID', 'remaining_treatment',
-       'filterID', 'min_QUAL_svim', 'min_RE_sniffles',
-       'filter_IMPRECISE_sniffles', 'tol_bp', 'pct_overlap',
-       'type_SVs_longReads', 'sampleID'],
-
-    """
-    print_if_verbose("Testing how perSVade works on different datasets")
-
-    # add fields to all dfs
-    df_accuracy_all["tolerance"] = "bp=" + df_accuracy_all.tol_bp.apply(str) + ";pct=" + df_accuracy_all.pct_overlap.apply(str)
-
-    # keep only those comparisons that are from the perSVade vs long reads
-    df_accuracy = df_accuracy_all[df_accuracy_all.comparisonID.apply(lambda x: x.startswith("perSVade-"))]
-    
-    # add fields
-    df_accuracy["type_RealVars"] = df_accuracy.comparisonID.apply(lambda x: x.split("_vs_")[1])
-    df_accuracy["perSVade_parameters"] = df_accuracy.comparisonID.apply(lambda x: x.split("_vs_")[0])
-
-    # define groups
-    all_GTs_longReads = sorted(set(df_accuracy.type_SVs_longReads))
-    
-    #all_types_RealVars = sorted(set(df_accuracy.type_RealVars))
-    all_types_RealVars = ['COMMON', 'UNION']
-
-    #all_svtypes = sorted(set(df_accuracy.svtype))
-    all_svtypes = ["integrated", "deletions"]
-    
-    #all_accuracy_fields = ["recall", "precision", "Fvalue"]
-    all_accuracy_fields = ["recall", "precision"]
-
-    #all_tolerances = list(reversed(sorted(set(df_accuracy.tolerance))))
-    all_tolerances = list(sorted(set(df_accuracy.tolerance)))
-
-    #all_remaining_treatment = sorted(set(df_accuracy.remaining_treatment))
-    all_remaining_treatment = ["drop"]
-
-    # make one figure for each type RealVars,  accuracy measure, genotypes_longReadsSVs, svtype and remaining_treatment
-    for type_RealVars in all_types_RealVars:
-        for genotypes_longReadsSVs in all_GTs_longReads:
-            for svtype in all_svtypes:
-                for remaining_treatment in all_remaining_treatment:
-
-                    # get the plot of the figure
-                    df_plot_fig = df_accuracy[(df_accuracy.type_RealVars==type_RealVars) & (df_accuracy.type_SVs_longReads==genotypes_longReadsSVs) & (df_accuracy.svtype==svtype) & (df_accuracy.remaining_treatment==remaining_treatment) & (df_accuracy.nevents>=min_nvars)]
-
-                    if len(df_plot_fig)==0: continue
-
-                    for accuracy_f in all_accuracy_fields:
-                        print_if_verbose(type_RealVars, genotypes_longReadsSVs, svtype, remaining_treatment, accuracy_f)
-                    
-                        # define the max accuracy
-                        max_accuracy = max(df_plot_fig[accuracy_f])
-
-                        # define the samples
-                        all_samples = sorted(set(df_plot_fig.sampleID))
-
-                        # init fig
-                        ncols = len(all_samples)
-                        nrows = len(all_tolerances)
-                        fig = plt.figure(figsize=(ncols*1.9, nrows*1.9)); I=0
-
-                        for Itol, tol in enumerate(all_tolerances):
-                            for Is, sampleID in enumerate(all_samples):
-
-                                # define the optimum number as the filterID where there is the best overlap between SNIFFLES and SVIM
-                                def calculate_Fvalue_Fvalues(f1, f2):
-                                    if f1<=0.0 or f2<=0.0: return 0.0
-                                    else: return (2*f1*f2)/(f1+f2)
-
-                                filterID_to_meanFvalue = df_accuracy_all[(df_accuracy_all.svtype==svtype) & (df_accuracy_all.comparisonID.isin({"SVIM_vs_SNIFFLES", "SNIFFLES_vs_SVIM"})) & (df_accuracy_all.tolerance==tol) & (df_accuracy_all.type_SVs_longReads==genotypes_longReadsSVs)].groupby("filterID").apply(lambda df_ID: calculate_Fvalue_Fvalues(df_ID.Fvalue.iloc[0], df_ID.Fvalue.iloc[1]))
-                                optimum_filterID = filterID_to_meanFvalue.sort_values().index[-1]
-
-                                # init ax
-                                ax = plt.subplot(nrows, ncols, I+1); I+=1
-
-                                # get the df
-                                df_plot = df_plot_fig[(df_plot_fig.tolerance==tol) & (df_plot_fig.sampleID==sampleID)].sort_values(by=["nevents"])
-
-                                # add the x axis
-                                df_plot["filterSet"] = list(range(len(df_plot)))
-
-                                # plot main line
-                                typeRun_to_color = {"perSVade-uniform":"blue", "perSVade-fast":"gray", "perSVade-realSVs":"red", 'perSVade-arroundHomRegions':"olive", 'perSVade-arroundRepeats':"black"}
-
-                                typeRun_to_marker = {"perSVade-uniform":"^", "perSVade-fast":"s", "perSVade-realSVs":"o", 'perSVade-arroundHomRegions':"v", 'perSVade-arroundRepeats':"*"}
-
-                                #ax = sns.scatterplot(data=df_plot, x="nevents", y=accuracy_f, hue="perSVade_parameters", style="perSVade_parameters", palette=typeRun_to_color, alpha=.6, edgecolors="None")
-                                ax = sns.lineplot(data=df_plot, x="filterSet", y=accuracy_f, hue="perSVade_parameters", style="perSVade_parameters", palette=typeRun_to_color,  markers=typeRun_to_marker, dashes=False, ci="sd", markeredgecolor=None, linewidth=1.8, markersize=4, alpha=.7, markeredgewidth=0)
-
-                                
-                                # outline the best filterID
-                                df_optimum = df_plot[df_plot.filterID==optimum_filterID]
-                                if len(df_optimum)!=len(set(df_plot.perSVade_parameters)): 
-
-                                    print(df_optimum.perSVade_parameters)
-
-                                    raise ValueError("the optimum filter ID is wrong")
-                                plt.axvline(df_optimum.filterSet.iloc[0], color="k", linestyle="--", linewidth=.9, zorder=10)
-                               
-                                
-                                # format legend
-                                if Is!=(len(all_samples)-1): ax.get_legend().remove()
-                                else: ax.legend(bbox_to_anchor=(2.7,1))
-                                        
-                                # title
-                                if Itol==0: ax.set_title(sampleID)
-
-                                # format axes
-                                if Is!=0: 
-                                    ax.set_yticklabels([])
-                                    ax.set_ylabel("")
-
-                                else: ax.set_ylabel("%s"%(tol))
-
-                                ax.set_ylim([0, max_accuracy+0.1])
-
-                                if Itol!=(len(all_tolerances)-1):
-                                    #ax.set_xticklabels([])
-                                    ax.set_xlabel("")
-
-                                ax.set_xticklabels([])
-                                ax.set_xticks([])
-
-                        # save the fig
-                        plt.subplots_adjust(wspace=0.08, hspace=0.17)
-                        fig.savefig("%s/perSVade_vs_longReads_%srealVars_%s_%s_%s_%s.pdf"%(PlotsDir, type_RealVars, accuracy_f, genotypes_longReadsSVs, svtype, remaining_treatment), bbox_inches='tight')
-                        plt.close(fig)
-
-
-    adghjhgdajgda
-
-
-
-def plot_accuracy_SNIFFLES_vs_SVIM_perSVade_representation(df_accuracy, PlotsDir):
-
-    """Plots the overlap between SVIM and SNIFFLES"""
-
-    print_if_verbose("plotting overlap between SVIM and SNIFFLES")
-
-    # get the df for SVIM and SNIFFLES
-    df_plot = df_accuracy[df_accuracy.comparisonID.isin({"SVIM_vs_SNIFFLES", "SNIFFLES_vs_SVIM"})]
-
-    # init a figure
-    all_svtypes = sorted(set(df_plot.svtype))
-    fig = plt.figure(figsize=(3*2, 3*len(all_svtypes))); I=0
-    comparisonID_to_color = {"SVIM_vs_SNIFFLES":"black", "SNIFFLES_vs_SVIM":"red"}
-
-    for svtype in all_svtypes:
-        df_svtype = df_plot[df_plot.svtype==svtype].sort_values(by="recall")
-
-        #if svtype=="inversions": print(df_svtype[df_svtype.nevents>5][["nevents", "precision", "recall", "min_QUAL_svim", "comparisonID", "min_RE_sniffles", "filter_IMPRECISE_sniffles"]])
-
-        # plot recall vs precision
-        ax = plt.subplot(len(all_svtypes), 2, I+1); I+=1
-        ax = sns.scatterplot(data=df_svtype, x="recall", y="precision", hue="comparisonID", style="comparisonID", palette=comparisonID_to_color)
-        ax.get_legend().remove()
-        ax.set_title(svtype)
-
-        # plot the number of events by each caller
-        ax = plt.subplot(len(all_svtypes), 2, I+1); I+=1
-        ax = sns.scatterplot(data=df_svtype, x="recall", y="nevents", hue="comparisonID", style="comparisonID", palette=comparisonID_to_color)
-        ax.legend(bbox_to_anchor=(1,1))
-        ax.set_title(svtype)
-
-    # save the fig
-    plt.subplots_adjust(wspace=0.3, hspace=0.4)
-    fig.savefig("%s/SNIFFLES_vs_SVIM_SVcalling.pdf"%(PlotsDir), bbox_inches='tight')
-    plt.close(fig)
+    return df_accuracy_perSVade_vs_longReads
 
 def report_accuracy_golden_set_reportAccuracy(dict_paths_all_samples, outdir, reference_genome, threads=4, replace=False, run_in_parallel=True):
 
@@ -12034,7 +11903,7 @@ def report_accuracy_golden_set_reportAccuracy(dict_paths_all_samples, outdir, re
     outdir_shortVsLong = "%s/perSVade_vs_longReads"%outdir; make_folder(outdir_shortVsLong)
 
     # define all the types of optimisations
-    all_types_simulations =  ["fast", "uniform", "realSVs", "arroundRepeats", "arroundHomRegions"]
+    
     #all_types_simulations =  ["fast", "uniform", "realSVs", "arroundRepeats"]
 
     # init df
@@ -12046,20 +11915,25 @@ def report_accuracy_golden_set_reportAccuracy(dict_paths_all_samples, outdir, re
 
         # define a file that has the accuracy for this sample
         df_accuracy_perSVade_vs_longReads_file = "%s/df_accuracy_perSVade_vs_longReads_%s.tab"%(outdir_shortVsLong, sampleID)
+        df_accuracy_perSVade_vs_longReads = get_df_accuracy_perSVade_vs_longReads_one_sample(sampleID, outdir_shortVsLong, dict_paths, df_accuracy_perSVade_vs_longReads_file, reference_genome, replace=replace, threads=threads, run_in_parallel=run_in_parallel)
+
         #remove_file(df_accuracy_perSVade_vs_longReads_file); sys.exit(0) # debug
 
+        adkhghj
+
         if file_is_empty(df_accuracy_perSVade_vs_longReads_file) or replace is True:
+
+
+            inputs_fn = [(typeRun_to_svtype_to_svDF, min_QUAL_svim, min_RE_sniffles, filter_IMPRECISE_sniffles, svim_df, sniffles_df, outdir_calculating_accuracy, sorted_bam_longReads, reference_genome, tol_bp, pct_overlap, type_SVs_longReads) for min_QUAL_svim in all_min_QUAL_svim for min_RE_sniffles in np.linspace(min(sniffles_df.INFO_RE), max_sniffles_RE, 6) for filter_IMPRECISE_sniffles in [True] for tol_bp in [50, 500, 1000] for pct_overlap in [0.50, 0.75] for type_SVs_longReads in ["all_SVs"]]
+
+
+            #for pct_overlap in [0.50, 0.75]: 
+
+
 
             # map each type of perSVade running to the final set of svs
             typeRun_to_svtype_to_svDF = {typeRun : {svtype : get_tab_as_df_or_empty_df(svfile) for svtype, svfile in get_svtype_to_svfile_and_df_gridss_from_perSVade_outdir(dict_paths["perSVade_outdir_%s"%typeRun], reference_genome, skip_df_gridssObtention=True)[0].items()} for typeRun in all_types_simulations}
 
-            # make sure that an example bedpe is properly sorted
-            bedpe_fields = ["chrom1", "start1", "end1", "chrom2", "start2", "end2", "ID", "score", "strand1", "strand2"]
-            bedpe_file = "%s/SVdetection_output/final_gridss_running/gridss_output.filt.bedpe"%(dict_paths["perSVade_outdir_uniform"])
-            if not file_is_empty(bedpe_file):
-                df_bedpe = pd.read_csv(bedpe_file, sep="\t", names=bedpe_fields, header=-1)
-                if any(df_bedpe.chrom1>df_bedpe.chrom2): raise ValueError("The chrom2 should be always after chrom2 in alphaberic order")
-            
             # define parms
             min_svim_QUAL = 2
 
