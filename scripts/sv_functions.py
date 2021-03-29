@@ -2192,8 +2192,10 @@ def get_SVs_arround_breakpoints(genome_file, df_bedpe, nvars, outdir, svtypes, r
                 if already_nvars_svtypes==(svtypes.intersection({"translocations", "insertions"})):
                     df_bedpe = df_bedpe[df_bedpe.order_by_chrom==10]
 
-                # if you already found all the intrachromosomal events and there are no interchromosomal breakpoints, skip
-                if already_nvars_svtypes==(svtypes.intersection({"inversions", "tandemDuplications", "deletions"})) and all(df_bedpe.order_by_chrom==10): break
+                # if you already found all the intrachromosomal events, keep the interchromosomal ones
+                if already_nvars_svtypes==(svtypes.intersection({"inversions", "tandemDuplications", "deletions", "insertions"})): df_bedpe = df_bedpe[df_bedpe.order_by_chrom==1]
+
+                if len(df_bedpe)==0: break
 
                 # interate through each svtype
                 for svtype in sorted_svtypes:  
@@ -2209,10 +2211,11 @@ def get_SVs_arround_breakpoints(genome_file, df_bedpe, nvars, outdir, svtypes, r
                     # if empty, continue
                     if len(df_bedpe)==0: continue
 
-                    # get the first bedpe row. Sorting in a way that the interchromosomal events will happen always first. This is to prioritize translocations. Do this unless there are more interchromosomal regions
+                    # sort bedpe in a way that the interchromosomal events will happen always first. This is to prioritize translocations. Do this unless there are more interchromosomal regions
                     if n_intrachromosomal>n_interchromosomal: df_bedpe = df_bedpe.sort_values(by="order_by_chrom")
                     else: df_bedpe = df_bedpe.sort_values(by="order_by_chrom", ascending=False)
 
+                    # get the first bedpe row
                     r = df_bedpe.iloc[0]
 
                     # record that this was already tried
@@ -3411,7 +3414,7 @@ def get_coverage_per_window_df_without_repeating(reference_genome, sorted_bam, w
     ######## measure regions, keeping in tmp ######
 
     if len(windows_to_measure_df)>0:
-        print_if_verbose("calculating coverage for uncalculated windows")
+        print_if_verbose("calculating coverage for uncalculated windows. %i/%i remaining"%(len(windows_to_measure_df), query_df_len))
 
         # remove the already calculated windows
         remove_file(calculated_coverage_file)
@@ -3431,8 +3434,9 @@ def get_coverage_per_window_df_without_repeating(reference_genome, sorted_bam, w
         remove_file("%s.coverage_provided_windows.tab"%bed_windows_to_measure)
 
         # get the merged dfs
-        df_coverage_all = df_previosuly_calculated_coverages.append(coverage_df, sort=True).loc[list(query_windows_df.index)]
-        
+        df_coverage_all = df_previosuly_calculated_coverages.append(coverage_df, sort=True) # do not keep only the query windows
+        #df_coverage_all = df_previosuly_calculated_coverages.append(coverage_df, sort=True).loc[list(query_windows_df.index)]
+
         # save
         calculated_coverage_file_tmp = "%s.tmp"%calculated_coverage_file
         df_coverage_all.to_csv(calculated_coverage_file_tmp, sep="\t", header=True, index=False)
@@ -10048,318 +10052,6 @@ def get_sampleID_and_runID_to_color(df):
             runID_to_color[runID] = sorted_colors[runID_colorI]
 
     return sampleID_to_color, runID_to_color
- 
-def generate_heatmap_accuracy_of_parameters_on_test_samples(df_benchmark, plots_dir, replace=False, threads=4):
-
-    """
-    This function takes a df where each row is one set of training parameters and test data svtype, together with the accuracy records. It generates a heatmap were the rows are each of the training parameters and the cols are the test samples.
-    """
-
-    print_if_verbose("plotting cross-accuracy")
-
-    # define  graphics
-    simName_to_color = {"simulation_1":"black", "simulation_2":"gray", "simulation_3":"green"}
-    ploidy_to_color = {'consensus_ref': 'gray', 'haploid': 'black', 'diploid_hetero': 'maroon', 'ref:3_var:1': 'red', 'ref:9_var:1': 'lightsalmon', 'ref:99_var:1': 'white'}
-    svtype_to_color = {"tandemDuplications": "gray", "deletions": "black", "inversions": "blue", "translocations": "olive", "insertions": "red", "remaining":"magenta", "integrated":"c"}
-    typeSimulations_to_color = {"uniform":"blue", "realSVs":"red", "fast":"magenta"}
-    sampleID_to_color, runID_to_color = get_sampleID_and_runID_to_color(df_benchmark) # automatic definition of graphics of sampleID and runID
-
-    # map each cathegory to the colors
-    cathegory_to_colors_dict = {"parms_sampleID" : sampleID_to_color,
-                                "parms_runID" : runID_to_color,
-                                "parms_typeSimulations": typeSimulations_to_color,
-                                "test_sampleID" : sampleID_to_color,
-                                "test_runID" : runID_to_color,
-                                "test_typeSimulations": typeSimulations_to_color,
-                                "test_simName" : simName_to_color,
-                                "test_ploidy" : ploidy_to_color,
-                                "svtype": svtype_to_color
-                                }
-
-    # define the lists of things
-    #interesting_ploidies_list = [set(df_benchmark.test_ploidy), {"haploid"}, {"diploid_hetero"}]
-    interesting_ploidies_list = [set(df_benchmark.test_ploidy)]
-
-    #interesting_svtypes_list = [set(df_benchmark.svtype), {"integrated"}]
-    interesting_svtypes_list = [{"integrated"}]
-
-    
-    #interesting_typeSimulations_list = [set(df_benchmark.parms_typeSimulations), {"fast"}, {"uniform", "realSVs"}]
-    interesting_typeSimulations_list = [set(df_benchmark.parms_typeSimulations), {"uniform", "realSVs"}]
-    
-    interesting_accuracies = ["Fvalue", "precision", "recall"]
-
-    # go through each accuracy measurement
-    for accuracy in interesting_accuracies:
-        for interesting_ploidies in interesting_ploidies_list:
-            for interesting_svtypes in interesting_svtypes_list:
-                for interesting_typeSimulations in interesting_typeSimulations_list:
-
-                    # define the tags
-                    if len(interesting_ploidies)==1: ploidy_tag = next(iter(interesting_ploidies))
-                    else: ploidy_tag = "allPloidies"
-
-                    if len(interesting_svtypes)==1: svtype_tag = next(iter(interesting_svtypes))
-                    else: svtype_tag = "allSVtypes"
-
-                    if len(interesting_typeSimulations)==1: typeSimulations_tag = next(iter(interesting_typeSimulations))
-                    elif len(interesting_typeSimulations)==2: typeSimulations_tag = "realANDuniform"
-                    else: typeSimulations_tag = "allSimulations"
-
-                    # get the filtered df
-                    df = df_benchmark[(df_benchmark.test_ploidy.isin(interesting_ploidies)) & (df_benchmark.svtype.isin(interesting_svtypes)) & (df_benchmark.parms_typeSimulations.isin(interesting_typeSimulations))]
-
-                    # add the indices
-                    parms_keys = [k for k in df.keys() if k.startswith("parms_")]
-                    test_keys = [k for k in df.keys() if k.startswith("test_")] + ["svtype"]
-                    df["parms_idx"] = df.apply(lambda r: "||||".join([r[k] for k in parms_keys]), axis=1)
-                    df["test_idx"] = df.apply(lambda r: "||||".join([r[k] for k in test_keys]), axis=1)
-
-                    # add the label
-                    def get_label(r):
-
-                        if r["parms_sampleID"]==r["test_sampleID"] and r["parms_runID"]==r["test_runID"] and r["parms_typeSimulations"]==r["test_typeSimulations"]: label = "="
-                        else: label = ""
-
-                        return label
-
-                    df["label"] = df.apply(get_label, axis=1)
-
-                    # get the square df
-                    df_square = df[["parms_idx", "test_idx", accuracy]].pivot(index='parms_idx', columns='test_idx', values=accuracy)
-
-                    # define dicts mapping objects
-                    type_keys_to_keys = {"parms":parms_keys, "test":test_keys}
-
-
-                    # generate the cols colors df
-                    def get_colors_series(idx, type_keys="parms"):
-                        # type_keys can be parms or test
-
-                        # get the color dicts
-                        keys = type_keys_to_keys[type_keys]
-
-                        # get the content
-                        idx_content = idx.split("||||")
-
-                        # define the series
-                        field_to_color = {keys[I] : cathegory_to_colors_dict[keys[I]][c] for I,c in enumerate(idx_content)}
-
-                        return pd.Series(field_to_color)
-                    
-                    row_colors_df = pd.Series(df_square.index, index=df_square.index).apply(lambda x: get_colors_series(x, type_keys="parms"))
-                    col_colors_df = pd.Series(df_square.columns, index=df_square.columns).apply(lambda x: get_colors_series(x, type_keys="test"))
-
-
-                    # define the col clustering
-                    col_cluster = True
-                    row_cluster = True
-
-                    # define the annotations
-                    df_annotations = df[["parms_idx", "test_idx", "label"]].pivot(index='parms_idx', columns='test_idx', values="label")
-
-                    # define the filename
-                    filename = "%s/cross_accuracy_%s_%s_%s_%s.pdf"%(plots_dir, accuracy, ploidy_tag, svtype_tag, typeSimulations_tag)
-                    print_if_verbose("getting %s"%filename)
-
-                    # define the title
-                    title = "%s when running the best filters according for each sample/condition (rows) tested on each simulation (columns)"%accuracy
-
-                    # define the figure size
-                    figsize = (int(len(df_square.columns)*0.03), int(len(df_square)*0.03))
-                    #figsize = None
-
-                    plot_clustermap_with_annotation(df_square, row_colors_df, col_colors_df, filename, title=title, col_cluster=col_cluster, row_cluster=row_cluster, colorbar_label=accuracy, adjust_position=True, legend=True, idxs_separator_pattern="||||", texts_to_strip={"L001"}, default_label_legend="control", df_annotations=df_annotations, cmap=sns.color_palette("RdBu_r", 50), ylabels_graphics_df=None, grid_lines=False, figsize=figsize)
-
-def generate_boxplot_comparing_cross_accuracy(df_benchmark, plots_dir):
-
-    """This function takes a cross-benchmarking df from plot_accuracy_of_parameters_on_test_samples and generates a set of boxplots, each of them with one accuracy measurement. The x will be the svtype, and the hue the type of comparison (fastSVcalling, different_sample, different_run, same_run) """
-
-    print_if_verbose("plotting cross-accuracy boxplot")
-
-    df_benchmark = cp.deepcopy(df_benchmark)
-
-    # define a shortened version of svtype
-    svtype_to_shortSVtype = {"deletions":"del", "tandemDuplications":"tan", "insertions":"ins", "translocations":"tra", "inversions":"inv", "integrated":"all", "remaining":"rem"}
-    df_benchmark["svtype"] = df_benchmark.svtype.apply(lambda x: svtype_to_shortSVtype[x])
-
-    #df_benchmark = df_benchmark.iloc[0:1000].append(df_benchmark[df_benchmark.parms_typeSimulations=="fast"].iloc[0:100]) # debug
-
-    # add the type of comparison
-    def get_type_comparison(r):
-
-        if r["parms_typeSimulations"]=="fast": return "default parameters"
-        elif r["parms_sampleID"]!=r["test_sampleID"]: return "optimised on different taxID"
-        elif r["parms_sampleID"]==r["test_sampleID"] and r["parms_runID"]!=r["test_runID"]: return "optimised on different run"
-        elif r["parms_sampleID"]==r["test_sampleID"] and r["parms_runID"]==r["test_runID"]: return "optimised on same run"
-        else: raise ValueError("The row is not valid")
-
-    df_benchmark["type comparison"] = df_benchmark.apply(get_type_comparison, axis=1)
-
-    print_if_verbose("plotting")
-
-    #label_to_ylabel = {"fraction overlapping SVs": "fraction overlap. SVs ~ precision" , "n SVs":"n SVs ~ recall"}
-
-    for parms_tag, interesting_type_comps in [["allComparisons", set(df_benchmark["type comparison"])], ["noDefault", set(df_benchmark["type comparison"]).difference({"default parameters"})]]:
-
-        # filter
-        df_plot = df_benchmark[df_benchmark["type comparison"].isin(interesting_type_comps)]
-
-        fig = plt.figure(figsize=(len(set(df_benchmark.svtype)), 8))
-
-        for I, y in enumerate(["precision", "recall", "Fvalue"]): # 
-            print_if_verbose(y)
-
-            ax = plt.subplot(3, 1, I+1)
-
-            # get a violin plot
-            #ax = sns.boxplot(x="svtype", y=y, data=df_plot, hue="type comparison", boxprops=dict(alpha=.45))
-            ax = sns.violinplot(x="svtype", y=y, data=df_plot, hue="type comparison", boxprops=dict(alpha=.9))
-
-            #ax = sns.swarmplot(x="svtype", y=y, hue="type comparison", data=df_plot, dodge=True, linewidth=.5, edgecolor="k")
-            ax = sns.stripplot(x="svtype", y=y, hue="type comparison", data=df_plot, dodge=True, linewidth=.1, edgecolor="k", size=2)
-
-            ax.legend(bbox_to_anchor=(1, 1))
-            ax.set_xlabel("")
-            #ax.set_ylabel(label_to_ylabel[y])
-
-            if I in [1,2]: ax.get_legend().remove()
-
-
-        # save
-        print_if_verbose("saving")
-        filename = "%s/cross_benchmarking_boxplots_%s.pdf"%(plots_dir, parms_tag)
-        fig.savefig(filename, bbox_inches='tight')
-        plt.close(fig)
-
-def plot_accuracy_of_parameters_on_test_samples(parameters_df, test_df, outdir, plots_dir, replace=False, threads=4):
-
-    """
-    This function runs the gridss+clove pipeline from several parameters (specified in parameters_df) on other datasets (specified in test_df). All the files will be written under outdir. At the end, a heatmap with the accuracy of each of the parameters on each of the test datasets will be generated. The index of each df should be a unique tuple indicating the cells in the final heatmap.
-    """
-
-    if replace is True: delete_folder(outdir)
-    make_folder(outdir)
-
-    # define the metadata of each df
-    parameters_df_metadata = [k for k in parameters_df.keys() if k not in {"parameters_json"}]
-    test_df_metadata = [k for k in test_df.keys() if k not in {"sorted_bam", "gridss_vcf", "reference_genome", "mitochondrial_chromosome", "svtables_prefix"}]
-
-    # keep only one "fast" if typeSimulations is there:
-    if "typeSimulations" in parameters_df.keys():
-
-        parameters_df_noFast = parameters_df[parameters_df.typeSimulations!="fast"]
-        parameters_df_Fast = parameters_df[parameters_df.typeSimulations=="fast"].iloc[0]
-        parameters_df = parameters_df_noFast.append(parameters_df_Fast)
-
-    # add the parameters as a dict
-    parameters_df["parameters_json_dict"] = parameters_df.parameters_json.apply(get_parameters_from_json)
-
-    # map each parameterID to the equivalent parameters
-    parmID_to_equal_parmIDs = {parmID : {other_parmID for other_parmID, r_other in parameters_df.iterrows() if r_other["parameters_json_dict"]==r["parameters_json_dict"] and other_parmID!=parmID} for parmID, r in parameters_df.iterrows()}
-    for parmID, equal_parmIDs in parmID_to_equal_parmIDs.items(): 
-        if len(equal_parmIDs)>0: print_if_verbose("%s and %s have equal parms"%(parmID, equal_parmIDs))
-
-    ######## CREATE A df_benchmarking CONTAINING ALL THE RESULTS ##########
-
-    # define the outdir
-    outdir_cross_benchmark_files = "%s/tmp_files"%outdir; make_folder(outdir_cross_benchmark_files)
-
-    # define the benchmarking file
-    df_benchmark_file = "%s/benchmarking_parameters.tab"%outdir
-
-    if file_is_empty(df_benchmark_file):
-
-        # initialize the df of the benchmarking
-        benchmarking_fields = ['FN', 'FP', 'Fvalue', 'TP', 'nevents', 'precision', 'recall', 'svtype']
-        df_benchmark = pd.DataFrame(columns=["parms_%s"%x for x in parameters_df_metadata] + ["test_%s"%x for x in test_df_metadata] + benchmarking_fields)
-
-        for numeric_parameter_index, (Irow, parms_row) in enumerate(parameters_df.iterrows()):
-            Irow_str = "_".join(Irow)
-            
-            # get the parameters
-            gridss_blacklisted_regions, gridss_maxcoverage, gridss_filters_dict, max_rel_coverage_to_consider_del, min_rel_coverage_to_consider_dup = get_parameters_from_json(parms_row["parameters_json"])
-
-            for numeric_test_index, (Itest, test_row) in enumerate(test_df.iterrows()):
-                Itest_str = "_".join(Itest)
-                print_if_verbose("\n\n---------\nusing best parameters by %s (%i/%i)"%(Irow_str, numeric_parameter_index+1, len(parameters_df)))
-                print_if_verbose("testing on %s (%i/%i)"%(Itest_str, numeric_test_index+1, len(test_df)))
-
-                # define an outdir and put the gridss vcf there with a softlink
-                outdir_cross_benchmark = "%s/%s_parameters_tested_on_%s"%(outdir_cross_benchmark_files, Irow_str, Itest_str); make_folder(outdir_cross_benchmark)
-
-                # define the test data file
-                df_benchmark_test_file = "%s/df_benchmark_test.py"%outdir_cross_benchmark
-
-                # generate this file through softlinking of equivalent parameterIDs
-                equal_parmIDs = parmID_to_equal_parmIDs[Irow]
-                if len(equal_parmIDs)>0:
-
-                    for equal_parmID in equal_parmIDs:
-
-                        # define the equal parmID test dir
-                        equal_parmID_outdir_cross_benchmark = "%s/%s_parameters_tested_on_%s"%(outdir_cross_benchmark_files, "_".join(equal_parmID), Itest_str); make_folder(outdir_cross_benchmark)
-
-                        # define the equal parm ID df_benchmark_test 
-                        equal_parmID_df_benchmark_test_file = "%s/df_benchmark_test.py"%equal_parmID_outdir_cross_benchmark
-
-                        if not file_is_empty(equal_parmID_df_benchmark_test_file): 
-                            print_if_verbose("Taking df benchmark from %s for %s"%("_".join(equal_parmID), Irow_str))
-                            soft_link_files(equal_parmID_df_benchmark_test_file, df_benchmark_test_file)
-
-                # get this file if not done
-                if file_is_empty(df_benchmark_test_file) or replace is True:
-
-                    # define the outdir
-                    gridss_vcf = "%s/gridss_vcf.vcf"%outdir_cross_benchmark
-                    soft_link_files(test_row["gridss_vcf"], gridss_vcf)
-
-                    # calculate the median insert sizes
-                    median_insert_size, median_insert_size_sd  = get_insert_size_distribution(test_row["sorted_bam"], replace=replace, threads=threads)
-
-                    # get the gridss-clove run
-                    sv_dict, df_gridss = run_gridssClove_given_filters(test_row["sorted_bam"], test_row["reference_genome"], outdir_cross_benchmark, -1, replace=replace, threads=threads, gridss_blacklisted_regions=gridss_blacklisted_regions, gridss_VCFoutput=gridss_vcf, gridss_maxcoverage=gridss_maxcoverage, median_insert_size=median_insert_size, median_insert_size_sd=median_insert_size_sd, gridss_filters_dict=gridss_filters_dict, run_in_parallel=True, max_rel_coverage_to_consider_del=max_rel_coverage_to_consider_del, min_rel_coverage_to_consider_dup=min_rel_coverage_to_consider_dup, replace_FromGridssRun=replace)
-
-                    # get the known SV dict
-                    known_sv_dict = {svtype : "%s_%s.tab"%(test_row["svtables_prefix"], svtype) for svtype in {"insertions", "deletions", "translocations", "inversions", "tandemDuplications"}}
-                    if any([file_is_empty(x) for x in known_sv_dict.values()]): raise ValueError("There are some un existing files")
-
-                    # get the benchmarking
-                    fileprefix = "%s/benchmarking"%outdir_cross_benchmark
-                    df_benchmark_test = benchmark_processedSVs_against_knownSVs_inHouse(sv_dict, known_sv_dict, fileprefix, replace=replace, add_integrated_benchmarking=True)
-
-                    # save
-                    print_if_verbose("saving")
-                    save_object(df_benchmark_test, df_benchmark_test_file)
-
-                else: df_benchmark_test = load_object(df_benchmark_test_file)
-
-                # add metadata fields
-                for x in parameters_df_metadata: df_benchmark_test["parms_%s"%x] = parms_row[x]
-                for x in test_df_metadata: df_benchmark_test["test_%s"%x] = test_row[x]
-
-                # keep
-                df_benchmark = df_benchmark.append(df_benchmark_test[list(df_benchmark.keys())])
-
-        # save
-        print_if_verbose("saving")
-        df_benchmark_file_tmp = "%s.tmp"%df_benchmark_file
-        df_benchmark.to_csv(df_benchmark_file_tmp, sep="\t", index=False, header=True)
-        os.rename(df_benchmark_file_tmp, df_benchmark_file)
-
-    else: df_benchmark = pd.read_csv(df_benchmark_file, sep="\t")
-
-    # delete the folder with all the intermediate files
-    delete_folder(outdir_cross_benchmark_files)
-
-    #######################################################################
-
-    # plot boxplot
-    generate_boxplot_comparing_cross_accuracy(df_benchmark, plots_dir)
-
-    # plot heatmap of cross accuracy
-    generate_heatmap_accuracy_of_parameters_on_test_samples(df_benchmark, plots_dir, replace=replace, threads=threads)
-
 
 def link_files_from_other_perSVade_outdirs_reads_and_alignment(outdir, other_perSVade_outdirs_sameReadsANDalignment):
 
@@ -10879,6 +10571,7 @@ def report_accuracy_realSVs_perSVadeRuns(close_shortReads_table, reference_genom
                 else: continue
                 """
 
+
                 # if the running in slurm is false, just run the cmd
                 if job_array_mode=="local": run_cmd(cmd)
                 elif job_array_mode=="job_array": 
@@ -10889,15 +10582,10 @@ def report_accuracy_realSVs_perSVadeRuns(close_shortReads_table, reference_genom
 
             # keep the simulation files and clean outdir
             elif n_remaining_jobs==0:
-
-                print_if_verbose("perSVade testing finished")
-                sys.exit(0)
+                print_if_verbose("perSVade testing finished. cleaning...")
 
                 # keeping simulations and cleaning
                 keep_simulation_files_for_perSVade_outdir(outdir_runID, replace=replace, n_simulated_genomes=n_simulated_genomes, simulation_ploidies=simulation_ploidies)
-
-                print(outdir_runID)
-                stopbeforecleaningtotestthatsimlationkeepingworked_ThisIsTOCkeckThatAllFIleswwereCorrect
 
                 # clean
                 clean_perSVade_outdir(outdir_runID)
@@ -12167,9 +11855,6 @@ def report_accuracy_golden_set_reportAccuracy(dict_paths_all_samples, outdir, re
 
     # plot the accuracy of each perSVade configuration on long-read based calls
     plot_accuracy_perSVade_vs_longReads(df_accuracy_perSVade_vs_longReads_all, PlotsDir)
-
-
-    adkhgdajhdajhgajhgadjhda
 
     # plot the cross accuracy between SNIFFLES and SVIM
     #plot_accuracy_SNIFFLES_vs_SVIM_perSVade_representation(df_accuracy_perSVade_vs_longReads, PlotsDir)

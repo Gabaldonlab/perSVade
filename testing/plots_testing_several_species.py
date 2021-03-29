@@ -2,7 +2,7 @@
 
 # This is a script that runs the plots of the testing of perSVade on several species
 
-##### DEFINE ENVIRONMENT #######
+#%% DEFINE ENVIRONMENT
 
 # module imports
 import os
@@ -16,7 +16,7 @@ import matplotlib.pyplot as plt
 ParentDir = "%s/samba"%(os.getenv("HOME")); # local
 if os.path.exists(ParentDir):
     run_in_cluster = False    
-    threads = 4
+
 else:
     run_in_cluster = True    
     ParentDir = "/gpfs/projects/bsc40/mschikora"
@@ -28,7 +28,10 @@ sys.path.insert(0, perSVade_dir)
 # import functions
 print("importing functions")
 import sv_functions as fun
-import graphics_functions as gfun
+
+# import testing functions
+sys.path.insert(0, "%s/scripts/perSVade/perSVade_repository/testing"%ParentDir)
+import testing_functions as test_fun
 
 # define paths
 perSVade_py = "%s/perSVade.py"%perSVade_dir
@@ -36,12 +39,29 @@ perSVade_py = "%s/perSVade.py"%perSVade_dir
 # define dirs
 outdir_testing = "%s/scripts/perSVade/perSVade_repository/testing/outdirs_testing_severalSpecies"%ParentDir; fun.make_folder(outdir_testing)
 CurDir = "%s/scripts/perSVade/perSVade_repository/testing"%ParentDir; fun.make_folder(outdir_testing)
+genomes_and_annotations_dir = "%s/genomes_and_annotations"%CurDir
 
 # define plots dir
 PlotsDir = "%s/plots"%CurDir; fun.make_folder(PlotsDir)
 ProcessedDataDir = "%s/processed_data"%PlotsDir; fun.make_folder(ProcessedDataDir)
 
-################################
+#%% GET PROCESSED DFs
+
+# get cross-accuracy measurements
+cross_accuracy_df = test_fun.get_cross_accuracy_df_several_perSVadeSimulations(outdir_testing, genomes_and_annotations_dir, replace=False)
+
+print(cross_accuracy_df)
+
+dajghdajhgadjda
+#%% PRINT OUT
+print("testing several species finished")
+
+kadhgdajhgadjdagj
+
+
+
+
+
 
 ########### COLLECT DATA ON EACH SAMPLE ########### 
 
