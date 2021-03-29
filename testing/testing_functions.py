@@ -11,8 +11,12 @@ import numpy as np
 
 # define the parent dir of the cluster or not
 ParentDir = "%s/samba"%(os.getenv("HOME")); # local
-if not os.path.exists(ParentDir): ParentDir = "/gpfs/projects/bsc40/mschikora"
-        
+if not os.path.exists(ParentDir): 
+    ParentDir = "/gpfs/projects/bsc40/mschikora"
+    run_in_cluster = True
+else:
+    run_in_cluster = False
+
 # define the dir where all perSVade code is
 perSVade_dir = "%s/scripts/perSVade/perSVade_repository/scripts"%ParentDir
 sys.path.insert(0, perSVade_dir)
@@ -77,20 +81,26 @@ species_Info = [("5478", "Candida_glabrata", 1, "mito_C_glabrata_CBS138", 100000
                 ("7227", "Drosophila_melanogaster", 2, "KJ947872.2", 30)]
 """
 
-"""
 species_Info = [("5478", "Candida_glabrata", 1, "mito_C_glabrata_CBS138", 10000000000000000),
                 ("5476", "Candida_albicans", 2, "Ca22chrM_C_albicans_SC5314", 10000000000000000),
                 ("5207", "Cryptococcus_neoformans", 1, "CP003834.1", 10000000000000000),
                 ("3702", "Arabidopsis_thaliana", 2, "BK010421.1,AP000423.1", 30),
                 ("7227", "Drosophila_melanogaster", 2, "KJ947872.2", 30)]
+
+"""
+species_Info = [("5476", "Candida_albicans", 2, "Ca22chrM_C_albicans_SC5314", 10000000000000000),
+                ("3702", "Arabidopsis_thaliana", 2, "BK010421.1,AP000423.1", 30)]
 """
 
+#species_Info = [("5207", "Cryptococcus_neoformans", 1, "CP003834.1", 10000000000000000)]
 
+
+"""
 species_Info = [("5478", "Candida_glabrata", 1, "mito_C_glabrata_CBS138", 10000000000000000),
                 ("5207", "Cryptococcus_neoformans", 1, "CP003834.1", 10000000000000000),
                 ("3702", "Arabidopsis_thaliana", 2, "BK010421.1,AP000423.1", 30)]
 
-
+"""
 """
 species_Info = [("5207", "Cryptococcus_neoformans", 1, "CP003834.1", 10000000000000000),
                 ("3702", "Arabidopsis_thaliana", 2, "BK010421.1,AP000423.1", 30),
@@ -419,3 +429,181 @@ def get_goldenSetTable_Cglabrata(CurDir):
     fun.save_df_as_tab(df, table_file)
 
     return table_file
+
+def get_df_accuracy_of_parameters_on_test_samples(parameters_df, test_df, outdir, replace=False, threads=4):
+
+    """This function tests the accuracy of each of the parameters df on the simulations of test_df. It runs each comparison in a sepparate perSVade job in the cluster"""
+
+    if replace is True: fun.delete_folder(outdir)
+    fun.make_folder(outdir)
+
+    # define the metadata of each df
+    parameters_df_metadata = [k for k in parameters_df.keys() if k not in {"parameters_json"}]
+    test_df_metadata = [k for k in test_df.keys() if k not in {"sorted_bam", "gridss_vcf", "reference_genome", "mitochondrial_chromosome", "svtables_prefix"}]
+
+    # define the outdir
+    outdir_cross_benchmark_files = "%s/tmp_files"%outdir; fun.make_folder(outdir_cross_benchmark_files)
+
+    # define the benchmarking file
+    df_benchmark_all_file = "%s/cross_benchmarking_parameters.tab"%outdir
+
+    if fun.file_is_empty(df_benchmark_all_file):
+
+        # initialize the df of the benchmarking
+        benchmarking_fields = ['FN', 'FP', 'Fvalue', 'TP', 'nevents', 'precision', 'recall', 'svtype']
+        df_benchmark_all = pd.DataFrame(columns=["parms_%s"%x for x in parameters_df_metadata] + ["test_%s"%x for x in test_df_metadata] + benchmarking_fields)
+
+        # init cmds
+        all_cmds = []
+
+        # map each parameterID to the equivalent parameters
+        parameters_df["parameters_json_dict"] = parameters_df.parameters_json.apply(fun.get_parameters_from_json)
+        parmID_to_equal_parmIDs = {parmID : {other_parmID for other_parmID, r_other in parameters_df.iterrows() if r_other["parameters_json_dict"]==r["parameters_json_dict"]} for parmID, r in parameters_df.iterrows()}
+
+        # define the parameter to run for each parameter
+        parmID_to_parmIDtoRun = {pID : sorted(equal_pIDs)[0] for pID, equal_pIDs in parmID_to_equal_parmIDs.items()}
+
+        # iterate through each set of parameters and testing
+        for numeric_parameter_index, (Irow, parms_row) in enumerate(parameters_df.iterrows()):
+            print(numeric_parameter_index, Irow, parmID_to_parmIDtoRun[Irow])
+
+            # define the running parm from parmID_to_parmIDtoRun (avoid duplications)
+            running_parmID = parmID_to_parmIDtoRun[Irow]
+            unique_parms_row = parameters_df.loc[running_parmID]
+            outdir_parms = "%s/parms_%s"%(outdir_cross_benchmark_files, "_".join(unique_parms_row[parameters_df_metadata]))
+            fun.make_folder(outdir_parms)
+
+            for numeric_test_index, (Itest, test_row) in enumerate(test_df.iterrows()):
+            
+                # define the final df
+                df_benchmarking_file = "%s/testON_%s_benchmarking_df.tab"%(outdir_parms, "_".join(test_row[test_df_metadata]))
+
+                # define cmd
+                testing_script = "%s/scripts/perSVade/perSVade_repository/testing/get_accuracy_parameters_on_sorted_bam.py"%ParentDir
+
+                if fun.file_is_empty(df_benchmarking_file): 
+
+                    all_cmds.append("%s --reference_genome %s --df_benchmarking_file %s --sorted_bam %s --gridss_vcf %s --svtables_prefix %s --threads %i --parameters_json %s --verbose --mitochondrial_chromosome %s"%(testing_script, test_row.reference_genome, df_benchmarking_file, test_row.sorted_bam, test_row.gridss_vcf, test_row.svtables_prefix, threads, unique_parms_row.parameters_json, test_row.mitochondrial_chromosome))
+
+                    continue
+
+                continue # debug
+
+                # load the df
+                df_benchmark = fun.get_tab_as_df_or_empty_df(df_benchmarking_file) 
+
+                # add metadata fields
+                for x in parameters_df_metadata: df_benchmark["parms_%s"%x] = parms_row[x]
+                for x in test_df_metadata: df_benchmark["test_%s"%x] = test_row[x]
+
+                # keep
+                df_benchmark_all = df_benchmark_all.append(df_benchmark[list(df_benchmark_all.keys())])
+
+
+        # get unique cmds
+        all_cmds_unique = sorted(set(all_cmds))
+        print("There are %i jobs to run. These are %i unique jobs"%(len(all_cmds), len(all_cmds_unique)))
+
+        # run cmds
+        if run_in_cluster is False: 
+            for cmd in all_cmds_unique: fun.run_cmd(cmd)
+
+        # run in the cluster
+        elif len(all_cmds_unique)>0:
+
+            # get jobs file
+            print("submitting %i cmds to the cluster"%len(all_cmds_unique))
+            jobs_filename = "%s/jobs.getting_crossAccuracy"%outdir
+            open(jobs_filename, "w").write("\n".join(all_cmds_unique))
+            fun.generate_jobarray_file(jobs_filename, "gettingCloseShortReads")
+
+            # submit to the cluster
+            fun.run_jobarray_file_MN4_greasy(jobs_filename, "getting_crossAccuracy", time="02:00:00", queue="debug", threads_per_job=threads, nodes=8)
+
+            # exit before it starts
+            print("You need to run all the jobs from %s"%jobs_filename)
+            sys.exit(0)
+
+        # save
+        fun.save_df_as_tab(df_benchmark_all, df_benchmark_all_file)
+
+    # clean
+    fun.delete_folder(outdir_cross_benchmark_files)
+
+
+    # load
+    df_benchmark_all = fun.get_tab_as_df_or_empty_df(df_benchmark_all_file)
+
+    print(df_benchmark_all)
+    
+    # clean the STD files
+
+    adljdahkjdad
+
+
+    return df_benchmark_all
+
+def get_cross_accuracy_df_several_perSVadeSimulations(outdir_testing, genomes_and_annotations_dir, replace=False):
+
+    """This function tests how each of the perSVade configurations works on the others. It runs one job for each type of simulations, and it iterates through them inside of the job."""
+
+    ###### GET PARAMETERS DF AND TESTING DF #######
+
+    # the parameters_df. The first cols are metadata (like sampleID, runID and optimisation type) and the others are things necessary for runnning gridss: and the path to the parameters_json
+    parameters_df_dict = {}
+
+    # test_df: This is info on which to test the running of gridss+clove. It contains metadata cols (sampleID, runID, optimisation type (real, uniform), simName, ploidy, svtype) and data to run the optimisation on (sorted_bam, gridss_vcf, reference_genome, mitochondrial_chromosome)
+    test_df_dict = {}
+
+    for taxID, spName, ploidy, mitochondrial_chromosome, max_coverage_sra_reads in species_Info:
+        for typeSimulations in ["arroundHomRegions", "arroundRepeats", "uniform", "realSVs"]:
+
+            # define outir
+            outdir_species_simulations = "%s/%s_%s/testing_Accuracy/%s"%(outdir_testing, taxID, spName, typeSimulations)
+
+            # define samples and runs
+            all_sampleIDs = [x for x in os.listdir(outdir_species_simulations)]
+
+            # go through each sampleID
+            for sampleID in os.listdir(outdir_species_simulations):
+             
+                # define the outdir of the run
+                sampleID_simulations_files = "%s/%s/simulations_files_and_parameters"%(outdir_species_simulations, sampleID)
+
+                # keep parameters
+                parameters_json = "%s/final_parameters.json"%sampleID_simulations_files
+                parameters_df_dict[(spName, sampleID, typeSimulations)] = {"species":spName, "typeSimulations":typeSimulations, "sampleID":sampleID, "parameters_json":parameters_json}
+
+                # define simulation ploidies
+                if ploidy==1: simulation_ploidy = "haploid"
+                elif ploidy==2: simulation_ploidy = "diploid_hetero"
+
+                # go through each 
+                for simName in ["sim1", "sim2"]:
+
+                    # define things
+                    sorted_bam = "%s/reads_%s_%s.bam"%(sampleID_simulations_files, simName, simulation_ploidy)
+                    gridss_vcf = "%s/gridss_vcf_%s_%s.vcf"%(sampleID_simulations_files, simName, simulation_ploidy)
+                    reference_genome = "%s/%s.fasta"%(genomes_and_annotations_dir, spName)
+                    svtables_prefix =  "%s/SVs_%s"%(sampleID_simulations_files, simName)
+
+                    # add to dict
+                    test_df_dict[(spName, sampleID, typeSimulations, simName, simulation_ploidy)] = {"species":spName, "sampleID":sampleID, "typeSimulations":typeSimulations, "simName":simName, "simulation_ploidy":simulation_ploidy, "sorted_bam":sorted_bam, "gridss_vcf":gridss_vcf, "reference_genome":reference_genome, "mitochondrial_chromosome":mitochondrial_chromosome, "svtables_prefix":svtables_prefix}
+
+
+    # add the fast parameters
+    parameters_json_fast = "%s/5478_Candida_glabrata/testing_Accuracy/fast/BG2_YPD/simulations_files_and_parameters/final_parameters.json"%outdir_testing
+    parameters_df_dict[("none", "fast", "fast")] = {"species":"none", "typeSimulations":"fast", "sampleID":"fast", "parameters_json":parameters_json_fast}
+
+    # get the dfs
+    parameters_df = pd.DataFrame(parameters_df_dict).transpose()[["species", "sampleID", "typeSimulations", "parameters_json"]]
+    test_df = pd.DataFrame(test_df_dict).transpose()[["species", "sampleID", "typeSimulations", "simName", "simulation_ploidy", "sorted_bam", "gridss_vcf", "reference_genome", "mitochondrial_chromosome", "svtables_prefix"]]
+
+    # plot the cross-accuracy
+    print("getting cross-accuracy df")
+    outdir_cross_accuracy = "%s/cross_accuracy_calculations"%outdir_testing
+    df_cross_accuracy_benchmark = get_df_accuracy_of_parameters_on_test_samples(parameters_df, test_df, outdir_cross_accuracy, replace=replace)
+
+    ##################################
+
+    return df_cross_accuracy_benchmark
