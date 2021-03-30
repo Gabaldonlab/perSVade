@@ -8,6 +8,8 @@ import os
 import sys
 import pandas as pd
 import numpy as np
+import multiprocessing as multiproc
+import seaborn as sns
 
 # define the parent dir of the cluster or not
 ParentDir = "%s/samba"%(os.getenv("HOME")); # local
@@ -430,7 +432,23 @@ def get_goldenSetTable_Cglabrata(CurDir):
 
     return table_file
 
-def get_df_accuracy_of_parameters_on_test_samples(parameters_df, test_df, outdir, replace=False, threads=4):
+def get_df_benchmark_from_file(Idf, df_benchmarking_file, parms_row, test_row, parameters_df_metadata, test_df_metadata, all_keys):
+
+    """Takes a df benchmarking file and returns the df"""
+
+    print("df %i"%Idf)
+
+    # load the df
+    df_benchmark = fun.get_tab_as_df_or_empty_df(df_benchmarking_file) 
+
+    # add metadata fields
+    for x in parameters_df_metadata: df_benchmark["parms_%s"%x] = parms_row[x]
+    for x in test_df_metadata: df_benchmark["test_%s"%x] = test_row[x]
+
+    # keep
+    return df_benchmark[all_keys]
+
+def get_df_accuracy_of_parameters_on_test_samples(parameters_df, test_df, outdir, replace=False, threads=4, threads_integration=48):
 
     """This function tests the accuracy of each of the parameters df on the simulations of test_df. It runs each comparison in a sepparate perSVade job in the cluster"""
 
@@ -451,7 +469,9 @@ def get_df_accuracy_of_parameters_on_test_samples(parameters_df, test_df, outdir
 
         # initialize the df of the benchmarking
         benchmarking_fields = ['FN', 'FP', 'Fvalue', 'TP', 'nevents', 'precision', 'recall', 'svtype']
-        df_benchmark_all = pd.DataFrame(columns=["parms_%s"%x for x in parameters_df_metadata] + ["test_%s"%x for x in test_df_metadata] + benchmarking_fields)
+        all_keys = ["parms_%s"%x for x in parameters_df_metadata] + ["test_%s"%x for x in test_df_metadata] + benchmarking_fields
+
+        list_dfs_benchmark_files = []
 
         # init cmds
         all_cmds = []
@@ -464,6 +484,7 @@ def get_df_accuracy_of_parameters_on_test_samples(parameters_df, test_df, outdir
         parmID_to_parmIDtoRun = {pID : sorted(equal_pIDs)[0] for pID, equal_pIDs in parmID_to_equal_parmIDs.items()}
 
         # iterate through each set of parameters and testing
+        Idf = 0
         for numeric_parameter_index, (Irow, parms_row) in enumerate(parameters_df.iterrows()):
             print(numeric_parameter_index, Irow, parmID_to_parmIDtoRun[Irow])
 
@@ -487,18 +508,10 @@ def get_df_accuracy_of_parameters_on_test_samples(parameters_df, test_df, outdir
 
                     continue
 
-                continue # debug
-
-                # load the df
-                df_benchmark = fun.get_tab_as_df_or_empty_df(df_benchmarking_file) 
-
-                # add metadata fields
-                for x in parameters_df_metadata: df_benchmark["parms_%s"%x] = parms_row[x]
-                for x in test_df_metadata: df_benchmark["test_%s"%x] = test_row[x]
-
-                # keep
-                df_benchmark_all = df_benchmark_all.append(df_benchmark[list(df_benchmark_all.keys())])
-
+              
+                # append
+                list_dfs_benchmark_files.append((Idf, df_benchmarking_file, parms_row, test_row, parameters_df_metadata, test_df_metadata, all_keys))
+                Idf += 1
 
         # get unique cmds
         all_cmds_unique = sorted(set(all_cmds))
@@ -518,28 +531,35 @@ def get_df_accuracy_of_parameters_on_test_samples(parameters_df, test_df, outdir
             fun.generate_jobarray_file(jobs_filename, "gettingCloseShortReads")
 
             # submit to the cluster
-            fun.run_jobarray_file_MN4_greasy(jobs_filename, "getting_crossAccuracy", time="02:00:00", queue="debug", threads_per_job=threads, nodes=8)
+            #fun.run_jobarray_file_MN4_greasy(jobs_filename, "getting_crossAccuracy", time="02:00:00", queue="debug", threads_per_job=threads, nodes=8)
+            fun.run_jobarray_file_MN4_greasy(jobs_filename, "getting_crossAccuracy", time="10:00:00", queue="bsc_ls", threads_per_job=threads, nodes=3)
 
             # exit before it starts
             print("You need to run all the jobs from %s"%jobs_filename)
             sys.exit(0)
+
+        # get the df for a function
+        with multiproc.Pool(threads_integration) as pool:
+
+            # run in parallel porechop runs for each chunk
+            list_dfs_benchmark = pool.starmap(get_df_benchmark_from_file, list_dfs_benchmark_files)
+
+            # close the pool
+            pool.close()
+            pool.terminate()
+
+        # merge
+        df_benchmark_all = pd.concat(list_dfs_benchmark)
 
         # save
         fun.save_df_as_tab(df_benchmark_all, df_benchmark_all_file)
 
     # clean
     fun.delete_folder(outdir_cross_benchmark_files)
-
+    fun.delete_folder("%s/STDfiles"%outdir)
 
     # load
     df_benchmark_all = fun.get_tab_as_df_or_empty_df(df_benchmark_all_file)
-
-    print(df_benchmark_all)
-    
-    # clean the STD files
-
-    adljdahkjdad
-
 
     return df_benchmark_all
 
@@ -606,4 +626,160 @@ def get_cross_accuracy_df_several_perSVadeSimulations(outdir_testing, genomes_an
 
     ##################################
 
+    ######### ADD FIELDS TO df_cross_accuracy_benchmark #########
+    print("adding extra fields")
+
+
+    # add sample and run IDs
+    def get_run(sampleID):
+        
+        if sampleID=="fast": return "fast"
+        else: return sampleID.split("_")[1]
+
+    def get_sample(sampleID): return sampleID.split("_")[0]
+
+    df_cross_accuracy_benchmark["parms_sample"] = df_cross_accuracy_benchmark.parms_sampleID.apply(get_sample)
+    df_cross_accuracy_benchmark["parms_run"] = df_cross_accuracy_benchmark.parms_sampleID.apply(get_run)
+    df_cross_accuracy_benchmark["test_sample"] = df_cross_accuracy_benchmark.test_sampleID.apply(get_sample)
+    df_cross_accuracy_benchmark["test_run"] = df_cross_accuracy_benchmark.test_sampleID.apply(get_run)
+
+    # add the type of comparison
+    print("running get_type_comparison")
+    def get_type_comparison(r):
+
+        if r["parms_species"]==r["test_species"] and r["parms_sampleID"]==r["test_sampleID"] and r["parms_typeSimulations"]==r["test_typeSimulations"]: return "same_run_and_simulation"
+        else: return "other"
+
+    df_cross_accuracy_benchmark["type_comparison"] = df_cross_accuracy_benchmark.apply(get_type_comparison, axis=1)
+    
+    # add the intra-species sample and run ID
+    species_to_sample_to_numericSample = {}
+    species_to_sample_to_run_to_numericRun = {}
+
+    df = df_cross_accuracy_benchmark[["parms_species", "parms_sample", "parms_run"]].drop_duplicates()
+    for species in sorted(set(df.parms_species)):
+        df_species = df[df.parms_species==species]
+
+        for Is, sample in enumerate(sorted(set(df_species.parms_sample))):
+            df_sample = df[df.parms_sample==sample]
+            species_to_sample_to_numericSample.setdefault(species, {}).setdefault(sample, Is)
+
+            for Ir, run in enumerate(sorted(set(df_sample.parms_run.values))): species_to_sample_to_run_to_numericRun.setdefault(species, {}).setdefault(sample, {}).setdefault(run, Ir)
+
+
+
+    print("get_parms_numeric_sample")
+    def get_parms_numeric_sample(r): return species_to_sample_to_numericSample[r.parms_species][r.parms_sample]
+    df_cross_accuracy_benchmark["parms_numeric_sample"] = df_cross_accuracy_benchmark.apply(get_parms_numeric_sample, axis=1)
+
+    print("get_test_numeric_sample")
+    def get_test_numeric_sample(r): return species_to_sample_to_numericSample[r.test_species][r.test_sample]
+    df_cross_accuracy_benchmark["test_numeric_sample"] = df_cross_accuracy_benchmark.apply(get_test_numeric_sample, axis=1)
+
+    print("get_parms_numeric_run")
+    def get_parms_numeric_run(r): return species_to_sample_to_run_to_numericRun[r.parms_species][r.parms_sample][r.parms_run]
+    df_cross_accuracy_benchmark["parms_numeric_run"] = df_cross_accuracy_benchmark.apply(get_parms_numeric_run, axis=1)
+
+    print("get_test_numeric_run")
+    def get_test_numeric_run(r): return species_to_sample_to_run_to_numericRun[r.test_species][r.test_sample][r.test_run]
+    df_cross_accuracy_benchmark["test_numeric_run"] = df_cross_accuracy_benchmark.apply(get_test_numeric_run, axis=1)
+
+
+
+
+    #############################################################
+
     return df_cross_accuracy_benchmark
+
+
+
+def generate_heatmap_accuracy_of_parameters_on_test_samples(df_benchmark, fileprefix, replace=False, threads=4, accuracy_f="Fvalue", svtype="integrated", col_cluster = False, row_cluster = False):
+
+    """
+    This function takes a df where each row is one set of training parameters and test data svtype, together with the accuracy records. It generates a heatmap were the rows are each of the training parameters and the cols are the test samples.
+    """
+
+    print("plotting cross-accuracy")
+
+    # define graphics
+    species_to_color = {'none': 'white', 'Drosophila_melanogaster': 'black', 'Arabidopsis_thaliana': 'gray', 'Cryptococcus_neoformans': 'lightcoral', 'Candida_albicans': 'blue', 'Candida_glabrata': 'cyan'}
+    typeSimulations_to_color = {"uniform":"blue", "realSVs":"red", "arroundRepeats":"black", "arroundHomRegions":"olive", "fast":"gray"}
+    numericSample_to_color = {"0":"white", "1":"gray", "2":"black"}
+    numericRun_to_color = {"0":"lightcoral", "1":"brown", "2":"r"}
+    simName_to_color = {"sim1":"white", "sim2":"black"}
+
+
+    cathegory_to_colors_dict = {"parms_species" : species_to_color,
+                                "parms_typeSimulations" : typeSimulations_to_color,
+                                "parms_numeric_sample":numericSample_to_color,
+                                "parms_numeric_run":numericRun_to_color,
+                                "test_species" : species_to_color,
+                                "test_typeSimulations" : typeSimulations_to_color,
+                                "test_numeric_sample":numericSample_to_color,
+                                "test_numeric_run":numericRun_to_color,
+                                "test_simName":simName_to_color}
+
+
+    # keep only the df with the svtype
+    df_plot = df_benchmark[df_benchmark.svtype==svtype]
+
+
+
+    # define square df
+    parms_keys = ["parms_species", "parms_typeSimulations", "parms_numeric_sample", "parms_numeric_run"]
+    test_keys = ["test_species", "test_typeSimulations", "test_numeric_sample", "test_numeric_run", "test_simName"]
+    df_plot["parms_idx"] = df_plot.apply(lambda r: "||||".join([str(r[k]) for k in parms_keys]), axis=1)
+    df_plot["test_idx"] = df_plot.apply(lambda r: "||||".join([str(r[k]) for k in test_keys]), axis=1)
+    df_square = df_plot[["parms_idx", "test_idx", accuracy_f]].pivot(index='parms_idx', columns='test_idx', values=accuracy_f)
+
+    # sort by species
+    print("sorting")
+    species_to_order =  {'none': 0, "Candida_glabrata":1, "Candida_albicans":2, "Cryptococcus_neoformans":3, "Arabidopsis_thaliana":4, "Drosophila_melanogaster":5}
+    index_to_order = {c : species_to_order[c.split("||||")[0]]  for c in df_square.index}
+    col_to_order = {c : species_to_order[c.split("||||")[0]]  for c in df_square.columns}
+
+    sorted_index = sorted(df_square.index, key=(lambda x: index_to_order[x]))
+    sorted_cols = sorted(df_square.columns, key=(lambda x: col_to_order[x]))
+
+    df_square = df_square.loc[sorted_index, sorted_cols]
+
+    # add the label
+    type_comparison_to_label = {"same_run_and_simulation":"*", "other":""}
+    df_plot["label"] = df_plot.type_comparison.apply(lambda x: type_comparison_to_label[x])
+    df_annotations = df_plot[["parms_idx", "test_idx", "label"]].pivot(index='parms_idx', columns='test_idx', values="label").loc[sorted_index, sorted_cols]
+
+    # define dicts mapping objects
+    type_keys_to_keys = {"parms":parms_keys, "test":test_keys}
+
+    # generate the cols colors df
+    def get_colors_series(idx, type_keys="parms"):
+        # type_keys can be parms or test
+
+        # get the color dicts
+        keys = type_keys_to_keys[type_keys]
+
+        # get the content
+        idx_content = idx.split("||||")
+
+        # define the series
+        field_to_color = {keys[I] : cathegory_to_colors_dict[keys[I]][c] for I,c in enumerate(idx_content)}
+
+        return pd.Series(field_to_color)
+    
+    row_colors_df = pd.Series(df_square.index, index=df_square.index).apply(lambda x: get_colors_series(x, type_keys="parms"))
+    col_colors_df = pd.Series(df_square.columns, index=df_square.columns).apply(lambda x: get_colors_series(x, type_keys="test"))
+
+    # get the plot
+    filename = "%s_cross_accuracy_%s_%s_%s_%s.pdf"%(fileprefix, accuracy_f, svtype, col_cluster, row_cluster)
+    print("getting %s"%filename)
+
+    # define the figure size
+    figsize = (int(len(df_square.columns)*0.03), int(len(df_square)*0.03))
+
+    fun.plot_clustermap_with_annotation(df_square, row_colors_df, col_colors_df, filename, title="cross accuracy", col_cluster=col_cluster, row_cluster=row_cluster, colorbar_label=accuracy_f, adjust_position=True, legend=True, idxs_separator_pattern="||||", texts_to_strip={"L001"}, default_label_legend="control", df_annotations=df_annotations, cmap=sns.color_palette("RdBu_r", 50), ylabels_graphics_df=None, grid_lines=False, figsize=figsize)
+
+
+
+
+
+                        

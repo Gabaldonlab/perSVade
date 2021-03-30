@@ -612,7 +612,7 @@ if opt.testAccuracy is True:
     ####################   
 
     ### REPORT ACCURACY SINGLE SAMPLE ###
-    youhavetoaddcodeof_codeGraveyard_report_accuracy_realSVs
+    #youhavetoaddcodeof_codeGraveyard_report_accuracy_realSVs
 
 
     if opt.StopAfter_testAccuracy is True: 

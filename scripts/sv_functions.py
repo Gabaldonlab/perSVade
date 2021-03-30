@@ -11684,6 +11684,122 @@ def get_df_accuracy_perSVade_vs_longReads_one_sample(sampleID, outdir_shortVsLon
 
     return df_accuracy_perSVade_vs_longReads
 
+def get_str_float_with_point(x):
+
+    """Gets a string and returns the float with point"""
+
+    if "." in x and x.startswith("0"): return "."+x.split(".")[1]
+    elif x=="1.0": return "1"
+    else: return x
+
+def plot_accuracy_perSVade_vs_longReads_precision_and_recall(df_accuracy_all, PlotsDir, min_nvars=10):
+
+    """Plots, for several combinations a grid where the columns are samples and the rows are each precision and recall. The x is the fraction of parameters that should a variant have to be included in the high confidence set """
+
+    #delete_folder(PlotsDir)
+    make_folder(PlotsDir)
+
+    # add fields to all dfs
+    df_accuracy_all["tolerance"] = "bp=" + df_accuracy_all.tol_bp.apply(str) + ";pct=" + df_accuracy_all.pct_overlap.apply(str)
+
+    # keep only those comparisons that are from the perSVade vs long reads
+    df_accuracy = df_accuracy_all[df_accuracy_all.comparisonID.apply(lambda x: x.startswith("perSVade-"))]
+    
+    # add fields
+    df_accuracy["perSVade_parameters"] = df_accuracy.comparisonID
+
+    # define groups
+    all_GTs_longReads = sorted(set(df_accuracy.type_SVs_longReads))
+    
+    #all_svtypes = sorted(set(df_accuracy.svtype))
+    all_svtypes = ["integrated"]
+    
+    #all_tolerances = list(reversed(sorted(set(df_accuracy.tolerance))))
+    #all_tolerances = list(sorted(set(df_accuracy.tolerance)))
+    all_tolerances = ['bp=50;pct=0.75', 'bp=500;pct=0.5']
+
+    all_filter_IMPRECISE_sniffles = [True]
+
+    #all_remaining_treatment = sorted(set(df_accuracy.remaining_treatment))
+    all_remaining_treatment = ["drop"]
+
+    all_accuracies = ["precision", "recall", "Fvalue"]
+
+    # make one figure for each type of filterings and svtype
+    for filter_IMPRECISE_sniffles in all_filter_IMPRECISE_sniffles:
+        for genotypes_longReadsSVs in all_GTs_longReads:
+            for tol in all_tolerances:
+                for remaining_treatment in all_remaining_treatment:
+                    for svtype in all_svtypes:
+
+                        # get the plot of the figure
+                        df_plot_fig = df_accuracy[(df_accuracy.type_SVs_longReads==genotypes_longReadsSVs) & (df_accuracy.tolerance==tol) & (df_accuracy.remaining_treatment==remaining_treatment) & (df_accuracy.filter_IMPRECISE_sniffles==filter_IMPRECISE_sniffles) & (df_accuracy.svtype==svtype) & (df_accuracy.nevents>=min_nvars)]
+
+                        if len(df_plot_fig)==0: continue
+
+                        # define the max x
+                        max_x = max(df_plot_fig.threshold_fractionParms) + 0.05
+
+                        # define the samples
+                        all_samples = sorted(set(df_plot_fig.sampleID))
+                     
+                        # init fig
+                        ncols = len(all_samples)
+                        nrows = len(all_accuracies) # one for precision, one for recall
+                        fig = plt.figure(figsize=(ncols*2.2, nrows*2.2)); I=0
+                        filename = "%s/sepparate_svtypes_%s_%s_%s_filtImprecise=%s_%s_%s.pdf"%(PlotsDir, genotypes_longReadsSVs, tol.replace(";", "_"), remaining_treatment, filter_IMPRECISE_sniffles, svtype, "_".join(all_accuracies))
+
+                        print_if_verbose("writing %s"%filename)
+
+
+                        for Iacc, accuracy_f in enumerate(all_accuracies):
+                            
+                            # define the max y
+                            max_y = max(df_plot_fig[accuracy_f]) + 0.05
+
+                            for Is, sampleID in enumerate(all_samples):
+
+                                # init ax
+                                ax = plt.subplot(nrows, ncols, I+1); I+=1
+
+                                # get the df
+                                df_plot = df_plot_fig[(df_plot_fig.sampleID==sampleID)].sort_values(by=["threshold_fractionParms"])
+
+                                # plot main line
+                                typeRun_to_color = {"perSVade-uniform":"blue", "perSVade-fast":"gray", "perSVade-realSVs":"red", 'perSVade-arroundHomRegions':"olive", 'perSVade-arroundRepeats':"black"}
+
+                                typeRun_to_marker = {"perSVade-uniform":"^", "perSVade-fast":"s", "perSVade-realSVs":"o", 'perSVade-arroundHomRegions':"v", 'perSVade-arroundRepeats':"*"}
+
+                                ax = sns.lineplot(data=df_plot, x="threshold_fractionParms", y=accuracy_f, hue="perSVade_parameters", style="perSVade_parameters", palette=typeRun_to_color,  markers=typeRun_to_marker, dashes=False, ci="sd", markeredgecolor=None, linewidth=1.8, markersize=4, alpha=.7, markeredgewidth=0)
+
+                                # remove x labels
+                                if Iacc!=(len(all_accuracies)-1):
+                                    ax.set_xticklabels([])
+                                    ax.set_xlabel("")
+
+                                # remove y labels
+                                if Is!=0: 
+                                    ax.set_yticklabels([])
+                                    ax.set_ylabel("")
+
+                                # add title only in the fist
+                                if Iacc==0: ax.set_title(sampleID)
+
+                                # format legend
+                                if Is!=(len(all_samples)-1): ax.get_legend().remove()
+                                else: ax.legend(bbox_to_anchor=(3.2,1))
+                                        
+                        
+                                # limits
+                                ax.set_xlim([0, max_x])
+                                ax.set_ylim([0, max_y])
+
+                        
+                        # save the fig
+                        plt.subplots_adjust(wspace=0.1, hspace=0.05)
+                        fig.savefig(filename, bbox_inches='tight')
+                        plt.close(fig)
+
 
 def plot_accuracy_perSVade_vs_longReads(df_accuracy_all, PlotsDir, min_nvars=10, xfield="recall", yfield="precision"):
 
@@ -11853,22 +11969,18 @@ def report_accuracy_golden_set_reportAccuracy(dict_paths_all_samples, outdir, re
     # define the dir
     PlotsDir = "%s/plots"%outdir; make_folder(PlotsDir)
 
+    # plot the sepparated precision and recall for each sample
+    plot_accuracy_perSVade_vs_longReads_precision_and_recall(df_accuracy_perSVade_vs_longReads_all, PlotsDir)
+
+
     # plot the accuracy of each perSVade configuration on long-read based calls
     plot_accuracy_perSVade_vs_longReads(df_accuracy_perSVade_vs_longReads_all, PlotsDir)
 
     # plot the cross accuracy between SNIFFLES and SVIM
     #plot_accuracy_SNIFFLES_vs_SVIM_perSVade_representation(df_accuracy_perSVade_vs_longReads, PlotsDir)
 
-    sys.exit(0)
-
-
-
-
-    print(df_accuracy_perSVade_vs_longReads)
-
     ###########################################
 
-    jkadhgahjda
 
 def remove_smallVarsCNV_nonEssentialFiles(outdir, ploidy):
 
