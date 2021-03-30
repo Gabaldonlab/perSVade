@@ -68,9 +68,11 @@ conda install -c anaconda -y cython=0.29.21 && # necessary for the cylowess runn
 conda install -c anaconda -y xlrd=1.2.0 &&
 conda install -c bioconda -y entrez-direct=13.3 && # would be to install esearch and efetch, but they are already installed with VEP
 conda install -c bioconda -y porechop=0.2.4 &&
-
-conda install -c bioconda svim=1.4.2
+conda install -c bioconda svim=1.4.2 &&
 conda install -c bioconda sniffles=1.0.12
+
+conda install -c anaconda spyder # we may skip this one
+
 
 
 # export env

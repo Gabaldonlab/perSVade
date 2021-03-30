@@ -48,11 +48,41 @@ ProcessedDataDir = "%s/processed_data"%PlotsDir; fun.make_folder(ProcessedDataDi
 #%% GET PROCESSED DFs
 
 # get cross-accuracy measurements
-cross_accuracy_df = test_fun.get_cross_accuracy_df_several_perSVadeSimulations(outdir_testing, genomes_and_annotations_dir, replace=False)
+df_cross_accuracy_benchmark = test_fun.get_cross_accuracy_df_several_perSVadeSimulations(outdir_testing, genomes_and_annotations_dir, replace=False)
 
-print(cross_accuracy_df)
 
-dajghdajhgadjda
+#%% CROSS BENCHMARKING PLOT
+
+# all data
+fileprefix = "%s/all_cross_accuracy"%PlotsDir
+test_fun.generate_heatmap_accuracy_of_parameters_on_test_samples(df_cross_accuracy_benchmark, fileprefix, replace=False, threads=4, accuracy_f="Fvalue", svtype="integrated", col_cluster = False, row_cluster = False)
+
+#%%
+# each parms species
+plots_dir_parms_species = "%s/parms_only_one_species"%PlotsDir; fun.make_folder(plots_dir_parms_species)
+for parms_species in ['Arabidopsis_thaliana', 'Candida_albicans', 'Candida_glabrata', 'Cryptococcus_neoformans', 'Drosophila_melanogaster']:
+    df_sp = df_cross_accuracy_benchmark[df_cross_accuracy_benchmark.parms_species.isin({parms_species, "none"})]
+    
+    fileprefix = "%s/%s"%(plots_dir_parms_species, parms_species)
+    test_fun.generate_heatmap_accuracy_of_parameters_on_test_samples(df_sp, fileprefix, replace=False, threads=4, accuracy_f="Fvalue", svtype="integrated", col_cluster = False, row_cluster = False)
+#%%
+# each test species
+plots_dir_test_species = "%s/test_only_one_species"%PlotsDir; fun.make_folder(plots_dir_test_species)
+for test_species in ['Arabidopsis_thaliana', 'Candida_albicans', 'Candida_glabrata', 'Cryptococcus_neoformans', 'Drosophila_melanogaster']:
+    df_sp = df_cross_accuracy_benchmark[df_cross_accuracy_benchmark.test_species.isin({test_species, "none"})]
+    
+    fileprefix = "%s/%s"%(plots_dir_test_species, test_species)
+    test_fun.generate_heatmap_accuracy_of_parameters_on_test_samples(df_sp, fileprefix, replace=False, threads=4, accuracy_f="Fvalue", svtype="integrated", col_cluster = False, row_cluster = False)
+    
+# only one species against itself
+#%%
+plots_dir_species = "%s/only_one_species"%PlotsDir; fun.make_folder(plots_dir_species)
+for species in ['Arabidopsis_thaliana', 'Candida_albicans', 'Candida_glabrata', 'Cryptococcus_neoformans', 'Drosophila_melanogaster']:
+    df_sp = df_cross_accuracy_benchmark[(df_cross_accuracy_benchmark.test_species.isin({species, "none"})) & (df_cross_accuracy_benchmark.parms_species.isin({species, "none"}))]
+    
+    fileprefix = "%s/%s"%(plots_dir_species, species)
+    test_fun.generate_heatmap_accuracy_of_parameters_on_test_samples(df_sp, fileprefix, replace=False, threads=4, accuracy_f="precision", svtype="integrated", col_cluster = False, row_cluster = False)
+    
 #%% PRINT OUT
 print("testing several species finished")
 
