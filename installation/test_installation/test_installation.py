@@ -139,11 +139,11 @@ real_bedpe_breakpoints = test_fun.test_realSVgeneration(Cglabrata_subsampled_rea
 ### TESTING THINGS THAT ARE DISPENSABLE ###
 
 # test the querying of the SRA database and downloading, and trimming of reads and also gztool
-outdir_SRAdb_query_downloading_and_readTrimming = "%s/testing_SRAdb_query_downloading_and_readTrimming_MERS"%testing_outputs_dir
-test_fun.test_SRAdb_query_downloading_and_readTrimming(outdir_SRAdb_query_downloading_and_readTrimming, MERS_genome, 1335626, replace=False)
+#outdir_SRAdb_query_downloading_and_readTrimming = "%s/testing_SRAdb_query_downloading_and_readTrimming_MERS"%testing_outputs_dir
+#test_fun.test_SRAdb_query_downloading_and_readTrimming(outdir_SRAdb_query_downloading_and_readTrimming, MERS_genome, 1335626, replace=False)
 
 # test the repeat masker obtention for a long chromosome 1, 2 and 6
-test_fun.test_get_repeat_maskerDF(Calbicans_chr1_2_6, replace=False)
+#test_fun.test_get_repeat_maskerDF(Calbicans_chr1_2_6, replace=False)
 
 ############################################
 
