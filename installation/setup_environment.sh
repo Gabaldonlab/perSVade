@@ -63,6 +63,11 @@ chmod u+x *;
 
 ######### CREATE THE REPEATMASKER SUBENVIRONMENT #########
 
+# add channels
+conda config --add channels conda-forge
+conda config --add channels anaconda
+conda config --add channels bioconda
+
 # create a subenvitonment to run repeat modeller. This needs a specific GLIBC version
 repeatMasker_env_name="$env_name"_RepeatMasker_env
 echo "creating conda env $repeatMasker_env_name"
@@ -207,7 +212,7 @@ echo "creating conda env $ete3_env_name"
 conda config --add channels conda-forge
 rm -rf $conda_dir/envs/$ete3_env_name || echo 'ete3 was not created'
 conda create -y --name $ete3_env_name python=3.6
-conda install -n $ete3_env_name -c etetoolkit-y ete3=3.1.2; # note that this was updated because 3.3.0 did not work
+conda install -n $ete3_env_name -c etetoolkit -y ete3=3.1.2; # note that this was updated because 3.3.0 did not work
 
 
 # old

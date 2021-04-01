@@ -17734,3 +17734,125 @@ def get_df_accuracy_perSVade_runs_vs_longReads_oneFilterSet(typeRun_to_svtype_to
 
     return df_accuracy_all
 
+
+
+
+
+
+def get_df_vcf_with_df_CNV_coverage_added_nonRedundant(sorted_bam, reference_genome, mitochondrial_chromosome, df_vcf, df_CNV, outdir, df_gridss, df_clove, threads, replace, window_size_CNVcalling, cnv_calling_algs):
+
+    """This function merges the df_vcf with the coverage-based prediction, removing redudnant events."""
+
+    # define the final file
+    df_vcf_final_file = "%s/vcf_merged_CNVcalling_SVcalling.vcf"%outdir
+
+    if file_is_empty(df_vcf_final_file) or replace is True:
+
+        # define fields
+        data_fields = ["chromosome", "start", "end", "ID", "SVTYPE", "INFO", "median95CI_lower_rel_coverage", "median95CI_higher_rel_coverage", "median95CI_lower_rel_coverage_relative", "median95CI_higher_rel_coverage_relative", "abs_spearman_r", "abs_pearson_r", "spearman_p", "pearson_p"]
+
+        vcf_fields = ["#CHROM", "POS", "ID", "REF", "ALT", "QUAL", "FILTER", "INFO", "FORMAT"]
+
+        # calculate median cov
+        destination_dir = "%s.calculating_windowcoverage"%sorted_bam
+        coverage_df = pd.read_csv(generate_coverage_per_window_file_parallel(reference_genome, destination_dir, sorted_bam, windows_file="none", replace=replace, run_in_parallel=True, delete_bams=True), sep="\t")
+        median_coverage = get_median_coverage(coverage_df, mitochondrial_chromosome)
+
+        ########### GET RID OF REDUNDANT EVENTS AND ADD FIELDS ###########
+
+        # add the ID
+        df_CNV["ID"] = "coverage" + df_CNV.SVTYPE + "|" + df_CNV.chromosome + ":" + df_CNV.start.apply(str) + "-" + df_CNV.end.apply(str)
+
+        # get the df_vcf related to CNV
+        df_vcf_forCNV = df_vcf[df_vcf.ALT.isin({"<DUP>", "<TDUP>", "<DEL>"})].rename(columns={"POS":"start", "#CHROM":"chromosome"}).set_index("ID", drop=False)
+        df_vcf_forCNV["end"] = df_vcf_forCNV.INFO.apply(lambda x: [int(y.split("END=")[1]) for y in x.split(";") if y.startswith("END")][0])
+
+        # add the svtype
+        svtype_to_DUPDEL = {"TDUP":"DUP", "DUP":"DUP", "DEL":"DEL"}
+        df_vcf_forCNV["SVTYPE"] = df_vcf_forCNV.INFO.apply(lambda x: [svtype_to_DUPDEL[y.split("SVTYPE=")[1]] for y in x.split(";") if y.startswith("SVTYPE")][0])
+
+        # add the type of SVcall
+        df_vcf_forCNV["type_CNVcall"] = "gridssClove"
+        df_CNV["type_CNVcall"] = "coverage"
+
+        # get only non-redundant CNVs
+        df_CNV.index = list(range(0, len(df_CNV)))
+        df_CNV = get_nonRedundant_CNVcalls_coverage(outdir, df_CNV, df_vcf_forCNV, threads, replace, pct_overlap=0.8)
+
+        ################################################################
+
+        ###### FORMAT AS VCF ######
+
+        # get the coverage calculation for the input vcf TAN,DUP,DEL
+        if len(df_vcf_forCNV)==0: df_vcf_forCNV_final = pd.DataFrame(columns=data_fields)
+        
+        else:   
+
+            df_vcf_forCNV_final  = df_vcf_forCNV.set_index("ID", drop=False)
+
+            bed_windows_prefix = "%s/calculating_cov_neighbors_SV-based_vcf"%outdir
+            df_vcf_forCNV_final = get_df_with_coverage_per_windows_relative_to_neighbor_regions(df_vcf_forCNV_final, bed_windows_prefix, reference_genome, sorted_bam, df_clove, median_coverage, replace=replace, run_in_parallel=True, delete_bams=True, threads=threads)
+            df_vcf_forCNV_final = get_coverage_df_windows_with_within_windows_statistics(df_vcf_forCNV_final, outdir, sorted_bam, reference_genome, median_coverage, replace=replace, threads=threads)
+
+            # change the SVTYPE to follow INFO. This is important to get TDUPs back in place
+            df_vcf_forCNV_final["SVTYPE"] = df_vcf_forCNV_final.INFO.apply(lambda x: [y.split("SVTYPE=")[1] for y in x.split(";") if y.startswith("SVTYPE")][0])
+
+        # add the INFO to and remaining data_fields to df_CNV
+        if len(df_CNV)==0: df_CNV = pd.DataFrame(columns=data_fields)
+        else:
+
+            # add the field
+            def get_INFO_from_df_CNV_r(r):
+
+                # add the info
+                info = "END=%i;SVTYPE=%s;merged_relative_CN=%.3f;median_coverage_corrected=%.3f"%(r["end"], r["SVTYPE"], r["merged_relative_CN"], r["median_coverage_corrected"])
+
+                # add the calling of cnvs
+                cnv_calling_algs_fields = ["median_relative_CN_%s"%alg for alg in cnv_calling_algs]
+                info += ";%s"%(";".join(["%s=%.3f"%(f, r[f]) for f in cnv_calling_algs_fields]))
+
+                return info 
+
+            df_CNV["INFO"] = df_CNV.apply(get_INFO_from_df_CNV_r, axis=1)
+
+            # filter out SVs that have a size below min_CNVsize_coverageBased
+            df_CNV["length_CNV"] = df_CNV.end - df_CNV.start
+            df_CNV = df_CNV[df_CNV.length_CNV>=min_CNVsize_coverageBased]
+
+            # add the coverage fields
+            bed_windows_prefix = "%s/calculating_cov_neighbors_CNV_vcf"%outdir
+            df_CNV = get_df_with_coverage_per_windows_relative_to_neighbor_regions(df_CNV, bed_windows_prefix, reference_genome, sorted_bam, df_clove, median_coverage, replace=replace, run_in_parallel=True, delete_bams=True, threads=threads)
+            df_CNV = get_coverage_df_windows_with_within_windows_statistics(df_CNV, outdir, sorted_bam, reference_genome, median_coverage, replace=replace, threads=threads)
+
+        # initialize the final df
+        df_vcf_final = df_CNV[data_fields].append(df_vcf_forCNV_final[data_fields])
+
+        # add the INFO
+        if len(df_vcf_final)==0: df_vcf_final["INFO"] = ""
+        else:   
+
+            df_vcf_final["INFO"] = df_vcf_final.apply(lambda r: "%s;RELCOVERAGE=%.4f,%.4f;RELCOVERAGE_NEIGHBOR=%.4f,%.4f;REGION_ABS_SPEARMANR=%.4f;REGION_ABS_PEARSONR=%.4f;REGION_SPEARMANP=%.4f;REGION_PEARSONP=%.4f"%(r["INFO"], r["median95CI_lower_rel_coverage"], r["median95CI_higher_rel_coverage"], r["median95CI_lower_rel_coverage_relative"], r["median95CI_higher_rel_coverage_relative"], r["abs_spearman_r"], r["abs_pearson_r"], r["spearman_p"], r["pearson_p"]), axis=1)
+
+        # add the ALT
+        df_vcf_final["ALT"] = "<" + df_vcf_final.SVTYPE + ">"
+
+        # add empty fields
+        for f in  ["REF", "QUAL", "FILTER", "FORMAT"]: df_vcf_final[f] = "."
+
+        # rename fields
+        df_vcf_final = df_vcf_final.rename(columns={"chromosome":"#CHROM", "start":"POS"})[vcf_fields]
+
+        # append the initial vcf 
+        df_vcf_noCNV = df_vcf[~(df_vcf.ALT.isin({"<DUP>", "<TDUP>", "<DEL>"}))]
+        df_vcf_final = df_vcf_final[vcf_fields].append(df_vcf_noCNV[vcf_fields])
+
+        ##########################
+
+        # save
+        save_df_as_tab(df_vcf_final[vcf_fields], df_vcf_final_file)
+
+    # load
+    df_vcf_final = get_tab_as_df_or_empty_df(df_vcf_final_file).sort_values(by=["#CHROM", "POS"])
+
+    return df_vcf_final
+

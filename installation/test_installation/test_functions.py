@@ -312,7 +312,9 @@ def test_parameter_optimisation_perSVade(sorted_bam, reference_genome, outdir, t
 
     if fun.file_is_empty("%s/perSVade_finished_file.txt"%outdir):
 
-        cmd = "%s -r %s -thr %i -o %s -sbam %s --nvars 5 --simulation_ploidies haploid --range_filtering_benchmark theoretically_meaningful -mchr mito_C_glabrata_CBS138 --min_chromosome_len 100 --nsimulations 1 --skip_repeat_analysis --skip_CNV_calling"%(fun.perSVade_py, reference_genome, threads, outdir, sorted_bam)
+        #cmd = "%s -r %s -thr %i -o %s -sbam %s --nvars 5 --simulation_ploidies haploid --range_filtering_benchmark theoretically_meaningful -mchr mito_C_glabrata_CBS138 --min_chromosome_len 100 --nsimulations 1 --skip_repeat_analysis --skip_CNV_calling"%(fun.perSVade_py, reference_genome, threads, outdir, sorted_bam)
+
+        cmd = "%s -r %s -thr %i -o %s -sbam %s --nvars 5 --simulation_ploidies haploid --range_filtering_benchmark theoretically_meaningful -mchr mito_C_glabrata_CBS138 --min_chromosome_len 100 --nsimulations 1 --skip_repeat_analysis --window_size_CNVcalling 200 --cnv_calling_algs HMMcopy,AneuFinder"%(fun.perSVade_py, reference_genome, threads, outdir, sorted_bam)
 
         if fun.printing_verbose_mode is True: cmd += " --verbose"
 

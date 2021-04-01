@@ -17139,7 +17139,10 @@ def get_df_vcf_with_df_CNV_coverage_added_nonRedundant(sorted_bam, reference_gen
     if file_is_empty(df_vcf_final_file) or replace is True:
 
         # define fields
-        data_fields = ["chromosome", "start", "end", "ID", "SVTYPE", "INFO", "median95CI_lower_rel_coverage", "median95CI_higher_rel_coverage", "median95CI_lower_rel_coverage_relative", "median95CI_higher_rel_coverage_relative", "abs_spearman_r", "abs_pearson_r", "spearman_p", "pearson_p"]
+        data_fields = ["chromosome", "start", "end", "ID", "SVTYPE", "INFO", "relative_coverage_target", "coverage_rel_to_5", "coverage_rel_to_3"]
+
+        #data_fields = ["chromosome", "start", "end", "ID", "SVTYPE", "INFO", "median95CI_lower_rel_coverage", "median95CI_higher_rel_coverage", "median95CI_lower_rel_coverage_relative", "median95CI_higher_rel_coverage_relative", "abs_spearman_r", "abs_pearson_r", "spearman_p", "pearson_p"]
+
 
         vcf_fields = ["#CHROM", "POS", "ID", "REF", "ALT", "QUAL", "FILTER", "INFO", "FORMAT"]
 
@@ -17182,8 +17185,6 @@ def get_df_vcf_with_df_CNV_coverage_added_nonRedundant(sorted_bam, reference_gen
 
             bed_windows_prefix = "%s/calculating_cov_neighbors_SV-based_vcf"%outdir
             df_vcf_forCNV_final = get_df_with_coverage_per_windows_relative_to_neighbor_regions(df_vcf_forCNV_final, bed_windows_prefix, reference_genome, sorted_bam, df_clove, median_coverage, replace=replace, run_in_parallel=True, delete_bams=True, threads=threads)
-            df_vcf_forCNV_final = get_coverage_df_windows_with_within_windows_statistics(df_vcf_forCNV_final, outdir, sorted_bam, reference_genome, median_coverage, replace=replace, threads=threads)
-
             # change the SVTYPE to follow INFO. This is important to get TDUPs back in place
             df_vcf_forCNV_final["SVTYPE"] = df_vcf_forCNV_final.INFO.apply(lambda x: [y.split("SVTYPE=")[1] for y in x.split(";") if y.startswith("SVTYPE")][0])
 
@@ -17212,7 +17213,6 @@ def get_df_vcf_with_df_CNV_coverage_added_nonRedundant(sorted_bam, reference_gen
             # add the coverage fields
             bed_windows_prefix = "%s/calculating_cov_neighbors_CNV_vcf"%outdir
             df_CNV = get_df_with_coverage_per_windows_relative_to_neighbor_regions(df_CNV, bed_windows_prefix, reference_genome, sorted_bam, df_clove, median_coverage, replace=replace, run_in_parallel=True, delete_bams=True, threads=threads)
-            df_CNV = get_coverage_df_windows_with_within_windows_statistics(df_CNV, outdir, sorted_bam, reference_genome, median_coverage, replace=replace, threads=threads)
 
         # initialize the final df
         df_vcf_final = df_CNV[data_fields].append(df_vcf_forCNV_final[data_fields])
@@ -17221,7 +17221,7 @@ def get_df_vcf_with_df_CNV_coverage_added_nonRedundant(sorted_bam, reference_gen
         if len(df_vcf_final)==0: df_vcf_final["INFO"] = ""
         else:   
 
-            df_vcf_final["INFO"] = df_vcf_final.apply(lambda r: "%s;RELCOVERAGE=%.4f,%.4f;RELCOVERAGE_NEIGHBOR=%.4f,%.4f;REGION_ABS_SPEARMANR=%.4f;REGION_ABS_PEARSONR=%.4f;REGION_SPEARMANP=%.4f;REGION_PEARSONP=%.4f"%(r["INFO"], r["median95CI_lower_rel_coverage"], r["median95CI_higher_rel_coverage"], r["median95CI_lower_rel_coverage_relative"], r["median95CI_higher_rel_coverage_relative"], r["abs_spearman_r"], r["abs_pearson_r"], r["spearman_p"], r["pearson_p"]), axis=1)
+            df_vcf_final["INFO"] = df_vcf_final.apply(lambda r: "%s;RELCOVERAGE=%s;RELCOVERAGE_TO_5=%s;RELCOVERAGE_TO_3=%s;"%(r["INFO"], r["relative_coverage_target"], r["coverage_rel_to_5"], r["coverage_rel_to_3"]), axis=1)
 
         # add the ALT
         df_vcf_final["ALT"] = "<" + df_vcf_final.SVTYPE + ">"
