@@ -4,7 +4,6 @@ channels:
   - anaconda
   - plotly
   - bioconda
-  - r
 dependencies:
   - wgsim=1.0
   - ensembl-vep=100.2
@@ -40,5 +39,4 @@ dependencies:
   - porechop=0.2.4
   - svim=1.4.2
   - sniffles=1.0.12
-  - spyder
 prefix: /gpfs/projects/bsc40/mschikora/anaconda3/envs/perSVade_env
