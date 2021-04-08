@@ -1,0 +1,4 @@
+sampleID	runID	short_reads1	short_reads2
+BG2	BG2_ANI	/gpfs/projects/bsc40/mschikora/Cglabrata_antifungals/data/trimmed_reads/RUN1_BG2_11B_ANI_R1_trimmed.fq.gz	/gpfs/projects/bsc40/mschikora/Cglabrata_antifungals/data/trimmed_reads/RUN1_BG2_11B_ANI_R2_trimmed.fq.gz
+CST34	CST34_ANI	/gpfs/projects/bsc40/mschikora/Cglabrata_antifungals/data/trimmed_reads/RUN1_CST34_2A_ANI_R1_trimmed.fq.gz	/gpfs/projects/bsc40/mschikora/Cglabrata_antifungals/data/trimmed_reads/RUN1_CST34_2A_ANI_R2_trimmed.fq.gz
+M12	M12_ANI	/gpfs/projects/bsc40/mschikora/Cglabrata_antifungals/data/trimmed_reads/RUN1_M12_5F_ANI_R1_trimmed.fq.gz	/gpfs/projects/bsc40/mschikora/Cglabrata_antifungals/data/trimmed_reads/RUN1_M12_5F_ANI_R2_trimmed.fq.gz

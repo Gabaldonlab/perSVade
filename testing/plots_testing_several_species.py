@@ -38,6 +38,8 @@ perSVade_py = "%s/perSVade.py"%perSVade_dir
 
 # define dirs
 outdir_testing = "%s/scripts/perSVade/perSVade_repository/testing/outdirs_testing_severalSpecies"%ParentDir; fun.make_folder(outdir_testing)
+outdir_testing_GoldenSet = "%s/scripts/perSVade/perSVade_repository/testing/outdirs_testing_severalSpecies_goldenSet"%ParentDir; fun.make_folder(outdir_testing)
+
 CurDir = "%s/scripts/perSVade/perSVade_repository/testing"%ParentDir; fun.make_folder(outdir_testing)
 genomes_and_annotations_dir = "%s/genomes_and_annotations"%CurDir
 
@@ -50,14 +52,23 @@ ProcessedDataDir = "%s/processed_data"%PlotsDir; fun.make_folder(ProcessedDataDi
 # get cross-accuracy measurements
 df_cross_accuracy_benchmark = test_fun.get_cross_accuracy_df_several_perSVadeSimulations(outdir_testing, genomes_and_annotations_dir, replace=False)
 
+# keep only interesting simulations
+df_cross_accuracy_benchmark = df_cross_accuracy_benchmark[(df_cross_accuracy_benchmark.parms_typeSimulations!="arroundRepeats") & ((df_cross_accuracy_benchmark.test_typeSimulations!="arroundRepeats"))]
+
+# load golden set df
+df_goldenSetAccuracy = test_fun.get_accuracy_df_goldenSet(outdir_testing_GoldenSet)
+
+
+
 
 #%% CROSS BENCHMARKING PLOT
 
 # all data
 fileprefix = "%s/all_cross_accuracy"%PlotsDir
-test_fun.generate_heatmap_accuracy_of_parameters_on_test_samples(df_cross_accuracy_benchmark, fileprefix, replace=False, threads=4, accuracy_f="Fvalue", svtype="integrated", col_cluster = False, row_cluster = False)
+test_fun.generate_heatmap_accuracy_of_parameters_on_test_samples(df_cross_accuracy_benchmark, fileprefix, replace=False, threads=4, accuracy_f="Fvalue", svtype="integrated", col_cluster = False, row_cluster = False, show_only_species_and_simType=True)
 
-#%%
+#%%  CROSS BENCHMARKING SEPPARAT
+
 # each parms species
 plots_dir_parms_species = "%s/parms_only_one_species"%PlotsDir; fun.make_folder(plots_dir_parms_species)
 for parms_species in ['Arabidopsis_thaliana', 'Candida_albicans', 'Candida_glabrata', 'Cryptococcus_neoformans', 'Drosophila_melanogaster']:
@@ -65,7 +76,7 @@ for parms_species in ['Arabidopsis_thaliana', 'Candida_albicans', 'Candida_glabr
     
     fileprefix = "%s/%s"%(plots_dir_parms_species, parms_species)
     test_fun.generate_heatmap_accuracy_of_parameters_on_test_samples(df_sp, fileprefix, replace=False, threads=4, accuracy_f="Fvalue", svtype="integrated", col_cluster = False, row_cluster = False)
-#%%
+
 # each test species
 plots_dir_test_species = "%s/test_only_one_species"%PlotsDir; fun.make_folder(plots_dir_test_species)
 for test_species in ['Arabidopsis_thaliana', 'Candida_albicans', 'Candida_glabrata', 'Cryptococcus_neoformans', 'Drosophila_melanogaster']:
@@ -75,7 +86,6 @@ for test_species in ['Arabidopsis_thaliana', 'Candida_albicans', 'Candida_glabra
     test_fun.generate_heatmap_accuracy_of_parameters_on_test_samples(df_sp, fileprefix, replace=False, threads=4, accuracy_f="Fvalue", svtype="integrated", col_cluster = False, row_cluster = False)
     
 # only one species against itself
-#%%
 plots_dir_species = "%s/only_one_species"%PlotsDir; fun.make_folder(plots_dir_species)
 for species in ['Arabidopsis_thaliana', 'Candida_albicans', 'Candida_glabrata', 'Cryptococcus_neoformans', 'Drosophila_melanogaster']:
     df_sp = df_cross_accuracy_benchmark[(df_cross_accuracy_benchmark.test_species.isin({species, "none"})) & (df_cross_accuracy_benchmark.parms_species.isin({species, "none"}))]
@@ -83,6 +93,23 @@ for species in ['Arabidopsis_thaliana', 'Candida_albicans', 'Candida_glabrata', 
     fileprefix = "%s/%s"%(plots_dir_species, species)
     test_fun.generate_heatmap_accuracy_of_parameters_on_test_samples(df_sp, fileprefix, replace=False, threads=4, accuracy_f="precision", svtype="integrated", col_cluster = False, row_cluster = False)
     
+#%% CROSS-ACCURACY VIOLINPLOTS
+    
+fileprefix = "%s/cross_accuracy_distribution"%PlotsDir
+ax  = test_fun.get_crossaccuracy_distributions(df_cross_accuracy_benchmark, fileprefix, accuracy_f="Fvalue",  svtype="integrated")
+    
+
+#%% GOLDEN ACCURACY BAR PLOTS
+
+fileprefix = "%s/goldenSetAccuracy"%PlotsDir
+test_fun.plot_goldenSet_accuracy_barplots(df_goldenSetAccuracy, fileprefix, accuracy_f="Fvalue", svtype="integrated")
+
+#%% GOLDEN ACCURACY LINE PLOT
+
+fileprefix = "%s/goldenSetAccuracy_lineplot"%PlotsDir
+test_fun.plot_goldenSet_accuracy_lineplots(df_goldenSetAccuracy, fileprefix, accuracy_f="Fvalue", svtype="integrated")
+
+
 #%% PRINT OUT
 print("testing several species finished")
 

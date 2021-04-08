@@ -17856,3 +17856,293 @@ def get_df_vcf_with_df_CNV_coverage_added_nonRedundant(sorted_bam, reference_gen
 
     return df_vcf_final
 
+
+
+
+
+def report_accuracy_realSVs_perSVadeRuns(close_shortReads_table, reference_genome, outdir, real_bedpe_breakpoints, threads=4, replace=False, n_simulated_genomes=2, mitochondrial_chromosome="mito_C_glabrata_CBS138", simulation_ploidies=["haploid", "diploid_homo", "diploid_hetero", "ref:2_var:1", "ref:3_var:1", "ref:4_var:1", "ref:5_var:1", "ref:9_var:1", "ref:19_var:1", "ref:99_var:1"], range_filtering_benchmark="theoretically_meaningful", nvars=100, job_array_mode="local", skip_cleaning_simulations_files_and_parameters=False, skip_cleaning_outdir=False, parameters_json_file=None, gff=None, replace_FromGridssRun_final_perSVade_run=False, fraction_available_mem=None, skip_CNV_calling=False, outdir_finding_realVars=None, replace_SV_CNVcalling=False, simulate_SVs_arround_HomologousRegions_previousBlastnFile=None, simulate_SVs_arround_HomologousRegions_maxEvalue=1e-5, simulate_SVs_arround_HomologousRegions_queryWindowSize=500):
+
+
+    """This function runs the SV pipeline for all the datasets in close_shortReads_table with the fastSV, optimisation based on uniform parameters and optimisation based on realSVs (specified in real_svtype_to_file). The latter is skipped if real_svtype_to_file is empty.
+
+    First, it runs perSVade on all parameters keeping some important files. It returns a dict with the outdir of each configuration."""
+
+    ##### DEFINE INPUTS ######
+
+    # this pipeline requires real data and close_shortReads_table that is not none
+    if real_bedpe_breakpoints is None: raise ValueError("You need real data if you want to test accuracy")
+    if file_is_empty(close_shortReads_table): raise ValueError("You need real data reads if you want to test accuracy")
+
+    # make the outdir
+    make_folder(outdir)
+
+    print_if_verbose("testing the accuracy of perSVade. Running perSVade on each sample with each configuration")
+
+    # get the gff with biotype
+    if gff is not None: 
+        correct_gff, gff_with_biotype = get_correct_gff_and_gff_with_biotype(gff, replace=replace)
+        gff = gff_with_biotype
+
+    # load the real data table
+    df_reads = pd.read_csv(close_shortReads_table, sep="\t").set_index("runID", drop=False)
+
+    # init final dict
+    final_dict = {}
+
+    # map each runID to the bam file, if it exists, from the previous run
+    runID_to_previous_bam = {}
+    for runID in set(df_reads.runID):
+        if outdir_finding_realVars is None: runID_to_previous_bam[runID] = None
+        else:  
+            runID_to_previous_bam[runID] = "%s/all_realVars/shortReads_realVarsDiscovery_%s/aligned_reads.bam.sorted"%(outdir_finding_realVars, runID)
+            for f in [runID_to_previous_bam[runID], "%s.bai"%runID_to_previous_bam[runID]]:
+                if file_is_empty(f): raise ValueError("%s should exist"%f)
+
+    ##########################
+
+    ##### RUN JOBS ######
+
+    # initialize the cmds to run 
+    all_cmds = []
+    
+    # predefine if some jobs need to be ran
+    types_simulations = ["arroundHomRegions", "arroundRepeats", "uniform", "fast", "realSVs"]
+    n_remaining_jobs = sum([sum([file_is_empty("%s/%s/%s/perSVade_finished_file.txt"%(outdir, typeSimulations, runID)) for runID in set(df_reads.runID)]) for typeSimulations in types_simulations])
+    print_if_verbose("There are %i remaining jobs"%n_remaining_jobs)
+
+    # go through each run and configuration
+    for typeSimulations, bedpe_breakpoints, fast_SVcalling, simulate_SVs_arround_repeats, simulate_SVs_arround_HomologousRegions in [("arroundHomRegions", None, False, False, True), ("arroundRepeats", None, False, True, False), ("uniform", None, False, False, False), ("realSVs", real_bedpe_breakpoints, False, False, False), ("fast", None, True, False, False)]:
+
+        # define an outdir for this type of simulations
+        outdir_typeSimulations = "%s/%s"%(outdir, typeSimulations); make_folder(outdir_typeSimulations)
+
+        # go though each runID
+        for runID in set(df_reads.runID):
+            print_if_verbose(typeSimulations, runID)
+
+            # define an outdir for this runID
+            outdir_runID = "%s/%s"%(outdir_typeSimulations, runID); make_folder(outdir_runID)
+
+            # remove the dir to repeat (debug)
+            #delete_folder(outdir_runID)
+            #continue
+
+            # keep
+            final_dict.setdefault(typeSimulations, {}).setdefault(runID, outdir_runID)
+
+            # map the previous bam file to here, to spare running time
+            previous_bam = runID_to_previous_bam[runID]
+            if previous_bam is not None:
+                dest_bam = "%s/aligned_reads.bam.sorted"%outdir_runID
+                soft_link_files(previous_bam, dest_bam)
+                soft_link_files(previous_bam+".bai", dest_bam+".bai")
+
+            # define the reads
+            r1 = df_reads.loc[runID, "short_reads1"]
+            r2 = df_reads.loc[runID, "short_reads2"]
+
+            # define the final file 
+            final_file = "%s/perSVade_finished_file.txt"%outdir_runID
+            parameters_file = "%s/SVdetection_output/final_gridss_running/perSVade_parameters.json"%outdir_runID
+
+            # define the previous repeats file 
+            previous_repeats_table = "%s.repeats.tab"%reference_genome
+            if file_is_empty(previous_repeats_table): raise ValueError("%s should exist"%previous_repeats_table)
+            
+            # only contine if the final file is not defined
+            if file_is_empty(final_file) or replace is True:# or file_is_empty(parameters_file):
+
+                # define the cmd. This is a normal perSvade.py run with the vars of the previous dir  
+                cmd = "python %s -r %s --threads %i --outdir %s --nvars %i --nsimulations %i --simulation_ploidies %s --range_filtering_benchmark %s --mitochondrial_chromosome %s -f1 %s -f2 %s --previous_repeats_table %s --min_CNVsize_coverageBased %i --skip_cleaning_outdir --skip_SV_CNV_calling --simulate_SVs_arround_HomologousRegions_maxEvalue %.10f --simulate_SVs_arround_HomologousRegions_queryWindowSize %i"%(perSVade_py, reference_genome, threads, outdir_runID, nvars, n_simulated_genomes, ",".join(simulation_ploidies), range_filtering_benchmark, mitochondrial_chromosome, r1, r2, previous_repeats_table, min_CNVsize_coverageBased, simulate_SVs_arround_HomologousRegions_maxEvalue, simulate_SVs_arround_HomologousRegions_queryWindowSize)
+
+                # add arguments depending on the pipeline
+                if replace is True: cmd += " --replace"
+                if fast_SVcalling is True: cmd += " --fast_SVcalling"
+                if bedpe_breakpoints is not None: cmd += " --real_bedpe_breakpoints %s"%bedpe_breakpoints
+                if printing_verbose_mode is True: cmd += " --verbose"
+                if parameters_json_file is not None: cmd += " --parameters_json_file %s"%parameters_json_file
+                if gff is not None: cmd += " --gff %s"%gff
+                if replace_FromGridssRun_final_perSVade_run is True: cmd += " --replace_FromGridssRun_final_perSVade_run"
+                if fraction_available_mem is not None: cmd += " --fraction_available_mem %.3f"%(float(fraction_available_mem))
+                if replace_SV_CNVcalling is True: cmd += " --replace_SV_CNVcalling"
+                if skip_CNV_calling is True: cmd += " --skip_CNV_calling"
+                if simulate_SVs_arround_repeats is True: cmd += " --simulate_SVs_arround_repeats"
+                if simulate_SVs_arround_HomologousRegions is True: cmd += " --simulate_SVs_arround_HomologousRegions"
+                if simulate_SVs_arround_HomologousRegions_previousBlastnFile is not None: cmd += " --simulate_SVs_arround_HomologousRegions_previousBlastnFile %s"%simulate_SVs_arround_HomologousRegions_previousBlastnFile
+
+                """
+                # debug
+                if typeSimulations=="arroundHomRegions": 
+                    print(cmd)
+                    yadgjhgdajhgdajhgagdh
+
+                else: continue
+                """
+
+
+                # if the running in slurm is false, just run the cmd
+                if job_array_mode=="local": run_cmd(cmd)
+                elif job_array_mode=="job_array": 
+                    all_cmds.append(cmd)
+                    continue
+
+                else: raise ValueError("%s is not valid"%job_array_mode)
+
+            # keep the simulation files and clean outdir
+            elif n_remaining_jobs==0:
+                print_if_verbose("perSVade testing finished. cleaning...")
+
+                # keeping simulations and cleaning
+                keep_simulation_files_for_perSVade_outdir(outdir_runID, replace=replace, n_simulated_genomes=n_simulated_genomes, simulation_ploidies=simulation_ploidies)
+
+                # clean
+                clean_perSVade_outdir(outdir_runID)
+
+    # if you are not running on slurm, just execute one cmd after the other
+    if job_array_mode=="job_array":
+
+        if len(all_cmds)>0: 
+            print_if_verbose("submitting %i jobs to the cluster for testing accuracy of perSVade on several combinations of parameters. The files of the submission are in %s"%(len(all_cmds), outdir))
+            jobs_filename = "%s/jobs.testingRealDataAccuracy"%outdir
+            open(jobs_filename, "w").write("\n".join(all_cmds))
+
+            generate_jobarray_file(jobs_filename, "accuracyRealSVs")
+
+            print_if_verbose("You have to wait under all the jobs in testRealSVs are done")
+            sys.exit(0)
+
+    #####################
+
+    #sys.exit(0)
+
+    return final_dict
+
+
+
+
+def get_distanceToTelomere_chromosome_GCcontent_to_coverage_fn(df_coverage_train, genome, outdir, expected_coverage_per_bp, mitochondrial_chromosome="mito_C_glabrata_CBS138", replace=False, threads=4, min_windows_to_model_coverage=10):
+
+    """This function takes a training df_coverage (with windows of a genome) and returns a lambda function that takes GC content, chromosome and  distance to the telomere and returns coverage (not relative) according to the model."""
+
+    print_if_verbose("getting coverage-predictor function")
+
+
+    ######### DEFINE INTERPOLATION FUNCTIONS #########
+
+    # rename the training df
+    df = df_coverage_train.rename(columns={"#chrom":"chromosome"})
+
+    # get a df with coverage predicted from several GC content and then the distance to the telomere (same for all chromosomes)
+    df = get_df_coverage_with_corrected_coverage(df, genome, outdir, replace, threads, mitochondrial_chromosome, None, initial_predictor_fields=["GCcontent"], fill_value_interpolation_finalFitting=1.0)
+
+    # define the relative coverage of all
+    median_coverage_all = get_median_coverage(df, mitochondrial_chromosome)
+
+    # define the set of each type of chromosomes
+    all_chromosomes = set(df.chromosome)
+    if mitochondrial_chromosome!="no_mitochondria": mtDNA_chromosomes = set(mitochondrial_chromosome.split(","))
+    else: mtDNA_chromosomes = set()
+    gDNA_chromosomes = all_chromosomes.difference(mtDNA_chromosomes)
+
+    # go through each coverage df and define 2 functions:   
+    # 1) takes GC content and returns predicted absolute coverage (fn_cov_fromGCcontent)
+    # 2) takes the the distance to the telomere and returns a weight that would be applied on 1) (fn_weight_fromDistTelomere)
+
+    chrom_to_fn_cov_fromGCcontent = {}
+    chrom_to_fn_weight_fromDistTelomere = {}
+
+    for type_genome, chroms in [("mtDNA", mtDNA_chromosomes), ("gDNA", gDNA_chromosomes)]:
+        print_if_verbose("investigating %s"%type_genome)
+
+        # get the df and median coverage
+        df_cov = df[df.type_genome==type_genome]
+        median_coverage_genome = get_median_coverage(df_cov, mitochondrial_chromosome)
+
+        # for short type genomes, just take the median coverage
+        if len(df_cov)<min_windows_to_model_coverage:
+
+            fn_cov_fromGCcontent = (lambda GC: median_coverage_genome)
+            fn_weight_fromDistTelomere = (lambda dist_telomere: 1.0)
+
+        else: 
+
+            # define a function that returns coverage from the GC content
+            df_cov = df_cov.sort_values(by="GCcontent")
+            fn_rel_cov_fromGCcontent = scipy_interpolate.interp1d(df_cov.GCcontent, df_cov.relative_coverage_predicted_from_GCcontent, bounds_error=False, kind="linear", assume_sorted=True, fill_value=1.0)
+
+            fn_cov_fromGCcontent = (lambda GC: fn_rel_cov_fromGCcontent(GC)*median_coverage_all)
+
+            # define a function that returns a weight (applied to the result of fn_cov_fromGCcontent) from dist_telomere. Only do this if there was such correction applied (sometimes it makes no sense)
+
+            if "relative_coverage_predicted_from_raw_distance_to_telomere_aferCorrBy_GCcontent" in set(df_cov.keys()):
+
+                df_cov = df_cov.sort_values(by="raw_distance_to_telomere")
+                fn_weight_fromDistTelomere = scipy_interpolate.interp1d(df_cov.raw_distance_to_telomere, df_cov.relative_coverage_predicted_from_raw_distance_to_telomere_aferCorrBy_GCcontent, bounds_error=False, kind="linear", assume_sorted=True, fill_value=1.0)
+
+            else: fn_weight_fromDistTelomere = (lambda dist_telomere: 1.0)
+
+        # keep functions
+        for chrom in chroms: 
+            chrom_to_fn_cov_fromGCcontent[chrom] = fn_cov_fromGCcontent
+            chrom_to_fn_weight_fromDistTelomere[chrom] = fn_weight_fromDistTelomere
+
+    ###################################################
+
+    ######## FINAL FUNCTION ##########
+
+    # define the function that takes a tuple of (distToTelomere, chromosome and GCcontent) and returns the absolute predicted coverage
+    final_function = (lambda dist_telomere, chrom, GCcontent:  # this is suposed to be the tuple
+
+                        (chrom_to_fn_cov_fromGCcontent[chrom](GCcontent)*chrom_to_fn_weight_fromDistTelomere[chrom](dist_telomere))
+
+                     )
+
+    ##################################
+
+    ########## CHECKS ############
+
+    # check that it works
+    df["cov_predicted_from_final_lambda"] = df.apply(lambda r: final_function(r["raw_distance_to_telomere"], r["chromosome"], r["GCcontent"]), axis=1)
+
+    if any(pd.isna(df.cov_predicted_from_final_lambda)): raise ValueError("There can't be NaNs in the cov_predicted_from_final_lambda")
+
+    # print the final r2
+    final_r2 = r2_score(df.mediancov_1, df.cov_predicted_from_final_lambda)
+    print_if_verbose("coverage predicted from GC content and distance to telomere: %.3f"%final_r2)
+    
+    # plot the coverages
+    outfile = "%s/coverage_modelling.pdf"%(outdir)
+    
+    chr_to_len = get_chr_to_len(genome)
+    sorted_chroms = sorted([c for c in all_chromosomes if chr_to_len[c]>=window_l])
+    print_if_verbose("plotting into %s for %i chromosomes"%(outfile, len(sorted_chroms)))
+
+    ncols = len(sorted_chroms)
+    nrows = 1
+    fig = plt.figure(figsize=(ncols*5, nrows*4))
+    for Ic, chrom in enumerate(sorted_chroms):
+
+        # get chrom
+        df_c = df[df.chromosome==chrom].sort_values(by="middle_position")
+
+        # add several scatters for each type of data
+        ax = plt.subplot(nrows, ncols, Ic+1)
+        plt.scatter(df_c.middle_position, df_c.mediancov_1, marker="o", color="gray", label="data")
+        plt.plot(df_c.middle_position, df_c.cov_predicted_from_final_lambda, linestyle="-", color="blue", label="predicted from GC +  distance to telomere")
+
+        # define axes
+        if Ic!=(len(sorted_chroms)-1): pass
+        else: ax.legend(bbox_to_anchor=(1, 1))
+
+        ax.set_ylabel("coverage")
+        ax.set_xlabel("position (bp)")
+        ax.set_title(chrom)
+
+    # adjust positions
+    plt.subplots_adjust(wspace=0.3, hspace=0.08)
+    fig.savefig(outfile, bbox_inches="tight")
+
+    return final_function
+
+    ##############################
+

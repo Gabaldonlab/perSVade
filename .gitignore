@@ -5,6 +5,7 @@ testing/failed_assemblies_taxID5207
 testing/genomes_and_annotations
 testing/outdirs_testing_severalSpecies
 testing/outdirs_testing_severalSpecies_goldenSet
+testing/outdirs_testing_humanGoldenSet
 testing/misc_testing
 testing/Cglabrata_goldenSetReads_BG2
 testing/Cglabrata_table_short_reads.tab

@@ -10,6 +10,7 @@ import pandas as pd
 import numpy as np
 import multiprocessing as multiproc
 import seaborn as sns
+from matplotlib import gridspec
 
 # define the parent dir of the cluster or not
 ParentDir = "%s/samba"%(os.getenv("HOME")); # local
@@ -26,6 +27,11 @@ sys.path.insert(0, perSVade_dir)
 # import functions from perSVade
 print("importing functions")
 import sv_functions as fun
+
+
+import matplotlib
+import matplotlib.pyplot as plt
+if run_in_cluster is False: matplotlib.use('TkAgg')
 
 ######################
 
@@ -563,6 +569,180 @@ def get_df_accuracy_of_parameters_on_test_samples(parameters_df, test_df, outdir
 
     return df_benchmark_all
 
+def get_accuracy_df_goldenSet(outdir_testing_GoldenSet):
+
+    """This function loads into a single df the accuracy results of the golden set bencjmarking"""
+
+    df_accuracy_all = pd.DataFrame()
+    for taxID, spName, ploidy, mitochondrial_chromosome, max_coverage_sra_reads in species_Info:
+        print(spName)
+
+        # define outir
+        outdir_species = "%s/%s_%s/testing_goldenSetAccuracy/perSVade_vs_longReads"%(outdir_testing_GoldenSet, taxID, spName)
+
+        for file in os.listdir(outdir_species):
+            
+
+            sampleID = file.split(".tab")[0].split("_")[-1]
+            df_accuracy = pd.read_csv("%s/%s"%(outdir_species, file), sep="\t")
+
+            # keep
+            df_accuracy["species"] = spName
+            df_accuracy["sampleID"] = sampleID
+
+            df_accuracy_all = df_accuracy_all.append(df_accuracy)
+
+    return df_accuracy_all
+
+
+def plot_goldenSet_accuracy_lineplots(df, fileprefix, accuracy_f="Fvalue", svtype="integrated"):
+
+    """
+    Plots the accuracy of the golden sets as lineplots
+
+    """
+
+    # filter the df
+    df_plot = df[(df.svtype==svtype) & (df.comparisonID!="perSVade-arroundRepeats") & (df.threshold_fractionParms==0.4789473684210527) & (df.type_SVs_longReads=="all_SVs") & (df.remaining_treatment=="drop") & (df.tol_bp==50) & (df.pct_overlap==0.75)].set_index("species", drop=False)
+
+    # define vars
+    typeRun_to_color = {"perSVade-uniform":"blue", "perSVade-fast":"gray", "perSVade-realSVs":"red", 'perSVade-arroundHomRegions':"black"}
+    sorted_typeRuns  = ["perSVade-arroundHomRegions", "perSVade-uniform", "perSVade-realSVs"]
+    #sorted_species =  ["Candida_glabrata", "Candida_albicans", "Cryptococcus_neoformans", "Arabidopsis_thaliana", "Drosophila_melanogaster"]
+    sorted_species =  ["Candida_glabrata", "Candida_albicans", "Cryptococcus_neoformans", "Arabidopsis_thaliana"]
+
+    typeRun_to_typeRunText = {"perSVade-realSVs":"known SVs", "perSVade-uniform":"random", "perSVade-arroundHomRegions":"homologous SVs"}
+
+    # plot init
+    nrows = len(sorted_species)
+    ncols = len(sorted_typeRuns)
+    fig = plt.figure(figsize=(ncols*1, nrows*1)); I = 1
+
+
+    for Is, species in enumerate(sorted_species):
+
+        # define the df
+        df_species = df_plot[(df_plot.species==species)]
+
+        # define the species
+        ylim = [min(df_species[accuracy_f])-0.05, max(df_species[accuracy_f])+0.05]
+        for Ir, typeRun in enumerate(sorted_typeRuns):
+
+            ax = plt.subplot(nrows, ncols, I); I+=1
+
+            # get the df
+            df = df_species[(df_species.comparisonID.isin({typeRun, "perSVade-fast"}))]
+            if len(df)!=len(set(df.sampleID))*2: raise ValueError("df is not correct")
+
+            # add the xval
+            compID_to_number = {"perSVade-fast":0, typeRun:1}
+            df["x_value"] = df.comparisonID.map(compID_to_number) 
+            df = df.sort_values(by="x_value")
+
+            # plot 
+            ax = sns.lineplot(data=df, x="x_value", y=accuracy_f, style="sampleID", color=typeRun_to_color[typeRun], markers=True, dashes=False)
+            
+            # adjust
+            ax.get_legend().remove()    
+            if Is==0: ax.set_title("%s"%(typeRun.split("-")[1]))
+            ax.set_ylim(ylim)
+            ax.set_xlim([-0.45, 1.45])
+
+            if Is==(nrows-1): 
+                ax.set_xticks([0,1])
+                ax.set_xticklabels(["default parms.", typeRun_to_typeRunText[typeRun]])
+                for label in ax.get_xticklabels(): label.set_rotation(90)
+
+            ax.set_xlabel("")
+            if Ir!=0:
+                ax.set_yticklabels([])
+                ax.set_ylabel("")
+
+    plt.subplots_adjust(wspace=0.15, hspace=0.15) 
+    filename = "%s_%s_%s.pdf"%(fileprefix, accuracy_f, svtype)
+    print("saving %s"%filename)
+    plt.subplots_adjust(wspace=0.05, hspace=0.15) 
+
+    fig.savefig(filename, bbox_inches='tight')
+
+
+def plot_goldenSet_accuracy_barplots(df, fileprefix, accuracy_f="Fvalue", svtype="integrated"):
+
+    """
+    Plots the accuracy of the golden sets as barplots by defining true variants those that have tshd_parms.
+
+    """
+
+    # filter the df
+    df_plot = df[(df.svtype==svtype) & (df.comparisonID!="perSVade-arroundRepeats") & (df.threshold_fractionParms==0.5310526315789474) & (df.type_SVs_longReads=="all_SVs") & (df.remaining_treatment=="drop") & (df.tol_bp==50) & (df.pct_overlap==0.75)].set_index("species", drop=False)
+
+    # define vars
+    typeRun_to_color = {"perSVade-uniform":"blue", "perSVade-fast":"gray", "perSVade-realSVs":"red", 'perSVade-arroundHomRegions':"black"}
+
+    ylim = [0, max(df_plot[accuracy_f])+0.05]
+
+    # plot init
+    fig = plt.figure(figsize=(6*0.5, 4*2)) 
+
+
+    # C. glabrata
+    ax = plt.subplot2grid(shape=(6, 6), loc=(0, 0), colspan=6) # loc is (row, col) of the first, colspa
+    sns.barplot(x="sampleID", y=accuracy_f, data=df_plot.loc["Candida_glabrata"], hue="comparisonID", palette=typeRun_to_color)
+    ax.legend(bbox_to_anchor=(1, 1))
+    ax.set_xticklabels([])
+    ax.set_xlabel("")
+    ax.set_ylim(ylim)
+    ax.set_ylabel("")
+    ax.set_title("%s for %s SVs"%(accuracy_f, svtype))
+
+    # C. albicans
+    ax = plt.subplot2grid(shape=(6, 6), loc=(1, 0), colspan=1) # loc is (row, col) of the first, colspa
+    sns.barplot(x="sampleID", y=accuracy_f, data=df_plot.loc["Candida_albicans"], hue="comparisonID", palette=typeRun_to_color)
+    ax.set_xlabel("")
+    ax.set_xticklabels([])
+    ax.get_legend().remove()
+    ax.set_ylim(ylim)
+    ax.set_ylabel("")
+
+    # C. neoformans
+    ax = plt.subplot2grid(shape=(6, 6), loc=(1, 1), colspan=5) # loc is (row, col) of the first, colspa
+    sns.barplot(x="sampleID", y=accuracy_f, data=df_plot.loc["Cryptococcus_neoformans"], hue="comparisonID", palette=typeRun_to_color)
+    ax.set_xlabel("")
+    ax.set_xticklabels([])
+    ax.get_legend().remove()
+    ax.set_ylim(ylim)
+    ax.set_ylabel("")
+    ax.set_yticklabels([])
+
+
+    # Drosophila
+    ax = plt.subplot2grid(shape=(6, 6), loc=(2, 0), colspan=6) # loc is (row, col) of the first, colspa
+    sns.barplot(x="sampleID", y=accuracy_f, data=df_plot.loc["Drosophila_melanogaster"], hue="comparisonID", palette=typeRun_to_color)
+    ax.set_xlabel("")
+    ax.set_xticklabels([])
+    ax.get_legend().remove()    
+    ax.set_ylim(ylim)
+    ax.set_ylabel("")
+
+    # A. thaliana
+    ax = plt.subplot2grid(shape=(6, 6), loc=(3, 0), colspan=4) # loc is (row, col) of the first, colspa
+    sns.barplot(x="sampleID", y=accuracy_f, data=df_plot.loc["Arabidopsis_thaliana"], hue="comparisonID", palette=typeRun_to_color)
+    ax.set_xlabel("")
+    ax.set_xticklabels([])
+    ax.get_legend().remove()    
+    ax.set_ylim(ylim)
+    ax.set_ylabel("")
+
+
+    #if I!=0: ax.get_legend().remove()
+
+    filename = "%s_%s_%s.pdf"%(fileprefix, accuracy_f, svtype)
+    print("saving %s"%filename)
+    plt.subplots_adjust(wspace=0.2, hspace=0.15) 
+
+    fig.savefig(filename, bbox_inches='tight')
+
+
 def get_cross_accuracy_df_several_perSVadeSimulations(outdir_testing, genomes_and_annotations_dir, replace=False):
 
     """This function tests how each of the perSVade configurations works on the others. It runs one job for each type of simulations, and it iterates through them inside of the job."""
@@ -647,8 +827,22 @@ def get_cross_accuracy_df_several_perSVadeSimulations(outdir_testing, genomes_an
     print("running get_type_comparison")
     def get_type_comparison(r):
 
-        if r["parms_species"]==r["test_species"] and r["parms_sampleID"]==r["test_sampleID"] and r["parms_typeSimulations"]==r["test_typeSimulations"]: return "same_run_and_simulation"
-        else: return "other"
+        # trained on fast
+        if r["parms_species"]=="none": return "fast"
+
+        # trained on the same paramteres as tested
+        elif r["parms_species"]==r["test_species"] and r["parms_sampleID"]==r["test_sampleID"] and r["parms_typeSimulations"]==r["test_typeSimulations"]: return "same_run_and_simulation"
+
+        # trained on the same specues and simulation type
+        elif r["parms_species"]==r["test_species"] and r["parms_typeSimulations"]==r["test_typeSimulations"]: return "same_species_and_simulation"
+
+        # trained on the same species
+        elif r["parms_species"]==r["test_species"]: return "same_species"
+
+        # trained on other speceis
+        elif r["parms_species"]!=r["test_species"]: return "different_species"
+
+        else: raise ValueError("r is not valid")
 
     df_cross_accuracy_benchmark["type_comparison"] = df_cross_accuracy_benchmark.apply(get_type_comparison, axis=1)
     
@@ -693,7 +887,7 @@ def get_cross_accuracy_df_several_perSVadeSimulations(outdir_testing, genomes_an
 
 
 
-def generate_heatmap_accuracy_of_parameters_on_test_samples(df_benchmark, fileprefix, replace=False, threads=4, accuracy_f="Fvalue", svtype="integrated", col_cluster = False, row_cluster = False):
+def generate_heatmap_accuracy_of_parameters_on_test_samples(df_benchmark, fileprefix, replace=False, threads=4, accuracy_f="Fvalue", svtype="integrated", col_cluster = False, row_cluster = False, show_only_species_and_simType=False):
 
     """
     This function takes a df where each row is one set of training parameters and test data svtype, together with the accuracy records. It generates a heatmap were the rows are each of the training parameters and the cols are the test samples.
@@ -702,8 +896,13 @@ def generate_heatmap_accuracy_of_parameters_on_test_samples(df_benchmark, filepr
     print("plotting cross-accuracy")
 
     # define graphics
-    species_to_color = {'none': 'white', 'Drosophila_melanogaster': 'black', 'Arabidopsis_thaliana': 'gray', 'Cryptococcus_neoformans': 'lightcoral', 'Candida_albicans': 'blue', 'Candida_glabrata': 'cyan'}
-    typeSimulations_to_color = {"uniform":"blue", "realSVs":"red", "arroundRepeats":"black", "arroundHomRegions":"olive", "fast":"gray"}
+    #species_to_color = {'none': 'gray', 'Drosophila_melanogaster': 'black', 'Arabidopsis_thaliana': 'gray', 'Cryptococcus_neoformans': 'lightcoral', 'Candida_albicans': 'blue', 'Candida_glabrata': 'cyan'}
+
+    species_to_color = {'none': 'gray', 'Drosophila_melanogaster': 'darkorange', 'Arabidopsis_thaliana': 'olive', 'Cryptococcus_neoformans': 'lightcoral', 'Candida_albicans': 'magenta', 'Candida_glabrata': 'lightseagreen'}
+
+
+    #typeSimulations_to_color = {"uniform":"blue", "realSVs":"red", "arroundRepeats":"black", "arroundHomRegions":"olive", "fast":"gray"}
+    typeSimulations_to_color = {"uniform":"blue", "realSVs":"red", "arroundHomRegions":"black", "fast":"gray"}
     numericSample_to_color = {"0":"white", "1":"gray", "2":"black"}
     numericRun_to_color = {"0":"lightcoral", "1":"brown", "2":"r"}
     simName_to_color = {"sim1":"white", "sim2":"black"}
@@ -721,8 +920,8 @@ def generate_heatmap_accuracy_of_parameters_on_test_samples(df_benchmark, filepr
 
 
     # keep only the df with the svtype
-    df_plot = df_benchmark[df_benchmark.svtype==svtype]
-
+    df_plot = df_benchmark[(df_benchmark.svtype==svtype) & (df_benchmark.parms_species!="Drosophila_melanogaster") & (df_benchmark.test_species!="Drosophila_melanogaster")] # hide drosophila
+    #df_plot = df_benchmark[(df_benchmark.svtype==svtype)]
 
 
     # define square df
@@ -744,7 +943,7 @@ def generate_heatmap_accuracy_of_parameters_on_test_samples(df_benchmark, filepr
     df_square = df_square.loc[sorted_index, sorted_cols]
 
     # add the label
-    type_comparison_to_label = {"same_run_and_simulation":"*", "other":""}
+    type_comparison_to_label = {"same_run_and_simulation":"*", "fast":"", "same_species_and_simulation":"", "same_species":"", "different_species":""}
     df_plot["label"] = df_plot.type_comparison.apply(lambda x: type_comparison_to_label[x])
     df_annotations = df_plot[["parms_idx", "test_idx", "label"]].pivot(index='parms_idx', columns='test_idx', values="label").loc[sorted_index, sorted_cols]
 
@@ -769,6 +968,13 @@ def generate_heatmap_accuracy_of_parameters_on_test_samples(df_benchmark, filepr
     row_colors_df = pd.Series(df_square.index, index=df_square.index).apply(lambda x: get_colors_series(x, type_keys="parms"))
     col_colors_df = pd.Series(df_square.columns, index=df_square.columns).apply(lambda x: get_colors_series(x, type_keys="test"))
 
+    # keep only simulation type and species twice
+    if show_only_species_and_simType is True:
+
+        row_colors_df = row_colors_df[["parms_species", "parms_typeSimulations"]]
+        col_colors_df = col_colors_df[["test_species", "test_typeSimulations"]]
+
+
     # get the plot
     filename = "%s_cross_accuracy_%s_%s_%s_%s.pdf"%(fileprefix, accuracy_f, svtype, col_cluster, row_cluster)
     print("getting %s"%filename)
@@ -776,10 +982,180 @@ def generate_heatmap_accuracy_of_parameters_on_test_samples(df_benchmark, filepr
     # define the figure size
     figsize = (int(len(df_square.columns)*0.03), int(len(df_square)*0.03))
 
-    fun.plot_clustermap_with_annotation(df_square, row_colors_df, col_colors_df, filename, title="cross accuracy", col_cluster=col_cluster, row_cluster=row_cluster, colorbar_label=accuracy_f, adjust_position=True, legend=True, idxs_separator_pattern="||||", texts_to_strip={"L001"}, default_label_legend="control", df_annotations=df_annotations, cmap=sns.color_palette("RdBu_r", 50), ylabels_graphics_df=None, grid_lines=False, figsize=figsize)
+    fun.plot_clustermap_with_annotation(df_square, row_colors_df, col_colors_df, filename, title="cross accuracy", col_cluster=col_cluster, row_cluster=row_cluster, colorbar_label=accuracy_f, adjust_position=True, legend=True, idxs_separator_pattern="||||", texts_to_strip={"L001"}, default_label_legend="control", df_annotations=df_annotations, cmap=sns.color_palette("RdBu_r", 50), ylabels_graphics_df=None, grid_lines=False, figsize=figsize, multiplier_width_colorbars=5)
+
+
+
+
+def get_sorted_bam_by_readName(bam, threads=4, replace=False):
+
+    """Sorts a bam file into sorted_bam"""
+
+    sorted_bam = "%s.sorted"%bam
+    sorted_bam_tmp = "%s.tmp"%sorted_bam
+
+    # define outdir
+    outdir = get_dir(bam)
+
+    if file_is_empty(sorted_bam) or replace is True:
+
+        # remove all temporary files generated previously in samtools sort (they'd make a new sort to be an error)
+        for outdir_file in os.listdir(outdir): 
+            fullfilepath = "%s/%s"%(outdir, outdir_file)
+            if outdir_file.startswith(bam) and ".tmp." in outdir_file: remove_file(fullfilepath)
+
+        print("sorting bam")
+        run_cmd("%s sort -n --threads %i -o %s %s"%(samtools, threads, sorted_bam_tmp, bam))
+
+        os.rename(sorted_bam_tmp, sorted_bam)
+
+    return sorted_bam
+
+def get_fastqgz_from_bam(bamfile, threads=4, replace=False):
+
+    """This function takes a bamfile and writes the reads """
+
+    # get the sorted bam and indexed bam
+    sorted_bam = get_sorted_bam_by_readName(bamfile, threads=threads, replace=replace)
+    #sorted_bam = bamfile
+    #index_bam = get_index_bam(sorted_bam, threads=threads, replace=replace)
+
+    # define the reads
+    reads1_gz = "%s.reads1.fastq.gz"%sorted_bam
+    reads2_gz = "%s.reads2.fastq.gz"%sorted_bam
+
+    if file_is_empty(reads1_gz) or file_is_empty(reads2_gz) or replace is True:
+
+        # define the tmp reads
+        reads1_tmp = "%s.reads1.tmp.fastq"%sorted_bam
+        reads2_tmp = "%s.reads2.tmp.fastq"%sorted_bam
+        reads1_tmp_gz = "%s.gz"%reads1_tmp
+        reads2_tmp_gz = "%s.gz"%reads2_tmp
+
+        # remove tmp files
+        for f in [reads1_tmp, reads2_tmp, reads1_tmp_gz, reads2_tmp_gz]: remove_file(f)
+
+        # get reads
+        print("getting reads from %s"%sorted_bam)
+        bedtools_std = "%s.std"%reads1_tmp
+        run_cmd("%s bamtofastq -i %s -fq %s -fq2 %s > %s 2>&1"%(bedtools, sorted_bam, reads1_tmp, reads2_tmp, bedtools_std))
+
+        # gzip
+        for f in [reads1_tmp, reads2_tmp]: run_cmd("pigz --fast %s"%f)
+
+        # rename
+        os.rename(reads1_tmp_gz, reads1_gz)
+        os.rename(reads2_tmp_gz, reads2_gz)
+
+    return reads1_gz, reads2_gz
+
+
+
+def get_crossaccuracy_distributions(df_cross_accuracy_benchmark, fileprefix, accuracy_f="Fvalue", svtype="integrated"):
+
+    """Prints a boxplot for each species and the accuracy on different types of simulations depending on the training parameters. Each row is a tested species and the X is the type of parameters"""
+
+    # keep one df
+    df_cross_accuracy_benchmark = df_cross_accuracy_benchmark[df_cross_accuracy_benchmark.svtype==svtype]
+
+    # define parms
+    #sorted_species = ["Candida_glabrata", "Candida_albicans", "Cryptococcus_neoformans", "Arabidopsis_thaliana", "Drosophila_melanogaster"]
+    sorted_species = ["Candida_glabrata", "Candida_albicans", "Cryptococcus_neoformans", "Arabidopsis_thaliana"]
+    typeSimulations_to_color = {"uniform":"blue", "realSVs":"red", "arroundHomRegions":"black", "fast":"gray"}
+    type_comparison_to_xvalue = {"fast":0, "same_run_and_simulation":1, "same_species_and_simulation":1, "same_species":1, "different_species":2}
+    xvalue_to_typeCompLabel = {0:"default parms.", 1:"same species", 2:"different species"}
+    df_cross_accuracy_benchmark["training parameters"] = df_cross_accuracy_benchmark.type_comparison.apply(lambda x: type_comparison_to_xvalue[x])
+    all_xvalues = sorted(set(df_cross_accuracy_benchmark["training parameters"]))
+
+    # init fig
+    nrows = len(sorted_species)
+    fig = plt.figure(figsize=(5*0.6, nrows*1.3))
+
+    for I, test_species in enumerate(sorted_species):
+
+        # get df
+        df_plot =  df_cross_accuracy_benchmark[df_cross_accuracy_benchmark.test_species==test_species]
+
+        # get the subplot
+        ax = plt.subplot(nrows, 1, I+1)
+
+        # get the violin
+        #ax = sns.violinplot(data=df_plot, x="training parameters", y=accuracy_f, hue="test_typeSimulations", palette=typeSimulations_to_color)
+        #ax = sns.boxplot(data=df_plot, x="training parameters", y=accuracy_f, hue="test_typeSimulations", palette=typeSimulations_to_color)
+
+        ax = sns.stripplot(data=df_plot, x="training parameters", y=accuracy_f, hue="test_typeSimulations", palette=typeSimulations_to_color,  dodge=True,  linewidth=.01, edgecolor="gray", size=3, alpha=.3)
+        #ax = sns.stripplot(x="training parameters", y=accuracy_f, hue="test_typeSimulations", data=df_plot, dodge=True, linewidth=.01, edgecolor="gray", size=3, palette=typeSimulations_to_color)
+        #ax = sns.swarmplot(x="training parameters", y=accuracy_f, hue="test_typeSimulations", data=df_plot, linewidth=.01, edgecolor="gray", size=3, palette=typeSimulations_to_color)
+
+        # change the edge colors
+        """
+        for i,box in enumerate(ax.artists):
+            #box.set_edgecolor(box.get_facecolor())
+            box.set_edgecolor("gray")
+            box.set_linewidth(0.02)
+        """
+
+        # remove title
+        ax.set_title("")
+        ax.set_ylabel("%s\n%s"%(test_species, accuracy_f))
+
+        # change the xticklabels
+        if I!=(nrows-1):
+            ax.set_xticklabels("")
+            ax.set_xlabel("")
+            ax.set_xticks(all_xvalues)
+        else:
+            ax.set_xticklabels([xvalue_to_typeCompLabel[x] for x in all_xvalues])
+            for label in ax.get_xticklabels(): label.set_rotation(90)
+
+        ax.set_ylim([-0.05, 1.1])
+
+        # add axvlines
+        for x in [0.5, 1.5]: plt.axvline(x, linewidth=.9, color="gray", linestyle="--")
+
+
+        # get the legen only in the first box
+        ax.legend(bbox_to_anchor=(1, 1))
+        if I!=0: ax.get_legend().remove()
+
+    # spaces
+    plt.subplots_adjust(wspace=0.01, hspace=0.01)
+    filename = "%s_%s_%s.pdf"%(fileprefix, accuracy_f, svtype)
+    fig.savefig(filename, bbox_inches='tight')
+    #plt.close(fig)
+
+def run_parallelFastqDump_fromSRR_pairedReads_localComputer(srr, outdir, replace=False, threads=4):
+
+    """Runs parallel fastqdump from an srr into outdir"""
+
+    # make dirs
+    make_folder(outdir)
 
 
 
 
 
-                        
+
+    # make the tmp
+    tmpdir = "%s/tmp"%outdir; 
+    delete_folder(tmpdir); make_folder(tmpdir)
+    tmpdir_parallel_fastqdump = "%s/tmp"%tmpdir; make_folder(tmpdir_parallel_fastqdump)
+
+    # run fastqdump parallel into the tmpdir 
+    stdfile = "%s/std_fastqdump.txt"%tmpdir
+    print_if_verbose("running fastq dump in parallel. The std is in %s"%stdfile)
+    run_cmd("%s -s %s -t %i -O %s --tmpdir %s --split-3 --gzip > %s 2>&1 "%(parallel_fastq_dump, srr, threads, tmpdir, tmpdir_parallel_fastqdump, stdfile))
+
+
+    # check that the fastqdump is correct
+    std_lines = open(stdfile, "r").readlines()
+    any_error = any(["ERROR" in l.upper() for l in std_lines])
+    if any_error:
+        raise ValueError("Something went wrong with the fastqdump. Check the log in %s"%stdfile)
+
+    khgdajhgajagdj
+
+    # define the tmp reads
+    tmp_reads1 = "%s/%s"%(tmpdir, get_file(reads1))
+    tmp_reads2 = "%s/%s"%(tmpdir, get_file(reads2))
+

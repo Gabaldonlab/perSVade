@@ -77,7 +77,7 @@ for taxID, spName, ploidy, mitochondrial_chromosome, max_coverage_sra_reads in t
     # this is testing the whole perSVade pipeline on 3 runs of 3 close taxIDs to the reference genome. It will run only SV calling.
 
     # record the used resources in this run (this should be only implemented when there are no running jobs)
-    test_fun.keep_STDfiles_nord3Runs_testingAccuracy(all_STDs_dir, outdir_perSVade, spName) 
+    #test_fun.keep_STDfiles_nord3Runs_testingAccuracy(all_STDs_dir, outdir_perSVade, spName) 
 
     # define the table with short reads
     if spName=="Candida_glabrata": close_shortReads_table = close_shortReads_table_Cglabrata
@@ -94,7 +94,7 @@ for taxID, spName, ploidy, mitochondrial_chromosome, max_coverage_sra_reads in t
     simulate_SVs_arround_HomologousRegions_previousBlastnFile = fun.get_blastn_regions_genome_against_itself(genome, simulate_SVs_arround_HomologousRegions_maxEvalue, simulate_SVs_arround_HomologousRegions_queryWindowSize, False, threads)
 
     # get the reads from SRA. 3 samples, 3 runs per sample. Process with the. --verbose
-    cmd = "%s --ref %s --threads %i -o %s --close_shortReads_table %s --target_taxID %s --n_close_samples 3 --nruns_per_sample 3 -f1 skip -f2 skip --mitochondrial_chromosome %s --testAccuracy --verbose --max_coverage_sra_reads %i --gff %s --nsimulations 2 --skip_CNV_calling --simulation_ploidies %s --previous_repeats_table %s --StopAfter_testAccuracy --simulate_SVs_arround_HomologousRegions_maxEvalue %.10f --simulate_SVs_arround_HomologousRegions_queryWindowSize %i --simulate_SVs_arround_HomologousRegions_previousBlastnFile %s --StopAfter_testAccuracy_perSVadeRunning"%(perSVade_py, genome, threads, outdir_perSVade, close_shortReads_table, taxID, mitochondrial_chromosome, max_coverage_sra_reads, gff, simulation_ploidies, previous_repeats_table, simulate_SVs_arround_HomologousRegions_maxEvalue, simulate_SVs_arround_HomologousRegions_queryWindowSize, simulate_SVs_arround_HomologousRegions_previousBlastnFile)
+    cmd = "%s --ref %s --threads %i -o %s --close_shortReads_table %s --target_taxID %s --n_close_samples 3 --nruns_per_sample 1 -f1 skip -f2 skip --mitochondrial_chromosome %s --testAccuracy --verbose --max_coverage_sra_reads %i --gff %s --nsimulations 2 --skip_CNV_calling --simulation_ploidies %s --previous_repeats_table %s --StopAfter_testAccuracy --simulate_SVs_arround_HomologousRegions_maxEvalue %.10f --simulate_SVs_arround_HomologousRegions_queryWindowSize %i --simulate_SVs_arround_HomologousRegions_previousBlastnFile %s --StopAfter_testAccuracy_perSVadeRunning"%(perSVade_py, genome, threads, outdir_perSVade, close_shortReads_table, taxID, mitochondrial_chromosome, max_coverage_sra_reads, gff, simulation_ploidies, previous_repeats_table, simulate_SVs_arround_HomologousRegions_maxEvalue, simulate_SVs_arround_HomologousRegions_queryWindowSize, simulate_SVs_arround_HomologousRegions_previousBlastnFile)
 
     """ 
     Relevant args
@@ -113,8 +113,8 @@ for taxID, spName, ploidy, mitochondrial_chromosome, max_coverage_sra_reads in t
 
     cmd_output = "%s/cmd_testing.std"%outdir_perSVade
     print("running std into %s"%cmd_output)
-    #fun.run_cmd("%s > %s 2>&1"%(cmd, cmd_output)) # run with stdout
-    fun.run_cmd(cmd); continue # run locally
+    fun.run_cmd("%s > %s 2>&1"%(cmd, cmd_output)) # run with stdout
+    #fun.run_cmd(cmd); continue # run locally
 
     ###### RUN JOB ARRAYS ######
 
