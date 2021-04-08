@@ -561,6 +561,9 @@ elif opt.fast_SVcalling is False and opt.close_shortReads_table is not None:
 
         opt.close_shortReads_table = fun.get_close_shortReads_table_close_to_taxID(opt.target_taxID, opt.ref, outdir_getting_closeReads, opt.ploidy, n_close_samples=opt.n_close_samples, nruns_per_sample=opt.nruns_per_sample, replace=opt.replace, threads=opt.threads, job_array_mode=opt.job_array_mode, StopAfter_sampleIndexingFromSRA=opt.StopAfter_sampleIndexingFromSRA, StopAfterPrefecth_of_reads=opt.StopAfterPrefecth_of_reads, max_coverage_sra_reads=opt.max_coverage_sra_reads)
 
+    # redefine close_shortReads_table to match n_close_samples and nruns_per_sample
+    opt.close_shortReads_table = fun.get_redefined_close_shortReads_table_with_meaningful_samples(opt.close_shortReads_table, n_close_samples=opt.n_close_samples, nruns_per_sample=opt.nruns_per_sample)
+
     # skip the running of the pipeline 
     if opt.StopAfter_readObtentionFromSRA:
         print("Stopping pipeline after the reads obtention from SRA")

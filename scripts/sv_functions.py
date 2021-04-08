@@ -3189,18 +3189,12 @@ def generate_nt_content_file(genome, target_nts="GC", replace=False):
 
 def get_distanceToTelomere_chromosome_GCcontent_to_coverage_fn(df_coverage_train, genome, outdir, expected_coverage_per_bp, mitochondrial_chromosome="mito_C_glabrata_CBS138", replace=False, threads=4, min_windows_to_model_coverage=10):
 
-    """This function takes a training df_coverage (with windows of a genome) and returns a lambda function that takes GC content, chromosome and  distance to the telomere and returns coverage (not relative) according to the model."""
+    """This function takes a training df_coverage (with windows of a genome) and returns a lambda function that takes GC content, chromosome and  distance to the telomere and returns coverage. This takes the absolute coverage"""
 
-    print_if_verbose("getting coverage-predictor function")
-
-
-    ######### DEFINE INTERPOLATION FUNCTIONS #########
+    print_if_verbose("getting coverage-predictor function for expected coverage per bp=%i"%expected_coverage_per_bp)
 
     # rename the training df
     df = df_coverage_train.rename(columns={"#chrom":"chromosome"})
-
-    # get a df with coverage predicted from several GC content and then the distance to the telomere (same for all chromosomes)
-    df = get_df_coverage_with_corrected_coverage(df, genome, outdir, replace, threads, mitochondrial_chromosome, None, initial_predictor_fields=["GCcontent"], fill_value_interpolation_finalFitting=1.0)
 
     # define the relative coverage of all
     median_coverage_all = get_median_coverage(df, mitochondrial_chromosome)
@@ -3221,41 +3215,18 @@ def get_distanceToTelomere_chromosome_GCcontent_to_coverage_fn(df_coverage_train
     for type_genome, chroms in [("mtDNA", mtDNA_chromosomes), ("gDNA", gDNA_chromosomes)]:
         print_if_verbose("investigating %s"%type_genome)
 
-        # get the df and median coverage
-        df_cov = df[df.type_genome==type_genome]
+        # get the df and median coverage for this genome
+        df_cov = df[df.chromosome.isin(chroms)]
         median_coverage_genome = get_median_coverage(df_cov, mitochondrial_chromosome)
 
-        # for short type genomes, just take the median coverage
-        if len(df_cov)<min_windows_to_model_coverage:
-
-            fn_cov_fromGCcontent = (lambda GC: median_coverage_genome)
-            fn_weight_fromDistTelomere = (lambda dist_telomere: 1.0)
-
-        else: 
-
-            # define a function that returns coverage from the GC content
-            df_cov = df_cov.sort_values(by="GCcontent")
-            fn_rel_cov_fromGCcontent = scipy_interpolate.interp1d(df_cov.GCcontent, df_cov.relative_coverage_predicted_from_GCcontent, bounds_error=False, kind="linear", assume_sorted=True, fill_value=1.0)
-
-            fn_cov_fromGCcontent = (lambda GC: fn_rel_cov_fromGCcontent(GC)*median_coverage_all)
-
-            # define a function that returns a weight (applied to the result of fn_cov_fromGCcontent) from dist_telomere. Only do this if there was such correction applied (sometimes it makes no sense)
-
-            if "relative_coverage_predicted_from_raw_distance_to_telomere_aferCorrBy_GCcontent" in set(df_cov.keys()):
-
-                df_cov = df_cov.sort_values(by="raw_distance_to_telomere")
-                fn_weight_fromDistTelomere = scipy_interpolate.interp1d(df_cov.raw_distance_to_telomere, df_cov.relative_coverage_predicted_from_raw_distance_to_telomere_aferCorrBy_GCcontent, bounds_error=False, kind="linear", assume_sorted=True, fill_value=1.0)
-
-            else: fn_weight_fromDistTelomere = (lambda dist_telomere: 1.0)
+        # define so that all windows get the same
+        fn_cov_fromGCcontent = (lambda GC: median_coverage_genome)
+        fn_weight_fromDistTelomere = (lambda dist_telomere: 1.0)
 
         # keep functions
         for chrom in chroms: 
             chrom_to_fn_cov_fromGCcontent[chrom] = fn_cov_fromGCcontent
             chrom_to_fn_weight_fromDistTelomere[chrom] = fn_weight_fromDistTelomere
-
-    ###################################################
-
-    ######## FINAL FUNCTION ##########
 
     # define the function that takes a tuple of (distToTelomere, chromosome and GCcontent) and returns the absolute predicted coverage
     final_function = (lambda dist_telomere, chrom, GCcontent:  # this is suposed to be the tuple
@@ -3263,55 +3234,9 @@ def get_distanceToTelomere_chromosome_GCcontent_to_coverage_fn(df_coverage_train
                         (chrom_to_fn_cov_fromGCcontent[chrom](GCcontent)*chrom_to_fn_weight_fromDistTelomere[chrom](dist_telomere))
 
                      )
-
-    ##################################
-
-    ########## CHECKS ############
-
-    # check that it works
-    df["cov_predicted_from_final_lambda"] = df.apply(lambda r: final_function(r["raw_distance_to_telomere"], r["chromosome"], r["GCcontent"]), axis=1)
-
-    if any(pd.isna(df.cov_predicted_from_final_lambda)): raise ValueError("There can't be NaNs in the cov_predicted_from_final_lambda")
-
-    # print the final r2
-    final_r2 = r2_score(df.mediancov_1, df.cov_predicted_from_final_lambda)
-    print_if_verbose("coverage predicted from GC content and distance to telomere: %.3f"%final_r2)
-    
-    # plot the coverages
-    outfile = "%s/coverage_modelling.pdf"%(outdir)
-    
-    chr_to_len = get_chr_to_len(genome)
-    sorted_chroms = sorted([c for c in all_chromosomes if chr_to_len[c]>=window_l])
-    print_if_verbose("plotting into %s for %i chromosomes"%(outfile, len(sorted_chroms)))
-
-    ncols = len(sorted_chroms)
-    nrows = 1
-    fig = plt.figure(figsize=(ncols*5, nrows*4))
-    for Ic, chrom in enumerate(sorted_chroms):
-
-        # get chrom
-        df_c = df[df.chromosome==chrom].sort_values(by="middle_position")
-
-        # add several scatters for each type of data
-        ax = plt.subplot(nrows, ncols, Ic+1)
-        plt.scatter(df_c.middle_position, df_c.mediancov_1, marker="o", color="gray", label="data")
-        plt.plot(df_c.middle_position, df_c.cov_predicted_from_final_lambda, linestyle="-", color="blue", label="predicted from GC +  distance to telomere")
-
-        # define axes
-        if Ic!=(len(sorted_chroms)-1): pass
-        else: ax.legend(bbox_to_anchor=(1, 1))
-
-        ax.set_ylabel("coverage")
-        ax.set_xlabel("position (bp)")
-        ax.set_title(chrom)
-
-    # adjust positions
-    plt.subplots_adjust(wspace=0.3, hspace=0.08)
-    fig.savefig(outfile, bbox_inches="tight")
-
+   
     return final_function
 
-    ##############################
 
 
 def get_clove_output(output_vcf_clove, getID_as_gridss=True):
@@ -5900,6 +5825,44 @@ def get_close_shortReads_table_close_to_taxID(target_taxID, reference_genome, ou
     #########################################
 
     return close_shortReads_table
+
+def get_redefined_close_shortReads_table_with_meaningful_samples(close_shortReads_table, n_close_samples=3, nruns_per_sample=3):
+
+    """Takes a close_shortReads_table and redefines it so that it matches n_close_samples and nruns_per_sample"""
+
+    # load df
+    df = get_tab_as_df_or_empty_df(close_shortReads_table)
+
+    # define the corrected df
+    df_corrected = pd.DataFrame()
+
+    already_found_samples = 0
+    for sampleID in sorted(set(df.sampleID)):
+
+        # break once you found all samples
+        if already_found_samples==n_close_samples: break
+        already_found_samples += 1
+
+        # get the df of the sample
+        df_s = df[df.sampleID==sampleID]
+
+        # init the number of runs for this sample
+        already_found_runs = 0
+
+        for runID in sorted(set(df_s.runID)):
+
+            # break once you found all the runs
+            if already_found_runs==nruns_per_sample: break
+            already_found_runs += 1
+
+            # keep the df
+            df_corrected = df_corrected.append(df_s[df_s.runID==runID])
+
+    # write the corrected table
+    close_shortReads_table_corrected = "%s.corrected.tab"%close_shortReads_table
+    save_df_as_tab(df_corrected, close_shortReads_table_corrected)
+
+    return close_shortReads_table_corrected
 
 def get_is_matching_predicted_and_known_rows(rk, rp, equal_fields, approximate_fields, chromField_to_posFields, tol_bp=50, pct_overlap=0.75):
 
@@ -8957,7 +8920,7 @@ def get_benchmarking_df_for_testSVs_from_trainSV_filterSets(test_SVdict, outdir,
 ################# GRAPHICS FUNCTIONS #################
 ######################################################
 
-def plot_clustermap_with_annotation(df, row_colors_df, col_colors_df, filename, title="clustermap", col_cluster=False, row_cluster=False, colorbar_label="default label", adjust_position=True, legend=True, idxs_separator_pattern="_", texts_to_strip={"L001"}, default_label_legend="control", df_annotations=None, cmap=sns.color_palette("RdBu_r", 50), ylabels_graphics_df=None, grid_lines=True, add_to_legend_x=1, figsize=None):
+def plot_clustermap_with_annotation(df, row_colors_df, col_colors_df, filename, title="clustermap", col_cluster=False, row_cluster=False, colorbar_label="default label", adjust_position=True, legend=True, idxs_separator_pattern="_", texts_to_strip={"L001"}, default_label_legend="control", df_annotations=None, cmap=sns.color_palette("RdBu_r", 50), ylabels_graphics_df=None, grid_lines=True, add_to_legend_x=1, figsize=None, multiplier_width_colorbars=1):
 
     """Takes a df were the index is the annotation and the cols are samples. It will be saved under filename. ylabels_graphics_df can be a df containing fontweight and color for each index value in df"""
 
@@ -9003,12 +8966,12 @@ def plot_clustermap_with_annotation(df, row_colors_df, col_colors_df, filename, 
         cm.ax_heatmap.set_position([hm_pos.x0, hm_pos.y0, hm_pos.width, hm_pos.height]); hm_pos = cm.ax_heatmap.get_position()
 
         # adjust the row colorbar, proportional to the row colorbar
-        width_row_colorbar = (hm_pos.width/len(col_colors_df)) * len(row_colors_df.columns)
+        width_row_colorbar = (hm_pos.width/len(col_colors_df)) * len(row_colors_df.columns) * multiplier_width_colorbars
         rc_pos = cm.ax_row_colors.get_position()
         cm.ax_row_colors.set_position([hm_pos.x0 - width_row_colorbar, rc_pos.y0, width_row_colorbar, rc_pos.height]); rc_pos = cm.ax_row_colors.get_position()
 
         # adjust the col colorbar proporitonal to the col colors
-        height_col_colorbar = (hm_pos.height/len(df)) * len(col_colors_df.columns)
+        height_col_colorbar = (hm_pos.height/len(df)) * len(col_colors_df.columns) * multiplier_width_colorbars
         cc_pos = cm.ax_col_colors.get_position()
         cm.ax_col_colors.set_position([hm_pos.x0, hm_pos.y0 + hm_pos.height, hm_pos.width, height_col_colorbar]); cc_pos = cm.ax_col_colors.get_position()
 
@@ -10468,6 +10431,13 @@ def report_accuracy_realSVs_perSVadeRuns(close_shortReads_table, reference_genom
     # make the outdir
     make_folder(outdir)
 
+    # debug
+    """
+    print("deleting %s"%outdir)
+    delete_folder(outdir)
+    sys.exit(0)
+    """
+
     print_if_verbose("testing the accuracy of perSVade. Running perSVade on each sample with each configuration")
 
     # get the gff with biotype
@@ -10498,12 +10468,12 @@ def report_accuracy_realSVs_perSVadeRuns(close_shortReads_table, reference_genom
     all_cmds = []
     
     # predefine if some jobs need to be ran
-    types_simulations = ["arroundHomRegions", "arroundRepeats", "uniform", "fast", "realSVs"]
+    types_simulations = ["arroundHomRegions", "uniform", "fast", "realSVs"]
     n_remaining_jobs = sum([sum([file_is_empty("%s/%s/%s/perSVade_finished_file.txt"%(outdir, typeSimulations, runID)) for runID in set(df_reads.runID)]) for typeSimulations in types_simulations])
     print_if_verbose("There are %i remaining jobs"%n_remaining_jobs)
 
     # go through each run and configuration
-    for typeSimulations, bedpe_breakpoints, fast_SVcalling, simulate_SVs_arround_repeats, simulate_SVs_arround_HomologousRegions in [("arroundHomRegions", None, False, False, True), ("arroundRepeats", None, False, True, False), ("uniform", None, False, False, False), ("realSVs", real_bedpe_breakpoints, False, False, False), ("fast", None, True, False, False)]:
+    for typeSimulations, bedpe_breakpoints, fast_SVcalling, simulate_SVs_arround_repeats, simulate_SVs_arround_HomologousRegions in [("arroundHomRegions", None, False, False, True), ("uniform", None, False, False, False), ("realSVs", real_bedpe_breakpoints, False, False, False), ("fast", None, True, False, False)]:
 
         # define an outdir for this type of simulations
         outdir_typeSimulations = "%s/%s"%(outdir, typeSimulations); make_folder(outdir_typeSimulations)
@@ -10545,7 +10515,7 @@ def report_accuracy_realSVs_perSVadeRuns(close_shortReads_table, reference_genom
             if file_is_empty(final_file) or replace is True:# or file_is_empty(parameters_file):
 
                 # define the cmd. This is a normal perSvade.py run with the vars of the previous dir  
-                cmd = "python %s -r %s --threads %i --outdir %s --nvars %i --nsimulations %i --simulation_ploidies %s --range_filtering_benchmark %s --mitochondrial_chromosome %s -f1 %s -f2 %s --previous_repeats_table %s --min_CNVsize_coverageBased %i --skip_cleaning_outdir --skip_SV_CNV_calling --simulate_SVs_arround_HomologousRegions_maxEvalue %.10f --simulate_SVs_arround_HomologousRegions_queryWindowSize %i"%(perSVade_py, reference_genome, threads, outdir_runID, nvars, n_simulated_genomes, ",".join(simulation_ploidies), range_filtering_benchmark, mitochondrial_chromosome, r1, r2, previous_repeats_table, min_CNVsize_coverageBased, simulate_SVs_arround_HomologousRegions_maxEvalue, simulate_SVs_arround_HomologousRegions_queryWindowSize)
+                cmd = "python %s -r %s --threads %i --outdir %s --nvars %i --nsimulations %i --simulation_ploidies %s --range_filtering_benchmark %s --mitochondrial_chromosome %s -f1 %s -f2 %s --previous_repeats_table %s --min_CNVsize_coverageBased %i --keep_simulation_files --simulate_SVs_arround_HomologousRegions_maxEvalue %.10f --simulate_SVs_arround_HomologousRegions_queryWindowSize %i"%(perSVade_py, reference_genome, threads, outdir_runID, nvars, n_simulated_genomes, ",".join(simulation_ploidies), range_filtering_benchmark, mitochondrial_chromosome, r1, r2, previous_repeats_table, min_CNVsize_coverageBased, simulate_SVs_arround_HomologousRegions_maxEvalue, simulate_SVs_arround_HomologousRegions_queryWindowSize)
 
                 # add arguments depending on the pipeline
                 if replace is True: cmd += " --replace"
@@ -10579,16 +10549,6 @@ def report_accuracy_realSVs_perSVadeRuns(close_shortReads_table, reference_genom
                     continue
 
                 else: raise ValueError("%s is not valid"%job_array_mode)
-
-            # keep the simulation files and clean outdir
-            elif n_remaining_jobs==0:
-                print_if_verbose("perSVade testing finished. cleaning...")
-
-                # keeping simulations and cleaning
-                keep_simulation_files_for_perSVade_outdir(outdir_runID, replace=replace, n_simulated_genomes=n_simulated_genomes, simulation_ploidies=simulation_ploidies)
-
-                # clean
-                clean_perSVade_outdir(outdir_runID)
 
     # if you are not running on slurm, just execute one cmd after the other
     if job_array_mode=="job_array":
@@ -19118,8 +19078,6 @@ def get_integrated_SV_CNV_smallVars_df_from_run_perSVade_severalSamples(paths_df
     #############################################
 
 
-
-  
 
 #######################################################################################
 #######################################################################################
