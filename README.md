@@ -90,7 +90,7 @@ Once you have installed all the dependencies, you can call the perSVade pipeline
 
 ## Pipeline details
 
-![alt text](https://github.com/Gabaldonlab/perSVade/blob/master/misc/perSVade_pipeline_cartoon_crop.pdf)
+![alt text](https://github.com/Gabaldonlab/perSVade/blob/master/misc/perSVade_pipeline_cartoon_crop.png)
 
 
 
