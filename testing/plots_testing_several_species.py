@@ -60,7 +60,6 @@ df_goldenSetAccuracy = test_fun.get_accuracy_df_goldenSet(outdir_testing_GoldenS
 
 
 
-
 #%% CROSS BENCHMARKING PLOT
 
 # all data
@@ -109,6 +108,20 @@ test_fun.plot_goldenSet_accuracy_barplots(df_goldenSetAccuracy, fileprefix, accu
 fileprefix = "%s/goldenSetAccuracy_lineplot"%PlotsDir
 test_fun.plot_goldenSet_accuracy_lineplots(df_goldenSetAccuracy, fileprefix, accuracy_f="Fvalue", svtype="integrated")
 
+#%% PRINT SV CONTENT
+
+typeSim = "realSVs"
+
+# prints the content of the SV dfs
+for taxID, spName, ploidy, mitochondrial_chromosome, max_coverage_sra_reads in test_fun.species_Info:
+
+    outdir_species = "%s/%s_%s/testing_Accuracy/%s"%(outdir_testing, taxID, spName, typeSim)
+    for sampleID in os.listdir(outdir_species):
+        
+        SV_CNV_file = "%s/%s/SVcalling_output/SV_and_CNV_variant_calling.vcf"%(outdir_species, sampleID)
+        SV_CNV = fun.get_vcf_df_with_INFO_as_single_fields(fun.get_df_and_header_from_vcf(SV_CNV_file)[0])
+        
+        adkhdjg
 
 #%% PRINT OUT
 print("testing several species finished")

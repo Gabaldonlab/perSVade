@@ -5064,9 +5064,10 @@ def run_parallelFastqDump_on_prefetched_SRRfile(SRRfile, replace=False, threads=
             print_if_verbose("running normal fastqdump. This is slower. The std is in %s"%stdfile)
 
             # run fastqdump
-            srr = get_file(SRRfile).split(".")[0]
-            run_cmd("%s --split-3 --gzip --outdir %s %s > %s 2>&1"%(fastqdump, tmpdir, srr, stdfile))
-
+            #srr = get_file(SRRfile).split(".")[0]
+            #run_cmd("%s --split-3 --gzip --outdir %s %s > %s 2>&1"%(fastqdump, tmpdir, srr, stdfile))
+            run_cmd("%s --split-3 --gzip --outdir %s %s > %s 2>&1"%(fastqdump, tmpdir, SRRfile, stdfile))
+            
             # define the tmp reads
             tmp_reads1 = "%s/%s_1.fastq.gz"%(tmpdir, srr)
             tmp_reads2 = "%s/%s_2.fastq.gz"%(tmpdir, srr)
@@ -10950,8 +10951,17 @@ def report_accuracy_golden_set_runJobs(goldenSet_table, outdir, reference_genome
     # define an outdir for all perSVade runs
     outdir_perSVade_calling = "%s/perSVade_SV_calling"%outdir; make_folder(outdir_perSVade_calling)
 
+
+    # remove folders to repeat
+    """
+    for f in ["%s/perSVade_SV_calling"%outdir, "%s/perSVade_vs_longReads"%outdir]: delete_folder(f)
+    print(outdir_perSVade_calling)
+    sys.exit(0)
+    """
+    
+
     # go through each run and configuration
-    for typeSimulations, bedpe_breakpoints, fast_SVcalling, simulate_SVs_arround_repeats, simulate_SVs_arround_HomologousRegions in [("fast", None, True, False, False), ("arroundHomRegions", None, False, False, True), ("arroundRepeats", None, False, True, False), ("uniform", None, False, False, False), ("realSVs", real_bedpe_breakpoints, False, False, False)]:
+    for typeSimulations, bedpe_breakpoints, fast_SVcalling, simulate_SVs_arround_repeats, simulate_SVs_arround_HomologousRegions in [("fast", None, True, False, False), ("arroundHomRegions", None, False, False, True), ("uniform", None, False, False, False), ("realSVs", real_bedpe_breakpoints, False, False, False)]:
 
         #if typeSimulations=="arroundHomRegions": continue # debug
 

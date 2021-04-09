@@ -107,8 +107,8 @@ for taxID, spName, ploidy, mitochondrial_chromosome, max_coverage_sra_reads in t
 
     cmd_output = "%s/cmd_testing.std"%outdir_perSVade
     print("running std into %s"%cmd_output)
-    #fun.run_cmd("%s > %s 2>&1"%(cmd, cmd_output)) # run with stdout
-    fun.run_cmd(cmd); continue # run locally 
+    fun.run_cmd("%s > %s 2>&1"%(cmd, cmd_output)) # run with stdout
+    #fun.run_cmd(cmd); continue # run locally 
  	
  	###### RUN JOB ARRAYS ######
 
@@ -127,7 +127,7 @@ for taxID, spName, ploidy, mitochondrial_chromosome, max_coverage_sra_reads in t
 
             queue = "bsc_ls"
             time = "48:00:00"
-            nodes = 4
+            nodes = 2
 
             fun.run_jobarray_file_MN4_greasy(jobs_filename, name, time=time, queue=queue, threads_per_job=threads, nodes=nodes)
 

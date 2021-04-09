@@ -88,6 +88,12 @@ Once you have installed all the dependencies, you can call the perSVade pipeline
 `python ./scripts/perSVade.py -r <path to the reference genome (fasta)> -o <output_directory> -p <ploidy, 1 or 2> -f1 <forward_reads.fastq.gz> -f2 <reverse_reads.fastq.gz>`
 
 
+## Pipeline details
+
+![alt text](https://github.com/Gabaldonlab/perSVade/misc/image.jpg?raw=true)
+
+
+
 ## Example: running SmallVariant calling and CNV detection for paired-end WGS
 
 perSVade also includes the possibility of running small variant calling. You can do this by skipping SV detection, with a command like:

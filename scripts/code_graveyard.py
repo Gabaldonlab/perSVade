@@ -18146,3 +18146,178 @@ def get_distanceToTelomere_chromosome_GCcontent_to_coverage_fn(df_coverage_train
 
     ##############################
 
+
+
+
+def report_accuracy_golden_set_runJobs(goldenSet_table, outdir, reference_genome, real_bedpe_breakpoints, threads=4, replace=False, n_simulated_genomes=2, mitochondrial_chromosome="mito_C_glabrata_CBS138", simulation_ploidies=["haploid", "diploid_homo", "diploid_hetero", "ref:2_var:1", "ref:3_var:1", "ref:4_var:1", "ref:5_var:1", "ref:9_var:1", "ref:19_var:1", "ref:99_var:1"], range_filtering_benchmark="theoretically_meaningful", nvars=100, job_array_mode="local", StopAfter_sampleIndexingFromSRA=False, StopAfterPrefecth_of_reads=False, target_taxID=None, parameters_json_file=None, fraction_available_mem=None, verbose=False, min_coverage=30, simulate_SVs_arround_HomologousRegions_previousBlastnFile=None, simulate_SVs_arround_HomologousRegions_maxEvalue=1e-5, simulate_SVs_arround_HomologousRegions_queryWindowSize=500, max_n_samples=6):
+
+
+    """Takes a table that has sampleID, short_reads_1, short_reads_2, long_reads. Each row has one sample. This function runs perSVade with different options for each of the samples in the goldenSet_table. It will run the first max_n_samples.  """
+
+    print_if_verbose("calculating accuracy for golden set SVcalls")
+    make_folder(outdir)
+
+    ##########################
+    ####### GET READS ########
+    ##########################
+
+    # redefine the goldenSet_table by one created automatically by parsing the SRA
+    if goldenSet_table=="auto": goldenSet_table = get_goldenSet_table_fromSRA(target_taxID, reference_genome, "%s/downloading_reads_SRA"%outdir, min_coverage, replace, threads, max_n_samples)
+
+    else: goldenSet_table = get_goldenSet_table_softlinked_under_outdir(goldenSet_table, "%s/provided_reads"%outdir)
+
+    if StopAfterPrefecth_of_reads is True:
+        print("WARNING: exiting after prefetch of reads")
+        sys.exit(0)
+
+    # load into a df that has the jobs, and filter by the number of jobs
+    goldenSet_df = get_tab_as_df_or_empty_df(goldenSet_table).iloc[0:max_n_samples]
+
+    # add the input strings
+    def add_input_strings_to_goldenSet_df_r(r):
+
+        if set(r.keys())=={"long_reads_SRRfile", "short_reads_SRRfile", "sampleID"}: 
+
+            input_long_reads_str = "--input_reads %s"%(r.long_reads_SRRfile)
+            input_short_reads_str = "--input_SRRfile %s"%(r.short_reads_SRRfile)
+            
+        elif set(r.keys())=={"long_reads", "short_reads_1", "short_reads_2", "sampleID"}: 
+
+            input_long_reads_str = "--input_reads %s"%(r.long_reads)
+            input_short_reads_str = "-f1 %s -f2 %s "%(r.short_reads_1, r.short_reads_2)
+
+        else: raise ValueError("The fields in the golden set table are not valid")
+
+        r["input_long_reads_str"] = input_long_reads_str
+        r["input_short_reads_str"] = input_short_reads_str
+
+        return r
+
+    goldenSet_df = goldenSet_df.apply(add_input_strings_to_goldenSet_df_r, axis=1)
+
+    ##########################
+    ##########################
+    ##########################
+
+
+    #########################
+    ####### RUN JOBS ########
+    #########################
+
+    print_if_verbose("running jobs golden set")
+
+    # init the final dict
+    final_dict = {}
+
+    # init the cmds
+    all_cmds = []
+
+    ############ ONT READS JOBS ################
+
+    # define an outdir for the ONT calling 
+    outdir_ONT_calling = "%s/ONT_SV_calling"%outdir; make_folder(outdir_ONT_calling)
+
+    # go through each of the samples
+    for Isample, r in goldenSet_df.iterrows():
+
+        # init the final_dict sample
+        final_dict[r.sampleID] = {}
+
+        # define the outdir for this sample
+        outdir_sample = "%s/%s"%(outdir_ONT_calling, r.sampleID); make_folder(outdir_sample)
+
+        # add the run svim and sniffles job
+        final_file_ONT_calling = "%s/ONT_SV_calling_finished.txt"%outdir_sample
+        if file_is_empty(final_file_ONT_calling) or replace is True: 
+
+            ont_calling_cmd = "%s --ref %s --outdir %s --aligner ngmlr --threads %i %s"%(run_svim_and_sniffles_py, reference_genome, outdir_sample, threads, r.input_long_reads_str)
+            if replace is True: ont_calling_cmd += " --replace"
+            if verbose is True: ont_calling_cmd += " --verbose"
+
+            all_cmds.append(ont_calling_cmd)
+
+        # keep the final dict
+        final_dict[r.sampleID]["svim_outdir"] = "%s/svim_output"%outdir_sample
+        final_dict[r.sampleID]["sniffles_outdir"] = "%s/sniffles_output"%outdir_sample
+
+    ############################################
+
+    ############ perSVade runs ##########
+
+    # define an outdir for all perSVade runs
+    outdir_perSVade_calling = "%s/perSVade_SV_calling"%outdir; make_folder(outdir_perSVade_calling)
+
+    # go through each run and configuration
+    for typeSimulations, bedpe_breakpoints, fast_SVcalling, simulate_SVs_arround_repeats, simulate_SVs_arround_HomologousRegions in [("fast", None, True, False, False), ("arroundHomRegions", None, False, False, True), ("arroundRepeats", None, False, True, False), ("uniform", None, False, False, False), ("realSVs", real_bedpe_breakpoints, False, False, False)]:
+
+        #if typeSimulations=="arroundHomRegions": continue # debug
+
+        # go through each sampleID
+        for Isample, r in goldenSet_df.iterrows():
+
+            # define the outdir of this sample and simulation
+            outdir_sample = "%s/perSVade_calling_%s_%s"%(outdir_perSVade_calling, typeSimulations, r.sampleID); make_folder(outdir_sample)
+
+            # define the other_perSVade_outdirs_sameReadsANDalignment from all the outdirs of this same sample and different typeSimulations
+            types_simulations = ["arroundHomRegions", "arroundRepeats", "uniform", "fast", "realSVs"]
+            other_perSVade_outdirs_sameReadsANDalignment = ",".join(["%s/perSVade_calling_%s_%s"%(outdir_perSVade_calling, x, r.sampleID) for x in types_simulations])
+
+            # keep 
+            final_dict[r.sampleID]["perSVade_outdir_%s"%typeSimulations] = outdir_sample
+
+            # define the final file 
+            final_file = "%s/perSVade_finished_file.txt"%outdir_sample
+
+            # define the previous repeats file 
+            previous_repeats_table = "%s.repeats.tab"%reference_genome
+            if file_is_empty(previous_repeats_table): raise ValueError("%s should exist"%previous_repeats_table)
+                
+            # only contine if the final file is not defined
+            if file_is_empty(final_file) or replace is True:
+
+                # define the cmd. This is a normal perSvade.py run with the vars of the previous dir  
+                cmd = "python %s -r %s --threads %i --outdir %s --nvars %i --nsimulations %i --simulation_ploidies %s --range_filtering_benchmark %s --mitochondrial_chromosome %s --previous_repeats_table %s --skip_SV_CNV_calling --QC_and_trimming_reads --other_perSVade_outdirs_sameReadsANDalignment %s --simulate_SVs_arround_HomologousRegions_maxEvalue %.10f --simulate_SVs_arround_HomologousRegions_queryWindowSize %i --keep_simulation_files %s"%(perSVade_py, reference_genome, threads, outdir_sample, nvars, n_simulated_genomes, ",".join(simulation_ploidies), range_filtering_benchmark, mitochondrial_chromosome, previous_repeats_table, other_perSVade_outdirs_sameReadsANDalignment, simulate_SVs_arround_HomologousRegions_maxEvalue, simulate_SVs_arround_HomologousRegions_queryWindowSize, r.input_short_reads_str)
+
+                # add arguments depending on the pipeline
+                if replace is True: cmd += " --replace"
+                if fast_SVcalling is True: cmd += " --fast_SVcalling"
+                if bedpe_breakpoints is not None: cmd += " --real_bedpe_breakpoints %s"%bedpe_breakpoints
+                if printing_verbose_mode is True: cmd += " --verbose"
+                if parameters_json_file is not None: cmd += " --parameters_json_file %s"%parameters_json_file
+                if fraction_available_mem is not None: cmd += " --fraction_available_mem %.3f"%(float(fraction_available_mem))
+                if simulate_SVs_arround_repeats is True: cmd += " --simulate_SVs_arround_repeats"
+                if simulate_SVs_arround_HomologousRegions is True: cmd += " --simulate_SVs_arround_HomologousRegions"
+                if simulate_SVs_arround_HomologousRegions_previousBlastnFile is not None: cmd += " --simulate_SVs_arround_HomologousRegions_previousBlastnFile %s"%simulate_SVs_arround_HomologousRegions_previousBlastnFile
+
+
+                all_cmds.append(cmd)
+
+    #####################################
+
+    # run jobs
+    if job_array_mode=="job_array":
+
+        if len(all_cmds)>0: 
+            print_if_verbose("submitting %i jobs to the cluster for testing accuracy of perSVade on short and long reads (Golden set analysis). The files of the submission are in %s"%(len(all_cmds), outdir))
+            jobs_filename = "%s/jobs.GoldenSetTesting"%outdir            
+            open(jobs_filename, "w").write("\n".join(all_cmds))
+
+            generate_jobarray_file(jobs_filename, "accuracyGoldenSet")
+
+            print_if_verbose("You have to wait under all the jobs in testRealSVs are done")
+            sys.exit(0)
+
+    elif job_array_mode=="local":
+        print("running %i jobs"%len(all_cmds))
+        for cmd in all_cmds: run_cmd(cmd)
+
+    else: raise ValueError("%s is not valid"%job_array_mode)
+    
+    #########################
+    #########################
+    #########################
+
+    #sys.exit(0) # debug
+
+    return final_dict
+
