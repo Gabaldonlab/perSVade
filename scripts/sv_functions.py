@@ -2111,6 +2111,9 @@ def get_SVs_arround_breakpoints(genome_file, df_bedpe, nvars, outdir, svtypes, r
         df_bedpe = df_bedpe[(df_bedpe.chrom1.isin(chroms)) & (df_bedpe.chrom2.isin(chroms))].sample(frac=1)
         df_bedpe.index = list(range(0, len(df_bedpe)))
 
+        # define the name of the bedpe so that it is a number
+        df_bedpe["name"] = list(range(0, len(df_bedpe)))
+
         # set the max_n_breakpoints, 
         max_n_breakpoints = nvars*5*1000
         if len(df_bedpe)>max_n_breakpoints: 
@@ -2181,9 +2184,16 @@ def get_SVs_arround_breakpoints(genome_file, df_bedpe, nvars, outdir, svtypes, r
             # define the sorted svtypes
             sorted_svtypes = [x for x in ["translocations", "tandemDuplications", "deletions", "inversions", "insertions"] if x in svtypes]
 
+            # sort bedpe in a way that the interchromosomal events will happen always first. This is to prioritize translocations. Do this unless there are more interchromosomal regions
+            if n_intrachromosomal>n_interchromosomal: df_bedpe = df_bedpe.sort_values(by="order_by_chrom")
+            else: df_bedpe = df_bedpe.sort_values(by="order_by_chrom", ascending=False)
+
             # go through each breakpoint and assign it to a cahegory. Break if a
             while len(df_bedpe)>0:
-                print_if_verbose("already traversed %i/%i breakpoints. There are %i affected positions"%(original_n_breakpoints - len(df_bedpe), original_n_breakpoints, len(already_affected_positions)))
+
+                # print the already traversed bps
+                already_traversed_bps = original_n_breakpoints - len(df_bedpe)
+                print_if_verbose("already traversed %i/%i breakpoints. There are %i affected positions"%(already_traversed_bps, original_n_breakpoints, len(already_affected_positions)))
 
                 # print the current numbers
                 for svtype in sorted_svtypes: print_if_verbose("%i/%i %s defined"%(len(svtype_to_svDF[svtype]), nvars, svtype))
@@ -2195,6 +2205,10 @@ def get_SVs_arround_breakpoints(genome_file, df_bedpe, nvars, outdir, svtypes, r
                 # if you already found all the intrachromosomal events, keep the interchromosomal ones
                 if already_nvars_svtypes==(svtypes.intersection({"inversions", "tandemDuplications", "deletions", "insertions"})): df_bedpe = df_bedpe[df_bedpe.order_by_chrom==1]
 
+                # define the bpIDs for which you already tried all svtypes, and remove them from bedpe
+                useless_bpIDs = {bpID for bpID, tried_svtypes in bpID_to_tried_svtypes.items() if tried_svtypes==svtypes}
+                df_bedpe = df_bedpe[~(df_bedpe.name.isin(useless_bpIDs))]
+
                 if len(df_bedpe)==0: break
 
                 # interate through each svtype
@@ -2204,16 +2218,8 @@ def get_SVs_arround_breakpoints(genome_file, df_bedpe, nvars, outdir, svtypes, r
                     def get_positions_intersecting_already_affected_positions(positions): return positions.intersection(already_affected_positions)
                     df_bedpe = df_bedpe[(df_bedpe.affected_positions_arroundBp.apply(get_positions_intersecting_already_affected_positions).apply(len))==0]
 
-                    # get only bedpe rows that have not already been tried to assign to all svtypes
-                    good_bpIDs = {bpID for bpID, tried_svtypes in bpID_to_tried_svtypes.items() if tried_svtypes!=svtypes}.intersection(set(df_bedpe.index))
-                    df_bedpe = df_bedpe.loc[good_bpIDs]
-
                     # if empty, continue
-                    if len(df_bedpe)==0: continue
-
-                    # sort bedpe in a way that the interchromosomal events will happen always first. This is to prioritize translocations. Do this unless there are more interchromosomal regions
-                    if n_intrachromosomal>n_interchromosomal: df_bedpe = df_bedpe.sort_values(by="order_by_chrom")
-                    else: df_bedpe = df_bedpe.sort_values(by="order_by_chrom", ascending=False)
+                    if len(df_bedpe)==0: break
 
                     # get the first bedpe row
                     r = df_bedpe.iloc[0]
@@ -5067,7 +5073,7 @@ def run_parallelFastqDump_on_prefetched_SRRfile(SRRfile, replace=False, threads=
             #srr = get_file(SRRfile).split(".")[0]
             #run_cmd("%s --split-3 --gzip --outdir %s %s > %s 2>&1"%(fastqdump, tmpdir, srr, stdfile))
             run_cmd("%s --split-3 --gzip --outdir %s %s > %s 2>&1"%(fastqdump, tmpdir, SRRfile, stdfile))
-            
+
             # define the tmp reads
             tmp_reads1 = "%s/%s_1.fastq.gz"%(tmpdir, srr)
             tmp_reads2 = "%s/%s_2.fastq.gz"%(tmpdir, srr)
