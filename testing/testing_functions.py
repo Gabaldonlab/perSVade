@@ -11,6 +11,7 @@ import numpy as np
 import multiprocessing as multiproc
 import seaborn as sns
 from matplotlib import gridspec
+import subprocess
 
 # define the parent dir of the cluster or not
 ParentDir = "%s/samba"%(os.getenv("HOME")); # local
@@ -95,6 +96,14 @@ species_Info = [("5478", "Candida_glabrata", 1, "mito_C_glabrata_CBS138", 100000
                 ("3702", "Arabidopsis_thaliana", 2, "BK010421.1,AP000423.1", 30),
                 ("7227", "Drosophila_melanogaster", 2, "KJ947872.2", 30)]
 
+
+"""
+species_Info = [("5476", "Candida_albicans", 2, "Ca22chrM_C_albicans_SC5314", 10000000000000000),
+                ("5207", "Cryptococcus_neoformans", 1, "CP003834.1", 10000000000000000),
+                ("3702", "Arabidopsis_thaliana", 2, "BK010421.1,AP000423.1", 30),
+                ("7227", "Drosophila_melanogaster", 2, "KJ947872.2", 30)]
+
+"""
 """
 species_Info = [("5476", "Candida_albicans", 2, "Ca22chrM_C_albicans_SC5314", 10000000000000000),
                 ("3702", "Arabidopsis_thaliana", 2, "BK010421.1,AP000423.1", 30)]
@@ -419,17 +428,27 @@ def get_goldenSetTable_Cglabrata(CurDir):
             origin_reads2 = "%s/mschikora/Cglabrata_antifungals/data/raw_reads/RUN4_BG2_SRA_WT_R2.fq.gz"%ParentDir
 
 
-        if any([fun.file_is_empty(f) for f in [origin_nanoporeFile, origin_reads1, origin_reads2]]): raise ValueError("There origin files should be defined in %s"%sampleID)
+
 
         # dest files
         dest_nanopore_file = "%s/%s_nanopore.fastq.gz"%(dest_reads_dir, sampleID)
         dest_reads_1 = "%s/%s_illumina_1.fastq.gz"%(dest_reads_dir, sampleID)
         dest_reads_2 = "%s/%s_illumina_2.fastq.gz"%(dest_reads_dir, sampleID)
 
-        # rsync
-        fun.rsync_file(origin_nanoporeFile, dest_nanopore_file)
-        fun.rsync_file(origin_reads1, dest_reads_1)
-        fun.rsync_file(origin_reads2, dest_reads_2)
+        # rsync reads only if missing
+        if any([fun.file_is_empty(f) for f in [dest_nanopore_file, dest_reads_1, dest_reads_2]]): 
+
+            if any([fun.file_is_empty(f) for f in [origin_nanoporeFile, origin_reads1, origin_reads2]]): 
+
+                print(origin_nanoporeFile)
+                print(origin_reads1)
+                print(origin_reads2)
+
+                raise ValueError("There origin files should be defined in %s"%sampleID)
+            # rsync
+            fun.rsync_file(origin_nanoporeFile, dest_nanopore_file)
+            fun.rsync_file(origin_reads1, dest_reads_1)
+            fun.rsync_file(origin_reads2, dest_reads_2)
 
         data_dict[sampleID] = {"sampleID":sampleID, "short_reads_1":dest_reads_1, "short_reads_2":dest_reads_2, "long_reads":dest_nanopore_file}
 
@@ -602,8 +621,14 @@ def plot_goldenSet_accuracy_lineplots(df, fileprefix, accuracy_f="Fvalue", svtyp
 
     """
 
+
+    youshouldremaketheplotssothattheyconsiderTheFactThatPrecision_and_recall_are_calculated_differently
+
     # filter the df
-    df_plot = df[(df.svtype==svtype) & (df.comparisonID!="perSVade-arroundRepeats") & (df.threshold_fractionParms==0.4789473684210527) & (df.type_SVs_longReads=="all_SVs") & (df.remaining_treatment=="drop") & (df.tol_bp==50) & (df.pct_overlap==0.75)].set_index("species", drop=False)
+    df_plot = df[(df.svtype==svtype) & (df.comparisonID!="perSVade-arroundRepeats") & (df.type_SVs_longReads=="all_SVs") & (df.remaining_treatment=="drop")].set_index("species", drop=False)
+
+
+    #& (df.threshold_fractionParms==0.4789473684210527) &(df.tol_bp==50) & (df.pct_overlap==0.75)
 
     # define vars
     typeRun_to_color = {"perSVade-uniform":"blue", "perSVade-fast":"gray", "perSVade-realSVs":"red", 'perSVade-arroundHomRegions':"black"}
@@ -747,62 +772,70 @@ def get_cross_accuracy_df_several_perSVadeSimulations(outdir_testing, genomes_an
 
     """This function tests how each of the perSVade configurations works on the others. It runs one job for each type of simulations, and it iterates through them inside of the job."""
 
-    ###### GET PARAMETERS DF AND TESTING DF #######
 
-    # the parameters_df. The first cols are metadata (like sampleID, runID and optimisation type) and the others are things necessary for runnning gridss: and the path to the parameters_json
-    parameters_df_dict = {}
-
-    # test_df: This is info on which to test the running of gridss+clove. It contains metadata cols (sampleID, runID, optimisation type (real, uniform), simName, ploidy, svtype) and data to run the optimisation on (sorted_bam, gridss_vcf, reference_genome, mitochondrial_chromosome)
-    test_df_dict = {}
-
-    for taxID, spName, ploidy, mitochondrial_chromosome, max_coverage_sra_reads in species_Info:
-        for typeSimulations in ["arroundHomRegions", "arroundRepeats", "uniform", "realSVs"]:
-
-            # define outir
-            outdir_species_simulations = "%s/%s_%s/testing_Accuracy/%s"%(outdir_testing, taxID, spName, typeSimulations)
-
-            # define samples and runs
-            all_sampleIDs = [x for x in os.listdir(outdir_species_simulations)]
-
-            # go through each sampleID
-            for sampleID in os.listdir(outdir_species_simulations):
-             
-                # define the outdir of the run
-                sampleID_simulations_files = "%s/%s/simulations_files_and_parameters"%(outdir_species_simulations, sampleID)
-
-                # keep parameters
-                parameters_json = "%s/final_parameters.json"%sampleID_simulations_files
-                parameters_df_dict[(spName, sampleID, typeSimulations)] = {"species":spName, "typeSimulations":typeSimulations, "sampleID":sampleID, "parameters_json":parameters_json}
-
-                # define simulation ploidies
-                if ploidy==1: simulation_ploidy = "haploid"
-                elif ploidy==2: simulation_ploidy = "diploid_hetero"
-
-                # go through each 
-                for simName in ["sim1", "sim2"]:
-
-                    # define things
-                    sorted_bam = "%s/reads_%s_%s.bam"%(sampleID_simulations_files, simName, simulation_ploidy)
-                    gridss_vcf = "%s/gridss_vcf_%s_%s.vcf"%(sampleID_simulations_files, simName, simulation_ploidy)
-                    reference_genome = "%s/%s.fasta"%(genomes_and_annotations_dir, spName)
-                    svtables_prefix =  "%s/SVs_%s"%(sampleID_simulations_files, simName)
-
-                    # add to dict
-                    test_df_dict[(spName, sampleID, typeSimulations, simName, simulation_ploidy)] = {"species":spName, "sampleID":sampleID, "typeSimulations":typeSimulations, "simName":simName, "simulation_ploidy":simulation_ploidy, "sorted_bam":sorted_bam, "gridss_vcf":gridss_vcf, "reference_genome":reference_genome, "mitochondrial_chromosome":mitochondrial_chromosome, "svtables_prefix":svtables_prefix}
-
-
-    # add the fast parameters
-    parameters_json_fast = "%s/5478_Candida_glabrata/testing_Accuracy/fast/BG2_YPD/simulations_files_and_parameters/final_parameters.json"%outdir_testing
-    parameters_df_dict[("none", "fast", "fast")] = {"species":"none", "typeSimulations":"fast", "sampleID":"fast", "parameters_json":parameters_json_fast}
-
-    # get the dfs
-    parameters_df = pd.DataFrame(parameters_df_dict).transpose()[["species", "sampleID", "typeSimulations", "parameters_json"]]
-    test_df = pd.DataFrame(test_df_dict).transpose()[["species", "sampleID", "typeSimulations", "simName", "simulation_ploidy", "sorted_bam", "gridss_vcf", "reference_genome", "mitochondrial_chromosome", "svtables_prefix"]]
-
-    # plot the cross-accuracy
-    print("getting cross-accuracy df")
+    # define the final outdir
     outdir_cross_accuracy = "%s/cross_accuracy_calculations"%outdir_testing
-    df_cross_accuracy_benchmark = get_df_accuracy_of_parameters_on_test_samples(parameters_df, test_df, outdir_cross_accuracy, replace=replace)
+    df_benchmark_all_file = "%s/cross_benchmarking_parameters.tab"%outdir_cross_accuracy
+
+    if fun.file_is_empty(df_benchmark_all_file) or replace is True:
+
+        ###### GET PARAMETERS DF AND TESTING DF #######
+
+        # the parameters_df. The first cols are metadata (like sampleID, runID and optimisation type) and the others are things necessary for runnning gridss: and the path to the parameters_json
+        parameters_df_dict = {}
+
+        # test_df: This is info on which to test the running of gridss+clove. It contains metadata cols (sampleID, runID, optimisation type (real, uniform), simName, ploidy, svtype) and data to run the optimisation on (sorted_bam, gridss_vcf, reference_genome, mitochondrial_chromosome)
+        test_df_dict = {}
+
+        for taxID, spName, ploidy, mitochondrial_chromosome, max_coverage_sra_reads in species_Info:
+            for typeSimulations in ["arroundHomRegions", "arroundRepeats", "uniform", "realSVs"]:
+
+                # define outir
+                outdir_species_simulations = "%s/%s_%s/testing_Accuracy/%s"%(outdir_testing, taxID, spName, typeSimulations)
+
+                # define samples and runs
+                all_sampleIDs = [x for x in os.listdir(outdir_species_simulations)]
+
+                # go through each sampleID
+                for sampleID in os.listdir(outdir_species_simulations):
+                 
+                    # define the outdir of the run
+                    sampleID_simulations_files = "%s/%s/simulations_files_and_parameters"%(outdir_species_simulations, sampleID)
+
+                    # keep parameters
+                    parameters_json = "%s/final_parameters.json"%sampleID_simulations_files
+                    parameters_df_dict[(spName, sampleID, typeSimulations)] = {"species":spName, "typeSimulations":typeSimulations, "sampleID":sampleID, "parameters_json":parameters_json}
+
+                    # define simulation ploidies
+                    if ploidy==1: simulation_ploidy = "haploid"
+                    elif ploidy==2: simulation_ploidy = "diploid_hetero"
+
+                    # go through each 
+                    for simName in ["sim1", "sim2"]:
+
+                        # define things
+                        sorted_bam = "%s/reads_%s_%s.bam"%(sampleID_simulations_files, simName, simulation_ploidy)
+                        gridss_vcf = "%s/gridss_vcf_%s_%s.vcf"%(sampleID_simulations_files, simName, simulation_ploidy)
+                        reference_genome = "%s/%s.fasta"%(genomes_and_annotations_dir, spName)
+                        svtables_prefix =  "%s/SVs_%s"%(sampleID_simulations_files, simName)
+
+                        # add to dict
+                        test_df_dict[(spName, sampleID, typeSimulations, simName, simulation_ploidy)] = {"species":spName, "sampleID":sampleID, "typeSimulations":typeSimulations, "simName":simName, "simulation_ploidy":simulation_ploidy, "sorted_bam":sorted_bam, "gridss_vcf":gridss_vcf, "reference_genome":reference_genome, "mitochondrial_chromosome":mitochondrial_chromosome, "svtables_prefix":svtables_prefix}
+
+
+        # add the fast parameters
+        parameters_json_fast = "%s/5478_Candida_glabrata/testing_Accuracy/fast/BG2_YPD/simulations_files_and_parameters/final_parameters.json"%outdir_testing
+        parameters_df_dict[("none", "fast", "fast")] = {"species":"none", "typeSimulations":"fast", "sampleID":"fast", "parameters_json":parameters_json_fast}
+
+        # get the dfs
+        parameters_df = pd.DataFrame(parameters_df_dict).transpose()[["species", "sampleID", "typeSimulations", "parameters_json"]]
+        test_df = pd.DataFrame(test_df_dict).transpose()[["species", "sampleID", "typeSimulations", "simName", "simulation_ploidy", "sorted_bam", "gridss_vcf", "reference_genome", "mitochondrial_chromosome", "svtables_prefix"]]
+
+        # plot the cross-accuracy
+        print("getting cross-accuracy df")
+        df_cross_accuracy_benchmark = get_df_accuracy_of_parameters_on_test_samples(parameters_df, test_df, outdir_cross_accuracy, replace=replace)
+
+    df_cross_accuracy_benchmark = fun.get_tab_as_df_or_empty_df(df_benchmark_all_file)
 
     ##################################
 
@@ -1124,38 +1157,78 @@ def get_crossaccuracy_distributions(df_cross_accuracy_benchmark, fileprefix, acc
     fig.savefig(filename, bbox_inches='tight')
     #plt.close(fig)
 
+
+def rsync_file_shh(origin, target):
+
+    """Copy a file with tmp and rsync"""
+
+    fun.run_cmd("rsync -v %s %s"%(origin, target))
+
+
 def run_parallelFastqDump_fromSRR_pairedReads_localComputer(srr, outdir, replace=False, threads=4):
 
     """Runs parallel fastqdump from an srr into outdir"""
 
     # make dirs
-    make_folder(outdir)
+    fun.make_folder(outdir)
 
+    # define the reads
+    final_reads1 = "%s/%s_1.fastq.gz"%(outdir, srr)
+    final_reads2 = "%s/%s_2.fastq.gz"%(outdir, srr)
 
+    if fun.file_is_empty(final_reads1) or fun.file_is_empty(final_reads2) or replace is True:
 
+        # check that you are locally
+        if not str(subprocess.check_output("uname -a", shell=True)).startswith("b'Linux bscls063 4.12.14-lp150.12.48-default"): raise ValueError("You are not running in the BSC local machine") 
 
+        # define the local outdir to download
+        local_outdir = "/data/projects/downloading_%s"%srr; 
+        fun.make_folder(local_outdir)
+        os.chdir(local_outdir)
 
+        # download prefetched SRA file
+        prefetch_outdir = "%s/downloading_SRAfile"%local_outdir
+        SRAfile = "%s/%s/%s.sra"%(prefetch_outdir, srr, srr)
 
-    # make the tmp
-    tmpdir = "%s/tmp"%outdir; 
-    delete_folder(tmpdir); make_folder(tmpdir)
-    tmpdir_parallel_fastqdump = "%s/tmp"%tmpdir; make_folder(tmpdir_parallel_fastqdump)
+        prefetch_finished_file = "%s/prefetch_finished.txt"%local_outdir
+        if fun.file_is_empty(prefetch_finished_file) or replace is True:
 
-    # run fastqdump parallel into the tmpdir 
-    stdfile = "%s/std_fastqdump.txt"%tmpdir
-    print_if_verbose("running fastq dump in parallel. The std is in %s"%stdfile)
-    run_cmd("%s -s %s -t %i -O %s --tmpdir %s --split-3 --gzip > %s 2>&1 "%(parallel_fastq_dump, srr, threads, tmpdir, tmpdir_parallel_fastqdump, stdfile))
+            fun.delete_folder(prefetch_outdir)
+            prefetch_std = "%s/prefetch_std.txt"%(local_outdir)
+            print("running prefetch. STD in %s"%prefetch_std)
+            fun.run_cmd("%s --output-directory %s --max-size 500G --progress %s > %s 2>&1"%(fun.prefetch, prefetch_outdir, srr, prefetch_std))
+            open(prefetch_finished_file, "w").write("prefetch finished")    
 
+        # run fastqdump parallel into the tmpdir 
+        stdfile = "%s/std_fastqdump.txt"%local_outdir
+        print("running fastq dump in parallel. The std is in %s"%stdfile)
+        fun.run_cmd("%s -s %s -t %i -O %s --tmpdir %s --split-3 --gzip --verbose > %s 2>&1 "%(fun.parallel_fastq_dump, SRAfile, threads, local_outdir, local_outdir, stdfile))
 
-    # check that the fastqdump is correct
-    std_lines = open(stdfile, "r").readlines()
-    any_error = any(["ERROR" in l.upper() for l in std_lines])
-    if any_error:
-        raise ValueError("Something went wrong with the fastqdump. Check the log in %s"%stdfile)
+        # check that the fastqdump is correct
+        std_lines = open(stdfile, "r").readlines()
+        any_error = any(["ERROR" in l.upper() for l in std_lines])
+        if any_error:
+            raise ValueError("Something went wrong with the fastqdump. Check the log in %s"%stdfile)
 
-    khgdajhgajagdj
+        # move reads to outdir
+        local_reads1 = "%s/%s_1.fastq.gz"%(local_outdir, srr)
+        local_reads2 = "%s/%s_2.fastq.gz"%(local_outdir, srr)
 
-    # define the tmp reads
-    tmp_reads1 = "%s/%s"%(tmpdir, get_file(reads1))
-    tmp_reads2 = "%s/%s"%(tmpdir, get_file(reads2))
+        # define options for rsync
+        gpfs_parentDir = "/gpfs/projects/bsc40/mschikora"
+        cluster_name = "bsc40395@dt01.bsc.es"
+
+        print("rsyncing reads1")
+        clusterDir_reads1 = "%s:%s/%s"%(cluster_name, fun.get_dir(final_reads1).replace(ParentDir, gpfs_parentDir), fun.get_file(final_reads1))
+        rsync_file_shh(local_reads1, clusterDir_reads1)
+
+        print("rsyncing reads2")
+        clusterDir_reads2 = "%s:%s/%s"%(cluster_name, fun.get_dir(final_reads2).replace(ParentDir, gpfs_parentDir), fun.get_file(final_reads2))
+        rsync_file_shh(local_reads2, clusterDir_reads2)
+
+        # clean
+        fun.delete_folder(local_outdir)
+
+    return final_reads1, final_reads2
+
 

@@ -13,7 +13,7 @@ import pandas as pd
 ParentDir = "%s/samba"%(os.getenv("HOME")); # local
 if os.path.exists(ParentDir):
     running_in_cluster = False    
-    threads = 8
+    threads = 4
 else:
     running_in_cluster = True    
     ParentDir = "/gpfs/projects/bsc40/mschikora"
@@ -35,7 +35,7 @@ import testing_functions as test_fun
 if running_in_cluster is True:
 
     cluster_name = fun.get_current_clusterName_mareNostrum()
-    if cluster_name=="MN4": threads = 24
+    if cluster_name=="MN4": threads = 48
     elif cluster_name=="Nord3": threads = 16
     else: raise ValueError("cluster could not be identified")
 
@@ -59,6 +59,9 @@ This is how I obtained the datasets:
 NA12878:
 
 wget ftp://ftp-trace.ncbi.nlm.nih.gov/giab/ftp/technical/svclassify_Manuscript/Supplementary_Information/Personalis_1000_Genomes_deduplicated_deletions.bed; mv Personalis_1000_Genomes_deduplicated_deletions.bed NA12878_deletions.bed # SVs
+
+
+# I downloaded the raw reads from the webpage https://www.ebi.ac.uk/ena/browser/view/ERR194147, because the fastqdump did not work
 
 (reference genome h19)
 
@@ -92,7 +95,7 @@ wget https://hgdownload.soe.ucsc.edu/goldenPath/hg38/bigZips/latest/hg38.fa.gz; 
 
 # get the reads for CHM1 and CHM13 and merge them
 CHM1_13_raw_reads_dir =  "%s/CHM1_13_raw_reads"%DataDir; fun.make_folder(CHM1_13_raw_reads_dir)
-for srr in ["ERR1341794", "ERR1341795"]: fun.run_parallelFastqDump_fromSRR_pairedReads_localComputer(srr,  "%s/%s"%(CHM1_13_raw_reads_dir, srr), replace=False, threads=threads)
+srr_to_reads = {srr : test_fun.run_parallelFastqDump_fromSRR_pairedReads_localComputer(srr,  "%s/%s"%(CHM1_13_raw_reads_dir, srr), replace=False, threads=threads) for srr in ["ERR1341794", "ERR1341795"]}
 
 
 akhagjdagdag
@@ -104,9 +107,7 @@ adjhgadjhgda
 """
 
 # get the reads from NA12878
-NA12878_raw_reads_dir = "%s/NA12878_raw_reads"%DataDir
-srr = "ERR194147"
-fun.run_parallelFastqDump_fromSRR_pairedReads(srr, NA12878_raw_reads_dir, replace=False, threads=threads)
+NA12878_raw_reads_dir = "%s/NA12878_raw_reads"%DataDir # downloaded manually from ERR194147
 
 
 kadhgahdgjadg

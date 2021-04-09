@@ -161,7 +161,7 @@ parser.add_argument("--skip_cnv_analysis", dest="skip_cnv_analysis", default=Fal
 
 # add the CNV calling args
 parser.add_argument("--window_size_CNVcalling", dest="window_size_CNVcalling", default=100, type=int, help="The window size in which the genome will be fragmented for CNV calling.")
-parser.add_argument("--cnv_calling_algs", dest="cnv_calling_algs", default="HMMcopy,CONY", type=str, help="A comma-sepparated string thatindicates which programs should be used for the CNV calling. It can be any of HMMcopy,CONY,AneuFinder. We note that CONY does not work well for small chromosomes or large binned windows.")
+parser.add_argument("--cnv_calling_algs", dest="cnv_calling_algs", default="HMMcopy,AneuFinder", type=str, help="A comma-sepparated string thatindicates which programs should be used for the CNV calling. It can be any of HMMcopy,CONY,AneuFinder. We note that CONY does not work well for small chromosomes or large binned windows.")
 
 parser.add_argument("--input_SRRfile", dest="input_SRRfile", default=None, help="An input srr file that can be provided instead of the fastq files. If this is provided the pipeline will run fastqdump on the reads.")
 
