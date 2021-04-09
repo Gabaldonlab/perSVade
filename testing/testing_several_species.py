@@ -77,7 +77,7 @@ for taxID, spName, ploidy, mitochondrial_chromosome, max_coverage_sra_reads in t
     # this is testing the whole perSVade pipeline on 3 runs of 3 close taxIDs to the reference genome. It will run only SV calling.
 
     # record the used resources in this run (this should be only implemented when there are no running jobs)
-    #test_fun.keep_STDfiles_nord3Runs_testingAccuracy(all_STDs_dir, outdir_perSVade, spName) 
+    test_fun.keep_STDfiles_nord3Runs_testingAccuracy(all_STDs_dir, outdir_perSVade, spName) 
 
     # define the table with short reads
     if spName=="Candida_glabrata": close_shortReads_table = close_shortReads_table_Cglabrata

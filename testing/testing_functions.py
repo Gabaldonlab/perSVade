@@ -1199,10 +1199,14 @@ def run_parallelFastqDump_fromSRR_pairedReads_localComputer(srr, outdir, replace
             fun.run_cmd("%s --output-directory %s --max-size 500G --progress %s > %s 2>&1"%(fun.prefetch, prefetch_outdir, srr, prefetch_std))
             open(prefetch_finished_file, "w").write("prefetch finished")    
 
+        # clean
+        for f in os.listdir(local_outdir): 
+            if f not in {"downloading_SRAfile", srr, "prefetch_finished.txt", "prefetch_std.txt"}: fun.delete_file_or_folder("%s/%s"%(local_outdir, f))
+
         # run fastqdump parallel into the tmpdir 
         stdfile = "%s/std_fastqdump.txt"%local_outdir
         print("running fastq dump in parallel. The std is in %s"%stdfile)
-        fun.run_cmd("%s -s %s -t %i -O %s --tmpdir %s --split-3 --gzip --verbose > %s 2>&1 "%(fun.parallel_fastq_dump, SRAfile, threads, local_outdir, local_outdir, stdfile))
+        fun.run_cmd("%s -s %s -t %i -O %s --tmpdir %s --split-3 --gzip -vvv > %s 2>&1 "%(fun.parallel_fastq_dump, SRAfile, threads, local_outdir, local_outdir, stdfile))
 
         # check that the fastqdump is correct
         std_lines = open(stdfile, "r").readlines()
