@@ -63,6 +63,39 @@ There is a WARNING message that you should look for after running this script:
 
 `WARNING: The connection to SRA did not work`. perSVade includes the option to query and download from the SRA database for the benchmarking of SV calling. This requires a proper network access and SRA connection, which may not always be available. This warning indicates that this process is not possible on your machine. You can skip this connection by providing the reads on your own through `--close_shortReads_table`.
 
+
+## Pipeline overview
+
+![alt text](https://github.com/Gabaldonlab/perSVade/blob/master/misc/perSVade_pipeline_cartoon_crop.png)
+
+This is a scheme of the key functions of perSVade. The pipeline runs structural variation (SV), small variant (SNPs and IN/DELs) and read depth-based Copy Number Variation (CNV) calling and annotation with a single bash command. By default, perSVade takes a set of paired-end short reads and a reference genome as inputs. It runs `bwa mem` to align these reads, generating a sorted .bam file that is the core of several downstream analyses. These include:
+
+1.  SV calling. This is the core, most novel function  of perSVade. It uses `gridss` to infer a list of breakpoints (two regions of the genome (two breakends) that are joined in the sample of interest and not in the reference genome) from discordant read pairs, split reads and de novo assembly signatures. The breakpoints are summarized into SVs with `clove`. The output of `clove` is processed by custom functions to generate 6 different .tab files, each with a different type of SV. In order to find the best parameters to run these algorithms, perSVade generates two simulated genomes with 50 SVs of each type and tries several combinations (>13,000,000,000) of filters for the `gridss` and `clove` outputs. It selects the filters that have the highest Fvalue (harmonic mean between precision and recall) for each simulated genome and SV type. In order to reduce overfitting, perSVade selects a final set of "best parameters" that work well for all simulations and SV types. This set of best parameters is used for the final calling on the real data. The accuracy (Fvalue, precision, recall) of these parameters on each simulation and SV type is reported as a heatmap, which is useful to evaluate the expected calling accuracy. By default, the simulations are placed randomly across the genome. However, SVs often appear around repetitive elements or regions of the genome with high similarity (i.e.: transposable elements insertions). This means that random simulations may not be realistic, potentially leading to overestimated calling accuracy and a parameter selection that does not work well for real SVs. perSVade can also generate more realistic simulation occuring arround regions with known SVs (i.e. regions with SVs called with perSVade) or homologous regions (inferred from BLAST). The different types of SVs are (note that text in "" indicates the column names of the corresponding .tab files):
+
+    1. Simple SVs: deletions, inversions and tandemDuplications (duplication of a region which gets inserted next to the affected region). These are described by a chromosome ("Chr"), "Start" and "End" coordinates of the SV. perSVade outputs one .tab file for each of these SV types.
+
+    2. Insertions: a region of the genome (indicated by "ChrA", "StartA", "EndA") is copied ("Copied" is TRUE) or cut ("Copied" is FALSE) and inserted into another region (indicated by "ChrB", "StartB"). "EndB" comes from adding to "StartB" the length of the inserted region. There is one .tab file for insertions.
+
+    3. Translocations: balanced translocations between two chromosomes ("ChrA" and "ChrB"). "StartA" indicates the start of "ChrA" (position 0). "EndA" indicates the position in "ChrA" where the translocation happens. For non-inverted translocations, "StartB" is 0 and "EndB" is the position in "ChrB" where the translocation happens. For inverted translocations, "StartB" is the position in "ChrB" where the translocation happens and "EndB" is the last position of "ChrB". There is one .tab file for translocations.
+
+    4. Unclassified SVs: There is one .tab file ("unclassified_SVs.tab") that reports all the variants that are called by `clove` and cannot be assigned to any of the above SV types. These include unclassified breakpoints (which could be part of unresolved/unkown complex variants) and complex inverted SVs (which are non-standard SVs). These types of SVs are not included in the simulations, so that the accuracy on them is unknown. This is why we group them together into a single file. For unclassified breakpoints, the "SVTYPE" indicates which is the orientation of the two breakends (there are 4 possible orientations, and the "SVTYPE" is different depending on if the two breakends are in the same chromosome or not). "#CHROM" - "POS" indicate one breakend and "#CHR" - "END" the other. "START" is -1 for such unclassified breakpoints. Complex inverted SVs represent variants were a region (indicated by "CHR2", "START", "END") is copied ("SVTYPE" is CVD) or cut ("SVTYPE" is CVT (same chromosome) or IVT (different chromosomes)), inverted and inserted into "#CHROM"-"POS".
+
+2. Read depth-based Copy Number Variation (CNV) calling. CNVs are one type of SVs where there is an alteration in the genomic content (deletions or duplications). The SV calling feature of perSVade (point 1) identifies some CNVs (insertions, tandem duplications, deletions and complex inverted SVs) but it can miss others (i.e.: whole-chromosome duplications or regions with complex rearrangements yielding CNVs). perSVade also includes a pipeline to call CNVs from read-depth alterations. For example, regions with 0x or 2x read-depth as compared to the mean of the genome can be called duplications, or deletions, respectively. A straight forward implementation of this concept to find CNVs is challenging because many genomic features drive variability in read depth independently of CNV. In order to solve this, perSVade calculates the relative coverage for bins of the genome and corrects the effect of the GC content, mappability and distance to the telomere (using non-parametric regression as in https://genomemedicine.biomedcentral.com/articles/10.1186/s13073-014-0100-8). This corrected coverage is used by `CONY`, `AneuFinder` and/or `HMMcopy` to call CNVs across the genome. perSVade generates consensus CNV calls from the three programs taking always the most conservative copy number for each bin of the genome. For example, if the used programs disagree on the copy number of a region the closest to 1 will be taken as the best estimate.
+
+3. Small variant (SNPs and IN/DELs) and gene CNV calling. perSVade includes an option to run a pipeline that performs small variant calling and calculation of read depth for each gene. It runs any of `freebayes`,  `GATK HaplotypeCaller` and/or `bcftools call` for small variant calling and integrates the results into .tab and .vcf files. It runs `mosdepth` for each gene (it requires a .gff file from the user).
+
+4. Integration of read-depth based CNVs and SVs into a single .vcf file. This is a file that is focused on showing the alteration of SVs on specific genomic regions (see the section "Output" for more details). It also removes redundant calls between the CNVs identified with `gridss`+`clove` and those derived from
+
+ sources of co
+
+
+perSVade uses `CONY`, `AneuFinder` and/or `HMMcopy` to def
+
+The traditional way to find CNVs is based on identifiying 
+
+ In addition, it is likely that 
+
+
 ## Running in MareNostrum
 
 If you are working from any cluster that has access to the BSC /gpfs filesystem you can activate the perSVade environment from its location in mschikora. You don't need to re-install anything if you are working in the BSC.
@@ -78,7 +111,6 @@ You can next run perSVade from the releases folder (these are stable versions of
 IMPORTANT NOTE: The activation of the perSVade conda environment works well from version 0.5 on. This means that you can activate from the login of MN or interactive nodes. However, the activation of older versions (v0.4 and below) is costly, and it overloads the login nodes. If you want to use an old version of perSVade, always activate it on an interactive node (i.e.: `salloc`). In addition, you can't run the perSVade pipeline from a login, because it takes too many resources. You can submit perSVade as a job or run from an interactive session with `salloc -n 1 --time=02:00:00 -c 48 --qos debug`.
 
 
-
 ## Running in other systems
 
 Once you have installed all the dependencies, you can call the perSVade pipeline with:
@@ -88,9 +120,10 @@ Once you have installed all the dependencies, you can call the perSVade pipeline
 `python ./scripts/perSVade.py -r <path to the reference genome (fasta)> -o <output_directory> -p <ploidy, 1 or 2> -f1 <forward_reads.fastq.gz> -f2 <reverse_reads.fastq.gz>`
 
 
-## Pipeline details
 
-![alt text](https://github.com/Gabaldonlab/perSVade/blob/master/misc/perSVade_pipeline_cartoon_crop.png)
+    The translocation can be inverted (indicated by the fact that "StartB" is the position of "ChrB" with the tran) These can be without inversion 
+
+,  and interpretation for a set of paired end WGS short reads. It is a pipeline to call breakpoints with  GRIDSS (https://github.com/PapenfussLab/gridss) and summarize them into complex structural variants with CLOVE (https://github.com/PapenfussLab/clove), with some added features. perSVade provides an automated benchmarking and parameter selection for these methods in any genome or sequencing run. This is useful for species without reccommended running and filtering parameters. In addition, it provides an automated report of the SV calling accuracy on simulations and real data, useful to assess the confidence of the results. The pipeline has not been extensively tested in several architectures and species, so that it is not intended for widespread usage. The next release will include these.
 
 
 
