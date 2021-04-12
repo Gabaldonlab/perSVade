@@ -160,20 +160,19 @@ This will output the following files and folders under `./output_directory`:
 
 The output of `clove` is processed by custom functions to generate 6 different .tab files, each with a different type of SV. These are the types of SVs(note that text in "" indicates the column names of the corresponding .tab files):
 
-![alt text](https://github.com/Gabaldonlab/perSVade/blob/master/misc/simple_SVs.png)
 <img src="https://github.com/Gabaldonlab/perSVade/blob/master/misc/simple_SVs.png" width="50%" height="50%">
 
 1. Simple SVs: deletions, inversions and tandemDuplications (duplication of a region which gets inserted next to the affected region). These are described by a chromosome ("Chr"), "Start" and "End" coordinates of the SV. perSVade outputs one .tab file for each of these SV types.
 
-![alt text](https://github.com/Gabaldonlab/perSVade/blob/master/misc/insertions.png)
+<img src="https://github.com/Gabaldonlab/perSVade/blob/master/misc/insertions.png" width="50%" height="50%">
 
 2. Insertions: a region of the genome (indicated by "ChrA", "StartA", "EndA") is copied ("Copied" is TRUE) or cut ("Copied" is FALSE) and inserted into another region (indicated by "ChrB", "StartB"). "EndB" comes from adding to "StartB" the length of the inserted region. There is one .tab file for insertions.
 
-![alt text](https://github.com/Gabaldonlab/perSVade/blob/master/misc/translocations.png)
+<img src="https://github.com/Gabaldonlab/perSVade/blob/master/misc/translocations.png" width="50%" height="50%">
 
 3. Translocations: balanced translocations between two chromosomes ("ChrA" and "ChrB"). "StartA" indicates the start of "ChrA" (position 0). "EndA" indicates the position in "ChrA" where the translocation happens. For non-inverted translocations, "StartB" is 0 and "EndB" is the position in "ChrB" where the translocation happens. For inverted translocations, "StartB" is the position in "ChrB" where the translocation happens and "EndB" is the last position of "ChrB". There is one .tab file for translocations.
 
-![alt text](https://github.com/Gabaldonlab/perSVade/blob/master/misc/unclassified_SVs.png)
+<img src="https://github.com/Gabaldonlab/perSVade/blob/master/misc/unclassified_SVs.png" width="50%" height="50%">
 
 4. Unclassified SVs: There is one .tab file ("unclassified_SVs.tab") that reports all the variants that are called by `clove` and cannot be assigned to any of the above SV types. These include unclassified breakpoints (which could be part of unresolved/unkown complex variants) and complex inverted SVs (which are non-standard SVs). These types of SVs are not included in the simulations, so that the accuracy on them is unknown. This is why we group them together into a single file. For unclassified breakpoints, the "SVTYPE" indicates which is the orientation of the two breakends (there are 4 possible orientations, and the "SVTYPE" is different depending on if the two breakends are in the same chromosome or not). "#CHROM" - "POS" indicate one breakend and "#CHR" - "END" the other. "START" is -1 for such unclassified breakpoints. Complex inverted SVs represent variants were a region (indicated by "CHR2", "START", "END") is copied ("SVTYPE" is CVD) or cut ("SVTYPE" is CVT (same chromosome) or IVT (different chromosomes)), inverted and inserted into "#CHROM"-"POS".
 
