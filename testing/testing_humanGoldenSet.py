@@ -69,6 +69,8 @@ HG002:
 
 wget ftp://ftp-trace.ncbi.nlm.nih.gov/giab/ftp/data/AshkenazimTrio/HG002_NA24385_son/NIST_HiSeq_HG002_Homogeneity-10953946/NHGRI_Illumina300X_AJtrio_novoalign_bams/HG002.hs37d5.60x.1.bam # bam
 
+wget ftp://ftp-trace.ncbi.nlm.nih.gov/giab/ftp/data/AshkenazimTrio/HG002_NA24385_son/NIST_HiSeq_HG002_Homogeneity-10953946/NHGRI_Illumina300X_AJtrio_novoalign_bams/HG002.hs37d5.60x.1.bam.bai
+
 wget ftp://ftp-trace.ncbi.nlm.nih.gov/giab/ftp/data/AshkenazimTrio/analysis/NIST_SVs_Integration_v0.6/HG002_SVs_Tier1_v0.6.vcf.gz; gunzip HG002_SVs_Tier1_v0.6.vcf.gz # SVs
 
 (reference genome h19)
@@ -93,117 +95,71 @@ wget https://hgdownload.soe.ucsc.edu/goldenPath/hg38/bigZips/latest/hg38.fa.gz; 
 
 """
 
+
+# define the reference genomes
+hg19_genome = test_fun.get_correct_human_genome("%s/hg19.fa"%DataDir, type_genome="hg19")
+hg38_genome = test_fun.get_correct_human_genome("%s/hg38.fa"%DataDir, type_genome="hg38")
+
 # get the reads for CHM1 and CHM13 and merge them
 CHM1_13_raw_reads_dir =  "%s/CHM1_13_raw_reads"%DataDir; fun.make_folder(CHM1_13_raw_reads_dir)
 srr_to_reads = {srr : test_fun.run_parallelFastqDump_fromSRR_pairedReads_localComputer(srr,  "%s/%s"%(CHM1_13_raw_reads_dir, srr), replace=False, threads=threads) for srr in ["ERR1341794", "ERR1341795"]}
 
-
-akhagjdagdag
-
-"""
-CHM_r1
-CHM_r2
-adjhgadjhgda
-"""
+CHM_r1 = "%s/merged_CHM_reads_1.fastq.gz"%CHM1_13_raw_reads_dir
+CHM_r2 = "%s/merged_CHM_reads_2.fastq.gz"%CHM1_13_raw_reads_dir
+test_fun.merge_reads_into_one_file(srr_to_reads["ERR1341794"][0], srr_to_reads["ERR1341795"][0], CHM_r1, replace=False)
+test_fun.merge_reads_into_one_file(srr_to_reads["ERR1341794"][1], srr_to_reads["ERR1341795"][1], CHM_r2, replace=False)
 
 # get the reads from NA12878
 NA12878_raw_reads_dir = "%s/NA12878_raw_reads"%DataDir # downloaded manually from ERR194147
-
-
-kadhgahdgjadg
-"""
-NA12878_r1
-NA12878_r2
-adjhgadjgjad
-"""
-
+NA12878_r1 = "%s/ERR194147_1.fastq.gz"%NA12878_raw_reads_dir
+NA12878_r2 = "%s/ERR194147_2.fastq.gz"%NA12878_raw_reads_dir
 
 # get the reads from HG002
 HG002_bam = "%s/HG002.hs37d5.60x.1.bam"%DataDir
-HG002_r1, HG002_r2 = test_fun.get_fastqgz_from_bam(HG002_bam, threads=threads, replace=False)
+HG002_r1, HG002_r2 = test_fun.get_fastqgz_from_bam(HG002_bam, threads=threads, replace=False, already_sorted_by_readName=False)
 
+
+# define filenames
+print(HG002_r1)
 
 adadgadjgjhadg
 
-# get repeatmasker for each genome, without repeatmodeller
-
 ###############################################
 
-############## TRIM READS ##################
+######### run SV calling  ###########
 
-
-
-
-#############################################
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-# define the taxIDs that have no
-taxIDs_with_noON_overalpping = {"746128"}
-
-# define the run in cluster (and debug)
+# define the type of run
 run_in_cluster = True
 if running_in_cluster is False: run_in_cluster = False
 
-# go through each species
-for taxID, spName, ploidy, mitochondrial_chromosome, max_coverage_sra_reads in test_fun.species_Info:
-    print(taxID, spName)
+# we will run SV calling on each referenge genome for the three datasets (using as "real SVs" those found in all of them)
+for genome_name, genome, mitochondrial_chromosome in [("hg38", hg38_genome, "chrM"), ("hg19", hg19_genome, "chrMT")]:
 
-    # define  the genome and annotations
-    genome = "%s/%s.fasta"%(outdir_genomes_and_annotations, spName)
-    gff = "%s/%s.gff"%(outdir_genomes_and_annotations, spName)
-
-    # create an outdir
-    outdir_perSVade = "%s/%s_%s"%(outdir_testing, taxID, spName); fun.make_folder(outdir_perSVade)
+    # define the outdir
+    outdir_perSVade = "%s/running_on_%s"%(outdir_testing, genome_name); 
 
     # get the repeats for this genome
-    previous_repeats_table = fun.get_repeat_maskerDF(genome, threads=threads, replace=False)[1]
+    previous_repeats_table = fun.get_repeat_maskerDF(genome, threads=threads, replace=False, use_repeat_modeller=False)[1]
 
     # get the blastn of the genome against itself
     simulate_SVs_arround_HomologousRegions_maxEvalue = 0.00001
     simulate_SVs_arround_HomologousRegions_queryWindowSize = 500
     simulate_SVs_arround_HomologousRegions_previousBlastnFile = fun.get_blastn_regions_genome_against_itself(genome, simulate_SVs_arround_HomologousRegions_maxEvalue, simulate_SVs_arround_HomologousRegions_queryWindowSize, False, threads)
 
-    # define the goldenSet_dir and the real bedpe breakpoints
-    if spName=="Candida_glabrata": 
-        goldenSet_table = test_fun.get_goldenSetTable_Cglabrata(CurDir)
-        real_bedpe_breakpoints = "%s/outdirs_testing_severalSpecies/%s_%s/findingRealSVs_providedCloseReads/integrated_breakpoints.bedpe"%(CurDir, taxID, spName)
+    # define the table with short reads
+    close_shortReads_table_df = pd.DataFrame({Is : {"sampleID":sampleID, "runID":sampleID+"run1", "short_reads1":reads[0], "short_reads2":reads[1]} for Is, (sampleID, reads) in enumerate({"CHM":(CHM_r1, CHM_r2), "NA12878":(NA12878_r1, NA12878_r2),  "HG002":(HG002_r1, HG002_r2)}.items())}).transpose()
+    close_shortReads_table = "%s/table_reads_genome_%s.tab"%(DataDir, genome_name)
+    fun.save_df_as_tab(close_shortReads_table_df, close_shortReads_table)
 
-    else: 
-        goldenSet_table = "auto"
-        real_bedpe_breakpoints = "%s/outdirs_testing_severalSpecies/%s_%s/findingRealSVs_automaticFindingOfCloseReads/integrated_breakpoints.bedpe"%(CurDir, taxID, spName)
+    print(close_shortReads_table_df)
 
-    # define the ploidy
-    if ploidy==1: simulation_ploidies = "haploid"
-    elif ploidy==2: simulation_ploidies = "diploid_hetero"
-    else: raise ValueError("ploidy %i is not valid"%ploidy)
+    adjhdgajadgjhadg
 
-    # get the golden set running 
-    if taxID in taxIDs_with_noON_overalpping: continue
-    cmd = "%s --ref %s --threads %i -o %s --target_taxID %s --real_bedpe_breakpoints %s -f1 skip -f2 skip --mitochondrial_chromosome %s --gff %s --goldenSet_table %s --skip_SVcalling --verbose --nsimulations 2 --simulation_ploidies %s --previous_repeats_table %s --QC_and_trimming_reads --StopAfter_goldenSetAnalysis --simulate_SVs_arround_HomologousRegions_previousBlastnFile %s --simulate_SVs_arround_HomologousRegions_maxEvalue %.10f --simulate_SVs_arround_HomologousRegions_queryWindowSize %i"%(perSVade_py, genome, threads, outdir_perSVade, taxID, real_bedpe_breakpoints, mitochondrial_chromosome, gff, goldenSet_table, simulation_ploidies, previous_repeats_table, simulate_SVs_arround_HomologousRegions_previousBlastnFile, simulate_SVs_arround_HomologousRegions_maxEvalue, simulate_SVs_arround_HomologousRegions_queryWindowSize)
+    # define the simulation ploidies as diploid
+    simulation_ploidies = "diploid_hetero"
 
-    """
-    StopAfter_goldenSetAnalysis
-    StopAfterPrefecth_of_reads_goldenSet
-	StopAfter_goldenSetAnalysis_readObtention
-	StopAfter_goldenSetAnalysis_readTrimming
-    StopAfter_sampleIndexingFromSRA
-
-    """
+    # define the cmd
+    cmd = "%s --ref %s --threads %i -o %s --close_shortReads_table %s --n_close_samples 3 --nruns_per_sample 1 -f1 skip -f2 skip --mitochondrial_chromosome %s --testAccuracy --verbose --nsimulations 2 --skip_CNV_calling --simulation_ploidies %s --previous_repeats_table %s --StopAfter_testAccuracy --simulate_SVs_arround_HomologousRegions_maxEvalue %.10f --simulate_SVs_arround_HomologousRegions_queryWindowSize %i --simulate_SVs_arround_HomologousRegions_previousBlastnFile %s --StopAfter_testAccuracy_perSVadeRunning --skip_SV_CNV_calling"%(perSVade_py, genome, threads, outdir_perSVade, close_shortReads_table, mitochondrial_chromosome, simulation_ploidies, previous_repeats_table, simulate_SVs_arround_HomologousRegions_maxEvalue, simulate_SVs_arround_HomologousRegions_queryWindowSize, simulate_SVs_arround_HomologousRegions_previousBlastnFile)
 
     # add options depending on the machine
     if run_in_cluster is True: cmd += " --job_array_mode job_array"
@@ -211,10 +167,11 @@ for taxID, spName, ploidy, mitochondrial_chromosome, max_coverage_sra_reads in t
 
     cmd_output = "%s/cmd_testing.std"%outdir_perSVade
     print("running std into %s"%cmd_output)
-    #fun.run_cmd("%s > %s 2>&1"%(cmd, cmd_output)) # run with stdout
-    fun.run_cmd(cmd); continue # run locally 
- 	
- 	###### RUN JOB ARRAYS ######
+    fun.run_cmd("%s > %s 2>&1"%(cmd, cmd_output)) # run with stdout
+    #fun.run_cmd(cmd); continue # run locally
+
+
+    ###### RUN JOB ARRAYS ######
 
     # get the jobs file to run
     all_lines_jobfile = [l for l in open(cmd_output, "r").readlines() if l.startswith("You need to successfully run all jobs in")]
@@ -224,28 +181,45 @@ for taxID, spName, ploidy, mitochondrial_chromosome, max_coverage_sra_reads in t
         jobs_filename = [x for x in all_lines_jobfile[-1].split() if x.startswith("/gpfs/projects/bsc40/mschikora")][0]
 
         # define parameters
-        name = "%s_jobs"%spName
+        name = genome_name
      
         # run jobs
         if cluster_name=="MN4": 
 
             queue = "bsc_ls"
             time = "48:00:00"
-            nodes = 4
+            nodes = 3
 
             fun.run_jobarray_file_MN4_greasy(jobs_filename, name, time=time, queue=queue, threads_per_job=threads, nodes=nodes)
 
-        elif cluster_name=="Nord3": 
+        elif cluster_name=="Nord3": kjadjhgahjgad
 
-            queue = "bsc_ls"; 
-            RAM_per_thread = 4000; # 1800 or 5000 
-            time = "48:00:00" # per job
-
-            #fun.run_jobarray_file_Nord3(jobs_filename, name, time=time, queue=queue, threads_per_job=threads, RAM_per_thread=RAM_per_thread, max_njobs_to_run=10000)
-            fun.run_jobarray_file_Nord3_greasy(jobs_filename, name, time=time, queue=queue, threads_per_job=threads, RAM_per_thread=RAM_per_thread, nodes=4)
 
     elif len(all_lines_jobfile)!=0: raise ValueError("something went wrong")
 
     ############################
 
-print("Golden set analysis worked")
+    #if taxID=="5476": adkjhdakg # stop after C. albicans
+
+print("the testing of several species finsihed susccesffully")
+
+#####################################
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
