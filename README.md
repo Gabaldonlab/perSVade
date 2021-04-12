@@ -160,11 +160,11 @@ This will output the following files and folders under `./output_directory`:
 
 The output of `clove` is processed by custom functions to generate 6 different .tab files, each with a different type of SV. These are the types of SVs(note that text in "" indicates the column names of the corresponding .tab files):
 
-![alt text](https://github.com/Gabaldonlab/perSVade/blob/master/misc/simple_SVs.png)
+![alt text](https://github.com/Gabaldonlab/perSVade/blob/master/misc/simple_SVs.png){:height="50%" width="50%"}
 
 1. Simple SVs: deletions, inversions and tandemDuplications (duplication of a region which gets inserted next to the affected region). These are described by a chromosome ("Chr"), "Start" and "End" coordinates of the SV. perSVade outputs one .tab file for each of these SV types.
 
-![alt text](https://github.com/Gabaldonlab/perSVade/blob/master/misc/insertions.png)
+![alt text](https://github.com/Gabaldonlab/perSVade/blob/master/misc/insertions.png){:height="50%" width="50%"}
 
 2. Insertions: a region of the genome (indicated by "ChrA", "StartA", "EndA") is copied ("Copied" is TRUE) or cut ("Copied" is FALSE) and inserted into another region (indicated by "ChrB", "StartB"). "EndB" comes from adding to "StartB" the length of the inserted region. There is one .tab file for insertions.
 
