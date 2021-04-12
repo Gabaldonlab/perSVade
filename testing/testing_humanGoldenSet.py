@@ -114,15 +114,12 @@ NA12878_raw_reads_dir = "%s/NA12878_raw_reads"%DataDir # downloaded manually fro
 NA12878_r1 = "%s/ERR194147_1.fastq.gz"%NA12878_raw_reads_dir
 NA12878_r2 = "%s/ERR194147_2.fastq.gz"%NA12878_raw_reads_dir
 
+"""
 # get the reads from HG002
 HG002_bam = "%s/HG002.hs37d5.60x.1.bam"%DataDir
 HG002_r1, HG002_r2 = test_fun.get_fastqgz_from_bam(HG002_bam, threads=threads, replace=False, already_sorted_by_readName=False)
+"""
 
-
-# define filenames
-print(HG002_r1)
-
-adadgadjgjhadg
 
 ###############################################
 
@@ -136,7 +133,7 @@ if running_in_cluster is False: run_in_cluster = False
 for genome_name, genome, mitochondrial_chromosome in [("hg38", hg38_genome, "chrM"), ("hg19", hg19_genome, "chrMT")]:
 
     # define the outdir
-    outdir_perSVade = "%s/running_on_%s"%(outdir_testing, genome_name); 
+    outdir_perSVade = "%s/running_on_%s"%(outdir_testing, genome_name); fun.make_folder(outdir_perSVade)
 
     # get the repeats for this genome
     previous_repeats_table = fun.get_repeat_maskerDF(genome, threads=threads, replace=False, use_repeat_modeller=False)[1]
@@ -145,6 +142,8 @@ for genome_name, genome, mitochondrial_chromosome in [("hg38", hg38_genome, "chr
     simulate_SVs_arround_HomologousRegions_maxEvalue = 0.00001
     simulate_SVs_arround_HomologousRegions_queryWindowSize = 500
     simulate_SVs_arround_HomologousRegions_previousBlastnFile = fun.get_blastn_regions_genome_against_itself(genome, simulate_SVs_arround_HomologousRegions_maxEvalue, simulate_SVs_arround_HomologousRegions_queryWindowSize, False, threads)
+
+    continue
 
     # define the table with short reads
     close_shortReads_table_df = pd.DataFrame({Is : {"sampleID":sampleID, "runID":sampleID+"run1", "short_reads1":reads[0], "short_reads2":reads[1]} for Is, (sampleID, reads) in enumerate({"CHM":(CHM_r1, CHM_r2), "NA12878":(NA12878_r1, NA12878_r2),  "HG002":(HG002_r1, HG002_r2)}.items())}).transpose()
