@@ -42,87 +42,139 @@ perSVade_genome_browser = "%s/perSVade_genome_browser.py"%CWD
 #######
 
 description = """
-Runs perSVade pipeline on an input set of paired end short ends. It is expected to be run on a coda environment and have several dependencies (see https://github.com/Gabaldonlab/perSVade). 
+Runs perSVade pipeline on an input set of paired end short ends. See https://github.com/Gabaldonlab/perSVade for more information.
 """
               
 parser = argparse.ArgumentParser(description=description, formatter_class=RawTextHelpFormatter)
 
-# general args
+#### general, mandatory args ####
+
 parser.add_argument("-r", "--ref", dest="ref", required=True, help="Reference genome. Has to end with .fasta.")
-parser.add_argument("-thr", "--threads", dest="threads", default=16, type=int, help="Number of threads, Default: 16")
+
 parser.add_argument("-o", "--outdir", dest="outdir", action="store", required=True, help="Directory where the data will be stored")
-parser.add_argument("--replace", dest="replace", action="store_true", help="Replace existing files")
+
+#################################
+
+#### general, optional args #### 
+
+parser.add_argument("-thr", "--threads", dest="threads", default=16, type=int, help="Number of threads, Default: 16")
+
 parser.add_argument("-p", "--ploidy", dest="ploidy", default=1, type=int, help="Ploidy, can be 1 or 2")
 
+parser.add_argument("-f1", "--fastq1", dest="fastq1", default=None, help="fastq_1 file. Option required to obtain bam files. It can be 'skip'")
 
-# replace CNV_calling
+parser.add_argument("-f2", "--fastq2", dest="fastq2", default=None, help="fastq_2 file. Option required to obtain bam files. It can be 'skip'")
+
+parser.add_argument("-sbam", "--sortedbam", dest="sortedbam", default=None, help="The path to the sorted bam file, which should have a bam.bai file in the same dir. For example, if your bam file is called 'aligned_reads.bam', there should be an 'aligned_reads.bam.bai' as well. This is mutually exclusive with providing reads. By default, it is assumed that this bam has marked duplicates.")
+
+parser.add_argument("-mchr", "--mitochondrial_chromosome", dest="mitochondrial_chromosome", default="mito_C_glabrata_CBS138", type=str, help="The name of the mitochondrial chromosome. This is important if you have mitochondrial proteins for which to annotate the impact of nonsynonymous variants, as the mitochondrial genetic code is different. This should be the same as in the gff. If there is no mitochondria just put 'no_mitochondria'. If there is more than one mitochindrial scaffold, provide them as comma-sepparated IDs.")
+
+################################
+
+#### replacing options ####
+
+parser.add_argument("--replace", dest="replace", action="store_true", help="Replace existing files")
+
 parser.add_argument("--replace_SV_CNVcalling", dest="replace_SV_CNVcalling", action="store_true", help="Replace everything related to the SV and CNV calling.")
+
 parser.add_argument("--replace_FromGridssRun_final_perSVade_run", dest="replace_FromGridssRun_final_perSVade_run", action="store_true", help="Replace from the clove running in the final gridss+clove running")
 
+###########################
 
-# different modules to be executed
+#### arguments related to the definition of "real SVs". All are optional #### 
 
 parser.add_argument("--close_shortReads_table", dest="close_shortReads_table", type=str, default=None, help="This is the path to a table that has 4 fields: sampleID,runID,short_reads1,short_reads2. These should be WGS runs of samples that are close to the reference genome and some expected SV. Whenever this argument is provided, the pipeline will find SVs in these samples and generate a folder <outdir>/findingRealSVs<>/SVs_compatible_to_insert that will contain one file for each SV, so that they are compatible and ready to insert in a simulated genome. This table will be used if --testAccuracy is specified, which will require at least 3 runs for each sample. It can be 'auto', in which case it will be inferred from the taxID provided by --target_taxID.")
 
-parser.add_argument("--target_taxID", dest="target_taxID", type=int, default=None, help="This is the taxID (according to NCBI taxonomy) to which your reference genome belongs. If provided it is used to download genomes and reads.")
+parser.add_argument("--real_bedpe_breakpoints", dest="real_bedpe_breakpoints", type=str, default=None, help="A file with the list of 'real' breakpoints arround which to insert the SVs in simulations. It may be created with --close_shortReads_table. If both --real_bedpe_breakpoints and --close_shortReads_table are provided, --real_bedpe_breakpoints will be used, and --close_shortReads_table will have no effect. If none of them are provided, this pipeline will base the parameter optimization on randomly inserted SVs (the default behavior). The coordinates have to be 1-based, as they are ready to insert into RSVsim.")
 
 parser.add_argument("--n_close_samples", dest="n_close_samples", default=5, type=int, help="Number of close samples to search in case --target_taxID is provided")
 
 parser.add_argument("--nruns_per_sample", dest="nruns_per_sample", default=3, type=int, help="Number of runs to download for each sample in the case that --target_taxID is specified. ")
 
-parser.add_argument("--real_bedpe_breakpoints", dest="real_bedpe_breakpoints", type=str, default=None, help="A file with the list of 'real' breakpoints arround which to insert the SVs in simulations. It may be created with --close_shortReads_table. If both --real_bedpe_breakpoints and --close_shortReads_table are provided, --real_bedpe_breakpoints will be used, and --close_shortReads_table will have no effect. If none of them are provided, this pipeline will base the parameter optimization on randomly inserted SVs (the default behavior). The coordinates have to be 1-based, as they are ready to insert into RSVsim.")
+parser.add_argument("--job_array_mode", dest="job_array_mode", type=str, default="local", help="It specifies in how to run the job arrays for,  --testAccuracy, the downloading of reads if  --close_shortReads_table is auto, and the SV calling for the table in --close_shortReads_table. It can be 'local' (runs one job after the other or 'job_array'. If 'job_array' is specified, this pipeline will generate a file with all the jobs to run, and stop. You will have to run these jobs before stepping into downstream analyses.")
+
+##############################################################################
+
+######### SV calling and optimisation vars ############
 
 parser.add_argument("--parameters_json_file", dest="parameters_json_file", type=str, default=None, help="A file with the json parameters to use. This only has effect if --fast_SVcalling is specified")
+
 parser.add_argument("--fast_SVcalling", dest="fast_SVcalling", action="store_true", default=False, help="Run SV calling with a default set of parameters. There will not be any optimisation nor reporting of accuracy. This is expected to work almost as fast as gridss and clove together. If --parameters_json_file, the parameters are substituted by the json parameters.")
 
+parser.add_argument("--nvars", dest="nvars", default=50, type=int, help="Number of variants to simulate for each SVtype.")
 
-# set the minimum SVsize
+parser.add_argument("--nsimulations", dest="nsimulations", default=3, type=int, help="The number of 'replicate' simulations that will be produced.")
+
+parser.add_argument("--simulation_ploidies", dest="simulation_ploidies", type=str, default="auto", help='A comma-sepparated string of the ploidies to simulate for parameter optimisation. It can have any of "haploid", "diploid_homo", "diploid_hetero", "ref:2_var:1", "ref:3_var:1", "ref:4_var:1", "ref:5_var:1", "ref:9_var:1", "ref:19_var:1", "ref:99_var:1" . By default it will be inferred from the ploidy. For example, if you are running on ploidy=2, it will optimise for diploid_hetero and diploid_homo.')
+
+parser.add_argument("--range_filtering_benchmark", dest="range_filtering_benchmark", type=str, default="theoretically_meaningful", help='The range of parameters that should be tested in the SV optimisation pipeline. It can be any of large, medium, small, theoretically_meaningful or single.')
+
+########################################################
+
+##### read depth-based CNV callings #####
+
 parser.add_argument("--min_CNVsize_coverageBased", dest="min_CNVsize_coverageBased", default=300, type=int, help="The minimum size of a CNV inferred from coverage.")
 
-# pipeline skipping options 
+#########################################
+
+##### skipping some steps #####
+
 parser.add_argument("--skip_SVcalling", dest="skip_SVcalling", action="store_true", default=False, help="Do not run SV calling.")
+
 parser.add_argument("--skip_SV_CNV_calling", dest="skip_SV_CNV_calling", action="store_true", default=False, help="Do not run the integration of SV and CNV calling into a final vcf")
+
 parser.add_argument("--skip_CNV_calling", dest="skip_CNV_calling", action="store_true", default=False, help="Do not run the calling of CNV based on coverage. This is reccommended if you have samples with smiley face in coverage in a fragmented genome, which does not allow for a proper normalisation of coverage.")
 
-# options of the long reads-based benchmarking
+###############################
+
+##### stopping options ######
+
+parser.add_argument("--StopAfter_bamFileObtention", dest="StopAfter_bamFileObtention", action="store_true", default=False, help="Stop after obtaining the BAM file of aligned reads.")
+
+parser.add_argument("--StopAfter_obtentionOFcloseSVs", dest="StopAfter_obtentionOFcloseSVs", action="store_true", default=False, help="Stop after obtaining the real_bedpe_breakpoints ")
+
+parser.add_argument("--StopAfter_repeatsObtention", dest="StopAfter_repeatsObtention", action="store_true", default=False, help="Stop after obtaining  the repeats table")
+
+
+#############################
+
+#### debugging options. For testing only ####
+
+parser.add_argument("--target_taxID", dest="target_taxID", type=int, default=None, help="This is the taxID (according to NCBI taxonomy) to which your reference genome belongs. If provided it is used to download genomes and reads.")
+
 parser.add_argument("--goldenSet_max_n_samples", dest="goldenSet_max_n_samples", default=6, type=int, help="Number of runs to run golden set analysis on.")
+
 parser.add_argument("--goldenSet_table", dest="goldenSet_table", type=str, default=None, help="This is the path to a table that has ONT reads for several samples, each line one sample. It can be 'auto', which will download as many datasets as possible not exceeding goldenSet_max_n_samples")
 
-# pipeline stopping options
 parser.add_argument("--StopAfter_readObtentionFromSRA", dest="StopAfter_readObtentionFromSRA", action="store_true", default=False, help="Stop after obtaining reads from SRA.")
+
 parser.add_argument("--StopAfter_sampleIndexingFromSRA", dest="StopAfter_sampleIndexingFromSRA", action="store_true", default=False, help="It will stop after indexing the samples of SRA. You can use this if, for example, your local machine has internet connection and your slurm cluster does not. You can first obtain the SRA indexes in the local machine. And then run again this pipeline without this option in the slurm cluster.")
-parser.add_argument("--StopAfter_bamFileObtention", dest="StopAfter_bamFileObtention", action="store_true", default=False, help="Stop after obtaining the BAM file of aligned reads.")
+
 parser.add_argument("--StopAfterPrefecth_of_reads", dest="StopAfterPrefecth_of_reads", action="store_true", default=False, help="Stop after obtaining the prefetched .srr file in case close_shortReads_table is 'auto'")
+
 parser.add_argument("--StopAfterPrefecth_of_reads_goldenSet", dest="StopAfterPrefecth_of_reads_goldenSet", action="store_true", default=False, help="Stop after obtaining the prefetched .srr file in case --goldenSet_table is specified.")
-parser.add_argument("--StopAfter_obtentionOFcloseSVs", dest="StopAfter_obtentionOFcloseSVs", action="store_true", default=False, help="Stop after obtaining the real_bedpe_breakpoints ")
-parser.add_argument("--StopAfter_repeatsObtention", dest="StopAfter_repeatsObtention", action="store_true", default=False, help="Stop after obtaining  the repeats table")
+
 parser.add_argument("--StopAfter_testAccuracy_perSVadeRunning", dest="StopAfter_testAccuracy_perSVadeRunning", action="store_true", default=False, help="When --testAccuracy is specified, the pipeline will stop after the running of perSVade on all the inputs of --close_shortReads_table with the different configurations.")
+
 parser.add_argument("--StopAfter_testAccuracy", dest="StopAfter_testAccuracy", action="store_true", default=False, help="When --testAccuracy is specified, the pipeline will stop after testing the accuracy.")
+
 parser.add_argument("--StopAfter_goldenSetAnalysis", dest="StopAfter_goldenSetAnalysis", action="store_true", default=False, help="When --goldenSet_table is specified, the pipeline will stop after running the golden set analysis.")
-parser.add_argument("--StopAfter_goldenSetAnalysis_readObtention", dest="StopAfter_goldenSetAnalysis_readObtention", action="store_true", default=False, help="When --goldenSet_table is specified, the pipeline will stop after running the golden set analysis' read obtention.")
-parser.add_argument("--StopAfter_goldenSetAnalysis_readTrimming", dest="StopAfter_goldenSetAnalysis_readTrimming", action="store_true", default=False, help="When --goldenSet_table is specified, the pipeline will stop after running the golden set analysis' read trimming.")
 
 parser.add_argument("--StopAfter_replace_SV_CNVcalling", dest="StopAfter_replace_SV_CNVcalling", action="store_true", help="Stop after the removal of files for repeating the CNV calling.")
 
-# testing options
 parser.add_argument("--testAccuracy", dest="testAccuracy", action="store_true", default=False, help="Reports the accuracy  of your calling on the real data, simulations and fastSVcalling for all the WGS runs specified in --close_shortReads_table. ")
 
+
+#############################################
+
+
 # simulation parameter args
-parser.add_argument("--nvars", dest="nvars", default=50, type=int, help="Number of variants to simulate for each SVtype.")
-parser.add_argument("--nsimulations", dest="nsimulations", default=3, type=int, help="The number of 'replicate' simulations that will be produced.")
-parser.add_argument("--simulation_ploidies", dest="simulation_ploidies", type=str, default="auto", help='A comma-sepparated string of the ploidies to simulate for parameter optimisation. It can have any of "haploid", "diploid_homo", "diploid_hetero", "ref:2_var:1", "ref:3_var:1", "ref:4_var:1", "ref:5_var:1", "ref:9_var:1", "ref:19_var:1", "ref:99_var:1" . By default it will be inferred from the ploidy. For example, if you are running on ploidy=2, it will optimise for diploid_hetero and diploid_homo.')
-parser.add_argument("--range_filtering_benchmark", dest="range_filtering_benchmark", type=str, default="theoretically_meaningful", help='The range of parameters that should be tested in the SV optimisation pipeline. It can be any of large, medium, small, theoretically_meaningful or single.')
 
 # alignment args
-parser.add_argument("-f1", "--fastq1", dest="fastq1", default=None, help="fastq_1 file. Option required to obtain bam files. It can be 'skip'")
-parser.add_argument("-f2", "--fastq2", dest="fastq2", default=None, help="fastq_2 file. Option required to obtain bam files. It can be 'skip'")
-parser.add_argument("-sbam", "--sortedbam", dest="sortedbam", default=None, help="The path to the sorted bam file, which should have a bam.bai file in the same dir. For example, if your bam file is called 'aligned_reads.bam', there should be an 'aligned_reads.bam.bai' as well. This is mutually exclusive with providing reads. By default, it is assumed that this bam has marked duplicates.")
 
 # machine options
-parser.add_argument("--job_array_mode", dest="job_array_mode", type=str, default="local", help="It specifies in how to run the job arrays for,  --testAccuracy, the downloading of reads if  --close_shortReads_table is auto, and the SV calling for the table in --close_shortReads_table. It can be 'local' (runs one job after the other or 'job_array'. If 'job_array' is specified, this pipeline will generate a file with all the jobs to run, and stop. You will have to run these jobs before stepping into downstream analyses.")
 
 # other args
-parser.add_argument("-mchr", "--mitochondrial_chromosome", dest="mitochondrial_chromosome", default="mito_C_glabrata_CBS138", type=str, help="The name of the mitochondrial chromosome. This is important if you have mitochondrial proteins for which to annotate the impact of nonsynonymous variants, as the mitochondrial genetic code is different. This should be the same as in the gff. If there is no mitochondria just put 'no_mitochondria'. If there is more than one mitochindrial scaffold, provide them as comma-sepparated IDs.")
 
 # do not clean the outdir
 parser.add_argument("--skip_cleaning_outdir", dest="skip_cleaning_outdir", action="store_true", default=False, help="Will NOT remove all the unnecessary files of the perSVade outdir")

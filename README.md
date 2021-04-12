@@ -4,7 +4,7 @@ perSVade is a method that runs structural variation (SV) calling and interpretat
 
 ## Pipeline overview
 
-![alt text](https://github.com/Gabaldonlab/perSVade/blob/master/misc/perSVade_pipeline_cartoon.png)
+<img src="https://github.com/Gabaldonlab/perSVade/blob/master/misc/perSVade_pipeline_cartoon.png" width="150%" height="150%">
 
 This is a scheme of the key functions of perSVade. The pipeline runs structural variation (SV), small variant (SNPs and IN/DELs) and read depth-based Copy Number Variation (CNV) calling and annotation with a single bash command. By default, perSVade takes a set of paired-end short reads and a reference genome as inputs. It runs `bwa mem` to align these reads, generating a sorted .bam file that is the core of several downstream analyses. These include:
 
@@ -12,7 +12,7 @@ This is a scheme of the key functions of perSVade. The pipeline runs structural 
 
 2. Read depth-based Copy Number Variation (CNV) calling. CNVs are one type of SVs where there is an alteration in the genomic content (deletions or duplications). The SV calling feature of perSVade (point 1) identifies some CNVs (insertions, tandem duplications, deletions and complex inverted SVs) but it can miss others (i.e.: whole-chromosome duplications or regions with unknown types of rearrangements yielding CNVs). perSVade also includes a pipeline to call CNVs from read-depth alterations. For example, regions with 0x or 2x read-depth as compared to the mean of the genome can be called duplications, or deletions, respectively. A straight forward implementation of this concept to find CNVs is challenging because many genomic features drive variability in read depth independently of CNV. In order to solve this, perSVade calculates the relative coverage for bins of the genome and corrects the effect of the GC content, mappability and distance to the telomere (using non-parametric regression as in https://genomemedicine.biomedcentral.com/articles/10.1186/s13073-014-0100-8). This corrected coverage is used by `CONY`, `AneuFinder` and/or `HMMcopy` to call CNVs across the genome. perSVade generates consensus CNV calls from the three programs taking always the most conservative copy number for each bin of the genome. For example, if the used programs disagree on the copy number of a region the closest to 1 will be taken as the best estimate.
 
-3. Small variant (SNPs and IN/DELs) and gene CNV calling. perSVade includes an option to run a pipeline that performs small variant calling and calculation of read depth for each gene. It runs any of `freebayes`,  `GATK HaplotypeCaller` and/or `bcftools call` for small variant calling and integrates the results into .tab and .vcf files. It runs `mosdepth` for each gene (it requires a .gff file from the user).
+3. Small variant (SNPs and IN/DELs) and gene CNV calling. perSVade includes an option to run a pipeline that performs small variant calling and calculation of read depth for each gene. It runs any of `freebayes`,  `GATK HaplotypeCaller` and/or `bcftools call` for small variant calling and integrates the results into .tab and .vcf files. It also runs `mosdepth` to get the coverage for this gene (it requires a .gff file from the user).
 
 4. Integration of read-depth based CNVs and SVs into a single .vcf file. This is a file that is focused on showing the alteration of SVs on specific genomic regions (see the section "Output" for more details). It also removes redundant calls between the CNVs identified with `gridss`+`clove` and those derived from
 
@@ -78,7 +78,7 @@ There is a WARNING message that you should look for after running this script:
 `WARNING: The connection to SRA did not work`. perSVade includes the option to query and download from the SRA database for the benchmarking of SV calling. This requires a proper network access and SRA connection, which may not always be available. This warning indicates that this process is not possible on your machine. You can skip this connection by providing the reads on your own through `--close_shortReads_table`.
 
 
-## Running in MareNostrum
+## Running in BSC clusters
 
 If you are working from any cluster that has access to the BSC /gpfs filesystem you can activate the perSVade environment from its location in mschikora. You don't need to re-install anything if you are working in the BSC.
 
@@ -92,6 +92,10 @@ You can next run perSVade from the releases folder (these are stable versions of
 
 IMPORTANT NOTE: The activation of the perSVade conda environment works well from version 0.7 on. This means that you can activate from the login of MN or interactive nodes. However, the activation of older versions (v0.4 and below) is costly, and it overloads the login nodes. If you want to use an old version of perSVade, always activate it on an interactive node (i.e.: `salloc`). In addition, you can't run the perSVade pipeline from a login, because it takes too many resources. You can submit perSVade as a job or run from an interactive session with `salloc -n 1 --time=02:00:00 -c 48 --qos debug`.
 
+OTHER NOTES:
+
+- All perSVade modules work in MareNostrum, and most of them in Nord3. The generation of "repeat files" and finding of "homologous regions" does not work in Nord3 because 
+
 
 ## Running in other systems
 
@@ -101,17 +105,29 @@ Once you have installed all the dependencies, you can call the perSVade pipeline
 
 `python ./scripts/perSVade.py -r <path to the reference genome (fasta)> -o <output_directory> -p <ploidy, 1 or 2> -f1 <forward_reads.fastq.gz> -f2 <reverse_reads.fastq.gz>`
 
+## perSVade options
 
+perSVade is a flexible pipeline with several options. Type `./scripts/perSVade.py -h` to understand what is the meaning of these options. Note that there are some of them which are flagged as "for debugging purposes only". These are arguments that are useful for developing the pipeline, but are not intended for most users.
 
-## Example 1: running SmallVariant calling and CNV detection for paired-end WGS
+In addition, you can import the file `./scripts/sv_functions.py` as a python module, which is useful to run some specific functions from a python script/shell. This module can be loaded with these python commands:
 
-perSVade also includes the possibility of running small variant calling. You can do this by skipping SV detection, with a command like:
+`import sys; sys.path.append(<perSVade directory>)`
+
+`import sv_functions as fun`
+
+Below are some examples of analyses that can be done with perSVade. We strongly advice that you check the meaning of each of the indicated arguments.
+
+## Example 1: running only small variant calling and calculation of coverage per gene
+
+You can run a traditional variant calling pipeline (small variants and coverage per gene) with a command like:
 
 `./scripts/perSVade.py --ref reference_genome.fasta --threads 4 -o ./output_directory -f1 reads_FWD.fastq.gz -f2 reads_FWD.fastq.gz --mitochondrial_chromosome chr_mito --mitochondrial_code 3 --gDNA_code 12 -gff features.gff  --run_smallVarsCNV --skip_SVcalling --caller all --coverage 20 --ploidy 2 --remove_smallVarsCNV_nonEssentialFiles --skip_repeat_analysis`
 
-This will align the reads with `bwa mem` and run `GATK HaplotypeCaller`, `freebayes` and `bcftools call` on the provided reads. The variants are filtered with the default parameters and the specified coverage. The resulting variants are be merged and annotated with `Ensembl VEP`. In addition, the read depth of each gene will be calculated with `mosdepth`.
+This will align the reads with `bwa mem` and run `GATK HaplotypeCaller`, `freebayes` and `bcftools call` on the provided reads. The variants are filtered with the default parameters and the specified coverage. The resulting variants are be merged and annotated with `Ensembl VEP`. In addition, the read depth of each gene will be calculated with `mosdepth`. Note that `--run_smallVarsCNV` is necessary to run 
 
-Type `./scripts/perSVade.py -h` to understand wahat is the meaning of these options. Some important remarks:
+
+## Example 2: running SV calling and coverage-based CNV calling
+
 
 1. `--mitochondrial_code` and `--gDNA_code` are the NCBI translation code of your species, check them in https://www.ncbi.nlm.nih.gov/Taxonomy/Utils/wprintgc.cgi . Note that they may be wrong sometimes, so that it is good to double check with the literature.
 2. `--mitochondrial_chromosome` is supposed to include the name of the chromosome in the reference genome fasta.
