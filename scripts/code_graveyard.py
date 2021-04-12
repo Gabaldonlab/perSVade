@@ -18321,3 +18321,139 @@ def report_accuracy_golden_set_runJobs(goldenSet_table, outdir, reference_genome
 
     return final_dict
 
+
+
+def get_correct_INFO_with_bendIDs_and_bendStats(r, df_gridss):
+
+    """Takes a row of the final df_CNV and returns the INFO with the breakend information and the best breakend IDs"""
+
+    # copy dfs
+    r = cp.deepcopy(r)
+
+    # get the info dict
+    info = get_INFO_dict_from_INFO_string(r["INFO"])
+    if any({not k.startswith("INFO_") for k in info}): raise ValueError("info is not correct")
+    info = {k.split("INFO_")[1] : v for k,v in info.items()}
+
+    ######### GET THE LIST OF BREAKENDS #########
+
+    # get the breakend list
+    if "BREAKENDIDs" in info.keys():
+
+        if info["BREAKENDIDs"]=="wholeChrom": breakend_IDs = ["wholeChrom"]
+        else: breakend_IDs = info["BREAKENDIDs"].split(",")
+
+    elif "BREAKPOINTIDs" in info.keys():
+
+        # define the interesting df_gridss
+        breakpoint_IDs = set(info["BREAKPOINTIDs"].split(","))
+        df_gridss = df_gridss[(df_gridss.eventID_as_clove.isin(breakpoint_IDs)) & (df_gridss["#CHROM"]==r["#CHROM"])]
+        if len(df_gridss)==0: raise ValueError("there should only be one ID")
+
+        # define the positions where the breakend should be found
+        if "END" in info: 
+
+            # sort df_gridss by pos
+            df_gridss = df_gridss.sort_values(by="POS")
+
+            # if there are two positions, find the breakpoint that best matches the POS-to-end regime
+            def get_score_breakpoint_matchingVariant(df_bp):
+
+                # if there is only one breakend, return a negative score
+                if len(df_bp)==1: return -1
+
+                # if there are two breakends return the inverted mean distance to the start and end
+                elif len(df_bp)==2: 
+                    first_pos = df_bp.iloc[0].POS
+                    second_pos =  df_bp.iloc[1].POS
+                    return 1 /(np.mean([abs(r["POS"]-first_pos), abs(info["END"]-second_pos)]) + 1)
+
+                else: raise ValueError("df_bp should have 1 or 2 breakends")
+
+            bpointID_to_score = df_gridss.groupby("eventID_as_clove").apply(get_score_breakpoint_matchingVariant)
+
+            # if there is some breakpoint with two breakends, it should be the one that is about this breakpoint
+            if any(bpointID_to_score>0):
+
+                best_breakpoint = bpointID_to_score[bpointID_to_score==max(bpointID_to_score)].index[0]
+
+                # keep the breakend IDs of the best breakpoints
+                best_bp_df_gridss = df_gridss[df_gridss.eventID_as_clove==best_breakpoint].sort_values(by="POS")
+                if len(best_bp_df_gridss)!=2: 
+                    raise ValueError("There should be 2 breakpoints in %s"%best_bp_df_gridss)
+
+                # define the breakend IDs
+                breakend_IDs = [best_bp_df_gridss.ID.iloc[0], best_bp_df_gridss.ID.iloc[1]]
+
+            # any breakend, even if it is not from the same breakpoint can be interesting
+            else:
+
+                # get the breakends that are closest to the positions
+                breakend_IDs = [sorted([(bendID, abs(r_bend["POS"]-target_pos)) for bendID, r_bend in df_gridss.iterrows()], key=(lambda x: x[1]))[0][0] for target_pos in [r["POS"], info["END"]]]
+
+                # check that these are two different breakends
+                if len(set(breakend_IDs))!=2: raise ValueError("the bend IDs are not unique")
+
+        else: 
+
+            # if there is only one position, find the closest in df_gridss and with the highest QUAL
+            bendID_df = df_gridss[df_gridss.POS==find_nearest(df_gridss.POS, r["POS"])].sort_values(by=["QUAL"], ascending=False)
+
+            breakend_IDs = [bendID_df.ID.iloc[0]]
+
+        if len(set(breakend_IDs))!=len(breakend_IDs): raise ValueError("there should be one breakend per position")
+
+    # in the CNV ones there are no breakend IDs, so you should just without breakendIDs
+    elif r["ID"].split("|")[0] in  {"coverageDEL", "coverageDUP"}: breakend_IDs = ["."]
+
+    else: raise ValueError("info is not valid. This is it:\n-------\n %s\n-------\n"%info)
+
+    # add them to info
+    info["BREAKENDIDs"] = ",".join(breakend_IDs)
+
+    #############################################
+
+    ######### ADD THE BREKEND STATS BASED ON THE BREAKPOINTS #########
+
+    # for whole chromosomes, just keep the best
+    if breakend_IDs!=["wholeChrom"] and breakend_IDs!=["."]: 
+
+        # get the quantitative fields
+        gridss_quantitative_fields=["allele_frequency", "allele_frequency_SmallEvent", "real_AF", "length_inexactHomology", "length_microHomology", "QUAL", "length_event", "len_inserted_sequence"]
+
+        for estimate_fn_name, estimate_fn in [("min", min), ("max", max), ("mean", np.mean)]:
+
+            # go throug each field
+            for quant_field in gridss_quantitative_fields:
+
+                # add to info
+                field = "%s_%s"%(quant_field, estimate_fn_name)
+                info[field] = estimate_fn([df_gridss.loc[bendID, quant_field] for bendID in breakend_IDs])
+
+        # get the qualitative fields
+        filter_to_int = {"LOW_QUAL":0, "REF":1, "INSUFFICIENT_SUPPORT":2, "NO_ASSEMBLY":3, "ASSEMBLY_TOO_SHORT":4, "ASSEMBLY_TOO_FEW_READ":5, "SINGLE_ASSEMBLY":6, "ASSEMBLY_ONLY":7, "PASS":8}
+
+        # get only the worst filter
+        df_gridss["FILTER"] = df_gridss.FILTER.apply(lambda x: sorted(x.split(";"), key=(lambda x: filter_to_int[x]))[0])
+
+        # get the best and worse filters
+        sorted_filters = sorted([df_gridss.loc[bendID, "FILTER"] for bendID in breakend_IDs], key=(lambda x: filter_to_int[x]))
+
+        info["best_FILTER"] = sorted_filters[-1]
+        info["worse_FILTER"] = sorted_filters[0]
+
+        # get the boolean fields
+        for f in ["has_poly16GC", "overlaps_repeats"]: info["any_%s"%f] = any([df_gridss.loc[bendID, f] for bendID in breakend_IDs])
+
+        # add all the breakend fields
+        for f in gridss_quantitative_fields + ["FILTER", "has_poly16GC", "overlaps_repeats", "coordinates"]:
+
+            info["BREAKEND_%s"%f] = ",".join([str(df_gridss.loc[bendID, f]) for bendID in breakend_IDs])
+
+    ##################################################################
+
+    # get the INFO as a string
+    return ";".join(["%s=%s"%(k, get_x_as_string(v)) for k, v in info.items()])
+
+
+

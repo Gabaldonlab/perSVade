@@ -606,7 +606,7 @@ if opt.testAccuracy is True:
 
     ### RUN PERSVADE ###
 
-    dict_perSVade_outdirs = fun.report_accuracy_realSVs_perSVadeRuns(opt.close_shortReads_table, opt.ref, "%s/testing_Accuracy"%opt.outdir, real_bedpe_breakpoints, threads=opt.threads, replace=opt.replace, n_simulated_genomes=opt.nsimulations, mitochondrial_chromosome=opt.mitochondrial_chromosome, simulation_ploidies=simulation_ploidies, range_filtering_benchmark=opt.range_filtering_benchmark, nvars=opt.nvars, job_array_mode=opt.job_array_mode, parameters_json_file=opt.parameters_json_file, gff=opt.gff, replace_FromGridssRun_final_perSVade_run=opt.replace_FromGridssRun_final_perSVade_run, fraction_available_mem=opt.fraction_available_mem, replace_SV_CNVcalling=opt.replace_SV_CNVcalling, skip_CNV_calling=opt.skip_CNV_calling, outdir_finding_realVars=outdir_finding_realVars, simulate_SVs_arround_HomologousRegions_previousBlastnFile=opt.simulate_SVs_arround_HomologousRegions_previousBlastnFile, simulate_SVs_arround_HomologousRegions_maxEvalue=opt.simulate_SVs_arround_HomologousRegions_maxEvalue, simulate_SVs_arround_HomologousRegions_queryWindowSize=opt.simulate_SVs_arround_HomologousRegions_queryWindowSize)
+    dict_perSVade_outdirs = fun.report_accuracy_realSVs_perSVadeRuns(opt.close_shortReads_table, opt.ref, "%s/testing_Accuracy"%opt.outdir, real_bedpe_breakpoints, threads=opt.threads, replace=opt.replace, n_simulated_genomes=opt.nsimulations, mitochondrial_chromosome=opt.mitochondrial_chromosome, simulation_ploidies=simulation_ploidies, range_filtering_benchmark=opt.range_filtering_benchmark, nvars=opt.nvars, job_array_mode=opt.job_array_mode, parameters_json_file=opt.parameters_json_file, gff=opt.gff, replace_FromGridssRun_final_perSVade_run=opt.replace_FromGridssRun_final_perSVade_run, fraction_available_mem=opt.fraction_available_mem, replace_SV_CNVcalling=opt.replace_SV_CNVcalling, skip_CNV_calling=opt.skip_CNV_calling, outdir_finding_realVars=outdir_finding_realVars, simulate_SVs_arround_HomologousRegions_previousBlastnFile=opt.simulate_SVs_arround_HomologousRegions_previousBlastnFile, simulate_SVs_arround_HomologousRegions_maxEvalue=opt.simulate_SVs_arround_HomologousRegions_maxEvalue, simulate_SVs_arround_HomologousRegions_queryWindowSize=opt.simulate_SVs_arround_HomologousRegions_queryWindowSize, skip_SV_CNV_calling=opt.skip_SV_CNV_calling)
 
     if opt.StopAfter_testAccuracy_perSVadeRunning is True: 
         print("You already ran all the configurations of perSVade. Stopping after the running of perSVade on testAccuracy")
@@ -682,13 +682,13 @@ if run_SV_CNV_calling is True:
     # make folders
     for f in [cnv_calling_outdir, outdir_var_calling]: fun.make_folder(f)
     
-    # define the df_bedpe and df_gridss
-    df_gridss = fun.get_svtype_to_svfile_and_df_gridss_from_perSVade_outdir(opt.outdir, opt.ref)[1]
-
     # run CNVcalling 
     minimal_CNV_fields = ["chromosome", "merged_relative_CN", "start", "end", "CNVid", "median_coverage", "median_coverage_corrected", "SVTYPE"] + ["median_relative_CN_%s"%x for x in cnv_calling_algs]
 
-    if opt.skip_CNV_calling is False: df_CNV_coverage = fun.run_CNV_calling(sorted_bam, opt.ref, cnv_calling_outdir, opt.threads, opt.replace, opt.mitochondrial_chromosome, df_gridss, opt.window_size_CNVcalling, opt.ploidy, bg_sorted_bam_CNV=opt.bg_sorted_bam_CNV, cnv_calling_algs=cnv_calling_algs)
+    if opt.skip_CNV_calling is False: 
+
+    	df_gridss = fun.get_svtype_to_svfile_and_df_gridss_from_perSVade_outdir(opt.outdir, opt.ref, replace=opt.replace)[1]
+    	df_CNV_coverage = fun.run_CNV_calling(sorted_bam, opt.ref, cnv_calling_outdir, opt.threads, opt.replace, opt.mitochondrial_chromosome, df_gridss, opt.window_size_CNVcalling, opt.ploidy, bg_sorted_bam_CNV=opt.bg_sorted_bam_CNV, cnv_calling_algs=cnv_calling_algs)
 
     else: df_CNV_coverage = pd.DataFrame(columns=minimal_CNV_fields)
 

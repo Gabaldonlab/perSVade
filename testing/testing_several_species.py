@@ -94,7 +94,7 @@ for taxID, spName, ploidy, mitochondrial_chromosome, max_coverage_sra_reads in t
     simulate_SVs_arround_HomologousRegions_previousBlastnFile = fun.get_blastn_regions_genome_against_itself(genome, simulate_SVs_arround_HomologousRegions_maxEvalue, simulate_SVs_arround_HomologousRegions_queryWindowSize, False, threads)
 
     # get the reads from SRA. 3 samples, 3 runs per sample. Process with the. --verbose
-    cmd = "%s --ref %s --threads %i -o %s --close_shortReads_table %s --target_taxID %s --n_close_samples 3 --nruns_per_sample 1 -f1 skip -f2 skip --mitochondrial_chromosome %s --testAccuracy --verbose --max_coverage_sra_reads %i --gff %s --nsimulations 2 --skip_CNV_calling --simulation_ploidies %s --previous_repeats_table %s --StopAfter_testAccuracy --simulate_SVs_arround_HomologousRegions_maxEvalue %.10f --simulate_SVs_arround_HomologousRegions_queryWindowSize %i --simulate_SVs_arround_HomologousRegions_previousBlastnFile %s --StopAfter_testAccuracy_perSVadeRunning"%(perSVade_py, genome, threads, outdir_perSVade, close_shortReads_table, taxID, mitochondrial_chromosome, max_coverage_sra_reads, gff, simulation_ploidies, previous_repeats_table, simulate_SVs_arround_HomologousRegions_maxEvalue, simulate_SVs_arround_HomologousRegions_queryWindowSize, simulate_SVs_arround_HomologousRegions_previousBlastnFile)
+    cmd = "%s --ref %s --threads %i -o %s --close_shortReads_table %s --target_taxID %s --n_close_samples 3 --nruns_per_sample 1 -f1 skip -f2 skip --mitochondrial_chromosome %s --testAccuracy --verbose --max_coverage_sra_reads %i --nsimulations 2 --skip_CNV_calling --simulation_ploidies %s --previous_repeats_table %s --StopAfter_testAccuracy --simulate_SVs_arround_HomologousRegions_maxEvalue %.10f --simulate_SVs_arround_HomologousRegions_queryWindowSize %i --simulate_SVs_arround_HomologousRegions_previousBlastnFile %s --StopAfter_testAccuracy_perSVadeRunning"%(perSVade_py, genome, threads, outdir_perSVade, close_shortReads_table, taxID, mitochondrial_chromosome, max_coverage_sra_reads, simulation_ploidies, previous_repeats_table, simulate_SVs_arround_HomologousRegions_maxEvalue, simulate_SVs_arround_HomologousRegions_queryWindowSize, simulate_SVs_arround_HomologousRegions_previousBlastnFile)
 
     """ 
     Relevant args
@@ -102,9 +102,9 @@ for taxID, spName, ploidy, mitochondrial_chromosome, max_coverage_sra_reads in t
     --skip_CNV_calling: This is always used because this testing is about SV calling
     --StopAfter_readObtentionFromSRA
     --StopAfter_obtentionOFcloseSVs
+    --gff gff
 
     # --StopAfter_testAccuracy_perSVadeRunning --slurm_constraint, --StopAfter_obtentionOFcloseSVs --gff %s. Need to add the ploidy (-p ploidy) min_CNV_size # replace_SV_CNVcalling_and_optimisation --skip_cleaning_simulations_files_and_parameters --skip_repeat_analysis, --StopAfterPrefecth_of_reads, --StopAfter_sampleIndexingFromSRA
-
     """
     
     # add options depending on the machine

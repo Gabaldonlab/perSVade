@@ -32,7 +32,7 @@ import sv_functions as fun
 
 import matplotlib
 import matplotlib.pyplot as plt
-if run_in_cluster is False: matplotlib.use('TkAgg')
+#if run_in_cluster is False: matplotlib.use('TkAgg')
 
 ######################
 
@@ -90,20 +90,17 @@ species_Info = [("5478", "Candida_glabrata", 1, "mito_C_glabrata_CBS138", 100000
                 ("7227", "Drosophila_melanogaster", 2, "KJ947872.2", 30)]
 """
 
+"""
 species_Info = [("5478", "Candida_glabrata", 1, "mito_C_glabrata_CBS138", 10000000000000000),
                 ("5476", "Candida_albicans", 2, "Ca22chrM_C_albicans_SC5314", 10000000000000000),
                 ("5207", "Cryptococcus_neoformans", 1, "CP003834.1", 10000000000000000),
                 ("3702", "Arabidopsis_thaliana", 2, "BK010421.1,AP000423.1", 30),
                 ("7227", "Drosophila_melanogaster", 2, "KJ947872.2", 30)]
-
-
 """
-species_Info = [("5476", "Candida_albicans", 2, "Ca22chrM_C_albicans_SC5314", 10000000000000000),
-                ("5207", "Cryptococcus_neoformans", 1, "CP003834.1", 10000000000000000),
-                ("3702", "Arabidopsis_thaliana", 2, "BK010421.1,AP000423.1", 30),
+
+species_Info = [("3702", "Arabidopsis_thaliana", 2, "BK010421.1,AP000423.1", 30),
                 ("7227", "Drosophila_melanogaster", 2, "KJ947872.2", 30)]
 
-"""
 """
 species_Info = [("5476", "Candida_albicans", 2, "Ca22chrM_C_albicans_SC5314", 10000000000000000),
                 ("3702", "Arabidopsis_thaliana", 2, "BK010421.1,AP000423.1", 30)]
@@ -1028,36 +1025,36 @@ def get_sorted_bam_by_readName(bam, threads=4, replace=False):
     sorted_bam_tmp = "%s.tmp"%sorted_bam
 
     # define outdir
-    outdir = get_dir(bam)
+    outdir = fun.get_dir(bam)
 
-    if file_is_empty(sorted_bam) or replace is True:
+    if fun.file_is_empty(sorted_bam) or replace is True:
 
         # remove all temporary files generated previously in samtools sort (they'd make a new sort to be an error)
         for outdir_file in os.listdir(outdir): 
             fullfilepath = "%s/%s"%(outdir, outdir_file)
-            if outdir_file.startswith(bam) and ".tmp." in outdir_file: remove_file(fullfilepath)
+            if outdir_file.startswith(fun.get_file(bam)) and ".tmp." in outdir_file: fun.remove_file(fullfilepath)
 
         print("sorting bam")
-        run_cmd("%s sort -n --threads %i -o %s %s"%(samtools, threads, sorted_bam_tmp, bam))
+        fun.run_cmd("%s sort -n --threads %i -o %s %s"%(fun.samtools, threads, sorted_bam_tmp, bam))
 
         os.rename(sorted_bam_tmp, sorted_bam)
 
     return sorted_bam
 
-def get_fastqgz_from_bam(bamfile, threads=4, replace=False):
+def get_fastqgz_from_bam(bamfile, threads=4, replace=False, already_sorted_by_readName=False):
 
     """This function takes a bamfile and writes the reads """
 
     # get the sorted bam and indexed bam
-    sorted_bam = get_sorted_bam_by_readName(bamfile, threads=threads, replace=replace)
-    #sorted_bam = bamfile
+    if already_sorted_by_readName is False: sorted_bam = get_sorted_bam_by_readName(bamfile, threads=threads, replace=replace)
+    else: sorted_bam = bamfile
     #index_bam = get_index_bam(sorted_bam, threads=threads, replace=replace)
 
     # define the reads
     reads1_gz = "%s.reads1.fastq.gz"%sorted_bam
     reads2_gz = "%s.reads2.fastq.gz"%sorted_bam
 
-    if file_is_empty(reads1_gz) or file_is_empty(reads2_gz) or replace is True:
+    if fun.file_is_empty(reads1_gz) or fun.file_is_empty(reads2_gz) or replace is True:
 
         # define the tmp reads
         reads1_tmp = "%s.reads1.tmp.fastq"%sorted_bam
@@ -1066,15 +1063,15 @@ def get_fastqgz_from_bam(bamfile, threads=4, replace=False):
         reads2_tmp_gz = "%s.gz"%reads2_tmp
 
         # remove tmp files
-        for f in [reads1_tmp, reads2_tmp, reads1_tmp_gz, reads2_tmp_gz]: remove_file(f)
+        for f in [reads1_tmp, reads2_tmp, reads1_tmp_gz, reads2_tmp_gz]: fun.remove_file(f)
 
         # get reads
         print("getting reads from %s"%sorted_bam)
         bedtools_std = "%s.std"%reads1_tmp
-        run_cmd("%s bamtofastq -i %s -fq %s -fq2 %s > %s 2>&1"%(bedtools, sorted_bam, reads1_tmp, reads2_tmp, bedtools_std))
+        fun.run_cmd("%s bamtofastq -i %s -fq %s -fq2 %s > %s 2>&1"%(fun.bedtools, sorted_bam, reads1_tmp, reads2_tmp, bedtools_std))
 
         # gzip
-        for f in [reads1_tmp, reads2_tmp]: run_cmd("pigz --fast %s"%f)
+        for f in [reads1_tmp, reads2_tmp]: fun.run_cmd("pigz --fast %s"%f)
 
         # rename
         os.rename(reads1_tmp_gz, reads1_gz)
@@ -1234,5 +1231,51 @@ def run_parallelFastqDump_fromSRR_pairedReads_localComputer(srr, outdir, replace
         fun.delete_folder(local_outdir)
 
     return final_reads1, final_reads2
+
+
+def merge_reads_into_one_file(readsA, readsB, merged_reads, replace=False):
+
+    """Takes 2 reads and merges them into a single file"""
+
+    if fun.file_is_empty(merged_reads) or replace is True:
+
+        merged_reads_tmp = "%s.tmp.fastq.gz"%merged_reads
+        print("merging reads into %s"%merged_reads)
+
+        fun.run_cmd("cat %s %s > %s"%(readsA, readsB, merged_reads_tmp))
+        os.rename(merged_reads_tmp, merged_reads)
+
+
+
+def get_correct_human_genome(raw_genome, type_genome="hg19"):
+
+    """This function takes a human genome and rewrites it so that it is correct"""
+
+    # define the corrected_genome
+    corrected_genome = "%s.corrected.fasta"%raw_genome
+
+    if fun.file_is_empty(corrected_genome):
+        print("getting corrected genome for %s"%type_genome)
+
+        # load genome and keep only the important scaffolds
+        if type_genome=="hg19": chr_to_seq = {seq.id : seq for seq in fun.SeqIO.parse(raw_genome, "fasta") if "_" not in seq.id and seq.id!="chrM"} # remove all the chromosomes with a '_' in it. I also remove chrM, which is the old version of the mtDNA
+
+        elif type_genome=="hg38": chr_to_seq = {seq.id : seq for seq in fun.SeqIO.parse(raw_genome, "fasta") if "_" not in seq.id} # same as hg19, but chromosome is called M
+        
+        else: raise ValueError("%s is not valid"%type_genome)
+
+        # get the length
+        genome_size = sum(map(len, chr_to_seq.values()))
+        print("The genome %s has %.3f Gbp"%(type_genome, genome_size/1e9))
+
+
+        for c in sorted(chr_to_seq.keys()): print(c)
+
+        # write
+        corrected_genome_tmp = "%s.tmp.fasta"%corrected_genome
+        fun.SeqIO.write(list(chr_to_seq.values()), corrected_genome_tmp, "fasta")
+        os.rename(corrected_genome_tmp, corrected_genome)
+
+    return corrected_genome
 
 

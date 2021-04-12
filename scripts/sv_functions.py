@@ -473,11 +473,21 @@ taxID_to_sampleID_to_srrs_goldenSet = {3702: {"Athaliana_sample" : {"illumina_pa
 ####################################
 
 
+def get_date_and_time_for_print():
+
+    """Gets the date of today"""
+
+    current_day = date.today().strftime("%d/%m/%Y")
+    current_time = time.strftime("%H:%M:%S", time.localtime())
+
+    return "[%s, %s]"%(current_day, current_time)
+
+
 def print_if_verbose(*x):
 
     """This function overrides the print statement"""
 
-    if printing_verbose_mode is True: print(*x)
+    if printing_verbose_mode is True: print(get_date_and_time_for_print(), *x)
 
 def get_aa(codons, genetic_code):
 
@@ -6784,7 +6794,7 @@ def get_svtype_to_svfile_from_perSVade_outdir(perSVade_outdir):
     return svtype_to_svfile
 
 
-def get_svtype_to_svfile_and_df_gridss_from_perSVade_outdir(perSVade_outdir, reference_genome, skip_df_gridssObtention=False):
+def get_svtype_to_svfile_and_df_gridss_from_perSVade_outdir(perSVade_outdir, reference_genome, skip_df_gridssObtention=False, replace=False):
 
     """This function takes from the perSVade outdir the svdict and the df_gridss"""
 
@@ -6810,7 +6820,14 @@ def get_svtype_to_svfile_and_df_gridss_from_perSVade_outdir(perSVade_outdir, ref
     # get the df gridss
     if skip_df_gridssObtention is False:
         print_if_verbose("loading df_gridss")
-        df_gridss = add_info_to_gridssDF(load_single_sample_VCF(gridss_vcf), reference_genome)
+
+        df_gridss_file = "%s.df_gridss.addedInfo.py"%gridss_vcf
+        if file_is_empty(df_gridss_file) or replace is True:
+
+            df_gridss = add_info_to_gridssDF(load_single_sample_VCF(gridss_vcf), reference_genome)
+            save_object(df_gridss, df_gridss_file)
+
+        df_gridss = load_object(df_gridss_file)
 
     else: df_gridss = None
 
@@ -10422,7 +10439,7 @@ def get_bedpe_breakpoints_arround_repeats(repeats_table_file, replace=False, min
 
 
 
-def report_accuracy_realSVs_perSVadeRuns(close_shortReads_table, reference_genome, outdir, real_bedpe_breakpoints, threads=4, replace=False, n_simulated_genomes=2, mitochondrial_chromosome="mito_C_glabrata_CBS138", simulation_ploidies=["haploid", "diploid_homo", "diploid_hetero", "ref:2_var:1", "ref:3_var:1", "ref:4_var:1", "ref:5_var:1", "ref:9_var:1", "ref:19_var:1", "ref:99_var:1"], range_filtering_benchmark="theoretically_meaningful", nvars=100, job_array_mode="local", skip_cleaning_simulations_files_and_parameters=False, skip_cleaning_outdir=False, parameters_json_file=None, gff=None, replace_FromGridssRun_final_perSVade_run=False, fraction_available_mem=None, skip_CNV_calling=False, outdir_finding_realVars=None, replace_SV_CNVcalling=False, simulate_SVs_arround_HomologousRegions_previousBlastnFile=None, simulate_SVs_arround_HomologousRegions_maxEvalue=1e-5, simulate_SVs_arround_HomologousRegions_queryWindowSize=500):
+def report_accuracy_realSVs_perSVadeRuns(close_shortReads_table, reference_genome, outdir, real_bedpe_breakpoints, threads=4, replace=False, n_simulated_genomes=2, mitochondrial_chromosome="mito_C_glabrata_CBS138", simulation_ploidies=["haploid", "diploid_homo", "diploid_hetero", "ref:2_var:1", "ref:3_var:1", "ref:4_var:1", "ref:5_var:1", "ref:9_var:1", "ref:19_var:1", "ref:99_var:1"], range_filtering_benchmark="theoretically_meaningful", nvars=100, job_array_mode="local", skip_cleaning_simulations_files_and_parameters=False, skip_cleaning_outdir=False, parameters_json_file=None, gff=None, replace_FromGridssRun_final_perSVade_run=False, fraction_available_mem=None, skip_CNV_calling=False, outdir_finding_realVars=None, replace_SV_CNVcalling=False, simulate_SVs_arround_HomologousRegions_previousBlastnFile=None, simulate_SVs_arround_HomologousRegions_maxEvalue=1e-5, simulate_SVs_arround_HomologousRegions_queryWindowSize=500, skip_SV_CNV_calling=False):
 
 
     """This function runs the SV pipeline for all the datasets in close_shortReads_table with the fastSV, optimisation based on uniform parameters and optimisation based on realSVs (specified in real_svtype_to_file). The latter is skipped if real_svtype_to_file is empty.
@@ -10535,6 +10552,7 @@ def report_accuracy_realSVs_perSVadeRuns(close_shortReads_table, reference_genom
                 if fraction_available_mem is not None: cmd += " --fraction_available_mem %.3f"%(float(fraction_available_mem))
                 if replace_SV_CNVcalling is True: cmd += " --replace_SV_CNVcalling"
                 if skip_CNV_calling is True: cmd += " --skip_CNV_calling"
+                if skip_SV_CNV_calling is True: cmd += " --skip_SV_CNV_calling"
                 if simulate_SVs_arround_repeats is True: cmd += " --simulate_SVs_arround_repeats"
                 if simulate_SVs_arround_HomologousRegions is True: cmd += " --simulate_SVs_arround_HomologousRegions"
                 if simulate_SVs_arround_HomologousRegions_previousBlastnFile is not None: cmd += " --simulate_SVs_arround_HomologousRegions_previousBlastnFile %s"%simulate_SVs_arround_HomologousRegions_previousBlastnFile
@@ -10550,7 +10568,10 @@ def report_accuracy_realSVs_perSVadeRuns(close_shortReads_table, reference_genom
 
 
                 # if the running in slurm is false, just run the cmd
-                if job_array_mode=="local": run_cmd(cmd)
+                if job_array_mode=="local": 
+                    print_if_verbose("running locally this cmd:\n---\n%s\n---\n"%cmd)
+                    run_cmd(cmd)
+
                 elif job_array_mode=="job_array": 
                     all_cmds.append(cmd)
                     continue
@@ -15772,7 +15793,7 @@ def run_repeat_masker(reference_genome, threads=4, replace=False, use_repeat_mod
        
     return repeat_masker_outfile_personal, repeat_masker_outfile_default
 
-def get_repeat_maskerDF(reference_genome, threads=4, replace=False):
+def get_repeat_maskerDF(reference_genome, threads=4, replace=False, use_repeat_modeller=True):
 
     """gets the repeat masker outfile as a pandas df. The repeatmasker locations are 1-based (https://bedops.readthedocs.io/en/latest/content/reference/file-management/conversion/rmsk2bed.html)"""
 
@@ -15784,7 +15805,7 @@ def get_repeat_maskerDF(reference_genome, threads=4, replace=False):
         print_if_verbose("running RepeatModeler and RepeatMasker into %s"%repeats_table_file)
 
         # get the file
-        repeat_masker_outfile_personal, repeat_masker_outfile_default = run_repeat_masker(reference_genome, threads=threads, replace=replace, use_repeat_modeller=True)
+        repeat_masker_outfile_personal, repeat_masker_outfile_default = run_repeat_masker(reference_genome, threads=threads, replace=replace, use_repeat_modeller=use_repeat_modeller)
 
         # load both dfs
         df_list = []
@@ -16960,14 +16981,10 @@ def get_correct_INFO_with_bendIDs_and_bendStats(r, df_gridss):
     # copy dfs
     r = cp.deepcopy(r)
 
-    # set the ID as index
-    df_gridss = df_gridss.set_index("ID", drop=False)
-    check_that_df_index_is_unique(df_gridss)
+    if r.progress_pct[-2:]=="00": print_if_verbose("%s%s rows processed"%(r.progress_pct, "%"))
 
     # get the info dict
-    info = get_INFO_dict_from_INFO_string(r["INFO"])
-    if any({not k.startswith("INFO_") for k in info}): raise ValueError("info is not correct")
-    info = {k.split("INFO_")[1] : v for k,v in info.items()}
+    info = r.info_as_dict
 
     ######### GET THE LIST OF BREAKENDS #########
 
@@ -16980,8 +16997,7 @@ def get_correct_INFO_with_bendIDs_and_bendStats(r, df_gridss):
     elif "BREAKPOINTIDs" in info.keys():
 
         # define the interesting df_gridss
-        breakpoint_IDs = set(info["BREAKPOINTIDs"].split(","))
-        df_gridss = df_gridss[(df_gridss.eventID_as_clove.isin(breakpoint_IDs)) & (df_gridss["#CHROM"]==r["#CHROM"])]
+        df_gridss = df_gridss.loc[r.gridss_bendIDs]
         if len(df_gridss)==0: raise ValueError("there should only be one ID")
 
         # define the positions where the breakend should be found
@@ -17090,6 +17106,60 @@ def get_correct_INFO_with_bendIDs_and_bendStats(r, df_gridss):
     return ";".join(["%s=%s"%(k, get_x_as_string(v)) for k, v in info.items()])
 
 
+def get_df_gridss_df_vcf_for_get_correct_INFO_with_bendIDs_and_bendStats(df_gridss, df_vcf):
+
+    """Adds fields to df_gridss and df_vcf so that they are prepared to run get_correct_INFO_with_bendIDs_and_bendStats. Initial fields: 
+
+    df_vcf: Index(['#CHROM', 'POS', 'ID', 'REF', 'ALT', 'QUAL', 'FILTER', 'INFO', 'FORMAT'])
+
+    """
+
+    # add the INFO as a dict
+    def get_INFO_dict_from_INFO_string_corrected(INFO):
+
+        info = get_INFO_dict_from_INFO_string(INFO)
+        if any({not k.startswith("INFO_") for k in info}): raise ValueError("info is not correct")
+        info = {k.split("INFO_")[1] : v for k,v in info.items()}
+
+        return info
+
+    df_vcf["info_as_dict"] = df_vcf.INFO.apply(get_INFO_dict_from_INFO_string_corrected)
+
+    # add a numeric index and pct
+    df_vcf["numeric_index"] = list(range(len(df_vcf)))
+    df_vcf["progress_pct"] = (((df_vcf.numeric_index+1)/len(df_vcf))*100).apply(lambda x: "%.2f"%x)
+
+    ######### add gridss_bendIDs to df_vcf ##########
+    print_if_verbose("adding gridss breakend IDs")
+
+    # these are the 'ID' field from df_gridss that is from the breakpoint ID and chromosome of all the breakpointIDs conforming a row in df_vcf
+    df_bpID = df_gridss.set_index("eventID_as_clove")[["ID", "#CHROM"]]
+
+    def get_gridss_bendIDs_for_df_vcf_r(r):
+
+        # print progress
+        if r.progress_pct[-2:]=="00": print_if_verbose("%s%s rows processed"%(r.progress_pct, "%"))
+
+        # get the breakendIDs
+        info = r.info_as_dict
+        if "BREAKENDIDs" not in info.keys() and "BREAKPOINTIDs" in info.keys(): 
+            breakpoint_IDs = set(info["BREAKPOINTIDs"].split(","))
+            df = df_bpID.loc[breakpoint_IDs]
+            return set(df[df["#CHROM"]==r["#CHROM"]].ID)
+
+        else: return set()
+
+    df_vcf["gridss_bendIDs"] = df_vcf[["info_as_dict", "#CHROM", "progress_pct"]].apply(get_gridss_bendIDs_for_df_vcf_r, axis=1)
+
+    #################################################
+  
+    # set the ID of df_gridss
+    df_gridss = df_gridss.set_index("ID", drop=False)
+    check_that_df_index_is_unique(df_gridss)
+
+    return df_gridss, df_vcf
+
+
 def clean_sorted_bam_coverage_per_window_files(sorted_bam):
 
     """Removes all files that start with sorted bam and  followed by coverage_per_window"""
@@ -17105,13 +17175,11 @@ def clean_sorted_bam_coverage_per_window_files(sorted_bam):
         if path.startswith("%s.coverage_per_window."%sorted_bam): remove_file(path)
 
 
-def get_df_vcf_with_df_CNV_coverage_added_nonRedundant(sorted_bam, reference_genome, mitochondrial_chromosome, df_vcf, df_CNV, outdir, df_gridss, df_clove, threads, replace, window_size_CNVcalling, cnv_calling_algs):
+def get_df_vcf_with_df_CNV_coverage_added_nonRedundant(sorted_bam, reference_genome, mitochondrial_chromosome, df_vcf, df_CNV, outdir, df_gridss, df_clove, threads, replace, window_size_CNVcalling, cnv_calling_algs, df_vcf_final_file):
 
     """This function merges the df_vcf with the coverage-based prediction, removing redudnant events."""
 
     # define the final file
-    df_vcf_final_file = "%s/vcf_merged_CNVcalling_SVcalling.vcf"%outdir
-
     if file_is_empty(df_vcf_final_file) or replace is True:
 
         # define fields
@@ -17123,6 +17191,7 @@ def get_df_vcf_with_df_CNV_coverage_added_nonRedundant(sorted_bam, reference_gen
         vcf_fields = ["#CHROM", "POS", "ID", "REF", "ALT", "QUAL", "FILTER", "INFO", "FORMAT"]
 
         # calculate median cov
+        print_if_verbose("calcuoating median coverage")
         destination_dir = "%s.calculating_windowcoverage"%sorted_bam
         coverage_df = pd.read_csv(generate_coverage_per_window_file_parallel(reference_genome, destination_dir, sorted_bam, windows_file="none", replace=replace, run_in_parallel=True, delete_bams=True), sep="\t")
         median_coverage = get_median_coverage(coverage_df, mitochondrial_chromosome)
@@ -17130,13 +17199,16 @@ def get_df_vcf_with_df_CNV_coverage_added_nonRedundant(sorted_bam, reference_gen
         ########### GET RID OF REDUNDANT EVENTS AND ADD FIELDS ###########
 
         # add the ID
+        print_if_verbose("adding ID")
         df_CNV["ID"] = "coverage" + df_CNV.SVTYPE + "|" + df_CNV.chromosome + ":" + df_CNV.start.apply(str) + "-" + df_CNV.end.apply(str)
 
         # get the df_vcf related to CNV
+        print_if_verbose("defining df_vcf_forCNV")
         df_vcf_forCNV = df_vcf[df_vcf.ALT.isin({"<DUP>", "<TDUP>", "<DEL>"})].rename(columns={"POS":"start", "#CHROM":"chromosome"}).set_index("ID", drop=False)
         df_vcf_forCNV["end"] = df_vcf_forCNV.INFO.apply(lambda x: [int(y.split("END=")[1]) for y in x.split(";") if y.startswith("END")][0])
 
         # add the svtype
+        print_if_verbose("adding SVTYPE")
         svtype_to_DUPDEL = {"TDUP":"DUP", "DUP":"DUP", "DEL":"DEL"}
         df_vcf_forCNV["SVTYPE"] = df_vcf_forCNV.INFO.apply(lambda x: [svtype_to_DUPDEL[y.split("SVTYPE=")[1]] for y in x.split(";") if y.startswith("SVTYPE")][0])
 
@@ -17145,6 +17217,7 @@ def get_df_vcf_with_df_CNV_coverage_added_nonRedundant(sorted_bam, reference_gen
         df_CNV["type_CNVcall"] = "coverage"
 
         # get only non-redundant CNVs
+        print_if_verbose("running get_nonRedundant_CNVcalls_coverage")
         df_CNV.index = list(range(0, len(df_CNV)))
         df_CNV = get_nonRedundant_CNVcalls_coverage(outdir, df_CNV, df_vcf_forCNV, threads, replace, pct_overlap=0.8)
 
@@ -17156,6 +17229,8 @@ def get_df_vcf_with_df_CNV_coverage_added_nonRedundant(sorted_bam, reference_gen
         if len(df_vcf_forCNV)==0: df_vcf_forCNV_final = pd.DataFrame(columns=data_fields)
         
         else:   
+
+            print_if_verbose("running get_df_with_coverage_per_windows_relative_to_neighbor_regions for df_vcf_forCNV_final")
 
             df_vcf_forCNV_final  = df_vcf_forCNV.set_index("ID", drop=False)
 
@@ -17194,6 +17269,8 @@ def get_df_vcf_with_df_CNV_coverage_added_nonRedundant(sorted_bam, reference_gen
         df_vcf_final = df_CNV[data_fields].append(df_vcf_forCNV_final[data_fields])
 
         # add the INFO
+        print_if_verbose("adding the final INFO")
+
         if len(df_vcf_final)==0: df_vcf_final["INFO"] = ""
         else:   
 
@@ -17215,12 +17292,8 @@ def get_df_vcf_with_df_CNV_coverage_added_nonRedundant(sorted_bam, reference_gen
         ##########################
 
         # save
+        print_if_verbose("saving")
         save_df_as_tab(df_vcf_final[vcf_fields], df_vcf_final_file)
-
-    # load
-    df_vcf_final = get_tab_as_df_or_empty_df(df_vcf_final_file).sort_values(by=["#CHROM", "POS"])
-
-    return df_vcf_final
 
 def get_vcf_all_SVs_and_CNV(perSVade_outdir, outdir, sorted_bam, reference_genome, ploidy, df_CNV_coverage, window_size_CNVcalling, cnv_calling_algs, replace=False, threads=4, mitochondrial_chromosome="mito_C_glabrata_CBS138"):
 
@@ -17236,6 +17309,7 @@ def get_vcf_all_SVs_and_CNV(perSVade_outdir, outdir, sorted_bam, reference_genom
         print_if_verbose("getting all CNV and SVs into one vcf")
 
         # clean the sorted bam coverage per window
+        print_if_verbose("cleaning sorted_bam") # this is fast
         clean_sorted_bam_coverage_per_window_files(sorted_bam)
 
         # define the outdir
@@ -17246,55 +17320,75 @@ def get_vcf_all_SVs_and_CNV(perSVade_outdir, outdir, sorted_bam, reference_genom
         if file_is_empty(outfile_clove): outfile_clove = "%s/clove_output.vcf"%outdir_gridss_final
 
         # get the clove df
+        print_if_verbose("getting clove output") # this is fast
         df_clove = get_clove_output(outfile_clove)
 
         # get files from output
+        print_if_verbose("loading gridss df") # this is fast 
         svtype_to_svfile, df_gridss = get_svtype_to_svfile_and_df_gridss_from_perSVade_outdir(perSVade_outdir, reference_genome)
 
         ######## GET THE VCF OF SVs ########
 
-        if len(svtype_to_svfile)==0:  
+        df_vcf_final_file = "%s/vcf_merged_CNVcalling_SVcalling.vcf"%outdir
+        if file_is_empty(df_vcf_final_file) or replace is True:
 
-            vcf_fields = ["#CHROM", "POS", "ID", "REF", "ALT", "QUAL", "FILTER", "INFO", "FORMAT"]
-            df_vcf = pd.DataFrame(columns=vcf_fields)
+            if len(svtype_to_svfile)==0:  
 
-        else:
+                vcf_fields = ["#CHROM", "POS", "ID", "REF", "ALT", "QUAL", "FILTER", "INFO", "FORMAT"]
+                df_vcf = pd.DataFrame(columns=vcf_fields)
 
-            # get the svDF metadata
-            print_if_verbose("getting the svtype_to_svDF")
-            svtype_to_svDF = get_sampleID_to_svtype_to_svDF_filtered({"x":svtype_to_svfile}, {"x":df_gridss}, sampleID_to_parentIDs={}, breakend_info_to_keep=['#CHROM', 'POS', 'other_coordinates', 'allele_frequency', 'allele_frequency_SmallEvent', 'real_AF', 'FILTER', 'inserted_sequence', 'has_poly16GC', 'length_inexactHomology', 'length_microHomology', 'QUAL', 'overlaps_repeats', 'REF', 'BREAKPOINTID'])["x"]
+            else:
 
-            print_if_verbose("svtype_to_svDF got")
+                # get the svDF metadata
+                print_if_verbose("getting the svtype_to_svDF") # this is fast
+                svtype_to_svDF = get_sampleID_to_svtype_to_svDF_filtered({"x":svtype_to_svfile}, {"x":df_gridss}, sampleID_to_parentIDs={}, breakend_info_to_keep=['#CHROM', 'POS', 'other_coordinates', 'allele_frequency', 'allele_frequency_SmallEvent', 'real_AF', 'FILTER', 'inserted_sequence', 'has_poly16GC', 'length_inexactHomology', 'length_microHomology', 'QUAL', 'overlaps_repeats', 'REF', 'BREAKPOINTID'])["x"]
 
-            # get a vcf df, that comes from all vcfs
-            df_vcf = pd.concat([get_vcf_df_for_svDF(svDF, svtype, reference_genome, df_gridss) for svtype, svDF in svtype_to_svDF.items() if svtype in {"tandemDuplications", "deletions", "inversions", "translocations", "insertions", "remaining"}])
+                print_if_verbose("svtype_to_svDF got")
+
+                # get a vcf df, that comes from all vcfs
+                print_if_verbose("getting df_vcf from each SV") # this is fast
+                df_vcf = pd.concat([get_vcf_df_for_svDF(svDF, svtype, reference_genome, df_gridss) for svtype, svDF in svtype_to_svDF.items() if svtype in {"tandemDuplications", "deletions", "inversions", "translocations", "insertions", "remaining"}])
+
+            # add the df_CNV_coverage
+            print_if_verbose("getting non-redundant vcf of SVs and CNVs") # this is fast enough
+            get_df_vcf_with_df_CNV_coverage_added_nonRedundant(sorted_bam, reference_genome, mitochondrial_chromosome, df_vcf, df_CNV_coverage, outdir, df_gridss, df_clove, threads, replace, window_size_CNVcalling, cnv_calling_algs, df_vcf_final_file)
+
+        # load
+        df_vcf = get_tab_as_df_or_empty_df(df_vcf_final_file).sort_values(by=["#CHROM", "POS"])
+        vcf_fields = cp.deepcopy(list(df_vcf.keys()))
+
+        # debug 
+        #df_vcf = df_vcf.iloc[0:1000]
 
         ####################################
 
-
-
-        # add the df_CNV_coverage
-        df_vcf = get_df_vcf_with_df_CNV_coverage_added_nonRedundant(sorted_bam, reference_genome, mitochondrial_chromosome, df_vcf, df_CNV_coverage, outdir, df_gridss, df_clove, threads, replace, window_size_CNVcalling, cnv_calling_algs)
-
         # add a tag to the ID, that makes it unique
+        print_if_verbose("add correct INFO") # this is fast
         df_vcf[["ID", "INFO"]] = df_vcf.apply(get_correctID_and_INFO_df_vcf_SV_CNV, axis=1)
 
         # check that it is unique
         if len(df_vcf)!=len(set(df_vcf.ID)): raise ValueError("IDs are not unique")
 
         # add the POS and END that are correct, these should be 1-based. Note that they wont match the ID
+        print_if_verbose("add correct POS") # this is fast
         df_vcf["POS"] = df_vcf.apply(get_correct_POS_in1based, axis=1)
 
         # add to the END + 1
+        print_if_verbose("add correct INFO with END+1") # this is fast
         chr_to_len = get_chr_to_len(reference_genome)
-        df_vcf["INFO"] = df_vcf.apply(lambda r: get_correct_INFO_withEND_in1based(r, chr_to_len), axis=1)        
+        df_vcf["INFO"] = df_vcf.apply(get_correct_INFO_withEND_in1based, chr_to_len=chr_to_len, axis=1)        
         
-        # add the breakend IDs and the metadata info
-        df_vcf["INFO"] = df_vcf.apply(lambda r: get_correct_INFO_with_bendIDs_and_bendStats(r, df_gridss), axis=1)
+        # add the breakend IDs and the metadata info 
+        print_if_verbose("add correct INFO with bIDs") # this is the bottleneck
+        df_gridss, df_vcf = get_df_gridss_df_vcf_for_get_correct_INFO_with_bendIDs_and_bendStats(df_gridss, df_vcf)
+
+        print_if_verbose("running get_correct_INFO_with_bendIDs_and_bendStats")
+        df_vcf["INFO"] = df_vcf.apply(get_correct_INFO_with_bendIDs_and_bendStats, df_gridss=df_gridss, axis=1)
 
         # write vcf
+        print_if_verbose("writing vcf_SVcalling")
         vcf_SVcalling_tmp = "%s.tmp"%vcf_SVcalling
-        vcf_lines = df_vcf.to_csv(sep="\t", header=False, index=False)
+        vcf_lines = df_vcf[vcf_fields].to_csv(sep="\t", header=False, index=False)
         header_lines = "\n".join([l.strip() for l in open(outfile_clove, "r").readlines() if l.startswith("#CHROM") or l.startswith("##fileformat")])
         open(vcf_SVcalling_tmp, "w").write(header_lines + "\n" + vcf_lines)
         os.rename(vcf_SVcalling_tmp, vcf_SVcalling)
