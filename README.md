@@ -1,12 +1,12 @@
 # perSVade: personalized Structural Variation detection
 
-perSVade is a method that runs structural variation (SV) calling and interpretation for a set of paired end WGS short reads. It is a pipeline to call breakpoints with  GRIDSS (https://github.com/PapenfussLab/gridss) and summarize them into complex structural variants with CLOVE (https://github.com/PapenfussLab/clove), with some added features. perSVade provides an automated benchmarking and parameter selection for these methods in any genome or sequencing run. This is useful for species without reccommended running and filtering parameters. In addition, it provides an automated report of the SV calling accuracy on simulations and real data, useful to assess the confidence of the results. 
+perSVade is a method for structural variation (SV), small variant (SNPs and IN/DELs) and read depth-based Copy Number Variation (CNV) calling and annotation with a single bash command using a set of paired-end short reads as input. The novel SV calling pipeline finds breakpoints with  GRIDSS (https://github.com/PapenfussLab/gridss) and summarizes them into complex structural variants with CLOVE (https://github.com/PapenfussLab/clove), with some added features. perSVade provides an automated benchmarking and parameter selection for these methods in any genome or sequencing run. This is useful for species without reccommended running and filtering parameters. In addition, it provides an automated report of the SV calling accuracy on simulations and real data, useful to assess the confidence of the results. 
 
 ## Pipeline overview
 
 <img src="https://github.com/Gabaldonlab/perSVade/blob/master/misc/perSVade_pipeline_cartoon.png" width="150%" height="150%">
 
-This is a scheme of the key functions of perSVade. The pipeline runs structural variation (SV), small variant (SNPs and IN/DELs) and read depth-based Copy Number Variation (CNV) calling and annotation with a single bash command. By default, perSVade takes a set of paired-end short reads and a reference genome as inputs. It runs `bwa mem` to align these reads, generating a sorted .bam file that is the core of several downstream analyses. These include:
+perSVade runs `bwa mem` to align the short reads, generating a sorted .bam file that is the core of several downstream analyses. These include:
 
 - SV calling. This is the core, most novel function  of perSVade. It uses `gridss` to infer a list of breakpoints (two regions of the genome (two breakends) that are joined in the sample of interest and not in the reference genome) from discordant read pairs, split reads and de novo assembly signatures. The breakpoints are summarized into SVs with `clove`. In order to find the best parameters to run these algorithms, perSVade generates two simulated genomes with 50 SVs of each type and tries several combinations (>13,000,000,000) of filters for the `gridss` and `clove` outputs. It selects the filters that have the highest Fvalue (harmonic mean between precision and recall) for each simulated genome and SV type. In order to reduce overfitting, perSVade selects a final set of "best parameters" that work well for all simulations and SV types. This set of best parameters is used for the final calling on the real data. The accuracy (Fvalue, precision, recall) of these parameters on each simulation and SV type is reported as a heatmap, which is useful to evaluate the expected calling accuracy. By default, the simulations are placed randomly across the genome. However, SVs often appear around repetitive elements or regions of the genome with high similarity (i.e.: transposable elements insertions). This means that random simulations may not be realistic, potentially leading to overestimated calling accuracy and a parameter selection that does not work well for real SVs. perSVade can also generate more realistic simulation occuring around regions with known SVs (i.e. regions with SVs called with perSVade) or homologous regions (inferred from BLAST). See "Output" for more details.
 
@@ -274,6 +274,6 @@ This is a vcf that contains all called SVs and CNVs, in a way that is focused on
 
 - 
 
-
+- 
 
 ## Resource consumption
