@@ -1,0 +1,33 @@
+{
+    "gridss_blacklisted_regions": "",
+    "gridss_filters_dict": {
+        "dif_between_insert_and_del": 5,
+        "filter_noReadPairs": false,
+        "filter_noSplitReads": false,
+        "filter_overlappingRepeats": false,
+        "filter_polyGC": true,
+        "max_to_be_considered_small_event": 1000,
+        "maximum_lenght_inexactHomology": 50,
+        "maximum_microhomology": 50,
+        "maximum_strand_bias": 0.99,
+        "min_Nfragments": 5,
+        "min_QUAL": 0,
+        "min_af": 0.25,
+        "min_af_EitherSmallOrLargeEvent": 0.25,
+        "min_length_inversions": 40,
+        "min_size": 50,
+        "range_filt_DEL_breakpoints": [
+            0,
+            1
+        ],
+        "wrong_FILTERtags": [
+            "NO_ASSEMBLY"
+        ],
+        "wrong_INFOtags": [
+            "IMPRECISE"
+        ]
+    },
+    "gridss_maxcoverage": 50000,
+    "max_rel_coverage_to_consider_del": 0.1,
+    "min_rel_coverage_to_consider_dup": 1.8
+}
