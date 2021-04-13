@@ -232,7 +232,7 @@ replacing_args.add_argument("--replace_var_integration", dest="replace_var_integ
 
 #### debugging options. For testing only ####
 
-debug_args = parser.add_argument_group("DEBUGGING ARGUMENTS. ONLY TO BE USED FOR DEVELOPMENT")
+debug_args = parser.add_argument_group("ONLY TO BE USED FOR DEVELOPMENT. USE AT YOUR OWN RISK!")
 
 debug_args.add_argument("--target_taxID", dest="target_taxID", type=int, default=None, help="This is the taxID (according to NCBI taxonomy) to which your reference genome belongs. If provided it is used to download genomes and reads.")
 
