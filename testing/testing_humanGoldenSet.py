@@ -114,11 +114,13 @@ NA12878_raw_reads_dir = "%s/NA12878_raw_reads"%DataDir # downloaded manually fro
 NA12878_r1 = "%s/ERR194147_1.fastq.gz"%NA12878_raw_reads_dir
 NA12878_r2 = "%s/ERR194147_2.fastq.gz"%NA12878_raw_reads_dir
 
-"""
+
 # get the reads from HG002
 HG002_bam = "%s/HG002.hs37d5.60x.1.bam"%DataDir
 HG002_r1, HG002_r2 = test_fun.get_fastqgz_from_bam(HG002_bam, threads=threads, replace=False, already_sorted_by_readName=False)
-"""
+
+
+adjdaghjgahd
 
 
 ###############################################

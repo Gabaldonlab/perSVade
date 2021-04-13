@@ -16,6 +16,24 @@ This is a scheme of the key functions of perSVade. The pipeline runs structural 
 
 4. Integration of read-depth based CNVs and SVs into a single .vcf file. This is a file that is focused on showing the alteration of SVs on specific genomic regions (see the section "Output" for more details). It also removes redundant calls between the CNVs identified with `gridss`+`clove` and those derived from
 
+## Running in BSC clusters (internal use only)
+
+If you are working from any cluster that has access to the BSC /gpfs filesystem you can activate the perSVade environment from its location in mschikora. YOU DON'T NEED TO REINSTALL ANYTHING.
+
+`source /gpfs/projects/bsc40/mschikora/anaconda3/etc/profile.d/conda.sh`  # activate the conda environment of mschikora
+
+`conda activate perSVade_v0.7_env` # activate the environment of perSVade version 0.7. You can change the version
+
+You can next run perSVade from the releases folder (these are stable versions of the pipeline). For example:
+
+`python /gpfs/projects/bsc40/mschikora/scripts/perSVade/releases/perSVade-0.7/scripts/perSVade.py -r <path to the reference genome (fasta)> -o <output_directory> -p <ploidy, 1 or 2> -f1 <forward_reads.fastq.gz> -f2 <reverse_reads.fastq.gz> `
+
+IMPORTANT NOTE: The activation of the perSVade conda environment works well from version 0.7 on. This means that you can activate from the login of MN or interactive nodes. However, the activation of older versions (v0.4 and below) is costly, and it overloads the login nodes. If you want to use an old version of perSVade, always activate it on an interactive node (i.e.: `salloc`). In addition, you can't run the perSVade pipeline from a login, because it takes too many resources. You can submit perSVade as a job or run from an interactive session with `salloc -n 1 --time=02:00:00 -c 48 --qos debug`.
+
+OTHER NOTES:
+
+- All perSVade modules work in MareNostrum, and most of them in Nord3. The generation of "repeat files" and finding of "homologous regions" does not work in Nord3 because the GCLIB versions are old.
+
 ## Installation
 
 ### 1. Downloading the perSVade source code
@@ -78,65 +96,46 @@ There is a WARNING message that you should look for after running this script:
 `WARNING: The connection to SRA did not work`. perSVade includes the option to query and download from the SRA database for the benchmarking of SV calling. This requires a proper network access and SRA connection, which may not always be available. This warning indicates that this process is not possible on your machine. You can skip this connection by providing the reads on your own through `--close_shortReads_table`.
 
 
-## Running in BSC clusters
+## Quick start
 
-If you are working from any cluster that has access to the BSC /gpfs filesystem you can activate the perSVade environment from its location in mschikora. You don't need to re-install anything if you are working in the BSC.
-
-`source /gpfs/projects/bsc40/mschikora/anaconda3/etc/profile.d/conda.sh`  # activate the conda environment of mschikora
-
-`conda activate perSVade_v0.7_env` # activate the environment of perSVade version 0.7. You can change the version
-
-You can next run perSVade from the releases folder (these are stable versions of the pipeline). For example:
-
-`python /gpfs/projects/bsc40/mschikora/scripts/perSVade/releases/perSVade-0.7/scripts/perSVade.py -r <path to the reference genome (fasta)> -o <output_directory> -p <ploidy, 1 or 2> -f1 <forward_reads.fastq.gz> -f2 <reverse_reads.fastq.gz> `
-
-IMPORTANT NOTE: The activation of the perSVade conda environment works well from version 0.7 on. This means that you can activate from the login of MN or interactive nodes. However, the activation of older versions (v0.4 and below) is costly, and it overloads the login nodes. If you want to use an old version of perSVade, always activate it on an interactive node (i.e.: `salloc`). In addition, you can't run the perSVade pipeline from a login, because it takes too many resources. You can submit perSVade as a job or run from an interactive session with `salloc -n 1 --time=02:00:00 -c 48 --qos debug`.
-
-OTHER NOTES:
-
-- All perSVade modules work in MareNostrum, and most of them in Nord3. The generation of "repeat files" and finding of "homologous regions" does not work in Nord3 because 
-
-
-## Running in other systems
-
-Once you have installed all the dependencies, you can call the perSVade pipeline with:
+You can call the perSVade pipeline with:
 
 `conda activate perSVade_env`
 
 `python ./scripts/perSVade.py -r <path to the reference genome (fasta)> -o <output_directory> -p <ploidy, 1 or 2> -f1 <forward_reads.fastq.gz> -f2 <reverse_reads.fastq.gz>`
 
-## perSVade options
+By default, perSVade runs SV calling optimised on random simulations, read depth-based CNV calling with AneuFinder/HMMcopy and integration of SVs and CNVs into a single vcf.
 
-perSVade is a flexible pipeline with several options. Type `./scripts/perSVade.py -h` to understand what is the meaning of these options. Note that there are some of them which are flagged as "for debugging purposes only". These are arguments that are useful for developing the pipeline, but are not intended for most users.
+However, this is a flexible pipeline with several options. Type `./scripts/perSVade.py -h` to understand what is the meaning of these options. Note that there are some of them which are flagged as "DEBUGGING ARGUMENTS. ONLY TO BE USED FOR DEVELOPMENT". These are arguments that are useful for developing the pipeline, but are not intended for most users.
 
 In addition, you can import the file `./scripts/sv_functions.py` as a python module, which is useful to run some specific functions from a python script/shell. This module can be loaded with these python commands:
 
-`import sys; sys.path.append(<perSVade directory>)`
+`import sys; sys.path.append("./scripts")`
 
 `import sv_functions as fun`
 
-Below are some examples of analyses that can be done with perSVade. We strongly advice that you check the meaning of each of the indicated arguments.
+Below are some examples of different analyses that can be done with perSVade. We STRONGLY ADVICE that you check the meaning of each of the indicated arguments.
 
 ## Example 1: running only small variant calling and calculation of coverage per gene
 
 You can run a traditional variant calling pipeline (small variants and coverage per gene) with a command like:
 
-`./scripts/perSVade.py --ref reference_genome.fasta --threads 4 -o ./output_directory -f1 reads_FWD.fastq.gz -f2 reads_FWD.fastq.gz --mitochondrial_chromosome chr_mito --mitochondrial_code 3 --gDNA_code 12 -gff features.gff  --run_smallVarsCNV --skip_SVcalling --caller all --coverage 20 --ploidy 2 --remove_smallVarsCNV_nonEssentialFiles --skip_repeat_analysis`
+`./scripts/perSVade.py --ref reference_genome.fasta --threads 4 -o ./output_directory -f1 reads_FWD.fastq.gz -f2 reads_FWD.fastq.gz --mitochondrial_chromosome chr_mito --mitochondrial_code 3 --gDNA_code 12 -gff features.gff  --run_smallVarsCNV --skip_SVcalling --caller all --coverage 20 --ploidy 2 --remove_smallVarsCNV_nonEssentialFiles --skip_repeat_analysis --fraction_available_mem 1.0`
 
-This will align the reads with `bwa mem` and run `GATK HaplotypeCaller`, `freebayes` and `bcftools call` on the provided reads. The variants are filtered with the default parameters and the specified coverage. The resulting variants are be merged and annotated with `Ensembl VEP`. In addition, the read depth of each gene will be calculated with `mosdepth`. Note that `--run_smallVarsCNV` is necessary to run 
-
+This will align the reads with `bwa mem` and run `GATK HaplotypeCaller`, `freebayes` and `bcftools call` on the provided reads. The variants are filtered with the default parameters and the specified coverage. The resulting variants are merged and annotated with `Ensembl VEP`. In addition, the read depth of each gene will be calculated with `mosdepth`. Note that `--run_smallVarsCNV` is necessary to run this "traditional variant calling" pipeline analysis. `--skip_repeat_analysis` will skip a default step of finding the repetitive regions of the genome (which takes some time) and annotating whether the called variants are found in these regions. 
 
 ## Example 2: running SV calling and coverage-based CNV calling
 
 
-1. `--mitochondrial_code` and `--gDNA_code` are the NCBI translation code of your species, check them in https://www.ncbi.nlm.nih.gov/Taxonomy/Utils/wprintgc.cgi . Note that they may be wrong sometimes, so that it is good to double check with the literature.
-2. `--mitochondrial_chromosome` is supposed to include the name of the chromosome in the reference genome fasta.
-3. `--run_smallVarsCNV` is the cmd that indicates perSVade to also run smallVariant calling.
-4. `--skip_SVcalling` tells the pipeline to skip the calling of structural variation
-5. `--coverage` is the minimum coverage for a variant to be kept. This parameter should be related to the coverage of your library. You may be careful with setting it too low (i.e. <15) as it will yield many false positive calls. It is reasonable to check how other similar studies set this parameter.
-6. `--remove_smallVarsCNV_nonEssentialFiles` is useful to clean the output directory from non-essential output files.
-7. If you may want to understand what the programs of this pipeline do. Check freebayes, bcftools, GATK HaplotypeCaller and ENSEMBL Variant Annotation Predictor.
-8. `--skip_repeat_analysis` does not analyze whether your variants overlap repetitive regions. By default it does, and finding repeats in the genome can slow down the analysis.
+
+
+
+
+
+
+## Output 
+
+
 
 This will output the following files and folders under `./output_directory`:
 
@@ -172,8 +171,6 @@ This will output the following files and folders under `./output_directory`:
     5. `variants_atLeast<n_PASS_programs>PASS_ploidy2.vcf` are the variants that PASS de filters in at least n_PASS_programs algorithms. The INFO and FORMAT fields are simplified to take less space. It may be useful to take, for example, variants that PASS de filters by at least 2 algorithms.
 
 
-## Output 
-
 The output of `clove` is processed by custom functions to generate 6 different .tab files, each with a different type of SV. These are the types of SVs(note that text in "" indicates the column names of the corresponding .tab files):
 
 <img src="https://github.com/Gabaldonlab/perSVade/blob/master/misc/simple_SVs.png" width="50%" height="50%">
@@ -191,6 +188,7 @@ The output of `clove` is processed by custom functions to generate 6 different .
 <img src="https://github.com/Gabaldonlab/perSVade/blob/master/misc/unclassified_SVs.png" width="50%" height="50%">
 
 4. Unclassified SVs: There is one .tab file ("unclassified_SVs.tab") that reports all the variants that are called by `clove` and cannot be assigned to any of the above SV types. These include unclassified breakpoints (which could be part of unresolved/unkown complex variants) and complex inverted SVs (which are non-standard SVs). These types of SVs are not included in the simulations, so that the accuracy on them is unknown. This is why we group them together into a single file. For unclassified breakpoints, the "SVTYPE" indicates which is the orientation of the two breakends (there are 4 possible orientations, and the "SVTYPE" is different depending on if the two breakends are in the same chromosome or not). "#CHROM" - "POS" indicate one breakend and "#CHR" - "END" the other. "START" is -1 for such unclassified breakpoints. Complex inverted SVs represent variants were a region (indicated by "CHR2", "START", "END") is copied ("SVTYPE" is CVD) or cut ("SVTYPE" is CVT (same chromosome) or IVT (different chromosomes)), inverted and inserted into "#CHROM"-"POS".
+
 
 
 ## Resource consumption
