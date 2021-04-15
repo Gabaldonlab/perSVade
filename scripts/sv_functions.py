@@ -16,6 +16,7 @@ import numpy as np
 import sys
 from collections import ChainMap
 from collections import OrderedDict
+import traceback
 import warnings
 from Bio import SeqIO
 from scipy import linalg
@@ -9530,11 +9531,48 @@ def get_best_parameters_for_GridssClove_run(sorted_bam, reference_genome, outdir
         for simulation_ID in range(1, n_simulated_genomes+1):
             print_if_verbose("working on simulation %i"%simulation_ID)
 
-            # get an outdir where all the simulations of this ID will be stored
-            simulation_outdir = "%s/simulation_%i"%(outdir, simulation_ID); make_folder(simulation_outdir)
+            ############# GET THE SIMULATED GENOME TRYING SEVERAL TIMES #############
 
-            # get the simulated SVs, which are an integration of 
-            sim_svtype_to_svfile, rearranged_genome = simulate_SVs_in_genome(reference_genome, mitochondrial_chromosome, simulation_outdir, nvars=nvars, bedpe_breakpoints=real_bedpe_breakpoints, replace=replace, svtypes={"insertions", "deletions", "inversions", "translocations", "tandemDuplications"})
+            # get an outdir where all the simulations of this ID will be stored
+            simulation_outdir = "%s/simulation_%i"%(outdir, simulation_ID)
+            if replace is True: delete_folder(simulation_outdir)
+
+            # get the simulated SVs. Try this 3 times just in case you had some strange variants
+            all_tries = [1, 2]
+            for Itry_sim in all_tries:
+
+                # only try if the simulation did not work
+                simulation_worked_file = "%s/SVsimulation_worked.txt"%simulation_outdir
+
+                # make the folder
+                make_folder(simulation_outdir)
+
+                # try the simulation
+                try: 
+
+                    sim_svtype_to_svfile, rearranged_genome = simulate_SVs_in_genome(reference_genome, mitochondrial_chromosome, simulation_outdir, nvars=nvars, bedpe_breakpoints=real_bedpe_breakpoints, replace=replace, svtypes={"insertions", "deletions", "inversions", "translocations", "tandemDuplications"})
+
+                    # write ending file
+                    open(simulation_worked_file, "w").write("simulation worked")
+                    break
+
+                # if it does not work, try again
+                except Exception as err:
+
+                    # delete the dir for the next round
+                    if Itry_sim!=all_tries[-1]: delete_folder(simulation_outdir); 
+
+                    # print the error
+                    print("\n\n---\nWARNING: The simulation did not work on try %i.\n---\n\n"%Itry_sim)
+                    print("---\nThis is the error:")
+                    traceback.print_tb(err.__traceback__)
+                    print(err)
+                    print("---\n. Retrying...")
+
+            # debug
+            if file_is_empty(simulation_worked_file): raise ValueError("The simulation did not work even after %i tries"%(len(all_tries)))
+
+            #########################################################################
 
             # define the genome ID
             genomeID = "simulation_%i"%(simulation_ID)
@@ -10129,27 +10167,58 @@ def blastn_query_against_subject(query_fasta, database_multifasta, blast_outfile
     if file_is_empty(blast_outfile) or replace is True:
         print_if_verbose("generating %s"%blast_outfile)
 
-        # put the under outdir
+        # put the query under outdir 
         query = "%s/query.fasta"%outdir
-        database = "%s/database.fasta"%outdir
-
         soft_link_files(query_fasta, query)
-        soft_link_files(database_multifasta, database)
 
-        # make blast db
-        run_cmd("%s -in %s -dbtype nucl"%(makeblastdb, database), env=EnvName_RepeatMasker)
+        # init a list of blast_outfile_chrom
+        list_blast_outfile_chrom = []
 
-        # run blast
+        # parallelize on chromosomes
+        for chrom in SeqIO.parse(database_multifasta, "fasta"):
+            print_if_verbose("getting blastn for chrom %s"%(chrom.id))
+
+            # define the outdir for this chrom
+            blast_outfile_chrom = "%s.%s.out"%(blast_outfile, chrom.id)
+            list_blast_outfile_chrom.append(blast_outfile_chrom)
+
+            if file_is_empty(blast_outfile_chrom) or replace is True:
+
+                # define outdir of this chrom
+                outdir_chrom = "%s/%s"%(outdir, chrom.id)
+                delete_folder(outdir_chrom); make_folder(outdir_chrom)
+
+                # generate the fasta for this chrom
+                database_chrom = "%s/database.fasta"%outdir_chrom
+                SeqIO.write([chrom], database_chrom, "fasta")
+
+                # make blast db
+                run_cmd("%s -in %s -dbtype nucl"%(makeblastdb, database_chrom), env=EnvName_RepeatMasker)
+
+                # run blast
+                blast_outfile_chrom_tmp = "%s.tmp"%blast_outfile_chrom
+                blast_std = "%s.generating.std"%blast_outfile_chrom
+
+                print_if_verbose("running blastn. The std is in %s"%blast_std)
+                run_cmd('%s -query %s -out %s -evalue %.10f -db %s -num_threads %i -outfmt "6 %s" > %s 2>&1 '%(blastn, query, blast_outfile_chrom_tmp, max_eval, database_chrom, threads, " ".join(out_fields), blast_std), env=EnvName_RepeatMasker)
+
+                # clean
+                remove_file(blast_std)
+                delete_folder(outdir_chrom)
+                os.rename(blast_outfile_chrom_tmp, blast_outfile_chrom)
+
+
+        # get a df
+        print_if_verbose("generating df_blast")
+        df_blast = pd.concat([pd.read_csv(blast_outfile_chrom, sep="\t", header=-1, names=out_fields) for blast_outfile_chrom in list_blast_outfile_chrom])
+
+        # get the blast_outfile
         blast_outfile_tmp = "%s.tmp"%blast_outfile
-        blast_std = "%s.generating.std"%blast_outfile
-
-        run_cmd('%s -query %s -out %s -evalue %.10f -db %s -num_threads %i -outfmt "6 %s" '%(blastn, query, blast_outfile_tmp, max_eval, database, threads, " ".join(out_fields)), env=EnvName_RepeatMasker)
-
-        remove_file(blast_std)
+        df_blast.to_csv(blast_outfile_tmp, sep="\t", header=True, index=False)
         os.rename(blast_outfile_tmp, blast_outfile)
 
     # load into df and return 
-    df_blast = pd.read_csv(blast_outfile, sep="\t", header=-1, names=out_fields)
+    df_blast = pd.read_csv(blast_outfile, sep="\t")
 
     return df_blast
 
@@ -10164,7 +10233,7 @@ def get_blastn_regions_genome_against_itself(reference_genome, max_eval, query_w
 
         # define a tmp dir
         tmpdir = "%s.generating_blast_against_itself"%reference_genome
-        delete_folder(tmpdir)
+        #delete_folder(tmpdir)
         make_folder(tmpdir)
 
         # get a genome of windows of query_window_size
@@ -13368,7 +13437,7 @@ def get_LOWESS_benchmarking_series_CV(kfold, frac, it, df, xfield, yfield, min_t
     return benchmarking_series
     
 
-def get_y_corrected_by_x_LOWESS_crossValidation(df, xfield, yfield, outdir, threads, replace, plots_prefix, max_y, min_test_points_CV=10, fill_value_interpolation_finalFitting="extrapolate"):
+def get_y_corrected_by_x_LOWESS_crossValidation(df, xfield, yfield, outdir, threads, replace, plots_prefix, max_y, min_test_points_CV=10, fill_value_interpolation_finalFitting="extrapolate", min_r2=0.1):
 
     """This function takes an x and a y series, returning the y corrected by x. This y corrected is y/(y predicted from LOWESS from x). The index must be unique. The best parameters are taken with 10 fold cross validation"""
 
@@ -13432,7 +13501,7 @@ def get_y_corrected_by_x_LOWESS_crossValidation(df, xfield, yfield, outdir, thre
 
     ##################################################### 
 
-    if len(df_benchmarking)==0 or max(df_benchmarking.mean_rsquare)<=0: 
+    if len(df_benchmarking)==0 or max(df_benchmarking.mean_rsquare)<min_r2: 
 
         print("WARNING: There is not enough variability or data points to perform a correction of %s on %s. There will be no correction applied"%(yfield, xfield))
         y_corrected = df[yfield]
@@ -13463,101 +13532,115 @@ def get_y_corrected_by_x_LOWESS_crossValidation(df, xfield, yfield, outdir, thre
         df["predicted_yvalues"] = get_lowess_fit_y(df_fitting[xfield].values, df_fitting[yfield].values, df[xfield].values, best_frac, best_it, fill_value_interpolation_finalFitting)
 
         # get the minimum non-0 coverage
-        min_non0_predicted_coverage = min(df[df.predicted_yvalues>0].predicted_yvalues)
+        all_non0_predicted_yvalues = df[df.predicted_yvalues>0].predicted_yvalues
 
-        # correct the predicted_yvalues so that if they are negative thet'd be set to 0 given that the input is also negative. In addition, if the input is not negative the prediction is set to be the minimum non negative coverage
-        def get_predicted_yvalues(r):
-            if r["predicted_yvalues"]<=0.0 and r[yfield]==0.0: return 0.0
-            elif r["predicted_yvalues"]<=0.0 and r[yfield]>0.0: return min_non0_predicted_coverage
-            else: return r["predicted_yvalues"]
+        # if all predicted values are 0 or below, return as if there was no prediction
+        if len(all_non0_predicted_yvalues)==0: 
 
-        df["predicted_yvalues"] = df.apply(get_predicted_yvalues, axis=1)
+            print("WARNING: There is not enough variability or data points to perform a correction of %s on %s. There will be no correction applied"%(yfield, xfield))
+            y_corrected = df[yfield]
+            final_rsquare = 0.0
+            df["predicted_yvalues"] = np.median(df[yfield])
 
-        # debug 
-        if any(pd.isna(df.predicted_yvalues)): raise ValueError("there should be no NaNs in the final prediction")
+        else:
 
-        # debug if any of the predicted_yvalues is <=0
-        if any(df.predicted_yvalues<0): raise ValueError("There can't be any negative values or less predicted yvalues")
+            # correct the predicted_yvalues so that if they are negative thet'd be set to 0 given that the input is also negative. In addition, if the input is not negative the prediction is set to be the minimum non negative coverage
+            min_non0_predicted_coverage = min(all_non0_predicted_yvalues)
 
-        # calculate the final rsquare
-        final_rsquare = r2_score(df[yfield], df.predicted_yvalues)
-        if pd.isna(final_rsquare): raise ValueError("rsquare can't be NaN")
+            def get_predicted_yvalues(r):
+                if r["predicted_yvalues"]<=0.0 and r[yfield]==0.0: return 0.0
+                elif r["predicted_yvalues"]<=0.0 and r[yfield]>0.0: return min_non0_predicted_coverage
+                else: return r["predicted_yvalues"]
 
-        ##############################
+            df["predicted_yvalues"] = df.apply(get_predicted_yvalues, axis=1)
 
-        ######### MAKE PLOTS #########
+            # debug 
+            if any(pd.isna(df.predicted_yvalues)): raise ValueError("there should be no NaNs in the final prediction")
 
-        filename = "%s_%s_from_%s_coverage.pdf"%(plots_prefix, yfield, xfield)
-        if file_is_empty(filename) or replace is True:
+            # debug if any of the predicted_yvalues is <=0
+            if any(df.predicted_yvalues<0): raise ValueError("There can't be any negative values or less predicted yvalues")
 
-            filename_tmp = "%s/coverage.tmp.pdf"%(outdir)
+            # calculate the final rsquare
+            final_rsquare = r2_score(df[yfield], df.predicted_yvalues)
+            if pd.isna(final_rsquare): raise ValueError("rsquare can't be NaN")
 
-            # get the plot
-            df_plot = df.sort_values(by=[xfield, yfield])
+            ##############################
 
-            fig = plt.figure(figsize=(5,5))
+            ######### MAKE PLOTS #########
 
-            #plt.plot(df_plot[xfield], df_plot[yfield], "o", alpha=0.2, color="gray", label="raw data")
-            sns.kdeplot(df_plot[[xfield, yfield]], cmap="gist_gray", shade=True)
-            plt.plot(df_plot[xfield], df_plot.predicted_yvalues, "-", color="red", label="LOWESS fit")
+            filename = "%s_%s_from_%s_coverage.pdf"%(plots_prefix, yfield, xfield)
+            if file_is_empty(filename) or replace is True:
 
-            plt.title("Fitting LOWESS with frac=%.3f it=%i. final R2=%.3f. %ix CV R2=%.3f +- %.3f (SD)\n"%(best_frac, best_it, final_rsquare, best_parms_series["kfold"], best_parms_series["mean_rsquare"], best_parms_series["std_rsquare"]))
-            plt.legend(bbox_to_anchor=(1, 1))
-            plt.xlabel(xfield)
-            plt.ylim([0, np.percentile(df_plot[yfield], 95)])
-            plt.ylabel(yfield)
+                filename_tmp = "%s/coverage.tmp.pdf"%(outdir)
 
-            fig.savefig(filename_tmp, bbox_inches='tight')
-            plt.close(fig)
+                # get the plot
+                df_plot = df.sort_values(by=[xfield, yfield])
 
-            os.rename(filename_tmp, filename)
+                fig = plt.figure(figsize=(5,5))
 
-        filename = "%s_%s_from_%s_coverage_corrected.pdf"%(plots_prefix, yfield, xfield)
-        if file_is_empty(filename) or replace is True:
+                #plt.plot(df_plot[xfield], df_plot[yfield], "o", alpha=0.2, color="gray", label="raw data")
+                sns.kdeplot(df_plot[[xfield, yfield]], cmap="gist_gray", shade=True)
+                plt.plot(df_plot[xfield], df_plot.predicted_yvalues, "-", color="red", label="LOWESS fit")
 
-            filename_tmp = "%s/coverage_corrected.tmp.pdf"%(outdir)
+                plt.title("Fitting LOWESS with frac=%.3f it=%i. final R2=%.3f. %ix CV R2=%.3f +- %.3f (SD)\n"%(best_frac, best_it, final_rsquare, best_parms_series["kfold"], best_parms_series["mean_rsquare"], best_parms_series["std_rsquare"]))
+                plt.legend(bbox_to_anchor=(1, 1))
+                plt.xlabel(xfield)
+                plt.ylim([0, np.percentile(df_plot[yfield], 95)])
+                plt.ylabel(yfield)
 
-            # get the plot
-            df_plot = df.sort_values(by=[xfield, yfield])
+                fig.savefig(filename_tmp, bbox_inches='tight')
+                plt.close(fig)
 
-            # add the correction
-            df_plot["y_corrected"] = df_plot[yfield]/df_plot.predicted_yvalues
+                os.rename(filename_tmp, filename)
 
-            fig = plt.figure(figsize=(5,5))
+            filename = "%s_%s_from_%s_coverage_corrected.pdf"%(plots_prefix, yfield, xfield)
+            if file_is_empty(filename) or replace is True:
 
-            #plt.plot(df_plot[xfield], df_plot[yfield], "o", alpha=0.2, color="gray", label="raw data")
-            sns.kdeplot(df_plot[[xfield, "y_corrected"]], cmap="gist_gray", shade=True)
+                filename_tmp = "%s/coverage_corrected.tmp.pdf"%(outdir)
 
-            plt.title("Fitting LOWESS with frac=%.3f and it=%i. final R2=%.3f. %ix CV R2=%.3f +- %.3f (SD)\n"%(best_frac, best_it, final_rsquare, best_parms_series["kfold"], best_parms_series["mean_rsquare"], best_parms_series["std_rsquare"]))
-            plt.legend(bbox_to_anchor=(1, 1))
-            plt.xlabel(xfield)
-            plt.ylim([0, np.percentile(df_plot[yfield], 95)])
-            plt.ylabel("%s corrected by %s"%(yfield, xfield))
+                # get the plot
+                df_plot = df.sort_values(by=[xfield, yfield])
 
-            fig.savefig(filename_tmp, bbox_inches='tight')
-            plt.close(fig)
+                # add the correction
+                df_plot["y_corrected"] = df_plot[yfield]/df_plot.predicted_yvalues
 
-            os.rename(filename_tmp, filename)
+                fig = plt.figure(figsize=(5,5))
 
-        ############################    
+                #plt.plot(df_plot[xfield], df_plot[yfield], "o", alpha=0.2, color="gray", label="raw data")
+                sns.kdeplot(df_plot[[xfield, "y_corrected"]], cmap="gist_gray", shade=True)
 
-        # get the corrected vals. If there is no prediction just return the raw vals
-        def divide_with_noNaN_correction(r):
+                plt.title("Fitting LOWESS with frac=%.3f and it=%i. final R2=%.3f. %ix CV R2=%.3f +- %.3f (SD)\n"%(best_frac, best_it, final_rsquare, best_parms_series["kfold"], best_parms_series["mean_rsquare"], best_parms_series["std_rsquare"]))
+                plt.legend(bbox_to_anchor=(1, 1))
+                plt.xlabel(xfield)
+                plt.ylim([0, np.percentile(df_plot[yfield], 95)])
+                plt.ylabel("%s corrected by %s"%(yfield, xfield))
 
-            # if both are 0, return it as it is
-            if r[yfield]==0 and r["predicted_yvalues"]==0: return 0.0
+                fig.savefig(filename_tmp, bbox_inches='tight')
+                plt.close(fig)
 
-            # predicted yvalues can't be 0 unless yfield is also
-            elif r["predicted_yvalues"]==0: raise ValueError("predicted_yvalues can't be 0 if yfield is not as well") 
-            
-            # normal division
-            else: return r[yfield]/r["predicted_yvalues"]
+                os.rename(filename_tmp, filename)
 
-        if final_rsquare>0: y_corrected = df.apply(divide_with_noNaN_correction, axis=1)
-        else: y_corrected = df[yfield]
+            ############################    
 
-        # debug
-        if any(pd.isna(y_corrected)): raise ValueError("there should be no NaNs in y_corrected")
+            # get the corrected vals. If there is no prediction just return the raw vals
+            def divide_with_noNaN_correction(r):
+
+                # if both are 0, return it as it is
+                if r[yfield]==0 and r["predicted_yvalues"]==0: return 0.0
+
+                # predicted yvalues can't be 0 unless yfield is also
+                elif r["predicted_yvalues"]==0: raise ValueError("predicted_yvalues can't be 0 if yfield is not as well") 
+                
+                # normal division
+                else: return r[yfield]/r["predicted_yvalues"]
+
+            if final_rsquare>=min_r2: y_corrected = df.apply(divide_with_noNaN_correction, axis=1)
+            else: 
+                y_corrected = df[yfield]
+                df["predicted_yvalues"] = np.median(df[yfield])
+
+            # debug
+            if any(pd.isna(y_corrected)): raise ValueError("there should be no NaNs in y_corrected")
 
     # get in the order of the initial index
     df = df.loc[initial_index]

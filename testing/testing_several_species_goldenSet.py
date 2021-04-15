@@ -126,8 +126,8 @@ for taxID, spName, ploidy, mitochondrial_chromosome, max_coverage_sra_reads in t
         if cluster_name=="MN4": 
 
             queue = "bsc_ls"
-            time = "48:00:00"
-            nodes = 3
+            time = "24:00:00"
+            nodes = 1
 
             fun.run_jobarray_file_MN4_greasy(jobs_filename, name, time=time, queue=queue, threads_per_job=threads, nodes=nodes)
 
