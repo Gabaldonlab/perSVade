@@ -236,7 +236,7 @@ perSVade includes two options to circumvent this:
 
 It is also possible to annotate whether small variants (when running with `run_smallVarsCNV`) are found around repeats (using `--consider_repeats_smallVarCall`). However, if you just want to get small variants calls with no repeat annotation we recommend using `--skip_repeat_analysis` to avoid excessive, useless, computation time.
 
-### perSVade crashed due to insufficient resources (allocated RAM or time), do I have to repeat all the running?** 
+### perSVade crashed due to insufficient resources (allocated RAM or time), do I have to repeat all the running?
 
 No worries. perSVade is designed to restart from the last correct step if you re-run with the same command in the same output directory. This means that you can simply re-run on a system with higher resources and expect no steps to be repeated.
 

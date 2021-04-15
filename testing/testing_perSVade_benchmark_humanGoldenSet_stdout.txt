@@ -1,0 +1,25 @@
+
+
+Building a new DB, current time: 04/15/2021 10:31:06
+New DB name:   /gpfs/projects/bsc40/mschikora/scripts/perSVade/perSVade_repository/testing/outdirs_testing_humanGoldenSet/data/hg38.fa.corrected.fasta.generating_blast_against_itself/database.fasta
+New DB title:  /gpfs/projects/bsc40/mschikora/scripts/perSVade/perSVade_repository/testing/outdirs_testing_humanGoldenSet/data/hg38.fa.corrected.fasta.generating_blast_against_itself/database.fasta
+Sequence type: Nucleotide
+Keep MBits: T
+Maximum file size: 1000000000B
+Adding sequences from FASTA; added 25 sequences in 36.7312 seconds.
+
+
+importing functions
+importing functions
+getting reads from /gpfs/projects/bsc40/mschikora/scripts/perSVade/perSVade_repository/testing/outdirs_testing_humanGoldenSet/data/HG002.hs37d5.60x.1.bam.sorted
+[15/04/2021, 00:49:51] running RepeatModeler and RepeatMasker into /gpfs/projects/bsc40/mschikora/scripts/perSVade/perSVade_repository/testing/outdirs_testing_humanGoldenSet/data/hg38.fa.corrected.fasta.repeats.tab
+[15/04/2021, 00:49:51] running repeatmasker to get the repeats of the genome in the default configuration. The std is in /gpfs/projects/bsc40/mschikora/scripts/perSVade/perSVade_repository/testing/outdirs_testing_humanGoldenSet/data/hg38_repeat_masker_outdir/default/hg38.fa.corrected.fasta.std.out
+[15/04/2021, 09:53:12] avoiding the generation of the personal repeat masker. The stderr can be found in /gpfs/projects/bsc40/mschikora/scripts/perSVade/perSVade_repository/testing/outdirs_testing_humanGoldenSet/data/hg38_repeat_masker_outdir/personal/hg38.fa.corrected.fasta.std.out
+[15/04/2021, 10:03:43] getting both repeats df
+[15/04/2021, 10:05:09] repeat inference finished
+[15/04/2021, 10:05:13] getting /gpfs/projects/bsc40/mschikora/scripts/perSVade/perSVade_repository/testing/outdirs_testing_humanGoldenSet/data/hg38.fa.corrected.fasta.blastn_against_itself.wsize=500_maxEval=1e-05.tab
+[15/04/2021, 10:05:14] generating /gpfs/projects/bsc40/mschikora/scripts/perSVade/perSVade_repository/testing/outdirs_testing_humanGoldenSet/data/hg38.fa.corrected.fasta.windows_500bp.fasta
+[15/04/2021, 10:06:12] running faidx. The std is in /gpfs/projects/bsc40/mschikora/scripts/perSVade/perSVade_repository/testing/outdirs_testing_humanGoldenSet/data/hg38.fa.corrected.fasta.indexing.std
+[15/04/2021, 10:31:03] generating /gpfs/projects/bsc40/mschikora/scripts/perSVade/perSVade_repository/testing/outdirs_testing_humanGoldenSet/data/hg38.fa.corrected.fasta.generating_blast_against_itself/blastn_subdividedRegions_against_genome.tab
+[15/04/2021, 10:31:03] softlinking. The std is in /gpfs/projects/bsc40/mschikora/scripts/perSVade/perSVade_repository/testing/outdirs_testing_humanGoldenSet/data/hg38.fa.corrected.fasta.generating_blast_against_itself/query.fasta.softlinking.std
+[15/04/2021, 10:31:04] softlinking. The std is in /gpfs/projects/bsc40/mschikora/scripts/perSVade/perSVade_repository/testing/outdirs_testing_humanGoldenSet/data/hg38.fa.corrected.fasta.generating_blast_against_itself/database.fasta.softlinking.std
