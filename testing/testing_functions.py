@@ -829,6 +829,9 @@ def get_heatmaps_used_parameters(df_parameters, filename):
 
     all_filter_names = [k for k in df_parameters.keys() if k.split()[0] in {"GRIDSS", "CLOVE"}]
 
+    # init a list of weights
+    yticklabels_weights = []
+
     # init df
     df_square_all = pd.DataFrame()
 
@@ -844,9 +847,18 @@ def get_heatmaps_used_parameters(df_parameters, filename):
         df_square = df_parameters.groupby("species_simulations").apply(get_series_filter_val_to_n_samples).transpose()
 
         # rename the index
-        df_square.index = ["%s=%s"%(filter_name, x) for x in df_square.index]
+        df_square.index = [str(x) for x in df_square.index]
 
+        # add a blank
+        df_square_all = df_square_all.append(pd.DataFrame({c : {"" : -1} for c in df_square.columns}))
+
+        # add the label
+        df_square_all = df_square_all.append(pd.DataFrame({c : {"%s"%filter_name : -1} for c in df_square.columns}))
+
+        # append df_square
         df_square_all = df_square_all.append(df_square)
+
+        yticklabels_weights += (["normal", "bold"] + ["normal"]*len(df_square))
      
     # sort by species
     species_to_order =  {'none': 0, "Candida_glabrata":1, "Candida_albicans":2, "Cryptococcus_neoformans":3, "Arabidopsis_thaliana":4, "Drosophila_melanogaster":5}
@@ -871,10 +883,15 @@ def get_heatmaps_used_parameters(df_parameters, filename):
         return pd.Series(field_to_color)
 
     col_colors_df = pd.Series(df_square_all.columns, index=df_square_all.columns).apply(get_colors_series)
-    row_colors_df =  pd.DataFrame({r : {filter_name: "white"} for r in df_square_all.index}).transpose()# no row colors
 
     # get colormap
-    cm = sns.clustermap(df_square_all, col_cluster=False, row_cluster=False, row_colors=None, col_colors=col_colors_df, cbar_kws={'label': "# samples", "ticks":[0, 1, 2, 3]}, xticklabels=False, square=False, cmap=["whitesmoke", "silver", "dimgray", "black"],  yticklabels=True, linewidth=.1) 
+    cm = sns.clustermap(df_square_all, col_cluster=False, row_cluster=False, row_colors=None, col_colors=col_colors_df, cbar_kws={'label': "# samples", "ticks":[-1, 0, 1, 2, 3]}, xticklabels=False, square=False, cmap=["white", "whitesmoke", "silver", "dimgray", "black"],  yticklabels=True, linewidth=0.1) 
+
+    # set the weight
+    for I, fw in enumerate(yticklabels_weights): cm.ax_heatmap.get_yticklabels()[I].set_weight(fw) 
+
+    # set the ticks
+    cm.ax_heatmap.tick_params(axis='both', which='both', length=0)
 
 
     # adjust the heatmap to fit the row colors
@@ -883,7 +900,7 @@ def get_heatmaps_used_parameters(df_parameters, filename):
     new_hm_height = size_box*len(df_square_all)
 
     hm_pos = cm.ax_heatmap.get_position()
-    cm.ax_heatmap.set_position([hm_pos.x0, cmap_pos.y0-new_hm_height-(size_box*0.25), hm_pos.width, new_hm_height])
+    cm.ax_heatmap.set_position([hm_pos.x0, cmap_pos.y0-new_hm_height-(size_box*0.0), hm_pos.width, new_hm_height])
 
     # do not rotate yaxis
     plt.setp(cm.ax_heatmap.get_yticklabels(), rotation=0, fontsize=10)
