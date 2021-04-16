@@ -13,6 +13,9 @@ import seaborn as sns
 from matplotlib import gridspec
 import subprocess
 
+
+
+
 # define the parent dir of the cluster or not
 ParentDir = "%s/samba"%(os.getenv("HOME")); # local
 if not os.path.exists(ParentDir): 
@@ -32,7 +35,7 @@ import sv_functions as fun
 
 import matplotlib
 import matplotlib.pyplot as plt
-#if run_in_cluster is False: matplotlib.use('TkAgg')
+if run_in_cluster is False: matplotlib.use('TkAgg')
 
 ######################
 
@@ -90,21 +93,19 @@ species_Info = [("5478", "Candida_glabrata", 1, "mito_C_glabrata_CBS138", 100000
                 ("7227", "Drosophila_melanogaster", 2, "KJ947872.2", 30)]
 """
 
-"""
 species_Info = [("5478", "Candida_glabrata", 1, "mito_C_glabrata_CBS138", 10000000000000000),
                 ("5476", "Candida_albicans", 2, "Ca22chrM_C_albicans_SC5314", 10000000000000000),
                 ("5207", "Cryptococcus_neoformans", 1, "CP003834.1", 10000000000000000),
                 ("3702", "Arabidopsis_thaliana", 2, "BK010421.1,AP000423.1", 30),
                 ("7227", "Drosophila_melanogaster", 2, "KJ947872.2", 30)]
-"""
 
 #species_Info = [("7227", "Drosophila_melanogaster", 2, "KJ947872.2", 30)]
 
 
-
+"""
 species_Info = [("3702", "Arabidopsis_thaliana", 2, "BK010421.1,AP000423.1", 30),
                 ("7227", "Drosophila_melanogaster", 2, "KJ947872.2", 30)]
-
+"""
 """
 species_Info = [("5476", "Candida_albicans", 2, "Ca22chrM_C_albicans_SC5314", 10000000000000000),
                 ("3702", "Arabidopsis_thaliana", 2, "BK010421.1,AP000423.1", 30)]
@@ -492,6 +493,7 @@ def get_df_accuracy_of_parameters_on_test_samples(parameters_df, test_df, outdir
     df_benchmark_all_file = "%s/cross_benchmarking_parameters.tab"%outdir
 
     if fun.file_is_empty(df_benchmark_all_file):
+        print("running get_df_accuracy_of_parameters_on_test_samples")
 
         # initialize the df of the benchmarking
         benchmarking_fields = ['FN', 'FP', 'Fvalue', 'TP', 'nevents', 'precision', 'recall', 'svtype']
@@ -557,8 +559,8 @@ def get_df_accuracy_of_parameters_on_test_samples(parameters_df, test_df, outdir
             fun.generate_jobarray_file(jobs_filename, "gettingCloseShortReads")
 
             # submit to the cluster
-            #fun.run_jobarray_file_MN4_greasy(jobs_filename, "getting_crossAccuracy", time="02:00:00", queue="debug", threads_per_job=threads, nodes=8)
-            fun.run_jobarray_file_MN4_greasy(jobs_filename, "getting_crossAccuracy", time="10:00:00", queue="bsc_ls", threads_per_job=threads, nodes=3)
+            fun.run_jobarray_file_MN4_greasy(jobs_filename, "getting_crossAccuracy", time="02:00:00", queue="debug", threads_per_job=threads, nodes=6) # max 8 nodes
+            #fun.run_jobarray_file_MN4_greasy(jobs_filename, "getting_crossAccuracy", time="10:00:00", queue="bsc_ls", threads_per_job=threads, nodes=3)
 
             # exit before it starts
             print("You need to run all the jobs from %s"%jobs_filename)
@@ -768,6 +770,132 @@ def plot_goldenSet_accuracy_barplots(df, fileprefix, accuracy_f="Fvalue", svtype
 
     fig.savefig(filename, bbox_inches='tight')
 
+def get_used_parameters_testing_several_species(outdir_testing):
+
+    """Takes the outdir testing and outputs a df with the used parameters."""
+
+    parameters_dict = {}; I=0
+
+    for taxID, spName, ploidy, mitochondrial_chromosome, max_coverage_sra_reads in species_Info:
+        for typeSimulations in ["arroundHomRegions", "uniform", "realSVs", "fast"]:
+                
+                # define simulations
+                outdir_species_simulations = "%s/%s_%s/testing_Accuracy/%s"%(outdir_testing, taxID, spName, typeSimulations)
+
+                # define samples
+                all_sampleIDs = [x for x in os.listdir(outdir_species_simulations)]
+
+                # go through each sampleID
+                for sampleID in all_sampleIDs:
+                    print(spName, typeSimulations, sampleID)
+                 
+                    # define the parameters
+                    parameters_json = "%s/%s/simulations_files_and_parameters/final_parameters.json"%(outdir_species_simulations, sampleID)
+
+                    # load them
+                    gridss_blacklisted_regions, gridss_maxcoverage, gridss_filters_dict, max_rel_coverage_to_consider_del, min_rel_coverage_to_consider_dup = fun.get_parameters_from_json(parameters_json)
+
+                    # modify the filters dict
+                    gridss_filters_dict = {"GRIDSS %s"%filt_name : filt_val for filt_name, filt_val in gridss_filters_dict.items()}
+
+                    # add them to dict
+                    parameters_dict[I] = {**{"species":spName, "typeSimulations":typeSimulations, "sampleID":sampleID, "CLOVE max_rel_coverage_del":max_rel_coverage_to_consider_del, "CLOVE min_rel_coverage_dup":min_rel_coverage_to_consider_dup}, **gridss_filters_dict}; I+=1
+
+    df_parameters = pd.DataFrame(parameters_dict).transpose()
+
+    return df_parameters
+
+def get_heatmaps_used_parameters(df_parameters, filename):
+
+    """takes a df from get_used_parameters_testing_several_species and plots the used parameters as a heatmap. The rows will be the different types of parameters and the cols the different species, samples. The colormap will indicate how many samples in a given species/type simulation yields a given parameter """
+
+    # sort df
+    df_parameters = df_parameters.sort_values(by=["species", "typeSimulations"])
+    df_parameters["species_simulations"] = df_parameters.species + "||||" + df_parameters.typeSimulations
+
+    # filterout fast
+    df_parameters = df_parameters[df_parameters.typeSimulations!="fast"]
+
+    # define vars
+    all_typesSimulations = ["arroundHomRegions", "uniform", "realSVs"] # fast
+    all_sorted_species = ["Candida_glabrata", "Candida_albicans", "Cryptococcus_neoformans", "Arabidopsis_thaliana", "Drosophila_melanogaster"]
+
+    species_to_color = {'none': 'gray', 'Drosophila_melanogaster': 'darkorange', 'Arabidopsis_thaliana': 'olive', 'Cryptococcus_neoformans': 'lightcoral', 'Candida_albicans': 'magenta', 'Candida_glabrata': 'lightseagreen'}
+
+    typeSimulations_to_color = {"uniform":"blue", "realSVs":"red", "arroundHomRegions":"black", "fast":"gray"}
+
+    cathegory_to_colors_dict = {"species" : species_to_color,
+                            "typeSimulations" : typeSimulations_to_color}
+
+    all_filter_names = [k for k in df_parameters.keys() if k.split()[0] in {"GRIDSS", "CLOVE"}]
+
+    # init df
+    df_square_all = pd.DataFrame()
+
+    # one plot for each filter
+    for filter_name in all_filter_names:
+
+        # get the values
+        sorted_filter_vals = sorted(set(df_parameters[filter_name]))
+        if len(sorted_filter_vals)==1: continue
+
+        # get df square where the rows are the values of this filter_name, the columns are the
+        def get_series_filter_val_to_n_samples(df_s): return pd.Series({filt_val : sum(df_s[filter_name]==filt_val) for filt_val in sorted_filter_vals})
+        df_square = df_parameters.groupby("species_simulations").apply(get_series_filter_val_to_n_samples).transpose()
+
+        # rename the index
+        df_square.index = ["%s=%s"%(filter_name, x) for x in df_square.index]
+
+        df_square_all = df_square_all.append(df_square)
+     
+    # sort by species
+    species_to_order =  {'none': 0, "Candida_glabrata":1, "Candida_albicans":2, "Cryptococcus_neoformans":3, "Arabidopsis_thaliana":4, "Drosophila_melanogaster":5}
+    typeSimulations_to_order = {"fast":0, "uniform":1, "realSVs":2, "arroundHomRegions":3}
+    col_to_order = {c : (species_to_order[c.split("||||")[0]], typeSimulations_to_order[c.split("||||")[1]])  for c in df_square_all.columns}
+    sorted_cols = sorted(df_square_all.columns, key=(lambda x: col_to_order[x]))
+    df_square_all = df_square_all[sorted_cols]
+
+    # generate the cols colors df
+    def get_colors_series(idx):
+        # type_keys can be parms or test
+
+        # get the color dicts
+        keys = ["species", "typeSimulations"]
+
+        # get the content
+        idx_content = idx.split("||||")
+
+        # define the series
+        field_to_color = {keys[I] : cathegory_to_colors_dict[keys[I]][c] for I,c in enumerate(idx_content)}
+
+        return pd.Series(field_to_color)
+
+    col_colors_df = pd.Series(df_square_all.columns, index=df_square_all.columns).apply(get_colors_series)
+    row_colors_df =  pd.DataFrame({r : {filter_name: "white"} for r in df_square_all.index}).transpose()# no row colors
+
+    # get colormap
+    cm = sns.clustermap(df_square_all, col_cluster=False, row_cluster=False, row_colors=None, col_colors=col_colors_df, cbar_kws={'label': "# samples", "ticks":[0, 1, 2, 3]}, xticklabels=False, square=False, cmap=["whitesmoke", "silver", "dimgray", "black"],  yticklabels=True, linewidth=.1) 
+
+
+    # adjust the heatmap to fit the row colors
+    cmap_pos = cm.ax_col_colors.get_position()
+    size_box = cmap_pos.height/2
+    new_hm_height = size_box*len(df_square_all)
+
+    hm_pos = cm.ax_heatmap.get_position()
+    cm.ax_heatmap.set_position([hm_pos.x0, cmap_pos.y0-new_hm_height-(size_box*0.25), hm_pos.width, new_hm_height])
+
+    # do not rotate yaxis
+    plt.setp(cm.ax_heatmap.get_yticklabels(), rotation=0, fontsize=10)
+
+    # ste title
+    cm.ax_col_colors.set_title(filter_name)
+
+    print("saving %s"%filename)
+    cm.savefig(filename, bbox_inches='tight')
+
+
+
 
 def get_cross_accuracy_df_several_perSVadeSimulations(outdir_testing, genomes_and_annotations_dir, replace=False):
 
@@ -789,7 +917,7 @@ def get_cross_accuracy_df_several_perSVadeSimulations(outdir_testing, genomes_an
         test_df_dict = {}
 
         for taxID, spName, ploidy, mitochondrial_chromosome, max_coverage_sra_reads in species_Info:
-            for typeSimulations in ["arroundHomRegions", "arroundRepeats", "uniform", "realSVs"]:
+            for typeSimulations in ["arroundHomRegions", "uniform", "realSVs"]:
 
                 # define outir
                 outdir_species_simulations = "%s/%s_%s/testing_Accuracy/%s"%(outdir_testing, taxID, spName, typeSimulations)
@@ -799,9 +927,11 @@ def get_cross_accuracy_df_several_perSVadeSimulations(outdir_testing, genomes_an
 
                 # go through each sampleID
                 for sampleID in os.listdir(outdir_species_simulations):
+                    print(spName, typeSimulations, sampleID)
                  
                     # define the outdir of the run
                     sampleID_simulations_files = "%s/%s/simulations_files_and_parameters"%(outdir_species_simulations, sampleID)
+                    if not os.path.isdir(sampleID_simulations_files): raise ValueError("%s does not exist"%sampleID_simulations_files)
 
                     # keep parameters
                     parameters_json = "%s/final_parameters.json"%sampleID_simulations_files
@@ -825,7 +955,7 @@ def get_cross_accuracy_df_several_perSVadeSimulations(outdir_testing, genomes_an
 
 
         # add the fast parameters
-        parameters_json_fast = "%s/5478_Candida_glabrata/testing_Accuracy/fast/BG2_YPD/simulations_files_and_parameters/final_parameters.json"%outdir_testing
+        parameters_json_fast = "%s/5478_Candida_glabrata/testing_Accuracy/fast/BG2_ANI/simulations_files_and_parameters/final_parameters.json"%outdir_testing
         parameters_df_dict[("none", "fast", "fast")] = {"species":"none", "typeSimulations":"fast", "sampleID":"fast", "parameters_json":parameters_json_fast}
 
         # get the dfs
@@ -954,8 +1084,7 @@ def generate_heatmap_accuracy_of_parameters_on_test_samples(df_benchmark, filepr
 
 
     # keep only the df with the svtype
-    df_plot = df_benchmark[(df_benchmark.svtype==svtype) & (df_benchmark.parms_species!="Drosophila_melanogaster") & (df_benchmark.test_species!="Drosophila_melanogaster")] # hide drosophila
-    #df_plot = df_benchmark[(df_benchmark.svtype==svtype)]
+    df_plot = df_benchmark[(df_benchmark.svtype==svtype)] 
 
 
     # define square df
@@ -1016,7 +1145,7 @@ def generate_heatmap_accuracy_of_parameters_on_test_samples(df_benchmark, filepr
     # define the figure size
     figsize = (int(len(df_square.columns)*0.03), int(len(df_square)*0.03))
 
-    fun.plot_clustermap_with_annotation(df_square, row_colors_df, col_colors_df, filename, title="cross accuracy", col_cluster=col_cluster, row_cluster=row_cluster, colorbar_label=accuracy_f, adjust_position=True, legend=True, idxs_separator_pattern="||||", texts_to_strip={"L001"}, default_label_legend="control", df_annotations=df_annotations, cmap=sns.color_palette("RdBu_r", 50), ylabels_graphics_df=None, grid_lines=False, figsize=figsize, multiplier_width_colorbars=5)
+    fun.plot_clustermap_with_annotation(df_square, row_colors_df, col_colors_df, filename, title="cross accuracy", col_cluster=col_cluster, row_cluster=row_cluster, colorbar_label=accuracy_f, adjust_position=True, legend=True, idxs_separator_pattern="||||", texts_to_strip={"L001"}, default_label_legend="control", df_annotations=df_annotations, cmap=sns.color_palette("RdBu_r", 50), ylabels_graphics_df=None, grid_lines=False, figsize=figsize, multiplier_width_colorbars=3)
 
 
 
@@ -1093,11 +1222,11 @@ def get_crossaccuracy_distributions(df_cross_accuracy_benchmark, fileprefix, acc
     df_cross_accuracy_benchmark = df_cross_accuracy_benchmark[df_cross_accuracy_benchmark.svtype==svtype]
 
     # define parms
-    #sorted_species = ["Candida_glabrata", "Candida_albicans", "Cryptococcus_neoformans", "Arabidopsis_thaliana", "Drosophila_melanogaster"]
-    sorted_species = ["Candida_glabrata", "Candida_albicans", "Cryptococcus_neoformans", "Arabidopsis_thaliana"]
+    sorted_species = ["Candida_glabrata", "Candida_albicans", "Cryptococcus_neoformans", "Arabidopsis_thaliana", "Drosophila_melanogaster"]
     typeSimulations_to_color = {"uniform":"blue", "realSVs":"red", "arroundHomRegions":"black", "fast":"gray"}
-    type_comparison_to_xvalue = {"fast":0, "same_run_and_simulation":1, "same_species_and_simulation":1, "same_species":1, "different_species":2}
-    xvalue_to_typeCompLabel = {0:"default parms.", 1:"same species", 2:"different species"}
+    type_comparison_to_xvalue = {"fast":0, "same_run_and_simulation":1, "same_species_and_simulation":2, "same_species":3, "different_species":4}
+    xvalue_to_typeCompLabel = {0:"default parms.", 1:"same sample", 2:"same simulation", 3:"same species", 4:"different species"}
+
     df_cross_accuracy_benchmark["training parameters"] = df_cross_accuracy_benchmark.type_comparison.apply(lambda x: type_comparison_to_xvalue[x])
     all_xvalues = sorted(set(df_cross_accuracy_benchmark["training parameters"]))
 
@@ -1131,7 +1260,7 @@ def get_crossaccuracy_distributions(df_cross_accuracy_benchmark, fileprefix, acc
 
         # remove title
         ax.set_title("")
-        ax.set_ylabel("%s\n%s"%(test_species, accuracy_f))
+        ax.set_ylabel("%s. %s\n%s"%(test_species.split("_")[0][0], test_species.split("_")[1], accuracy_f))
 
         # change the xticklabels
         if I!=(nrows-1):
@@ -1145,7 +1274,7 @@ def get_crossaccuracy_distributions(df_cross_accuracy_benchmark, fileprefix, acc
         ax.set_ylim([-0.05, 1.1])
 
         # add axvlines
-        for x in [0.5, 1.5]: plt.axvline(x, linewidth=.9, color="gray", linestyle="--")
+        for x in [0.5, 1.5, 2.5, 3.5]: plt.axvline(x, linewidth=.9, color="gray", linestyle="--")
 
 
         # get the legen only in the first box
