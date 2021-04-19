@@ -136,8 +136,8 @@ for genome_name, genome, mitochondrial_chromosome in [("hg38", hg38_genome, "chr
 
     # get the blastn of the genome against itself
     simulate_SVs_arround_HomologousRegions_maxEvalue = 0.00001
-    simulate_SVs_arround_HomologousRegions_queryWindowSize = 500
-    simulate_SVs_arround_HomologousRegions_previousBlastnFile = fun.get_blastn_regions_genome_against_itself(genome, simulate_SVs_arround_HomologousRegions_maxEvalue, simulate_SVs_arround_HomologousRegions_queryWindowSize, False, threads)
+    simulate_SVs_arround_HomologousRegions_queryWindowSize = 10000
+    simulate_SVs_arround_HomologousRegions_previousBlastnFile = fun.get_blastn_regions_genome_against_itself(genome, simulate_SVs_arround_HomologousRegions_maxEvalue, simulate_SVs_arround_HomologousRegions_queryWindowSize, False, threads, max_query_windows=5000)
 
     continue
 

@@ -8193,6 +8193,25 @@ def write_breakpoints_for_parameter_combinations_and_get_filterIDtoBpoints_grids
             min_QUAL_l = [50, 100, 300, 500, 800, 1000, 1000000000]
             filter_overlappingRepeats_l = [False, True]
 
+        elif range_filtering=="theoretically_meaningful_NoFilterRepeats":
+
+            min_Nfragments_l = [5, 8, 10, 15, 20, 30]
+            min_af_l = [0.05, 0.1, 0.2, 0.5, expected_AF*0.9]
+            min_af_EitherSmallOrLargeEvent_l = min_af_l
+            wrong_FILTERtags_l = [("NO_ASSEMBLY",), ("NO_ASSEMBLY", "INSUFFICIENT_SUPPORT"), ("NO_ASSEMBLY", "LOW_QUAL"), ("LOW_QUAL", "INSUFFICIENT_SUPPORT"), all_FILTER_tags, meaningful_FILTER_tags] 
+            filter_polyGC_l = [True]
+            filter_noSplitReads_l = [True, False]
+            filter_noReadPairs_l = [True, False]
+            maximum_strand_bias_l = [0.9, 0.95]
+            maximum_microhomology_l = [100, 200, 1000, 100000000]
+            maximum_lenght_inexactHomology_l = [100, 200, 1000, 10000000]
+            range_filt_DEL_breakpoints_l = [(100, 800), (50, 900), (200, 700), (0,1)]
+            min_length_inversions_l = [0, 50, 1000000000]
+            dif_between_insert_and_del_l = [0, 5, 10, 1000000000]
+            max_to_be_considered_small_event_l = [100, 200, 500, 1000, 1500, 1000000000]
+            min_QUAL_l = [50, 100, 300, 500, 800, 1000, 1000000000]
+            filter_overlappingRepeats_l = [False]
+
         elif range_filtering=="single":
 
             min_Nfragments_l = [8]
@@ -10124,7 +10143,7 @@ def link_files_from_other_perSVade_outdirs_reads_and_alignment(outdir, other_per
 
     ###########################
 
-def get_multifasta_genome_split_into_windows(reference_genome, window_size, replace):
+def get_multifasta_genome_split_into_windows(reference_genome, window_size, replace, max_query_windows):
 
     """Splits a genome into windows of window_size"""
 
@@ -10145,11 +10164,19 @@ def get_multifasta_genome_split_into_windows(reference_genome, window_size, repl
         run_cmd("%s makewindows -g %s.fai -w %i > %s 2>%s"%(bedtools, reference_genome, window_size, windows_file, windows_file_stderr)) # debug
         df_windows = pd.read_csv(windows_file, sep="\t", header=-1, names=["chromosome", "start", "end"])
 
+        # keep only max_query_windows (randomly, and then sorting them)
+        df_windows = df_windows.sample(frac=1).iloc[0:max_query_windows].sort_values(by=["chromosome", "start", "end"])
+
         # clean
         for f in [windows_file, windows_file_stderr]: remove_file(f)
 
         # generate the multifasta
         all_records = [SeqRecord(chr_to_seq[r.chromosome][r.start:r.end].seq, id="%s||%i||%i"%(r.chromosome, r.start, r.end), name="", description="") for I,r in df_windows.iterrows()]
+        len_all_records = len(all_records)
+
+        # keep the records that have no Ns
+        all_records = [r for r in all_records if "N" not in r.seq]
+        print_if_verbose("There are %i/%i query regions with no Ns, kept for the analysis"%(len(all_records), len_all_records))
 
         windows_multifasta_tmp = "%s.tmp"%windows_multifasta
         SeqIO.write(all_records, windows_multifasta_tmp, "fasta")
@@ -10222,7 +10249,7 @@ def blastn_query_against_subject(query_fasta, database_multifasta, blast_outfile
 
     return df_blast
 
-def get_blastn_regions_genome_against_itself(reference_genome, max_eval, query_window_size, replace, threads):
+def get_blastn_regions_genome_against_itself(reference_genome, max_eval, query_window_size, replace, threads, max_query_windows=1000000):
 
     """Takes a reference genome and some blast parameters and runs blastn of query_window_size against the genome, returning the blast file """
 
@@ -10237,7 +10264,7 @@ def get_blastn_regions_genome_against_itself(reference_genome, max_eval, query_w
         make_folder(tmpdir)
 
         # get a genome of windows of query_window_size
-        query_multifasta = get_multifasta_genome_split_into_windows(reference_genome, query_window_size, replace)
+        query_multifasta = get_multifasta_genome_split_into_windows(reference_genome, query_window_size, replace, max_query_windows)
 
         # blast the query multifasta against the genome
         blast_outfile = "%s/blastn_subdividedRegions_against_genome.tab"%tmpdir
@@ -11635,7 +11662,7 @@ def get_df_accuracy_perSVade_vs_longReads_one_sample(sampleID, outdir_shortVsLon
         sniffles_df = get_sniffles_as_df(dict_paths["sniffles_outdir"], reference_genome)
 
         # define all the interesting simulations
-        all_types_simulations =  ["fast", "uniform", "realSVs", "arroundRepeats", "arroundHomRegions"]
+        all_types_simulations =  ["fast", "uniform", "realSVs", "arroundHomRegions"]
 
         # define SVIM and SNIFFLES filters (same number each)
         all_min_QUAL_svim = [3, 5, 7, 10, 12, 15, 20, 30, 40, 50] # max of 100
@@ -11707,7 +11734,7 @@ def get_df_accuracy_perSVade_vs_longReads_one_sample(sampleID, outdir_shortVsLon
                                 outdir_perSVade_vs_ONcalling = "%s/perSVade_vs_ONcalling_%s_%s_%s_%s_%s"%(outdir_calculating_accuracy, type_SVs_longReads, filter_IMPRECISE_sniffles, remaining_treatment, tol_bp, pct_overlap); make_folder(outdir_perSVade_vs_ONcalling)
 
                                 # go through different threshold of which SVs and calculate the accuracy
-                                all_thresholds_fractionParms = np.linspace(0.01, 1, 20)
+                                all_thresholds_fractionParms = sorted(set(list(np.linspace(0.01, 1, 20)) + [0.1, 0.5]))
 
                                 # define inputs of get_accuracy_df_for_one_typeRun_perSVade_and_threshold_fractionParms
                                 inputs_fn = [(threshold_fractionParms, ON_svtype_to_svDF, typeRun_to_svtype_to_svDF[typeRun], typeRun, "%s/calculateAccuracy_%s_%s"%(outdir_perSVade_vs_ONcalling, threshold_fractionParms, typeRun), tol_bp, pct_overlap) for threshold_fractionParms in all_thresholds_fractionParms for typeRun in all_types_simulations]
@@ -11832,7 +11859,7 @@ def plot_accuracy_perSVade_vs_longReads_precision_and_recall(df_accuracy_all, Pl
                                 df_plot = df_plot_fig[(df_plot_fig.sampleID==sampleID)].sort_values(by=["threshold_fractionParms"])
 
                                 # plot main line
-                                typeRun_to_color = {"perSVade-uniform":"blue", "perSVade-fast":"gray", "perSVade-realSVs":"red", 'perSVade-arroundHomRegions':"olive", 'perSVade-arroundRepeats':"black"}
+                                typeRun_to_color = {"perSVade-uniform":"blue", "perSVade-fast":"gray", "perSVade-realSVs":"red", 'perSVade-arroundHomRegions':"black", 'perSVade-arroundRepeats':"black"}
 
                                 typeRun_to_marker = {"perSVade-uniform":"^", "perSVade-fast":"s", "perSVade-realSVs":"o", 'perSVade-arroundHomRegions':"v", 'perSVade-arroundRepeats':"*"}
 
@@ -11951,7 +11978,7 @@ def plot_accuracy_perSVade_vs_longReads(df_accuracy_all, PlotsDir, min_nvars=10,
                             df_plot = df_plot_fig[(df_plot_fig.svtype==svtype) & (df_plot_fig.sampleID==sampleID)].sort_values(by=[xfield])
 
                             # plot main line
-                            typeRun_to_color = {"perSVade-uniform":"blue", "perSVade-fast":"gray", "perSVade-realSVs":"red", 'perSVade-arroundHomRegions':"olive", 'perSVade-arroundRepeats':"black"}
+                            typeRun_to_color = {"perSVade-uniform":"blue", "perSVade-fast":"gray", "perSVade-realSVs":"red", 'perSVade-arroundHomRegions':"black", 'perSVade-arroundRepeats':"black"}
 
                             typeRun_to_marker = {"perSVade-uniform":"^", "perSVade-fast":"s", "perSVade-realSVs":"o", 'perSVade-arroundHomRegions':"v", 'perSVade-arroundRepeats':"*"}
 

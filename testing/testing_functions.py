@@ -625,29 +625,37 @@ def plot_goldenSet_accuracy_lineplots(df, fileprefix, accuracy_f="Fvalue", svtyp
     """
 
 
-    youshouldremaketheplotssothattheyconsiderTheFactThatPrecision_and_recall_are_calculated_differently
+    #youshouldremaketheplotssothattheyconsiderTheFactThatPrecision_and_recall_are_calculated_differently
 
-    # filter the df
-    df_plot = df[(df.svtype==svtype) & (df.comparisonID!="perSVade-arroundRepeats") & (df.type_SVs_longReads=="all_SVs") & (df.remaining_treatment=="drop")].set_index("species", drop=False)
+    # filter get a df plot 
+    df_all = df[(df.svtype==svtype) & (df.type_SVs_longReads=="all_SVs") & (df.remaining_treatment=="drop")]
+
+    df_recall = df_all[(df_all.threshold_fractionParms==0.50) & (df_all.tol_bp==50) & (df_all.pct_overlap==0.75)][["recall", "species", "comparisonID", "sampleID"]]
+
+    df_precision = df_all[(df_all.threshold_fractionParms==min(df_all.threshold_fractionParms)) & (df_all.tol_bp==50) & (df_all.pct_overlap==0.75)][["precision", "species", "comparisonID", "sampleID"]]
+
+    #df_precision = df_all[(df_all.threshold_fractionParms==min(df_all.threshold_fractionParms)) & (df_all.tol_bp==500) & (df_all.pct_overlap==0.50)][["precision", "species", "comparisonID", "sampleID"]]
 
 
-    #& (df.threshold_fractionParms==0.4789473684210527) &(df.tol_bp==50) & (df.pct_overlap==0.75)
+    df_plot = df_precision.merge(df_recall, on=["species", "comparisonID", "sampleID"], how="left", validate="one_to_one").set_index("species", drop=False)
+
+    df_plot["Fvalue"] = (2*df_plot.precision*df_plot.recall) / (df_plot.precision+df_plot.recall)
 
     # define vars
     typeRun_to_color = {"perSVade-uniform":"blue", "perSVade-fast":"gray", "perSVade-realSVs":"red", 'perSVade-arroundHomRegions':"black"}
     sorted_typeRuns  = ["perSVade-arroundHomRegions", "perSVade-uniform", "perSVade-realSVs"]
-    #sorted_species =  ["Candida_glabrata", "Candida_albicans", "Cryptococcus_neoformans", "Arabidopsis_thaliana", "Drosophila_melanogaster"]
-    sorted_species =  ["Candida_glabrata", "Candida_albicans", "Cryptococcus_neoformans", "Arabidopsis_thaliana"]
+    sorted_species =  ["Candida_glabrata", "Candida_albicans", "Cryptococcus_neoformans", "Arabidopsis_thaliana", "Drosophila_melanogaster"]
 
     typeRun_to_typeRunText = {"perSVade-realSVs":"known SVs", "perSVade-uniform":"random", "perSVade-arroundHomRegions":"homologous SVs"}
 
     # plot init
     nrows = len(sorted_species)
     ncols = len(sorted_typeRuns)
-    fig = plt.figure(figsize=(ncols*1, nrows*1)); I = 1
+    fig = plt.figure(figsize=(ncols*1.3, nrows*1.3)); I = 1
 
 
     for Is, species in enumerate(sorted_species):
+        print(species)
 
         # define the df
         df_species = df_plot[(df_plot.species==species)]
@@ -672,7 +680,7 @@ def plot_goldenSet_accuracy_lineplots(df, fileprefix, accuracy_f="Fvalue", svtyp
             
             # adjust
             ax.get_legend().remove()    
-            if Is==0: ax.set_title("%s"%(typeRun.split("-")[1]))
+            if Is==0: ax.set_title("%s"%(typeRun.split("-")[1].replace("arroundHomRegions", "HomRegions")))
             ax.set_ylim(ylim)
             ax.set_xlim([-0.45, 1.45])
 
@@ -681,10 +689,15 @@ def plot_goldenSet_accuracy_lineplots(df, fileprefix, accuracy_f="Fvalue", svtyp
                 ax.set_xticklabels(["default parms.", typeRun_to_typeRunText[typeRun]])
                 for label in ax.get_xticklabels(): label.set_rotation(90)
 
+            else: 
+                ax.set_xticks([])
+
             ax.set_xlabel("")
             if Ir!=0:
                 ax.set_yticklabels([])
                 ax.set_ylabel("")
+
+            else: ax.set_ylabel("%s. %s\n%s"%(species.split("_")[0][0], species.split("_")[1], accuracy_f))
 
     plt.subplots_adjust(wspace=0.15, hspace=0.15) 
     filename = "%s_%s_%s.pdf"%(fileprefix, accuracy_f, svtype)
