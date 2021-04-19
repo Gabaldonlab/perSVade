@@ -63,20 +63,17 @@ df_parameters_used = test_fun.get_used_parameters_testing_several_species(outdir
 filename = "%s/used_parameters_testing_several_species.pdf"%PlotsDir
 df_plot = test_fun.get_heatmaps_used_parameters(df_parameters_used, filename)
 
-
 #%% CROSS BENCHMARKING PLOT
 
 # all data
 fileprefix = "%s/all_cross_accuracy"%PlotsDir
 test_fun.generate_heatmap_accuracy_of_parameters_on_test_samples(df_cross_accuracy_benchmark, fileprefix, replace=False, threads=4, accuracy_f="recall", svtype="integrated", col_cluster = False, row_cluster = False, show_only_species_and_simType=True)
 
-
 #%% CROSS-ACCURACY JITTER PLOTS PER CATHEGORY
     
 fileprefix = "%s/cross_accuracy_distribution"%PlotsDir
 ax  = test_fun.get_crossaccuracy_distributions(df_cross_accuracy_benchmark, fileprefix, accuracy_f="precision",  svtype="integrated")
     
-
 #%% GOLDEN ACCURACY BAR PLOTS
 
 fileprefix = "%s/goldenSetAccuracy"%PlotsDir
@@ -85,9 +82,9 @@ test_fun.plot_goldenSet_accuracy_barplots(df_goldenSetAccuracy, fileprefix, accu
 #%% GOLDEN ACCURACY LINE PLOT
 
 fileprefix = "%s/goldenSetAccuracy_lineplot"%PlotsDir
-test_fun.plot_goldenSet_accuracy_lineplots(df_goldenSetAccuracy, fileprefix, accuracy_f="Fvalue", svtype="integrated")
+test_fun.plot_goldenSet_accuracy_lineplots(df_goldenSetAccuracy, fileprefix, accuracy_f="recall", svtype="integrated")
 
-#%% PRINT SV CONTENT
+#%% PRINT CONTENT OF THE FINAL SV_CATHEGORY
 
 typeSim = "realSVs"
 
