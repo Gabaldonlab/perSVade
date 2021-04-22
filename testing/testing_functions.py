@@ -12,7 +12,7 @@ import multiprocessing as multiproc
 import seaborn as sns
 from matplotlib import gridspec
 import subprocess
-
+import itertools
 
 
 
@@ -1442,3 +1442,75 @@ def get_correct_human_genome(raw_genome, type_genome="hg19"):
     return corrected_genome
 
 
+def get_blastn_regions_genome_against_itself_equal_regions(windows_multifasta, replace=False, threads=4, window_size=500):
+
+    """Takes a multifasta and returns a blastn of regions that are the same"""
+
+    blastn_outfile = "%s.equal_sequences_like_blastn.tab"%windows_multifasta
+    if fun.file_is_empty(blastn_outfile) or replace is True:
+
+        print("getting %s"%blastn_outfile)
+
+        # load multifasta in as a seq_df
+        def get_id_from_seq(seq): return seq.id
+        def get_str_from_seq(seq): return str(seq.seq).upper()
+
+        indices = list(map(get_id_from_seq, fun.SeqIO.parse(windows_multifasta, "fasta")))
+        sequences = list(map(get_str_from_seq, fun.SeqIO.parse(windows_multifasta, "fasta")))
+
+        seq_df = pd.DataFrame({"sequence":sequences, "seq_name":indices}).sort_values(by="sequence")
+
+        # get a series that maps each sequence to a list of pairs of different indices
+        def get_pairs_homRegions(df_s): return list(itertools.combinations(df_s.seq_name, 2))
+        seq_to_pairsEqualRegions = seq_df.groupby("sequence").apply(get_pairs_homRegions).reset_index(drop=True).apply(set)
+
+        # get all the pairs of identical regions
+        all_pairs_identical = pd.Series(list(set.union(*seq_to_pairsEqualRegions)))
+        #all_pairs_identical = pd.Series(list({("chrX||59229000||59229500", "chrX||59229000||59229500"), ("chrX||59229000||59229500", "chr3||131069500||131070000")})) # example to debug
+
+        if len(all_pairs_identical)==0: raise ValueError("There are no identical regions")
+
+        # get a df with the pairs of identical regions
+        def get_r_blastn_from_pairIDs(pair):
+
+            query_chromosome, qstart, qend = pair[0].split("||")
+            subject_chromosome, sstart, send = pair[1].split("||")
+
+            return pd.Series({"qseqid":pair[0], "sseqid":pair[1], "query_chromosome":query_chromosome, "subject_chromosome":subject_chromosome, "qstart":qstart, "sstart":sstart, "qend":qend, "send":send})
+
+        blast_df = all_pairs_identical.apply(get_r_blastn_from_pairIDs)
+
+        # remove regions that are unnecessary
+        blast_df = blast_df[(blast_df.qseqid!=blast_df.sseqid)]
+
+        # change to ints
+        blast_df["qstart"] = blast_df.qstart.apply(int)
+        blast_df["qend"] = blast_df.qend.apply(int)
+        blast_df["sstart"] = blast_df.sstart.apply(int)
+        blast_df["send"] = blast_df.send.apply(int)
+
+        # add uniform fields
+        blast_df["qlen"] = window_size
+        blast_df["slen"] = window_size
+        blast_df["evalue"] = 0.0 
+        blast_df["bitscore"] = 100.0
+        blast_df["score"] = 100.0 
+        blast_df["length"] =  window_size
+        blast_df["pident"] = 100.0 
+        blast_df["nident"] = window_size 
+        blast_df["qcovs"] = 100.0
+        blast_df["sstart_0based"] =  blast_df.sstart
+        blast_df["subject_like_qseqid"] = blast_df.sseqid
+        blast_df["query_start"] = blast_df.qstart
+        blast_df["query_end"] = blast_df.qend
+
+        # add the centers
+        blast_df["query_center"] = blast_df.query_start + (int(window_size/2))
+        blast_df["subject_center"] = blast_df.sstart + (int(window_size/2))
+
+        # save df
+        fun.save_df_as_tab(blast_df, blastn_outfile)
+
+    return blastn_outfile
+
+                                                                                

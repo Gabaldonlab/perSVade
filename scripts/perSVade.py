@@ -79,6 +79,8 @@ resources_args.add_argument("-thr", "--threads", dest="threads", default=16, typ
 
 resources_args.add_argument("--fraction_available_mem", dest="fraction_available_mem", default=None, help="The fraction of RAM that is being allocated to this perSVade run. In several steps, this pipeline needs to calculate the available memory (using psutil.virtual_memory()). This returns all the available memory in the computer. If you are running on a fraction of the computers' resources, this calculation is overestimating the available RAM. In such case you can provide the fraction available through this argument. By default, it will calculate the available ram by filling the memory, which may give errors. It is highly reccommended that you provide this option. If you want to use all the allocated memory you should specify --fraction_available_mem 1.0")
 
+resources_args.add_argument("--min_gb_RAM_required", dest="min_gb_RAM_required", default=2, type=int, help="The minimum number of RAM required to run perSVade. This can be related to --fraction_available_mem")
+
 ##############################################
 
 #### general, optional args #### 
@@ -402,7 +404,9 @@ fun.min_CNVsize_coverageBased = opt.min_CNVsize_coverageBased
 real_available_threads = fun.get_available_threads(opt.outdir)
 if opt.threads>real_available_threads:  print("WARNING: There are %i available threads, and you required %i."%(real_available_threads, opt.threads))
 
-print("Running with %i Gb of RAM and %i cores"%(int(fun.get_availableGbRAM(opt.outdir)), opt.threads))
+available_Gb_RAM = fun.get_availableGbRAM(opt.outdir)
+if available_Gb_RAM<opt.min_gb_RAM_required: raise ValueError("You should be running with at least %i Gb of RAM. There are just %.3f in this system"%(opt.min_gb_RAM_required, available_Gb_RAM))
+print("Running with %.3f Gb of RAM and %i cores"%(available_Gb_RAM, opt.threads))
 
 # change the default parameters if specified
 if opt.parameters_json_file is not None:
@@ -733,6 +737,7 @@ print("structural variation analysis with perSVade finished")
 minimal_CNV_fields = ["chromosome", "merged_relative_CN", "start", "end", "CNVid", "median_coverage", "median_coverage_corrected", "SVTYPE"] + ["median_relative_CN_%s"%x for x in cnv_calling_algs]
 
 if opt.skip_CNV_calling is False and not any([x=="skip" for x in {opt.fastq1, opt.fastq2}]): 
+    print("RUNNING COVERAGE-BASED CNV CALLING...")
 
     # make folder
     cnv_calling_outdir = "%s/CNV_calling"%opt.outdir

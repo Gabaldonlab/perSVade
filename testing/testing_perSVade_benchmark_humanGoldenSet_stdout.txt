@@ -1,11 +1,17 @@
-
-
-Building a new DB, current time: 04/19/2021 11:46:21
-New DB name:   /gpfs/projects/bsc40/mschikora/scripts/perSVade/perSVade_repository/testing/outdirs_testing_humanGoldenSet/data/hg38.fa.corrected.fasta.generating_blast_against_itself/chr1/database.fasta
-New DB title:  /gpfs/projects/bsc40/mschikora/scripts/perSVade/perSVade_repository/testing/outdirs_testing_humanGoldenSet/data/hg38.fa.corrected.fasta.generating_blast_against_itself/chr1/database.fasta
-Sequence type: Nucleotide
-Keep MBits: T
-Maximum file size: 1000000000B
-Adding sequences from FASTA; added 1 sequences in 2.53985 seconds.
-
-
+importing functions
+importing functions
+[22/04/2021, 00:46:37] generating /gpfs/projects/bsc40/mschikora/scripts/perSVade/perSVade_repository/testing/outdirs_testing_humanGoldenSet/data/hg38.fa.corrected.fasta.windows_500bp_max10000000Windows.fasta
+[22/04/2021, 01:10:15] removing records with Ns
+[22/04/2021, 01:10:26] There are 5874582/6176584 query regions with no Ns, kept for the analysis
+getting /gpfs/projects/bsc40/mschikora/scripts/perSVade/perSVade_repository/testing/outdirs_testing_humanGoldenSet/data/hg38.fa.corrected.fasta.windows_500bp_max10000000Windows.fasta.equal_sequences_like_blastn.tab
+[22/04/2021, 01:20:43] running RepeatModeler and RepeatMasker into /gpfs/projects/bsc40/mschikora/scripts/perSVade/perSVade_repository/testing/outdirs_testing_humanGoldenSet/data/hg19.fa.corrected.fasta.repeats.tab
+[22/04/2021, 01:20:43] running repeatmasker to get the repeats of the genome in the default configuration. The std is in /gpfs/projects/bsc40/mschikora/scripts/perSVade/perSVade_repository/testing/outdirs_testing_humanGoldenSet/data/hg19_repeat_masker_outdir/default/hg19.fa.corrected.fasta.std.out
+[22/04/2021, 09:46:33] avoiding the generation of the personal repeat masker. The stderr can be found in /gpfs/projects/bsc40/mschikora/scripts/perSVade/perSVade_repository/testing/outdirs_testing_humanGoldenSet/data/hg19_repeat_masker_outdir/personal/hg19.fa.corrected.fasta.std.out
+[22/04/2021, 09:56:52] getting both repeats df
+[22/04/2021, 09:58:17] repeat inference finished
+[22/04/2021, 09:58:22] generating /gpfs/projects/bsc40/mschikora/scripts/perSVade/perSVade_repository/testing/outdirs_testing_humanGoldenSet/data/hg19.fa.corrected.fasta.windows_500bp_max10000000Windows.fasta
+[22/04/2021, 09:59:21] running faidx. The std is in /gpfs/projects/bsc40/mschikora/scripts/perSVade/perSVade_repository/testing/outdirs_testing_humanGoldenSet/data/hg19.fa.corrected.fasta.indexing.std
+[22/04/2021, 10:22:59] removing records with Ns
+[22/04/2021, 10:23:10] There are 5722404/6191402 query regions with no Ns, kept for the analysis
+getting /gpfs/projects/bsc40/mschikora/scripts/perSVade/perSVade_repository/testing/outdirs_testing_humanGoldenSet/data/hg19.fa.corrected.fasta.windows_500bp_max10000000Windows.fasta.equal_sequences_like_blastn.tab
+the testing of several species finsihed susccesffully

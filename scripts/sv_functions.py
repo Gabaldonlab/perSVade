@@ -3232,6 +3232,8 @@ def get_distanceToTelomere_chromosome_GCcontent_to_coverage_fn(df_coverage_train
     for type_genome, chroms in [("mtDNA", mtDNA_chromosomes), ("gDNA", gDNA_chromosomes)]:
         print_if_verbose("investigating %s"%type_genome)
 
+        if len(chroms)==0: continue
+
         # get the df and median coverage for this genome
         df_cov = df[df.chromosome.isin(chroms)]
         median_coverage_genome = get_median_coverage(df_cov, mitochondrial_chromosome)
@@ -9231,7 +9233,11 @@ def getPlots_filtering_accuracy_across_genomes_and_ploidies(df_cross_benchmark, 
                                     # get the different keywords
                                     simName, simType, ploidy, svtype = idx.split("||||")
 
-                                    return pd.Series({"simName":simName_to_color[simName], "simType":simType_to_color[simType], "ploidy":ploidy_to_color[ploidy], "svtype":svtype_to_color[svtype]})
+                                    # add the ploidy from diploid_hetero
+                                    if ploidy in ploidy_to_color: ploidy_color = ploidy_to_color[ploidy]
+                                    else: ploidy_color = ploidy_to_color["diploid_hetero"]
+
+                                    return pd.Series({"simName":simName_to_color[simName], "simType":simType_to_color[simType], "ploidy":ploidy_color, "svtype":svtype_to_color[svtype]})
                                 
                                 row_colors_df = pd.Series(df_square.index, index=df_square.index).apply(get_colors_series)
                                 col_colors_df = pd.Series(df_square.columns, index=df_square.columns).apply(get_colors_series)
@@ -10147,7 +10153,7 @@ def get_multifasta_genome_split_into_windows(reference_genome, window_size, repl
 
     """Splits a genome into windows of window_size"""
 
-    windows_multifasta = "%s.windows_%ibp.fasta"%(reference_genome, window_size)
+    windows_multifasta = "%s.windows_%ibp_max%iWindows.fasta"%(reference_genome, window_size, max_query_windows)
     if file_is_empty(windows_multifasta) or replace is True:
         print_if_verbose("generating %s"%windows_multifasta)
 
@@ -10175,6 +10181,7 @@ def get_multifasta_genome_split_into_windows(reference_genome, window_size, repl
         len_all_records = len(all_records)
 
         # keep the records that have no Ns
+        print_if_verbose("removing records with Ns")
         all_records = [r for r in all_records if "N" not in r.seq]
         print_if_verbose("There are %i/%i query regions with no Ns, kept for the analysis"%(len(all_records), len_all_records))
 
