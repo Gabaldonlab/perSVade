@@ -94,7 +94,6 @@ wget https://hgdownload.soe.ucsc.edu/goldenPath/hg38/bigZips/latest/hg38.fa.gz; 
 
 """
 
-
 # define the reference genomes
 hg19_genome = test_fun.get_correct_human_genome("%s/hg19.fa"%DataDir, type_genome="hg19")
 hg38_genome = test_fun.get_correct_human_genome("%s/hg38.fa"%DataDir, type_genome="hg38")
@@ -127,6 +126,7 @@ if running_in_cluster is False: run_in_cluster = False
 
 # we will run SV calling on each referenge genome for the three datasets (using as "real SVs" those found in all of them)
 for genome_name, genome, mitochondrial_chromosome in [("hg38", hg38_genome, "chrM"), ("hg19", hg19_genome, "chrMT")]:
+    print(genome_name)
 
     # define the outdir
     outdir_perSVade = "%s/running_on_%s"%(outdir_testing, genome_name); fun.make_folder(outdir_perSVade)
@@ -134,27 +134,25 @@ for genome_name, genome, mitochondrial_chromosome in [("hg38", hg38_genome, "chr
     # get the repeats for this genome
     previous_repeats_table = fun.get_repeat_maskerDF(genome, threads=threads, replace=False, use_repeat_modeller=False)[1]
 
-    # get the blastn of the genome against itself
+    # get homologous regions that are exactly the same (this is to generate simulate_SVs_arround_HomologousRegions_previousBlastnFile)
     simulate_SVs_arround_HomologousRegions_maxEvalue = 0.00001
-    simulate_SVs_arround_HomologousRegions_queryWindowSize = 10000
-    simulate_SVs_arround_HomologousRegions_previousBlastnFile = fun.get_blastn_regions_genome_against_itself(genome, simulate_SVs_arround_HomologousRegions_maxEvalue, simulate_SVs_arround_HomologousRegions_queryWindowSize, False, threads, max_query_windows=5000)
+    simulate_SVs_arround_HomologousRegions_queryWindowSize = 500
 
-    continue
+    windows_multifasta = fun.get_multifasta_genome_split_into_windows(genome, simulate_SVs_arround_HomologousRegions_queryWindowSize, False, 10000000)
+
+    simulate_SVs_arround_HomologousRegions_previousBlastnFile = test_fun.get_blastn_regions_genome_against_itself_equal_regions(windows_multifasta, replace=False, threads=threads, window_size=simulate_SVs_arround_HomologousRegions_queryWindowSize)
 
     # define the table with short reads
     close_shortReads_table_df = pd.DataFrame({Is : {"sampleID":sampleID, "runID":sampleID+"run1", "short_reads1":reads[0], "short_reads2":reads[1]} for Is, (sampleID, reads) in enumerate({"CHM":(CHM_r1, CHM_r2), "NA12878":(NA12878_r1, NA12878_r2),  "HG002":(HG002_r1, HG002_r2)}.items())}).transpose()
     close_shortReads_table = "%s/table_reads_genome_%s.tab"%(DataDir, genome_name)
     fun.save_df_as_tab(close_shortReads_table_df, close_shortReads_table)
 
-    print(close_shortReads_table_df)
-
-    adjhdgajadgjhadg
 
     # define the simulation ploidies as diploid
     simulation_ploidies = "diploid_hetero"
 
     # define the cmd
-    cmd = "%s --ref %s --threads %i -o %s --close_shortReads_table %s --n_close_samples 3 --nruns_per_sample 1 -f1 skip -f2 skip --mitochondrial_chromosome %s --testAccuracy --verbose --nsimulations 2 --skip_CNV_calling --simulation_ploidies %s --previous_repeats_table %s --StopAfter_testAccuracy --simulate_SVs_arround_HomologousRegions_maxEvalue %.10f --simulate_SVs_arround_HomologousRegions_queryWindowSize %i --simulate_SVs_arround_HomologousRegions_previousBlastnFile %s --StopAfter_testAccuracy_perSVadeRunning --skip_SV_CNV_calling"%(perSVade_py, genome, threads, outdir_perSVade, close_shortReads_table, mitochondrial_chromosome, simulation_ploidies, previous_repeats_table, simulate_SVs_arround_HomologousRegions_maxEvalue, simulate_SVs_arround_HomologousRegions_queryWindowSize, simulate_SVs_arround_HomologousRegions_previousBlastnFile)
+    cmd = "%s --ref %s --threads %i -o %s --close_shortReads_table %s --n_close_samples 3 --nruns_per_sample 1 -f1 skip -f2 skip --mitochondrial_chromosome %s --testAccuracy --verbose --nsimulations 2 --skip_CNV_calling --simulation_ploidies %s --previous_repeats_table %s --StopAfter_testAccuracy --simulate_SVs_arround_HomologousRegions_maxEvalue %.10f --simulate_SVs_arround_HomologousRegions_queryWindowSize %i --simulate_SVs_arround_HomologousRegions_previousBlastnFile %s --StopAfter_testAccuracy_perSVadeRunning --skip_SV_CNV_calling --min_gb_RAM_required 3"%(perSVade_py, genome, threads, outdir_perSVade, close_shortReads_table, mitochondrial_chromosome, simulation_ploidies, previous_repeats_table, simulate_SVs_arround_HomologousRegions_maxEvalue, simulate_SVs_arround_HomologousRegions_queryWindowSize, simulate_SVs_arround_HomologousRegions_previousBlastnFile)
 
     # add options depending on the machine
     if run_in_cluster is True: cmd += " --job_array_mode job_array"
@@ -187,7 +185,14 @@ for genome_name, genome, mitochondrial_chromosome in [("hg38", hg38_genome, "chr
 
             fun.run_jobarray_file_MN4_greasy(jobs_filename, name, time=time, queue=queue, threads_per_job=threads, nodes=nodes)
 
-        elif cluster_name=="Nord3": kjadjhgahjgad
+        elif cluster_name=="Nord3": 
+
+            # define resources
+            time = "48:00:00"
+            RAM_per_thread = 6000 # first 3600
+
+            # run
+            fun.run_jobarray_file_Nord3(jobs_filename, name, time=time, queue="bsc_ls", threads_per_job=threads, RAM_per_thread=RAM_per_thread, max_njobs_to_run=10000)
 
 
     elif len(all_lines_jobfile)!=0: raise ValueError("something went wrong")
