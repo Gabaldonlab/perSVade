@@ -116,6 +116,18 @@ NA12878_r2 = "%s/ERR194147_2.fastq.gz"%NA12878_raw_reads_dir
 HG002_bam = "%s/HG002.hs37d5.60x.1.bam"%DataDir
 HG002_r1, HG002_r2 = test_fun.get_fastqgz_from_bam(HG002_bam, threads=threads, replace=False, already_sorted_by_readName=False)
 
+# get the trimmed reads
+CHM_r1_trim, CHM_r2_trim = fun.run_trimmomatic(CHM_r1, CHM_r2, replace=False, threads=threads)
+NA12878_r1_trim, NA12878_r2_trim = fun.run_trimmomatic(NA12878_r1, NA12878_r2, replace=False, threads=threads)
+HG002_r1_trim, HG002_r2_trim = fun.run_trimmomatic(HG002_r1, HG002_r2, replace=False, threads=threads)
+
+# define the table with short reads
+close_shortReads_table_df = pd.DataFrame({Is : {"sampleID":sampleID, "runID":sampleID+"run1", "short_reads1":reads[0], "short_reads2":reads[1]} for Is, (sampleID, reads) in enumerate({"CHM":(CHM_r1_trim, CHM_r2_trim), "NA12878":(NA12878_r1_trim, NA12878_r2_trim),  "HG002":(HG002_r1_trim, HG002_r2_trim)}.items())}).transpose()
+
+# write table    
+close_shortReads_table = "%s/table_reads_genome.tab"%DataDir
+fun.save_df_as_tab(close_shortReads_table_df, close_shortReads_table)
+
 ###############################################
 
 ######### run SV calling  ###########
@@ -142,12 +154,6 @@ for genome_name, genome, mitochondrial_chromosome in [("hg38", hg38_genome, "chr
 
     simulate_SVs_arround_HomologousRegions_previousBlastnFile = test_fun.get_blastn_regions_genome_against_itself_equal_regions(windows_multifasta, replace=False, threads=threads, window_size=simulate_SVs_arround_HomologousRegions_queryWindowSize)
 
-    # define the table with short reads
-    close_shortReads_table_df = pd.DataFrame({Is : {"sampleID":sampleID, "runID":sampleID+"run1", "short_reads1":reads[0], "short_reads2":reads[1]} for Is, (sampleID, reads) in enumerate({"CHM":(CHM_r1, CHM_r2), "NA12878":(NA12878_r1, NA12878_r2),  "HG002":(HG002_r1, HG002_r2)}.items())}).transpose()
-    close_shortReads_table = "%s/table_reads_genome_%s.tab"%(DataDir, genome_name)
-    fun.save_df_as_tab(close_shortReads_table_df, close_shortReads_table)
-
-
     # define the simulation ploidies as diploid
     simulation_ploidies = "diploid_hetero"
 
@@ -162,7 +168,6 @@ for genome_name, genome, mitochondrial_chromosome in [("hg38", hg38_genome, "chr
     print("running std into %s"%cmd_output)
     fun.run_cmd("%s > %s 2>&1"%(cmd, cmd_output)) # run with stdout
     #fun.run_cmd(cmd); continue # run locally
-
 
     ###### RUN JOB ARRAYS ######
 
@@ -199,27 +204,7 @@ for genome_name, genome, mitochondrial_chromosome in [("hg38", hg38_genome, "chr
 
     ############################
 
-    #if taxID=="5476": adkjhdakg # stop after C. albicans
-
 print("the testing of several species finsihed susccesffully")
 
 #####################################
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 

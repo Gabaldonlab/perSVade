@@ -67,12 +67,28 @@ df_plot = test_fun.get_heatmaps_used_parameters(df_parameters_used, filename)
 
 # all data
 fileprefix = "%s/all_cross_accuracy"%PlotsDir
-test_fun.generate_heatmap_accuracy_of_parameters_on_test_samples(df_cross_accuracy_benchmark, fileprefix, replace=False, threads=4, accuracy_f="recall", svtype="integrated", col_cluster = False, row_cluster = False, show_only_species_and_simType=True)
+test_fun.generate_heatmap_accuracy_of_parameters_on_test_samples(df_cross_accuracy_benchmark, fileprefix, replace=False, threads=4, accuracy_f="Fvalue", svtype="integrated", col_cluster = False, row_cluster = False, show_only_species_and_simType=True)
+
+#%% CROSS BENCHMARKING PLOT ONLY RANDOM SVs
+
+df_plot = df_cross_accuracy_benchmark[(df_cross_accuracy_benchmark.parms_typeSimulations.isin({"fast", "uniform"})) & (df_cross_accuracy_benchmark.test_typeSimulations=="uniform")]
+
+# all data
+fileprefix = "%s/all_cross_accuracy_onlyUniform"%PlotsDir
+test_fun.generate_heatmap_accuracy_of_parameters_on_test_samples(df_plot, fileprefix, replace=False, threads=4, accuracy_f="Fvalue", svtype="integrated", col_cluster = False, row_cluster = False, show_only_species_and_simType=True, multiplier_width_colorbars=1.5, show_only_species=True)
+
 
 #%% CROSS-ACCURACY JITTER PLOTS PER CATHEGORY
     
 fileprefix = "%s/cross_accuracy_distribution"%PlotsDir
 ax  = test_fun.get_crossaccuracy_distributions(df_cross_accuracy_benchmark, fileprefix, accuracy_f="precision",  svtype="integrated")
+    
+
+
+#%% CROSS-ACCURACY JITTER PLOTS PER CATHEGORY ONE SINGLE TYPE
+    
+fileprefix = "%s/cross_accuracy_distribution_onlyUniform_SameRun"%PlotsDir
+test_fun.plot_accuracy_distributions_sameRun_bySpecies(df_cross_accuracy_benchmark, fileprefix, accuracy_f="Fvalue", all_types_simulations={"fast", "uniform"})
     
 #%% GOLDEN ACCURACY BAR PLOTS
 

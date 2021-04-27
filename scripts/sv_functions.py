@@ -871,7 +871,19 @@ def get_availableGbRAM(outdir):
 
     """This function returns a float with the available memory in your system. psutil.virtual_memory().available/1e9 would yield the theoretically available memory.
 
-    fraction_available_mem is the fraction of the total memory available in the node (computer) that is dedicated to the run of perSVade."""
+    fraction_available_mem is the fraction of the total memory available in the node (computer) that is dedicated to the run of perSVade.
+
+    # nord3. This does not work reliably
+    
+    elif "BSC_MACHINE" in os.environ and os.environ["BSC_MACHINE"]=="nord3":
+
+        # define the available threads
+        real_available_threads = get_available_threads(outdir)
+
+        # get thr ram considering that 1 node has 16 threads
+        availableGbRAM = available_mem*(int(real_available_threads)/16)
+
+    """
 
     # get the memory with psutil
     available_mem = psutil.virtual_memory().available/1e9
@@ -883,15 +895,6 @@ def get_availableGbRAM(outdir):
         if "BSC_MACHINE" in os.environ and os.environ["BSC_MACHINE"]=="mn4":
 
             availableGbRAM = available_mem*(int(os.environ["SLURM_CPUS_PER_TASK"])/48)
-
-        # nord3
-        elif "BSC_MACHINE" in os.environ and os.environ["BSC_MACHINE"]=="nord3":
-
-            # define the available threads
-            real_available_threads = get_available_threads(outdir)
-
-            # get thr ram considering that 1 node has 16 threads
-            availableGbRAM = available_mem*(int(real_available_threads)/16)
 
         # BSC machine
         elif str(subprocess.check_output("uname -a", shell=True)).startswith("b'Linux bscls063 4.12.14-lp150.12.48-default"): 
@@ -990,22 +993,24 @@ def get_sorted_bam_test(r1, r2, ref_genome, replace=False):
 
 def get_available_threads(outdir):
 
-    """Returns the avilable number of threads by runnning GATK. It runs gatk on a dummy genome and returns the really available number of threads  """
+    """Returns the avilable number of threads by runnning GATK. It runs gatk on a dummy genome and returns the really available number of threads  
+
+    # Nord3 non interactive nodes
+    elif "BSC_MACHINE" in os.environ and os.environ["BSC_MACHINE"]=="nord3" and "LSB_MCPU_HOSTS" in os.environ:
+
+        available_threads = int(os.environ["LSB_MCPU_HOSTS"].split()[-1])
+
+    """
 
     # MN4
     if "BSC_MACHINE" in os.environ and os.environ["BSC_MACHINE"]=="mn4":
 
         available_threads = int(os.environ["SLURM_CPUS_PER_TASK"])
 
-    # Nord3 
+    # Nord3 interactive nodes
     elif "BSC_MACHINE" in os.environ and os.environ["BSC_MACHINE"]=="nord3" and not "LSB_MCPU_HOSTS" in os.environ:
 
         available_threads = 4
-
-    # Nord3 interactive nodes
-    elif "BSC_MACHINE" in os.environ and os.environ["BSC_MACHINE"]=="nord3" and "LSB_MCPU_HOSTS" in os.environ:
-
-        available_threads = int(os.environ["LSB_MCPU_HOSTS"].split()[-1])
 
     # BSC machine
     elif str(subprocess.check_output("uname -a", shell=True)).startswith("b'Linux bscls063 4.12.14-lp150.12.48-default"): 
@@ -4580,7 +4585,18 @@ def run_trimmomatic(reads1, reads2, replace=False, threads=1):
             remove_file(std_trimmomatic)
 
         # check that the reads are correct
-        check_that_paired_reads_are_correct(trimmed_reads1, trimmed_reads2)
+        #check_that_paired_reads_are_correct(trimmed_reads1, trimmed_reads2)
+
+    # clean unnecessary files
+    for raw_reads in [reads1, reads2]:
+        directory = get_dir(raw_reads)
+        raw_file = get_file(raw_reads)
+
+        for f in os.listdir(directory):
+
+            # same prefix, different file, remove
+            filepath = "%s/%s"%(directory, f)
+            if f.startswith(raw_file) and f not in {raw_file, "%s.trimmed.fastq.gz"%raw_file} and os.path.isfile(filepath): remove_file(filepath)
 
     return trimmed_reads1, trimmed_reads2
 
@@ -14234,6 +14250,7 @@ def run_CNV_calling(sorted_bam, reference_genome, outdir, threads, replace, mito
 
             if file_is_empty(df_CNperWindow_HMMcopy_file) or replace is True:
 
+                # run the HMMcopy
                 df_CNperWindow_HMMcopy = run_CNV_calling_HMMcopy(HMMcopy_outdir, replace, threads, df_coverage, ploidy, reference_genome, mitochondrial_chromosome)
 
                 save_df_as_tab(df_CNperWindow_HMMcopy, df_CNperWindow_HMMcopy_file)
@@ -18048,7 +18065,8 @@ def get_integrated_variants_into_one_df(df, file_prefix, replace=False, remove_f
         SV_CNV_annot = pd.DataFrame()
 
         # go through each sample
-        for sampleID, r in df.iterrows():
+        for Is, (sampleID, r) in enumerate(df.iterrows()):
+            print(Is, sampleID)
 
             # small vars
             if "smallVars_vcf" in r.keys():
@@ -18237,8 +18255,9 @@ def get_bed_df_from_variantID(varID):
         dict_bed = {0 : {"chromosome":chromA, "start":startA, "end":endA, "ID":varID+"-A", "type_overlap":"both"},
                     1 : {"chromosome":chromB, "start":startB, "end":endB, "ID":varID+"-B", "type_overlap":"pos"}}
 
-    # complex inverted duplication. A region is duplicated, inverted and inserted into another region of the genome
-    elif svtype in {"CVD"}:
+    # complex inverted duplication. A region is duplicated, inverted and inserted into another region of the genome. This applies also to complex inverted translocations (intrachromosomal (CVT) or interchromosomal (IVT)). A regions is cut, duplicated, inverted and inserted into anothe region of the genome
+
+    elif svtype in {"CVD", "IVT", "CVT"}:
 
         # get the region A nd the posB
         regionA, posB = varID.split("|")[1:]
@@ -18253,6 +18272,7 @@ def get_bed_df_from_variantID(varID):
         # here the A region is copied, inverted and pasted into a B breakend. This means that the type_overlap is different
         dict_bed = {0 : {"chromosome":chromA, "start":startA, "end":endA, "ID":varID+"-A", "type_overlap":"both"},
                     1 : {"chromosome":chromB, "start":startB, "end":endB, "ID":varID+"-B", "type_overlap":"pos"}}
+
 
     elif svtype in {"TRA"}:
 
@@ -18295,6 +18315,7 @@ def get_SV_CNV_df_with_common_variantID_acrossSamples(SV_CNV, outdir, pct_overla
     Takes a SV_CNV df and returns it with the field 'variantID_across_samples'. It uses bedmap to be particularly efficient. The basis of this is that if two variants are of the same type and overlap by pct_overlap or tol_bp they are called to be the same.
     """
 
+    print_if_verbose("getting beds")
     make_folder(outdir)
 
     # get all variantIDs
@@ -18309,6 +18330,8 @@ def get_SV_CNV_df_with_common_variantID_acrossSamples(SV_CNV, outdir, pct_overla
     df_bed_all[["chromosome", "start", "end", "ID"]].to_csv(variants_bed, sep="\t", index=False, header=False)
 
     ######### RUN BEDMAP TO MAP VARIANTS TO EACH OTHER #########
+
+    print_if_verbose("running bedmap")
 
     # define the stderr
     bedmap_stderr = "%s/running_bedmap_.stderr"%outdir
@@ -18347,6 +18370,8 @@ def get_SV_CNV_df_with_common_variantID_acrossSamples(SV_CNV, outdir, pct_overla
 
     ######## MAP EACH VARID TO THE OTHER IDs ########
 
+    print_if_verbose("map variants through IDs")
+
     # map each variantID to the bedIDs
     varID_to_bedIDs = dict(df_bed_all.groupby("variantID").apply(lambda df_varID: set(df_varID.ID)))
 
@@ -18377,6 +18402,8 @@ def get_SV_CNV_df_with_common_variantID_acrossSamples(SV_CNV, outdir, pct_overla
     #################################################
 
     ########## ADD THE variantID_across_samples ##########
+
+    print_if_verbose("add variantID_across_samples")
 
     # get the list of clusters of the variant IDs
     list_clusters_varIDs = get_list_clusters_from_dict(varID_to_overlapping_varIDs)
@@ -19292,6 +19319,7 @@ def get_integrated_SV_CNV_smallVars_df_from_run_perSVade_severalSamples(paths_df
         SV_CNV = get_SV_CNV_df_with_overlaps_with_all_samples(SV_CNV, outdir_common_variantID_acrossSamples, tol_bp, pct_overlap, cwd, df_bedpe_all, df_CN_all, threads, reference_genome)
 
         # get the common variant ID
+        print("getting common variant ID across samples")
         SV_CNV = get_SV_CNV_df_with_common_variantID_acrossSamples(SV_CNV, outdir_common_variantID_acrossSamples, pct_overlap, tol_bp)
 
         # keep relevant files
@@ -19305,6 +19333,473 @@ def get_integrated_SV_CNV_smallVars_df_from_run_perSVade_severalSamples(paths_df
     #############################################
 
 
+
+
+
+def get_s_small_vars_df_and_s_small_var_annot(Is, perSVade_outdir, sampleID, target_ploidy, fields_varCall, fields_varAnnot, tmpdir):
+
+    """This function takes a perSVade outdir and re-writes the varcall file with no headers into tmpdir"""
+
+    print("ploidy %i, %i: %s"%(target_ploidy, Is+1, sampleID))
+
+    # variants
+    small_vars_file = "%s/small_vars_%s_ploidy%i.tab"%(tmpdir, sampleID, target_ploidy)
+    if file_is_empty(small_vars_file):
+
+        # get the variant calling
+        s_small_vars_df = pd.read_csv("%s/smallVars_CNV_output/variant_calling_ploidy%i.tab"%(perSVade_outdir, target_ploidy), sep="\t")[fields_varCall]
+
+        # add fields
+        s_small_vars_df["sampleID"] = sampleID
+        s_small_vars_df["calling_ploidy"] = target_ploidy
+
+        # redeinfe
+        fields_varCall = (fields_varCall + ["sampleID", "calling_ploidy"])
+
+        # save
+        small_vars_file_tmp = "%s.tmp"%small_vars_file
+        s_small_vars_df[fields_varCall].to_csv(small_vars_file_tmp, sep="\t", index=False, header=True)
+        os.rename(small_vars_file_tmp, small_vars_file)
+
+    # var annotation
+    small_vars_annot_file = "%s/small_vars_annot_%s_ploidy%i.tab"%(tmpdir, sampleID, target_ploidy)
+    if file_is_empty(small_vars_annot_file):
+
+        # get the annotation of the variants
+        small_var_annot_s = pd.read_csv("%s/smallVars_CNV_output/variant_annotation_ploidy%i.tab"%(perSVade_outdir, target_ploidy), sep="\t")
+
+        # write
+        small_vars_annot_file_tmp = "%s.tmp"%small_vars_annot_file
+        small_var_annot_s[fields_varAnnot].to_csv(small_vars_annot_file_tmp, sep="\t", index=False, header=False)
+        os.rename(small_vars_annot_file_tmp, small_vars_annot_file)
+
+    return (small_vars_file, small_vars_annot_file)
+
+def get_integrated_small_vars_df_severalSamples(paths_df, outdir, ploidy, run_ploidy2_ifHaploid=False, threads=4, replace=False, fields_varCall="all", fields_varAnnot="all"):
+
+    """
+    This function generates several datsets under outdir that result from the integration of several small variant callsets by perSVade. These are the arguments:
+
+    - paths_df should be a df that contains sampleID and perSVade_outdir. These are the datasets to integrate. IT can be a filepath
+    - outdir is the directory where to store the integrated variant calling files
+    - ploidy indicates the ploidy of the runs
+    - run_ploidy2_ifHaploid indicates whether the option --run_ploidy2_ifHaploid was used in perSVade.
+    - fields_varCall and fields_varAnnot indicate whether to keep only some fields. They should be a list or "all"
+
+    """
+
+    ######## PROCESS INPUTS #########
+
+    # define paths_df
+    if type(paths_df)==str: paths_df = get_tab_as_df_or_empty_df(paths_df)
+    paths_df["sampleID"] = paths_df["sampleID"].apply(str)
+
+    # make the outdir
+    make_folder(outdir)
+
+    # debug the run_ploidy2_ifHaploid
+    if run_ploidy2_ifHaploid is True and ploidy!=1: raise ValueError("if run_ploidy2_ifHaploid is True, ploidy has to be 1")
+
+    # define the samples to run
+    samples_to_run = set(paths_df.sampleID)
+
+    #################################
+
+    ######### GET THE COVERAGE DF PER GENE ###########
+
+    coverage_df_file = "%s/merged_coverage.tab"%outdir
+
+    if file_is_empty(coverage_df_file) or replace is True:
+        print("getting per gene coverage df")
+
+        # init df
+        coverage_df = pd.DataFrame()
+
+        for Is, (sampleID, perSVade_outdir) in enumerate(paths_df[["sampleID", "perSVade_outdir"]].values):
+            print("%i/%i: %s"%(Is+1, len(paths_df), sampleID))
+
+            # add the coverage
+            s_coverage_df = pd.read_csv("%s/smallVars_CNV_output/CNV_results/genes_and_regions_coverage.tab"%(perSVade_outdir), sep="\t")
+            s_coverage_df["sampleID"] = sampleID
+            coverage_df = coverage_df.append(s_coverage_df)
+
+        # save
+        save_df_as_tab(coverage_df, coverage_df_file)
+
+    ##################################################
+
+    ####### MERGED SMALL VARIANT CALLS ##########
+
+    small_vars_df_file = "%s/smallVars.tab"%outdir
+    small_var_annot_file = "%s/smallVars_annot.tab"%outdir
+
+    # get the simple dataframes
+    if file_is_empty(small_vars_df_file) or file_is_empty(small_var_annot_file) or replace is True:
+        print_if_verbose("getting small variant calls")
+
+        # init dfs
+        small_vars_df = pd.DataFrame()
+        small_var_annot = pd.DataFrame()
+
+        # define a tmpdir
+        tmpdir = "%s/tmp"%outdir; make_folder(tmpdir)
+
+        ######## GET INDIVIDUAL VARCALL FILES WITH DESIRED FIELDS #####
+
+        # define the interesting ploidies
+        if run_ploidy2_ifHaploid is True: interesting_ploidies = [1, 2]
+        else: interesting_ploidies = [ploidy]
+
+        # load the first df to get the fields_varCall
+        first_perSVade_outdir = paths_df.perSVade_outdir.iloc[0]
+        first_small_vars_df = get_tab_as_df_or_empty_df("%s/smallVars_CNV_output/variant_calling_ploidy%i.tab"%(first_perSVade_outdir, ploidy))
+        first_small_vars_annot = get_tab_as_df_or_empty_df("%s/smallVars_CNV_output/variant_annotation_ploidy%i.tab"%(first_perSVade_outdir, ploidy))
+
+        # define the fields_varCall and fields_varAnnot
+        if fields_varCall=="all": fields_varCall = list(first_small_vars_df.keys())
+        if fields_varAnnot=="all": fields_varAnnot = list(first_small_vars_annot.keys())
+
+        # define a list of inputs to parallelize
+        inputs_fn = [(Is, perSVade_outdir, sampleID, target_ploidy, fields_varCall, fields_varAnnot, tmpdir) for Is, (sampleID, perSVade_outdir) in enumerate(paths_df[["sampleID", "perSVade_outdir"]].values) for target_ploidy in interesting_ploidies]
+
+        # get files in parallel
+        with multiproc.Pool(threads) as pool:
+            list_small_vars_files = pool.starmap(get_s_small_vars_df_and_s_small_var_annot, inputs_fn) 
+                
+            pool.close()
+            pool.terminate()
+
+        ###############################################################
+
+        ##### write the annotations with bash #######
+        if file_is_empty(small_var_annot_file):        
+            print("writing annotations")
+
+            # get all files
+            annot_files = [x[1] for x in list_small_vars_files]
+
+            # concatenate them and set them unique
+            small_var_annot_file_tmp = "%s.tmp"%small_var_annot_file
+            run_cmd("cat %s | sort | uniq > %s"%(" ".join(annot_files), small_var_annot_file_tmp))
+
+            # add the header
+            print("adding header")
+            small_var_annot_file_tmp2 = "%s.tmp2"%small_var_annot_file_tmp
+            run_cmd("{ echo -n '%s\n'; cat %s; } > %s"%("\t".join(fields_varAnnot), small_var_annot_file_tmp, small_var_annot_file_tmp2))
+
+            # keep
+            remove_file(small_var_annot_file_tmp)
+            os.rename(small_var_annot_file_tmp2, small_var_annot_file)
+
+
+        #############################################
+
+        ####### INTEGRATE AND ADD OVERLAPPING VARS #######
+        print("integrate and get overlapping calls")
+
+        # define the variants with annotation
+
+        # integrate the dfs
+        varcall_files = [x[0] for x in list_small_vars_files]
+        small_vars_df = pd.concat(list(map(get_tab_as_df_or_empty_df, varcall_files)))
+
+        # set the sample to be str
+        small_vars_df["sampleID"] = small_vars_df["sampleID"].apply(str)
+
+        # check that all the variants have an annotation
+        all_vars = set(small_vars_df["#Uploaded_variation"])
+        vars_with_annotation = set(get_tab_as_df_or_empty_df(small_var_annot_file)["#Uploaded_variation"])
+        vars_with_no_annotation = all_vars.difference(vars_with_annotation)
+        if len(vars_with_no_annotation):
+            print("WARNING: There are %i/%i vars with no annotation:"%(len(vars_with_no_annotation), len(all_vars)))
+            for v in vars_with_no_annotation: 
+                if "*" not in v: print(v)
+
+        # check that the relative_CN is there
+        if run_ploidy2_ifHaploid is True:
+            if any(pd.isna(small_vars_df.relative_CN)): raise ValueError("there can't be NaNs in small_vars_df")
+
+        # add shared small varianrs
+        print("adding shared small variants")
+
+        # define variants that are called in any
+        any_called_variants_df = small_vars_df
+
+        # define PASS variants
+        ploidy_to_minAF = {1:0.9, 2:0.25, 3:0.0, 4:0.0}
+
+        if run_ploidy2_ifHaploid is True:
+
+            small_vars_df["is_correct_haploid"] = (small_vars_df.calling_ploidy==1) & (small_vars_df.mean_fractionReadsCov_PASS_algs>=0.9)
+            small_vars_df["is_correct_diploid"] = (small_vars_df.calling_ploidy==2) & (small_vars_df.mean_fractionReadsCov_PASS_algs>=0.25)
+
+            PASSatLeast2_variants_df = small_vars_df[(small_vars_df.NPASS>=2) & ((small_vars_df.is_correct_haploid) | (small_vars_df.is_correct_diploid))]
+
+        else: PASSatLeast2_variants_df = small_vars_df[(small_vars_df.NPASS>=2) & (small_vars_df.mean_fractionReadsCov_PASS_algs>=ploidy_to_minAF[ploidy])]
+
+        # map each sample to the variants of each type
+        def get_set_variants_from_df_s(df_s): return set(df_s["#Uploaded_variation"])
+        sampleID_to_any_called_variants = any_called_variants_df.groupby("sampleID").apply(get_set_variants_from_df_s)
+        sampleID_to_PASSatLeast2_variants = PASSatLeast2_variants_df.groupby("sampleID").apply(get_set_variants_from_df_s)
+
+        # create a dict with all sampleID_to_variants_series
+        typeVars_to_sampleID_to_variants_series = {"anyCalled":sampleID_to_any_called_variants, "PASSatLeast2":sampleID_to_PASSatLeast2_variants}
+
+        # add the missing samples
+        for sampleID_to_variants_series in typeVars_to_sampleID_to_variants_series.values():
+            for sampleID in samples_to_run: 
+                if sampleID not in set(sampleID_to_variants_series.index): sampleID_to_variants_series[sampleID] = set()
+
+        # add the intersection of each var with the types of vars in typeVars_to_sampleID_to_variants_series
+        for typeVars, sampleID_to_variants in typeVars_to_sampleID_to_variants_series.items():
+            print(typeVars, "map each sample")
+
+            # init the field of other samples
+            small_vars_df["other_samples_with_%s"%typeVars] = ""
+
+            # map each sample that is mapping 
+            for Is, (sampleID, variants) in enumerate(sampleID_to_variants.items()):
+                print(sampleID)
+                bool_to_text = {True: ","+sampleID, False:""}
+                small_vars_df["other_samples_with_%s"%typeVars] += small_vars_df["#Uploaded_variation"].isin(variants).map(bool_to_text)
+
+        ##################################################
+
+        # clean intermediate files
+        delete_folder(tmpdir)
+
+        # write dfs
+        print("writing")
+        save_df_as_tab(small_vars_df, small_vars_df_file)
+
+    #############################################
+
+
+def get_integrated_CNperWindow_df_severalSamples(paths_df, outdir, threads=4, replace=False):
+
+    """
+    This function generates several datsets under outdir that result from the integration of several CNV callsets by perSVade. These are the arguments:
+
+    - paths_df should be a df that contains sampleID and perSVade_outdir. These are the datasets to integrate. IT can be a filepath
+    - outdir is the directory where to store the integrated variant calling files
+    - fields_varCall and fields_varAnnot indicate whether to keep only some fields. They should be a list or "all"
+
+    """
+
+    # make the outdir
+    make_folder(outdir)
+
+    # define paths_df
+    if type(paths_df)==str: paths_df = get_tab_as_df_or_empty_df(paths_df)
+    paths_df["sampleID"] = paths_df["sampleID"].apply(str)
+
+
+    # define the required file
+    integrated_CNperWindow_df = "%s/integrated_CNperWindow.tab"%outdir
+
+
+    if file_is_empty(integrated_CNperWindow_df) or replace is True:
+        print("getting CN-perWindow dataframe")
+
+        # init df
+        df_CN = pd.DataFrame()
+
+        for Is, (sampleID, perSVade_outdir) in enumerate(paths_df[["sampleID", "perSVade_outdir"]].values):
+            print("%i/%i: %s"%(Is+1, len(paths_df), sampleID))
+
+            df_CN_sample = get_tab_as_df_or_empty_df("%s/CNV_calling/final_df_coverage.tab"%(perSVade_outdir))
+            df_CN_sample["sampleID"] = sampleID
+            df_CN = df_CN.append(df_CN_sample)
+
+        print("saving")
+        save_df_as_tab(df_CN, integrated_CNperWindow_df)
+
+    return integrated_CNperWindow_df
+
+def get_integrated_SV_CNV_df_severalSamples(paths_df, outdir, gff, reference_genome, threads=4, replace=False, integrated_CNperWindow_file=None, fields_varCall="all", fields_varAnnot="all", tol_bp=50, pct_overlap=0.75):
+
+    """
+    This function integrates the SV and CNV calling .vcf file from different perSVade runs
+
+    - paths_df should be a df that contains sampleID and perSVade_outdir. These are the datasets to integrate. IT can be a filepath
+    - outdir is the directory where to store the integrated variant calling files
+    - integrated_CNperWindow_file is a file generated with get_integrated_CNperWindow_df_severalSamples. If None, it will be assumed that no CNV calling was performed
+    - gff and reference_genome should be the same ones provided to perSVade
+    - fields_varCall and fields_varAnnot indicate whether to keep only some fields. They should be a list or "all"
+    - tol_bp and pct_overlap are parameters for definining that two SVs are the same. By default, two SVs are defined to be the same if they are from the same type, the breakends overlap by <50 bp and (in the case of inversions, duplications, deletions) the overlap is >=75% 
+
+    """
+
+    # make the outdir
+    make_folder(outdir)
+
+    # define paths_df
+    if type(paths_df)==str: paths_df = get_tab_as_df_or_empty_df(paths_df)
+    paths_df["sampleID"] = paths_df["sampleID"].apply(str)
+
+    #paths_df = paths_df.iloc[0:5] # debug
+
+    # define the dirs
+    SV_CNV_file = "%s/SV_CNV.tab"%(outdir)
+    SV_CNV_file_simple = "%s/SV_CNV.simple.tab"%(outdir)
+    SV_CNV_annot_file = "%s/SV_CNV_annot.tab"%(outdir)
+    integrated_gridss_df = "%s/integrated_gridss_df.tab"%(outdir)
+    integrated_bedpe_df = "%s/integrated_bedpe_df.tab"%(outdir)
+
+    # define the samples to run
+    samples_to_run = set(paths_df.sampleID)
+
+    ####### GET THE SIMLY MERGED DFS ##########
+
+    if file_is_empty(SV_CNV_file_simple) or file_is_empty(SV_CNV_annot_file) or replace is True:
+        print("getting stacked SV_CNV files")
+
+        # create a dict that maps each sample to the SV CNV df files
+        sampleID_to_SV_dataDict = {sampleID : {"sampleID":sampleID,  "SV_CNV_vcf":"%s/SVcalling_output/SV_and_CNV_variant_calling.vcf"%(perSVade_outdir),  "SV_CNV_var_annotation":"%s/SVcalling_output/SV_and_CNV_variant_calling.vcf_annotated_VEP.tab"%(perSVade_outdir)}for sampleID, perSVade_outdir in paths_df[["sampleID", "perSVade_outdir"]].values}
+
+        # get the integrated SV_CNV dfs
+        df_data = pd.DataFrame(sampleID_to_SV_dataDict).transpose()
+        file_prefix = "%s/integrated_SV_CNV_calling"%outdir
+        SV_CNV, SV_CNV_annot = get_integrated_variants_into_one_df(df_data, file_prefix, replace=True, remove_files=True)[2:]
+
+        # add the gff
+        gff_df = load_gff3_intoDF(gff, replace=False)
+        all_protein_coding_genes = set(gff_df[gff_df.feature.isin({"CDS", "mRNA"})].upmost_parent)
+        SV_CNV_annot["is_protein_coding_gene"] = SV_CNV_annot.Gene.isin(all_protein_coding_genes)
+        SV_CNV_annot["is_transcript_disrupting"] = SV_CNV_annot.Consequence.apply(get_is_transcript_disrupting_consequence_SV)
+
+        # keep only some fields
+        if fields_varCall!="all": 
+            fields_varCall = sorted(set(fields_varCall).difference({"sampleID"})) + ["sampleID"]
+            SV_CNV = SV_CNV[fields_varCall]
+
+        if fields_varAnnot!="all": 
+            fields_varAnnot = sorted(set(fields_varCall).difference({"is_protein_coding_gene", "is_transcript_disrupting"})) + ["is_protein_coding_gene", "is_transcript_disrupting"]
+            SV_CNV_annot = SV_CNV_annot[fields_varAnnot]
+
+
+        for I, f in enumerate(list(SV_CNV.keys())): print(I+1, f)
+
+        # save dfs
+        print("writing")
+        save_df_as_tab(SV_CNV, SV_CNV_file_simple)
+        save_df_as_tab(SV_CNV_annot, SV_CNV_annot_file)
+        
+    ###########################################
+
+    # load the CNV per window calling df
+    if integrated_CNperWindow_file is  not None: df_CN_all = get_tab_as_df_or_empty_df(integrated_CNperWindow_file)
+    else: df_CN_all = None
+
+    ####### GET THE INTEGRATED GRIDSS DF AND BEDPE DF ######
+
+    # generates a gridss df that has all the breakpoints
+
+    if file_is_empty(integrated_gridss_df) or file_is_empty(integrated_bedpe_df) or replace is True:
+        print("generating integrated gridss df")
+
+        # make a folder to integrate the gridss df
+        outdir_integrating_gridss_df = "%s/intergrating_gridss_df"%outdir
+        delete_folder(outdir_integrating_gridss_df)
+        make_folder(outdir_integrating_gridss_df)
+
+        # init
+        df_gridss_all = pd.DataFrame()
+        df_bedpe_all = pd.DataFrame()
+
+        for Is, (sampleID, perSVade_outdir) in enumerate(paths_df[["sampleID", "perSVade_outdir"]].values):
+            print("%i/%i: %s"%(Is+1, len(paths_df), sampleID))
+
+            # get the outdir
+            outdir_gridss = "%s/SVdetection_output/final_gridss_running"%(perSVade_outdir)
+
+            # define the filenames original
+            origin_gridss_vcf_raw_file = "%s/gridss_output.raw.vcf"%outdir_gridss
+            origin_gridss_vcf_filt_file = "%s/gridss_output.filt.vcf"%outdir_gridss
+
+            # put them into the outdir_integrating_gridss_df
+            gridss_vcf_raw_file = "%s/%s_gridss_output.raw.vcf"%(outdir_integrating_gridss_df, sampleID)
+            gridss_vcf_filt_file = "%s/%s_gridss_output.filt.vcf"%(outdir_integrating_gridss_df, sampleID)
+            soft_link_files(origin_gridss_vcf_raw_file, gridss_vcf_raw_file)
+            soft_link_files(origin_gridss_vcf_filt_file, gridss_vcf_filt_file)
+
+            ## GET THE BEDPE ##
+
+            # get the bedpe files
+            bedpe_raw = get_tab_as_df_or_empty_df(get_bedpe_from_svVCF(gridss_vcf_raw_file, outdir_integrating_gridss_df, replace=False, only_simple_conversion=True))
+            bedpe_filt = get_tab_as_df_or_empty_df(get_bedpe_from_svVCF(gridss_vcf_filt_file, outdir_integrating_gridss_df, replace=False, only_simple_conversion=True))
+
+            # add whether it is PASS
+            pass_breakpoints = set(bedpe_filt.name)
+            bedpe_raw["PASSed_filters"] = bedpe_raw.name.isin(pass_breakpoints)
+            
+            # add name and keep
+            bedpe_raw["sampleID"] = sampleID
+            df_bedpe_all = df_bedpe_all.append(bedpe_raw)
+            ###################
+
+            ## GET THE GRIDSS ##
+
+            # get the gridss vcfs
+            gridss_vcf_raw = get_df_and_header_from_vcf(gridss_vcf_raw_file)[0]
+            gridss_vcf_filt = get_df_and_header_from_vcf(gridss_vcf_filt_file)[0]
+
+            # change names
+            sample_name_vcf = gridss_vcf_raw.columns[-1]
+            gridss_vcf_raw = gridss_vcf_raw.rename(columns={sample_name_vcf:"DATA"})
+            gridss_vcf_filt = gridss_vcf_filt.rename(columns={sample_name_vcf:"DATA"})
+
+            # add whether it passed the filters
+            pass_variants = set(gridss_vcf_filt.ID)
+            gridss_vcf_raw["PASSed_filters"] = gridss_vcf_raw.ID.isin(pass_variants)
+            gridss_vcf_raw["sampleID"] = sampleID
+
+            # keep
+            df_gridss_all = df_gridss_all.append(gridss_vcf_raw)
+
+            ####################
+
+        # clean
+        delete_folder(outdir_integrating_gridss_df)
+
+        # save
+        save_df_as_tab(df_gridss_all, integrated_gridss_df)
+        save_df_as_tab(df_bedpe_all, integrated_bedpe_df)
+
+    # load the df
+    df_gridss_all = get_tab_as_df_or_empty_df(integrated_gridss_df)
+    df_bedpe_all = get_tab_as_df_or_empty_df(integrated_bedpe_df)
+
+    ###########################################
+
+    ######### GET THE COMMON DF OF SVs #########
+
+    if file_is_empty(SV_CNV_file) or replace is True:
+        print("adding the intersecting variants between samples")
+
+        # loading SV_CNV simple
+        SV_CNV = get_tab_as_df_or_empty_df(SV_CNV_file_simple)
+
+        # add the common variant ID across samples
+        outdir_common_variantID_acrossSamples = "%s/getting_common_variantID_acrossSamples"%outdir
+        
+        # add the overlaps with other samples
+        SV_CNV = get_SV_CNV_df_with_overlaps_with_all_samples(SV_CNV, outdir_common_variantID_acrossSamples, tol_bp, pct_overlap, outdir, df_bedpe_all, df_CN_all, threads, reference_genome)
+
+        # get the common variant ID
+        print("adding the common variant ID")
+        SV_CNV = get_SV_CNV_df_with_common_variantID_acrossSamples(SV_CNV, outdir_common_variantID_acrossSamples, pct_overlap, tol_bp)
+
+        # keep relevant files
+        SV_CNV = SV_CNV[[k for k in SV_CNV.keys() if k!="INFO"]]
+
+
+        delete_folder(outdir_common_variantID_acrossSamples)
+
+        # keep
+        save_df_as_tab(SV_CNV, SV_CNV_file)
+
+    #############################################
 
 #######################################################################################
 #######################################################################################
