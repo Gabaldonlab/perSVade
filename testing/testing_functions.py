@@ -35,7 +35,9 @@ import sv_functions as fun
 
 import matplotlib
 import matplotlib.pyplot as plt
-if run_in_cluster is False: matplotlib.use('TkAgg')
+if run_in_cluster is False: 
+    try: matplotlib.use('TkAgg')
+    except: print("setting TkAgg does not work") 
 
 ######################
 
@@ -1081,7 +1083,7 @@ def get_cross_accuracy_df_several_perSVadeSimulations(outdir_testing, genomes_an
 
 
 
-def generate_heatmap_accuracy_of_parameters_on_test_samples(df_benchmark, fileprefix, replace=False, threads=4, accuracy_f="Fvalue", svtype="integrated", col_cluster = False, row_cluster = False, show_only_species_and_simType=False):
+def generate_heatmap_accuracy_of_parameters_on_test_samples(df_benchmark, fileprefix, replace=False, threads=4, accuracy_f="Fvalue", svtype="integrated", col_cluster = False, row_cluster = False, show_only_species_and_simType=False, multiplier_width_colorbars=3, show_only_species=False):
 
     """
     This function takes a df where each row is one set of training parameters and test data svtype, together with the accuracy records. It generates a heatmap were the rows are each of the training parameters and the cols are the test samples.
@@ -1167,6 +1169,12 @@ def generate_heatmap_accuracy_of_parameters_on_test_samples(df_benchmark, filepr
         row_colors_df = row_colors_df[["parms_species", "parms_typeSimulations"]]
         col_colors_df = col_colors_df[["test_species", "test_typeSimulations"]]
 
+    # keep only species colors
+    if show_only_species is True:
+
+        row_colors_df = row_colors_df[["parms_species"]]
+        col_colors_df = col_colors_df[["test_species"]]
+
 
     # get the plot
     filename = "%s_cross_accuracy_%s_%s_%s_%s.pdf"%(fileprefix, accuracy_f, svtype, col_cluster, row_cluster)
@@ -1175,7 +1183,7 @@ def generate_heatmap_accuracy_of_parameters_on_test_samples(df_benchmark, filepr
     # define the figure size
     figsize = (int(len(df_square.columns)*0.03), int(len(df_square)*0.03))
 
-    fun.plot_clustermap_with_annotation(df_square, row_colors_df, col_colors_df, filename, title="cross accuracy", col_cluster=col_cluster, row_cluster=row_cluster, colorbar_label=accuracy_f, adjust_position=True, legend=True, idxs_separator_pattern="||||", texts_to_strip={"L001"}, default_label_legend="control", df_annotations=df_annotations, cmap=sns.color_palette("RdBu_r", 50), ylabels_graphics_df=None, grid_lines=False, figsize=figsize, multiplier_width_colorbars=3)
+    fun.plot_clustermap_with_annotation(df_square, row_colors_df, col_colors_df, filename, title="cross accuracy", col_cluster=col_cluster, row_cluster=row_cluster, colorbar_label=accuracy_f, adjust_position=True, legend=True, idxs_separator_pattern="||||", texts_to_strip={"L001"}, default_label_legend="control", df_annotations=df_annotations, cmap=sns.color_palette("RdBu_r", 50), ylabels_graphics_df=None, grid_lines=False, figsize=figsize, multiplier_width_colorbars=multiplier_width_colorbars)
 
 
 
@@ -1316,6 +1324,41 @@ def get_crossaccuracy_distributions(df_cross_accuracy_benchmark, fileprefix, acc
     filename = "%s_%s_%s.pdf"%(fileprefix, accuracy_f, svtype)
     fig.savefig(filename, bbox_inches='tight')
     #plt.close(fig)
+
+def plot_accuracy_distributions_sameRun_bySpecies(df_cross_accuracy_benchmark, fileprefix, accuracy_f="Fvalue", all_types_simulations={"fast", "uniform"}, all_types_comparisons={'fast', 'same_run_and_simulation'}, svtype="integrated", ylim=[0,1.1]):
+
+    """This plots on the X the test species and the hue is the type_comparison"""
+
+
+    # get the df
+    df_plot = df_cross_accuracy_benchmark[(df_cross_accuracy_benchmark.parms_typeSimulations.isin(all_types_simulations)) & (df_cross_accuracy_benchmark.test_typeSimulations.isin(all_types_simulations)) & (df_cross_accuracy_benchmark.type_comparison.isin(all_types_comparisons)) & (df_cross_accuracy_benchmark.svtype==svtype)]
+
+    # define vars
+    palette = {"fast":"silver", "same_run_and_simulation":"black"}
+
+    # plot
+    fig = plt.figure(figsize=(5, 3))
+
+
+    # add violin
+    ax = sns.violinplot(x="test_species", y=accuracy_f, hue="type_comparison", data=df_plot, palette=palette, linewidth=.5, color=palette, dodge=True, split=False)
+
+    for art in ax.get_children():
+        if type(art)==matplotlib.collections.PolyCollection: art.set_alpha(0.4)
+
+
+    #ax = sns.stripplot(data=df_plot, x="test_species", y=accuracy_f, hue="type_comparison", palette=palette,  dodge=True,  linewidth=.01, edgecolor="gray", size=3, alpha=.4)
+    ax = sns.swarmplot(data=df_plot, x="test_species", y=accuracy_f, hue="type_comparison", palette=palette,  dodge=True,  linewidth=.01, edgecolor="dimgray", size=6, alpha=.9)
+
+    
+
+
+    for label in ax.get_xticklabels(): label.set_rotation(90)
+    ax.legend(bbox_to_anchor=(1, 1))
+    ax.set_ylim(ylim)
+
+    filename = "%s_%s_%s.pdf"%(fileprefix, accuracy_f, svtype)
+    fig.savefig(filename, bbox_inches='tight')
 
 
 def rsync_file_shh(origin, target):

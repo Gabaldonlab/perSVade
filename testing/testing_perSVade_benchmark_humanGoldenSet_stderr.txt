@@ -1,5 +1,4 @@
-/gpfs/projects/bsc40/mschikora/anaconda3/envs/perSVade_env/lib/python3.6/site-packages/plotly/tools.py:103: UserWarning:
-
-Looks like you don't have 'read-write' permission to your 'home' ('~') directory or to our '~/.plotly' directory. That means plotly's python api can't setup local configuration files. No problem though! You'll just have to sign-in using 'plotly.plotly.sign_in()'. For help with that: 'help(plotly.plotly.sign_in)'.
-Questions? Visit https://support.plot.ly
-
+Traceback (most recent call last):
+  File "./testing_humanGoldenSet.py", line 130, in <module>
+    print(close_shortReads_table_df)
+NameError: name 'genome_name' is not defined

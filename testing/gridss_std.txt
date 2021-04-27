@@ -1,0 +1,1 @@
+sh: /gpfs/projects/bsc40/mschikora/scripts/perSVade/releases/perSVade-0.8/scripts/../installation/external_software/gridss.sh: Permiso denegado
