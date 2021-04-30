@@ -1141,7 +1141,7 @@ def run_gatk_HaplotypeCaller(outdir_gatk, ref, sorted_bam, ploidy, threads, cove
     # return the filtered file
     return gatk_out_filtered
 
-def run_bwa_mem(fastq1, fastq2, ref, outdir, bamfile, sorted_bam, index_bam, name_sample, threads=1, replace=False, MarkDuplicates=True):
+def run_bwa_mem(fastq1, fastq2, ref, outdir, bamfile, sorted_bam, index_bam, name_sample, threads=1, replace=False, MarkDuplicates=True, tmpdir_writingFiles=None):
 
     """Takes a set of files and runs bwa mem getting sorted_bam and index_bam. skip_MarkingDuplicates will not mark duplicates"""
 
@@ -1195,7 +1195,7 @@ def run_bwa_mem(fastq1, fastq2, ref, outdir, bamfile, sorted_bam, index_bam, nam
 
 
         if MarkDuplicates is True:
-            bamfile_MarkedDuplicates = get_bam_with_duplicatesMarkedSpark(bamfile, threads=threads, replace=replace)
+            bamfile_MarkedDuplicates = get_bam_with_duplicatesMarkedSpark(bamfile, threads=threads, replace=replace, tmpdir_writingFiles=tmpdir_writingFiles)
 
         else: bamfile_MarkedDuplicates = bamfile
 
@@ -3240,8 +3240,9 @@ def get_distanceToTelomere_chromosome_GCcontent_to_coverage_fn(df_coverage_train
         if len(chroms)==0: continue
 
         # get the df and median coverage for this genome
-        df_cov = df[df.chromosome.isin(chroms)]
-        median_coverage_genome = get_median_coverage(df_cov, mitochondrial_chromosome)
+        df_cov = df[(df.chromosome.isin(chroms)) & (df.mediancov_1>0)]
+        if len(df_cov)>0: median_coverage_genome = get_median_coverage(df_cov, mitochondrial_chromosome)
+        else: median_coverage_genome = median_coverage_all
 
         # define so that all windows get the same
         fn_cov_fromGCcontent = (lambda GC: median_coverage_genome)
@@ -7095,7 +7096,7 @@ def clean_perSVade_outdir(outdir):
 
     ###########################################
 
-def get_compatible_real_bedpe_breakpoints(close_shortReads_table, reference_genome, outdir, replace=False, threads=4, mitochondrial_chromosome="mito_C_glabrata_CBS138", job_array_mode="local", max_nvars=100, parameters_json_file=None):
+def get_compatible_real_bedpe_breakpoints(close_shortReads_table, reference_genome, outdir, replace=False, threads=4, mitochondrial_chromosome="mito_C_glabrata_CBS138", job_array_mode="local", max_nvars=100, parameters_json_file=None,  tmpdir=None):
 
     """Generates a file under outdir that has the stacked breakpoints arround which to generate SV calls
     realSV_calling_on can be reads or assembly"""
@@ -7142,11 +7143,12 @@ def get_compatible_real_bedpe_breakpoints(close_shortReads_table, reference_geno
             print_if_verbose("getting vars for %s"%ID)
 
             # define the cmd. This is a normal perSvade.py run with the vars of the previous dir  
-            cmd = "python %s -r %s --threads %i --outdir %s  --mitochondrial_chromosome %s --fast_SVcalling --previous_repeats_table %s --min_CNVsize_coverageBased %i --skip_CNV_calling --skip_SV_CNV_calling"%(perSVade_py, reference_genome, threads, outdir_gridssClove, mitochondrial_chromosome, previous_repeats_table, min_CNVsize_coverageBased)
+            cmd = "python %s -r %s --threads %i --outdir %s  --mitochondrial_chromosome %s --fast_SVcalling --previous_repeats_table %s --min_CNVsize_coverageBased %i --skip_CNV_calling --skip_SV_CNV_calling --fractionRAM_to_dedicate %.2f"%(perSVade_py, reference_genome, threads, outdir_gridssClove, mitochondrial_chromosome, previous_repeats_table, min_CNVsize_coverageBased, fractionRAM_to_dedicate)
 
             # add arguments depending on the pipeline
             if replace is True: cmd += " --replace"
             if parameters_json_file is not None: cmd += " --parameters_json_file %s"%parameters_json_file
+            if tmpdir is not None: cmd += " --tmpdir %s"%tmpdir
 
             # add the input
             all_keys_df = set(df_genomes.keys())
@@ -10658,7 +10660,7 @@ def report_accuracy_realSVs_perSVadeRuns(close_shortReads_table, reference_genom
             if file_is_empty(final_file) or replace is True:# or file_is_empty(parameters_file):
 
                 # define the cmd. This is a normal perSvade.py run with the vars of the previous dir  
-                cmd = "python %s -r %s --threads %i --outdir %s --nvars %i --nsimulations %i --simulation_ploidies %s --range_filtering_benchmark %s --mitochondrial_chromosome %s -f1 %s -f2 %s --previous_repeats_table %s --min_CNVsize_coverageBased %i --keep_simulation_files --simulate_SVs_arround_HomologousRegions_maxEvalue %.10f --simulate_SVs_arround_HomologousRegions_queryWindowSize %i"%(perSVade_py, reference_genome, threads, outdir_runID, nvars, n_simulated_genomes, ",".join(simulation_ploidies), range_filtering_benchmark, mitochondrial_chromosome, r1, r2, previous_repeats_table, min_CNVsize_coverageBased, simulate_SVs_arround_HomologousRegions_maxEvalue, simulate_SVs_arround_HomologousRegions_queryWindowSize)
+                cmd = "python %s -r %s --threads %i --outdir %s --nvars %i --nsimulations %i --simulation_ploidies %s --range_filtering_benchmark %s --mitochondrial_chromosome %s -f1 %s -f2 %s --previous_repeats_table %s --min_CNVsize_coverageBased %i --keep_simulation_files --simulate_SVs_arround_HomologousRegions_maxEvalue %.10f --simulate_SVs_arround_HomologousRegions_queryWindowSize %i --fractionRAM_to_dedicate %.2f"%(perSVade_py, reference_genome, threads, outdir_runID, nvars, n_simulated_genomes, ",".join(simulation_ploidies), range_filtering_benchmark, mitochondrial_chromosome, r1, r2, previous_repeats_table, min_CNVsize_coverageBased, simulate_SVs_arround_HomologousRegions_maxEvalue, simulate_SVs_arround_HomologousRegions_queryWindowSize, fractionRAM_to_dedicate)
 
                 # add arguments depending on the pipeline
                 if replace is True: cmd += " --replace"
@@ -11135,7 +11137,7 @@ def report_accuracy_golden_set_runJobs(goldenSet_table, outdir, reference_genome
             if file_is_empty(final_file) or replace is True:
 
                 # define the cmd. This is a normal perSvade.py run with the vars of the previous dir  
-                cmd = "python %s -r %s --threads %i --outdir %s --nvars %i --nsimulations %i --simulation_ploidies %s --range_filtering_benchmark %s --mitochondrial_chromosome %s --previous_repeats_table %s --skip_SV_CNV_calling --skip_CNV_calling --QC_and_trimming_reads --other_perSVade_outdirs_sameReadsANDalignment %s --simulate_SVs_arround_HomologousRegions_maxEvalue %.10f --simulate_SVs_arround_HomologousRegions_queryWindowSize %i --keep_simulation_files %s"%(perSVade_py, reference_genome, threads, outdir_sample, nvars, n_simulated_genomes, ",".join(simulation_ploidies), range_filtering_benchmark, mitochondrial_chromosome, previous_repeats_table, other_perSVade_outdirs_sameReadsANDalignment, simulate_SVs_arround_HomologousRegions_maxEvalue, simulate_SVs_arround_HomologousRegions_queryWindowSize, r.input_short_reads_str)
+                cmd = "python %s -r %s --threads %i --outdir %s --nvars %i --nsimulations %i --simulation_ploidies %s --range_filtering_benchmark %s --mitochondrial_chromosome %s --previous_repeats_table %s --skip_SV_CNV_calling --skip_CNV_calling --QC_and_trimming_reads --other_perSVade_outdirs_sameReadsANDalignment %s --simulate_SVs_arround_HomologousRegions_maxEvalue %.10f --simulate_SVs_arround_HomologousRegions_queryWindowSize %i --keep_simulation_files %s --fractionRAM_to_dedicate %.2f"%(perSVade_py, reference_genome, threads, outdir_sample, nvars, n_simulated_genomes, ",".join(simulation_ploidies), range_filtering_benchmark, mitochondrial_chromosome, previous_repeats_table, other_perSVade_outdirs_sameReadsANDalignment, simulate_SVs_arround_HomologousRegions_maxEvalue, simulate_SVs_arround_HomologousRegions_queryWindowSize, r.input_short_reads_str, fractionRAM_to_dedicate)
 
                 # add arguments depending on the pipeline
                 if replace is True: cmd += " --replace"
@@ -12211,8 +12213,19 @@ def remove_smallVarsCNV_nonEssentialFiles_severalPloidies(outdir, ploidies):
 
     for f in files_to_remove: remove_file(f)
 
+def get_new_tmpdir(tmpdir_writingFiles):
 
-def get_bam_with_duplicatesMarkedSpark(bam, threads=4, replace=False, remove_duplicates=False):
+    """Creates a new tmpdir under tmpdir_writingFiles"""
+
+    # define the already existing tmpdirs
+    already_existing_files = set(os.listdir(tmpdir_writingFiles))
+
+    # get the ID of the folder
+    tmpdir_name = id_generator(15, chars=string.ascii_uppercase, already_existing_ids=already_existing_files)
+
+    return "%s/%s"%(tmpdir_writingFiles, tmpdir_name)
+
+def get_bam_with_duplicatesMarkedSpark(bam, threads=4, replace=False, remove_duplicates=False, tmpdir_writingFiles=None):
 
     """
     This function takes a bam file and runs MarkDuplicatesSpark (most efficient when the input bam is NOT coordinate-sorted) returning the bam with the duplicates sorted. It does not compute metrics to make it faster. Some notes about MarkDuplicatesSpark:
@@ -12247,7 +12260,10 @@ def get_bam_with_duplicatesMarkedSpark(bam, threads=4, replace=False, remove_dup
         # define the java memory
         
         # define the tmpdir
-        tmpdir = "%s.runningMarkDups_tmp"%bam
+        if tmpdir_writingFiles is None: tmpdir = "%s.runningMarkDups_tmp"%bam
+        else: tmpdir = get_new_tmpdir(tmpdir_writingFiles)
+
+        delete_folder("%s.runningMarkDups_tmp"%bam)
         delete_folder(tmpdir)
         make_folder(tmpdir)
 
@@ -12267,7 +12283,12 @@ def get_bam_with_duplicatesMarkedSpark(bam, threads=4, replace=False, remove_dup
 
         try: 
 
-            run_cmd("%s --java-options '-Xms%ig -Xmx%ig' MarkDuplicatesSpark -I %s -O %s --verbosity INFO --tmp-dir %s  --create-output-variant-index false --create-output-bam-splitting-index false --create-output-bam-index false --remove-all-duplicates %s > %s 2>&1"%(gatk, javaRamGb, javaRamGb, bam, bam_dupMarked_tmp, tmpdir, remove_duplicates_str, markduplicates_std))
+            # normal (old) run
+            #run_cmd("%s --java-options '-Xms%ig -Xmx%ig' MarkDuplicatesSpark -I %s -O %s --verbosity INFO --tmp-dir %s  --create-output-variant-index false --create-output-bam-splitting-index false --create-output-bam-index false --remove-all-duplicates %s > %s 2>&1"%(gatk, javaRamGb, javaRamGb, bam, bam_dupMarked_tmp, tmpdir, remove_duplicates_str, markduplicates_std))
+
+            # use all available cores
+            run_cmd("%s --java-options '-Xms%ig -Xmx%ig' MarkDuplicatesSpark --spark-master local[%i] -I %s -O %s --verbosity INFO --tmp-dir %s  --create-output-variant-index false --create-output-bam-splitting-index false --create-output-bam-index false --remove-all-duplicates %s > %s 2>&1"%(gatk, javaRamGb, javaRamGb, threads, bam, bam_dupMarked_tmp, tmpdir, remove_duplicates_str, markduplicates_std))
+
 
             print_if_verbose("MarkDuplicatesSpark worked correctly")
 
@@ -12276,7 +12297,6 @@ def get_bam_with_duplicatesMarkedSpark(bam, threads=4, replace=False, remove_dup
             # define the MarkDuplicatesSpark options
             MarkDuplicatesSpark_log = "%s.MarkDuplicatesSpark_failed.log"%bam
             os.rename(markduplicates_std, MarkDuplicatesSpark_log)
-
 
 
             print_if_verbose("MarkDuplicatesSpark did not work on the current memory configuration. Trying with the normal MarkDuplicates. You can check the failed log of MarkDuplicatesSpark_failed in %s"%MarkDuplicatesSpark_log)
@@ -12434,8 +12454,9 @@ def get_crossValidated_rsquare_HMMcopy_givenParameters(Ip, parameters_dict, outf
         # get the test df
         df_test = testing_coverage_dfs[cvID]
 
-        # get the rsquares for each chromosome
-        rsquare = np.mean(list(map(lambda c: get_rsquare_one_chromosome_crossValidated_rsquare_HMMcopy(df_train, df_test, c), set(df_train.chr))))
+        # get the rsquares for each chromosome that has at least 3 testing windows
+        interesting_chromosomes_r2 = {c for c in set(df_train.chr) if sum(df_test.chr==c)>=3}
+        rsquare = np.mean(list(map(lambda c: get_rsquare_one_chromosome_crossValidated_rsquare_HMMcopy(df_train, df_test, c), interesting_chromosomes_r2)))
 
         if rsquare<=0: break
 
@@ -14194,8 +14215,6 @@ def run_CNV_calling(sorted_bam, reference_genome, outdir, threads, replace, mito
                 save_df_as_tab(df_CNperWindow_AneuFinder, df_CNperWindow_AneuFinder_file)
 
             df_CNperWindow_AneuFinder = get_tab_as_df_or_empty_df(df_CNperWindow_AneuFinder_file)
-
-            print(df_CNperWindow_AneuFinder)
 
             df_coverage = df_coverage.merge(df_CNperWindow_AneuFinder[["chromosome", "start", "end", "relative_CN"]], on=["chromosome", "start", "end"], left_index=False, right_index=False, how="left", validate="one_to_one").rename(columns={"relative_CN":"relative_CN_AneuFinder"})
 
@@ -17137,6 +17156,9 @@ def get_correct_INFO_with_bendIDs_and_bendStats(r, df_gridss):
         # define the positions where the breakend should be found
         if "END" in info: 
 
+            # check that the sorting is the same
+            if r["POS"]>=info["END"]: raise ValueError("END should be after POS")
+
             # sort df_gridss by pos
             df_gridss = df_gridss.sort_values(by="POS")
 
@@ -17172,11 +17194,24 @@ def get_correct_INFO_with_bendIDs_and_bendStats(r, df_gridss):
             # any breakend, even if it is not from the same breakpoint can be interesting
             else:
 
-                # get the breakends that are closest to the positions
-                breakend_IDs = [sorted([(bendID, abs(r_bend["POS"]-target_pos)) for bendID, r_bend in df_gridss.iterrows()], key=(lambda x: x[1]))[0][0] for target_pos in [r["POS"], info["END"]]]
+                # if there are two breakends, get the combination that is best matched (remember that gridss is sorted by POS)
+                if len(df_gridss)==2: breakend_IDs = list(df_gridss.index) # the first is for POS and the second for END
+
+                # in general, get the breakends that are closest to the positions
+                else: breakend_IDs = [sorted([(bendID, abs(r_bend["POS"]-target_pos)) for bendID, r_bend in df_gridss.iterrows()], key=(lambda x: x[1]))[0][0] for target_pos in [r["POS"], info["END"]]]
 
                 # check that these are two different breakends
-                if len(set(breakend_IDs))!=2: raise ValueError("the bend IDs are not unique")
+                if len(set(breakend_IDs))!=2: 
+
+                    print(bpointID_to_score)
+                    print(breakend_IDs)
+                    print(df_gridss, df_gridss.keys())
+                    print(df_gridss[["#CHROM", "POS", "ID"]])
+                    print(r)
+                    print(r.ID)
+                    print(r.info_as_dict)
+
+                    raise ValueError("the bend IDs are not unique")
 
         else: 
 
