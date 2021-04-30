@@ -79,7 +79,13 @@ resources_args.add_argument("-thr", "--threads", dest="threads", default=16, typ
 
 resources_args.add_argument("--fraction_available_mem", dest="fraction_available_mem", default=None, help="The fraction of RAM that is being allocated to this perSVade run. In several steps, this pipeline needs to calculate the available memory (using psutil.virtual_memory()). This returns all the available memory in the computer. If you are running on a fraction of the computers' resources, this calculation is overestimating the available RAM. In such case you can provide the fraction available through this argument. By default, it will calculate the available ram by filling the memory, which may give errors. It is highly reccommended that you provide this option. If you want to use all the allocated memory you should specify --fraction_available_mem 1.0")
 
+resources_args.add_argument("--fractionRAM_to_dedicate", dest="fractionRAM_to_dedicate", type=float,  default=0.5, help="This is the fraction of the available memory that will be used by several java programs that require a heap size. By default we set this to 0.5 to not overload the system")
+
+resources_args.add_argument("--tmpdir", dest="tmpdir", default=None, help="A full path to a directory where to write intermediate files. This is useful if you are running on a cluster that has some directories that have higher writing speed than others.")
+
 resources_args.add_argument("--min_gb_RAM_required", dest="min_gb_RAM_required", default=2, type=int, help="The minimum number of RAM required to run perSVade. This can be related to --fraction_available_mem")
+
+
 
 ##############################################
 
@@ -397,6 +403,10 @@ fun.printing_verbose_mode = opt.verbose
 fun.fraction_available_mem = opt.fraction_available_mem
 if opt.fraction_available_mem is None: print("WARNING: You did not specify how much RAM should be used through --fraction_available_mem. perSVade will calculate this by filling the memory, which may be dangerous. If you want to use all the allocated memory you should specify --fraction_available_mem 1.0")
 
+# define the fraction of RAM to dedicate
+if opt.fractionRAM_to_dedicate>0.95: raise ValueError("You are using >95 pct of the systems RAM, which is dangerous")
+fun.fractionRAM_to_dedicate = opt.fractionRAM_to_dedicate
+
 # define the min_CNVsize_coverageBased
 fun.min_CNVsize_coverageBased = opt.min_CNVsize_coverageBased
 
@@ -422,6 +432,10 @@ if opt.parameters_json_file is not None:
 
 # get the gff info
 if opt.gff is not None: correct_gff, gff_with_biotype = fun.get_correct_gff_and_gff_with_biotype(opt.gff, replace=opt.replace)
+
+# check that the tmpdir exists
+if opt.tmpdir is not None:
+	if not os.path.isdir(opt.tmpdir): raise ValueError("The folder that you specified with --tmpdir does not exist")
 
 # get the repeats table
 if opt.skip_repeat_analysis is False:
@@ -554,7 +568,7 @@ if not any([x=="skip" for x in {opt.fastq1, opt.fastq2}]):
                 if f not in {fun.get_file(opt.fastq1), fun.get_file(opt.fastq2)}: fun.delete_file_or_folder("%s/%s"%(reads_dir, f))
 
         print("WORKING ON ALIGNMENT")
-        fun.run_bwa_mem(opt.fastq1, opt.fastq2, opt.ref, opt.outdir, bamfile, sorted_bam, index_bam, name_sample, threads=opt.threads, replace=opt.replace)
+        fun.run_bwa_mem(opt.fastq1, opt.fastq2, opt.ref, opt.outdir, bamfile, sorted_bam, index_bam, name_sample, threads=opt.threads, replace=opt.replace, tmpdir_writingFiles=opt.tmpdir)
         fun.clean_sorted_bam_coverage_per_window_files(sorted_bam)
 
     else: print("Warning: No fastq file given, assuming that you provided a bam file")
@@ -649,7 +663,7 @@ elif opt.fast_SVcalling is False and opt.close_shortReads_table is not None:
         sys.exit(0) 
 
     # get the real SVs
-    real_bedpe_breakpoints = fun.get_compatible_real_bedpe_breakpoints(opt.close_shortReads_table, opt.ref, outdir_finding_realVars, replace=opt.replace, threads=opt.threads, max_nvars=opt.nvars, mitochondrial_chromosome=opt.mitochondrial_chromosome, job_array_mode=opt.job_array_mode, parameters_json_file=opt.parameters_json_file)
+    real_bedpe_breakpoints = fun.get_compatible_real_bedpe_breakpoints(opt.close_shortReads_table, opt.ref, outdir_finding_realVars, replace=opt.replace, threads=opt.threads, max_nvars=opt.nvars, mitochondrial_chromosome=opt.mitochondrial_chromosome, job_array_mode=opt.job_array_mode, parameters_json_file=opt.parameters_json_file, tmpdir=opt.tmpdir)
 
 else: 
     print("Avoiding the simulation of real variants. Only inserting randomSV.")
