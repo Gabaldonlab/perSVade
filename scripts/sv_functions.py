@@ -7149,6 +7149,7 @@ def get_compatible_real_bedpe_breakpoints(close_shortReads_table, reference_geno
             if replace is True: cmd += " --replace"
             if parameters_json_file is not None: cmd += " --parameters_json_file %s"%parameters_json_file
             if tmpdir is not None: cmd += " --tmpdir %s"%tmpdir
+            if fraction_available_mem is not None: cmd += " --fraction_available_mem %.2f"%fraction_available_mem
 
             # add the input
             all_keys_df = set(df_genomes.keys())
@@ -13521,56 +13522,60 @@ def get_y_corrected_by_x_LOWESS_crossValidation(df, xfield, yfield, outdir, thre
     # check that the index is unique
     if len(df.index)!=len(set(df.index)): raise ValueError("The index should be unique")
 
-
     # define the df_fitting as the one where the yfield is not 0
     df_fitting = df[(df[yfield]>0) & (df[yfield]<=max_y)]
 
-    # sort by the x
-    df_fitting = df_fitting.sort_values(by=[xfield, yfield])
+    # If there is nothing to fit, do not benchmark
+    if len(df_fitting)==0: df_benchmarking = pd.DataFrame()
 
-    ########## GET THE DF BENCHMARKED DF 10xCV ########## 
+    else:
 
-    # define the df_benckmarking file
-    df_benchmarking_file = "%s/df_benckmarking.tab"%outdir
+        # sort by the x
+        df_fitting = df_fitting.sort_values(by=[xfield, yfield])
 
-    if file_is_empty(df_benchmarking_file) or replace is True:
-        print_if_verbose("getting benchmarking for %s vs %s"%(xfield, yfield))
+        ########## GET THE DF BENCHMARKED DF 10xCV ########## 
 
-        # define parms
-        n_frac = 8
-        kfold = 4
+        # define the df_benckmarking file
+        df_benchmarking_file = "%s/df_benckmarking.tab"%outdir
 
-        # define all the fractions
-        min_frac = min([1/len(df_fitting), 0.05])
-        all_fractions = list(np.linspace(min_frac, 0.1, n_frac))
+        if file_is_empty(df_benchmarking_file) or replace is True:
+            print_if_verbose("getting benchmarking for %s vs %s"%(xfield, yfield))
 
-        # define several robustifying iteration
-        all_its = range(1, 3) 
+            # define parms
+            n_frac = 8
+            kfold = 4
 
-        # debug
-        if any(pd.isna(df_fitting[xfield])) or any(pd.isna(df_fitting[yfield])): raise ValueError("There are NaNs")
+            # define all the fractions
+            min_frac = min([1/len(df_fitting), 0.05])
+            all_fractions = list(np.linspace(min_frac, 0.1, n_frac))
 
-        # define the inputs of the benchmarking function
-        inputs_fn = make_flat_listOflists([[(kfold, frac, it, df_fitting, xfield, yfield, min_test_points_CV, outdir) for frac in all_fractions] for it in all_its])
+            # define several robustifying iteration
+            all_its = range(1, 3) 
 
-        # get a list of the benchmarking series in parallel
-        with multiproc.Pool(threads) as pool:
+            # debug
+            if any(pd.isna(df_fitting[xfield])) or any(pd.isna(df_fitting[yfield])): raise ValueError("There are NaNs")
 
-            list_benchmarking_series = pool.starmap(get_LOWESS_benchmarking_series_CV, inputs_fn) 
-            
-            pool.close()
-            pool.terminate()
+            # define the inputs of the benchmarking function
+            inputs_fn = make_flat_listOflists([[(kfold, frac, it, df_fitting, xfield, yfield, min_test_points_CV, outdir) for frac in all_fractions] for it in all_its])
 
-        # get as df
-        df_benchmarking = pd.DataFrame(list_benchmarking_series)
+            # get a list of the benchmarking series in parallel
+            with multiproc.Pool(threads) as pool:
 
-        # save
-        save_df_as_tab(df_benchmarking, df_benchmarking_file)
+                list_benchmarking_series = pool.starmap(get_LOWESS_benchmarking_series_CV, inputs_fn) 
+                
+                pool.close()
+                pool.terminate()
 
-    # load
-    df_benchmarking  = get_tab_as_df_or_empty_df(df_benchmarking_file)
+            # get as df
+            df_benchmarking = pd.DataFrame(list_benchmarking_series)
 
-    ##################################################### 
+            # save
+            save_df_as_tab(df_benchmarking, df_benchmarking_file)
+
+        # load
+        df_benchmarking  = get_tab_as_df_or_empty_df(df_benchmarking_file)
+
+        ##################################################### 
 
     if len(df_benchmarking)==0 or max(df_benchmarking.mean_rsquare)<min_r2: 
 
@@ -13860,6 +13865,8 @@ def get_df_coverage_with_corrected_coverage(df_coverage, reference_genome, outdi
 
                 # define the field of the predicted coverage from the predictors
                 predicted_coverage_field = "relative_coverage_predicted_from_%s_aferCorrBy_%s"%(predictor, "-".join(already_included_predictors))
+
+                print(df_cov, df_cov.keys(), max_relative_coverage, df_cov.corrected_relative_coverage)
 
                 # correct the coverage 
                 plots_prefix = "%s/final_fitting_round%i"%(plots_dir, pID+1)
@@ -17983,7 +17990,7 @@ def run_jobarray_file_Nord3_greasy(jobs_filename, name, time="12:00:00", queue="
     run_cmd("bsub < %s"%jobs_filename_run)
 
 
-def run_jobarray_file_MN4_greasy(jobs_filename, name, time="12:00:00", queue="bsc_ls", threads_per_job=4, nodes=1):
+def run_jobarray_file_MN4_greasy(jobs_filename, name, time="12:00:00", queue="bsc_ls", threads_per_job=4, nodes=1, constraint=None):
 
     """
     This function takes a jobs filename and creates a jobscript with args (which is a list of lines to be written to the jobs cript). It works in MN4 for greasy    
@@ -18015,6 +18022,10 @@ def run_jobarray_file_MN4_greasy(jobs_filename, name, time="12:00:00", queue="bs
     max_ntasks = int((requested_nodes*48)/threads_per_job)
     ntasks = min([njobs, max_ntasks])
 
+    # define the constraint line 
+    if constraint is not None: constraint_line = "#SBATCH --constraint=%s"%constraint
+    else: constraint_line = ""
+
     # define the arguments
     arguments = [ "#!/bin/sh",
                   "#SBATCH --error=%s"%stderr_file,
@@ -18026,6 +18037,7 @@ def run_jobarray_file_MN4_greasy(jobs_filename, name, time="12:00:00", queue="bs
                   "#SBATCH --qos=%s"%queue,
                   "#SBATCH --cpus-per-task=%i"%threads_per_job,
                   "#SBATCH --ntasks=%i"%ntasks,
+                  constraint_line,
                   "",
                   "module load greasy",
                   "export GREASY_LOGFILE=%s;"%(greasy_logfile),
