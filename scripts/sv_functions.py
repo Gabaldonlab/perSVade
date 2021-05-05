@@ -13734,7 +13734,7 @@ def verify_no_NaNs(series):
 
 
 
-def get_df_coverage_with_corrected_coverage(df_coverage, reference_genome, outdir, replace, threads, mitochondrial_chromosome, df_gridss, initial_predictor_fields=["GCcontent", "median_mappability"], fill_value_interpolation_finalFitting="extrapolate"):
+def get_df_coverage_with_corrected_coverage(df_coverage, reference_genome, outdir, replace, threads, mitochondrial_chromosome, initial_predictor_fields=["GCcontent", "median_mappability"], fill_value_interpolation_finalFitting="extrapolate"):
 
     """This function will take a df_coverage that has coverage_field as a proxy for coverage. It will add <coverage_field> which is a value that will be a ratio between the coverage_field and the coverage_field predicted from a loess regression taking into account mappability, GC content and distance to the telomere across the windows. The resulting value will be centered arround 1.  
 
@@ -13866,7 +13866,7 @@ def get_df_coverage_with_corrected_coverage(df_coverage, reference_genome, outdi
                 # define the field of the predicted coverage from the predictors
                 predicted_coverage_field = "relative_coverage_predicted_from_%s_aferCorrBy_%s"%(predictor, "-".join(already_included_predictors))
 
-                print(df_cov, df_cov.keys(), max_relative_coverage, df_cov.corrected_relative_coverage)
+                #print(df_cov, df_cov.keys(), max_relative_coverage, df_cov.corrected_relative_coverage)
 
                 # correct the coverage 
                 plots_prefix = "%s/final_fitting_round%i"%(plots_dir, pID+1)
@@ -14141,7 +14141,7 @@ def get_df_coverage_with_corrected_coverage_background(df_coverage, df_coverage_
 
 
 
-def run_CNV_calling(sorted_bam, reference_genome, outdir, threads, replace, mitochondrial_chromosome, df_gridss, window_size, ploidy, plot_correlation=True, bg_sorted_bam_CNV=None, cnv_calling_algs={"HMMcopy", "AneuFinder", "CONY"}):
+def run_CNV_calling(sorted_bam, reference_genome, outdir, threads, replace, mitochondrial_chromosome, window_size, ploidy, plot_correlation=True, bg_sorted_bam_CNV=None, cnv_calling_algs={"HMMcopy", "AneuFinder", "CONY"}):
 
     """This function takes a sorted bam and runs several programs on it to get the copy-number variation results. It is important that the sorted_bam contains no duplicates. It will correct bu GC content, mappability and distance to the telomere. All coverage will be corrected by GC content, mappability and the distance to the telomere, which will be calculated also taking into account breakpoint information. 
 
@@ -14169,7 +14169,7 @@ def run_CNV_calling(sorted_bam, reference_genome, outdir, threads, replace, mito
         # add the 'corrected_relative_coverage' by mappability, GC content and distance to the telomere
         if bg_sorted_bam_CNV is None:
 
-            df_coverage = get_df_coverage_with_corrected_coverage(df_coverage, reference_genome, outdir, replace, threads, mitochondrial_chromosome, df_gridss)
+            df_coverage = get_df_coverage_with_corrected_coverage(df_coverage, reference_genome, outdir, replace, threads, mitochondrial_chromosome)
 
         # if bg_sorted_bam_CNV is provided, calculate the "corrected_relative_coverage" as compared to the bg_sorted_bam_CNV
         else:
@@ -19379,10 +19379,6 @@ def get_integrated_SV_CNV_smallVars_df_from_run_perSVade_severalSamples(paths_df
 
     #############################################
 
-
-
-
-
 def get_s_small_vars_df_and_s_small_var_annot(Is, perSVade_outdir, sampleID, target_ploidy, fields_varCall, fields_varAnnot, tmpdir):
 
     """This function takes a perSVade outdir and re-writes the varcall file with no headers into tmpdir"""
@@ -19394,7 +19390,15 @@ def get_s_small_vars_df_and_s_small_var_annot(Is, perSVade_outdir, sampleID, tar
     if file_is_empty(small_vars_file):
 
         # get the variant calling
-        s_small_vars_df = pd.read_csv("%s/smallVars_CNV_output/variant_calling_ploidy%i.tab"%(perSVade_outdir, target_ploidy), sep="\t")[fields_varCall]
+        s_small_vars_df = pd.read_csv("%s/smallVars_CNV_output/variant_calling_ploidy%i.tab"%(perSVade_outdir, target_ploidy), sep="\t")
+
+        # add extra fields
+        missing_fields = set(fields_varCall).difference(set(s_small_vars_df.keys()))
+        if len(missing_fields)>0: print("WARNING: There are some missing fields (%s) in %s"%(missing_fields, sampleID))
+        for field in missing_fields: s_small_vars_df[field] = np.nan
+
+        # keep interesting fields 
+        s_small_vars_df = s_small_vars_df[fields_varCall]
 
         # add fields
         s_small_vars_df["sampleID"] = sampleID
@@ -19457,7 +19461,7 @@ def get_integrated_small_vars_df_severalSamples(paths_df, outdir, ploidy, run_pl
     coverage_df_file = "%s/merged_coverage.tab"%outdir
 
     if file_is_empty(coverage_df_file) or replace is True:
-        print("getting per gene coverage df")
+        print("getting per gene coverage df") # This took <10 Gb of RAM for 645 C. albincans samples
 
         # init df
         coverage_df = pd.DataFrame()
@@ -19470,8 +19474,9 @@ def get_integrated_small_vars_df_severalSamples(paths_df, outdir, ploidy, run_pl
             s_coverage_df["sampleID"] = sampleID
             coverage_df = coverage_df.append(s_coverage_df)
 
-        # save
+        # save and del the object
         save_df_as_tab(coverage_df, coverage_df_file)
+        del coverage_df
 
     ##################################################
 
@@ -19492,6 +19497,8 @@ def get_integrated_small_vars_df_severalSamples(paths_df, outdir, ploidy, run_pl
         tmpdir = "%s/tmp"%outdir; make_folder(tmpdir)
 
         ######## GET INDIVIDUAL VARCALL FILES WITH DESIRED FIELDS #####
+
+        # This took <10 Gb of RAM for 645 C. albincans samples
 
         # define the interesting ploidies
         if run_ploidy2_ifHaploid is True: interesting_ploidies = [1, 2]
