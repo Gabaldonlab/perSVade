@@ -752,7 +752,8 @@ print("structural variation analysis with perSVade finished")
 # run CNVcalling by getting df_CNV_coverage
 minimal_CNV_fields = ["chromosome", "merged_relative_CN", "start", "end", "CNVid", "median_coverage", "median_coverage_corrected", "SVTYPE"] + ["median_relative_CN_%s"%x for x in cnv_calling_algs]
 
-if opt.skip_CNV_calling is False and not any([x=="skip" for x in {opt.fastq1, opt.fastq2}]): 
+run_CNV_calls = (opt.skip_CNV_calling is False and not any([x=="skip" for x in {opt.fastq1, opt.fastq2}]))
+if run_CNV_calls is True: 
     print("RUNNING COVERAGE-BASED CNV CALLING...")
 
     # make folder
@@ -760,8 +761,7 @@ if opt.skip_CNV_calling is False and not any([x=="skip" for x in {opt.fastq1, op
     fun.make_folder(cnv_calling_outdir)
 
     # run CNV calling
-    df_gridss = fun.get_svtype_to_svfile_and_df_gridss_from_perSVade_outdir(opt.outdir, opt.ref, replace=opt.replace)[1]
-    df_CNV_coverage = fun.run_CNV_calling(sorted_bam, opt.ref, cnv_calling_outdir, opt.threads, opt.replace, opt.mitochondrial_chromosome, df_gridss, opt.window_size_CNVcalling, opt.ploidy, bg_sorted_bam_CNV=opt.bg_sorted_bam_CNV, cnv_calling_algs=cnv_calling_algs)
+    df_CNV_coverage = fun.run_CNV_calling(sorted_bam, opt.ref, cnv_calling_outdir, opt.threads, opt.replace, opt.mitochondrial_chromosome, opt.window_size_CNVcalling, opt.ploidy, bg_sorted_bam_CNV=opt.bg_sorted_bam_CNV, cnv_calling_algs=cnv_calling_algs)
 
 else: df_CNV_coverage = pd.DataFrame(columns=minimal_CNV_fields)
 
@@ -854,7 +854,7 @@ if opt.run_smallVarsCNV:
         if __name__ == '__main__': fun.run_cmd(varcall_cmd)
 
         # regenerate the variant calling file according to run_SV_CNV_calling
-        if run_SV_CNV_calling is True: fun.get_small_variant_calling_withCNstate("%s/variant_calling_ploidy%i.tab"%(outdir_varcall, ploidy_varcall), df_CNV_coverage, replace=(opt.replace or opt.replace_addingCNstate_to_smallVars))
+        if run_CNV_calls is True: fun.get_small_variant_calling_withCNstate("%s/variant_calling_ploidy%i.tab"%(outdir_varcall, ploidy_varcall), df_CNV_coverage, replace=(opt.replace or opt.replace_addingCNstate_to_smallVars))
   
     # define the small variants vcf
     small_vars_vcf = "%s/variants_atLeast1PASS_ploidy%i.vcf"%(outdir_varcall, opt.ploidy)
