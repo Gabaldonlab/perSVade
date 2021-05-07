@@ -152,12 +152,9 @@ if opt.gff is not None and not fun.file_is_empty(variantAnnotation_table) and op
 ############### CNV #################
 #####################################
 
-if opt.skip_cnv_analysis is False:
+if opt.skip_cnv_analysis is False or opt.gff is None:
 
-    # debug
-    if opt.gff is None: raise ValueError("If you want to perform CNV analysis you need to provide a gff")
-
-    print("Starting CNV analysis")
+    print("Starting CNV per gene analysis")
 
     # make a folder for the CNV anlysis
     cnv_outdir = "%s/CNV_results"%opt.outdir

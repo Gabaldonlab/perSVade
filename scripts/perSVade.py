@@ -207,6 +207,9 @@ skipping_args.add_argument("--skip_CNV_calling", dest="skip_CNV_calling", action
 
 skipping_args.add_argument("--skip_cnv_per_gene_analysis", dest="skip_cnv_per_gene_analysis", default=False, action="store_true", help="Don't perform the cnv analysis where we calculate coverage per gene and per equal windows of the genome. This refers to the per-gene CNV analysis, not the per-window.")
 
+skipping_args.add_argument("--skip_marking_duplicates", dest="skip_marking_duplicates", default=False, action="store_true", help="Don't mark the duplicate reads in the .bam file.")
+
+
 ###############################
 
 ##### stopping options ######
@@ -569,10 +572,14 @@ if not any([x=="skip" for x in {opt.fastq1, opt.fastq2}]):
             for f in os.listdir(reads_dir): 
                 if f not in {fun.get_file(opt.fastq1), fun.get_file(opt.fastq2)}: fun.delete_file_or_folder("%s/%s"%(reads_dir, f))
 
-        print("WORKING ON ALIGNMENT")
-        fun.run_bwa_mem(opt.fastq1, opt.fastq2, opt.ref, opt.outdir, bamfile, sorted_bam, index_bam, name_sample, threads=opt.threads, replace=opt.replace, tmpdir_writingFiles=opt.tmpdir)
-        fun.clean_sorted_bam_coverage_per_window_files(sorted_bam)
+        # deifine if marking duplicates (default yes)
+        if opt.skip_marking_duplicates is True: bwa_mem_MarkDuplicates = False
+        else: bwa_mem_MarkDuplicates = True
 
+        print("WORKING ON ALIGNMENT")
+        fun.run_bwa_mem(opt.fastq1, opt.fastq2, opt.ref, opt.outdir, bamfile, sorted_bam, index_bam, name_sample, threads=opt.threads, replace=opt.replace, tmpdir_writingFiles=opt.tmpdir, MarkDuplicates=bwa_mem_MarkDuplicates)
+        fun.clean_sorted_bam_coverage_per_window_files(sorted_bam)
+        
     else: print("Warning: No fastq file given, assuming that you provided a bam file")
 
     # check that all the important files exist
@@ -605,8 +612,6 @@ if not any([x=="skip" for x in {opt.fastq1, opt.fastq2}]):
     coverage_file = fun.generate_coverage_per_window_file_parallel(opt.ref, destination_dir, sorted_bam, windows_file="none", replace=opt.replace, run_in_parallel=True, delete_bams=True)
 
 ####################################################
-
-
 
 ###########################################
 ###########################################
@@ -665,7 +670,7 @@ elif opt.fast_SVcalling is False and opt.close_shortReads_table is not None:
         sys.exit(0) 
 
     # get the real SVs
-    real_bedpe_breakpoints = fun.get_compatible_real_bedpe_breakpoints(opt.close_shortReads_table, opt.ref, outdir_finding_realVars, replace=opt.replace, threads=opt.threads, max_nvars=opt.nvars, mitochondrial_chromosome=opt.mitochondrial_chromosome, job_array_mode=opt.job_array_mode, parameters_json_file=opt.parameters_json_file, tmpdir=opt.tmpdir)
+    real_bedpe_breakpoints = fun.get_compatible_real_bedpe_breakpoints(opt.close_shortReads_table, opt.ref, outdir_finding_realVars, replace=opt.replace, threads=opt.threads, max_nvars=opt.nvars, mitochondrial_chromosome=opt.mitochondrial_chromosome, job_array_mode=opt.job_array_mode, parameters_json_file=opt.parameters_json_file, tmpdir=opt.tmpdir, skip_marking_duplicates=opt.skip_marking_duplicates)
 
 else: 
     print("Avoiding the simulation of real variants. Only inserting randomSV.")
