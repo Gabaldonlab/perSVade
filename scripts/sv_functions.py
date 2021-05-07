@@ -1226,6 +1226,20 @@ def run_bwa_mem(fastq1, fastq2, ref, outdir, bamfile, sorted_bam, index_bam, nam
         cmd_indexBam = "%s index -@ %i %s > %s 2>&1"%(samtools, threads, sorted_bam, bam_index_std); run_cmd(cmd_indexBam)   # creates a .bai of sorted_bam
         remove_file(bam_index_std)
 
+def run_picard_ValidateSamFile(sorted_bam, reference_genome, replace=False):
+
+    """This function reports how good a sorted bam is"""
+
+    report_file = "%s.ValidateSamFile_output.txt"%sorted_bam
+
+    if file_is_empty(report_file) or replace is True:
+        print_if_verbose("running picard ValidateSamFile into %s"%report_file)
+
+        report_file_tmp = "%s.tmp"%report_file
+        run_cmd("%s ValidateSamFile I=%s R=%s > %s 2>&1"%(picard_exec, sorted_bam, reference_genome, report_file_tmp), env=EnvName_picard)
+
+        os.rename(report_file_tmp, report_file)
+
 def make_flat_listOflists(LoL):
 
     return list(itertools.chain.from_iterable(LoL))
@@ -7096,7 +7110,7 @@ def clean_perSVade_outdir(outdir):
 
     ###########################################
 
-def get_compatible_real_bedpe_breakpoints(close_shortReads_table, reference_genome, outdir, replace=False, threads=4, mitochondrial_chromosome="mito_C_glabrata_CBS138", job_array_mode="local", max_nvars=100, parameters_json_file=None,  tmpdir=None):
+def get_compatible_real_bedpe_breakpoints(close_shortReads_table, reference_genome, outdir, replace=False, threads=4, mitochondrial_chromosome="mito_C_glabrata_CBS138", job_array_mode="local", max_nvars=100, parameters_json_file=None,  tmpdir=None, skip_marking_duplicates=False):
 
     """Generates a file under outdir that has the stacked breakpoints arround which to generate SV calls
     realSV_calling_on can be reads or assembly"""
@@ -7150,7 +7164,8 @@ def get_compatible_real_bedpe_breakpoints(close_shortReads_table, reference_geno
             if parameters_json_file is not None: cmd += " --parameters_json_file %s"%parameters_json_file
             if tmpdir is not None: cmd += " --tmpdir %s"%tmpdir
             if fraction_available_mem is not None: cmd += " --fraction_available_mem %.2f"%fraction_available_mem
-
+            if skip_marking_duplicates is True: cmd += " --skip_marking_duplicates"
+            
             # add the input
             all_keys_df = set(df_genomes.keys())
 
@@ -19426,6 +19441,41 @@ def get_s_small_vars_df_and_s_small_var_annot(Is, perSVade_outdir, sampleID, tar
 
     return (small_vars_file, small_vars_annot_file)
 
+def load_varcall_df_and_print_sampleID(varcall_file, sample_idx, len_all_samples):
+
+    """This function loads a df and prints which is being loaded"""
+
+    print_if_verbose("loading sample %i/%i"%(sample_idx, len_all_samples))
+    return get_tab_as_df_or_empty_df(varcall_file)
+
+
+def get_other_samples_with_variant_series_writeFile(varsDF, sampleID, small_vars_df_numeric_variantID, all_samples_with_vars, tmpdir):
+
+    """This function returns a series in the same order as small_vars_df_numeric_variantID that contains a string with wether the sample is overlapping mutations in sampleID. It is written under tmpdir"""
+
+    final_file = "%s/overlapping_sample_%s.txt"%(tmpdir, sampleID)
+    if file_is_empty(final_file):
+
+        print("getting overlapping samples on sample %s"%sampleID)
+
+        # define the variants
+        if sampleID in all_samples_with_vars: variants = set(varsDF["numeric_variantID"])
+        else: variants = set()
+
+        bool_to_text = {True: ","+sampleID, False:""}
+        other_samples_with_var_series = cp.deepcopy(small_vars_df_numeric_variantID).isin(variants).map(bool_to_text)
+
+        # delete the variants and check that you didn't lose anything
+        #del variants
+
+        # write
+        df_write = pd.DataFrame({sampleID:other_samples_with_var_series})
+        final_file_tmp = "%s.tmp"%final_file
+        df_write.to_csv(final_file_tmp, sep="\t", index=False, header=False)
+        os.rename(final_file_tmp, final_file)
+
+    return final_file
+
 def get_integrated_small_vars_df_severalSamples(paths_df, outdir, ploidy, run_ploidy2_ifHaploid=False, threads=4, replace=False, fields_varCall="all", fields_varAnnot="all"):
 
     """
@@ -19440,6 +19490,8 @@ def get_integrated_small_vars_df_severalSamples(paths_df, outdir, ploidy, run_pl
     """
 
     ######## PROCESS INPUTS #########
+
+    print_if_verbose("Beginning: %.3f Gb RAM available"%(psutil.virtual_memory().available/1e9))
 
     # define paths_df
     if type(paths_df)==str: paths_df = get_tab_as_df_or_empty_df(paths_df)
@@ -19513,6 +19565,9 @@ def get_integrated_small_vars_df_severalSamples(paths_df, outdir, ploidy, run_pl
         if fields_varCall=="all": fields_varCall = list(first_small_vars_df.keys())
         if fields_varAnnot=="all": fields_varAnnot = list(first_small_vars_annot.keys())
 
+        # make sure that "#Uploaded_variation" is in annot
+        if "#Uploaded_variation" not in fields_varAnnot: raise ValueError("#Uploaded_variation shold be in fields_varAnnot")
+
         # define a list of inputs to parallelize
         inputs_fn = [(Is, perSVade_outdir, sampleID, target_ploidy, fields_varCall, fields_varAnnot, tmpdir) for Is, (sampleID, perSVade_outdir) in enumerate(paths_df[["sampleID", "perSVade_outdir"]].values) for target_ploidy in interesting_ploidies]
 
@@ -19532,36 +19587,59 @@ def get_integrated_small_vars_df_severalSamples(paths_df, outdir, ploidy, run_pl
             # get all files
             annot_files = [x[1] for x in list_small_vars_files]
 
-            # concatenate them and set them unique
-            small_var_annot_file_tmp = "%s.tmp"%small_var_annot_file
-            run_cmd("cat %s | sort | uniq > %s"%(" ".join(annot_files), small_var_annot_file_tmp))
+            # int the df with the annotations
+            df_annotation_all = pd.DataFrame(columns=fields_varAnnot)
 
-            # add the header
-            print("adding header")
-            small_var_annot_file_tmp2 = "%s.tmp2"%small_var_annot_file_tmp
-            run_cmd("{ echo -n '%s\n'; cat %s; } > %s"%("\t".join(fields_varAnnot), small_var_annot_file_tmp, small_var_annot_file_tmp2))
+            # iterate through each annot file and update only new variants
+            for Iannot, annot_file in enumerate(annot_files):
+                print("getting annotation file %i/%i"%(Iannot+1, len(annot_files)))
 
-            # keep
-            remove_file(small_var_annot_file_tmp)
-            os.rename(small_var_annot_file_tmp2, small_var_annot_file)
+                # load df
+                df_annotation = pd.read_csv(annot_file, sep="\t", header=None, names=fields_varAnnot)
 
+                # define new vars
+                if len(df_annotation_all)==0: current_vars = set()
+                else: current_vars = set(df_annotation_all["#Uploaded_variation"])
+                all_vars = set(df_annotation["#Uploaded_variation"])
+                new_vars = all_vars.difference(current_vars)
+                print("There are %i/%i new variants"%(len(new_vars), len(all_vars)))
+
+                # get the df only with the new vars
+                df_annotation = df_annotation[df_annotation["#Uploaded_variation"].isin(new_vars)]
+                df_annotation_all = df_annotation_all.append(df_annotation)
+
+            # sort by variant
+            df_annotation_all = df_annotation_all.sort_values(by=["#Uploaded_variation"])
+
+            # write the final file
+            print("writing final annotations")
+            save_df_as_tab(df_annotation_all, small_var_annot_file)
+            del df_annotation_all
 
         #############################################
 
         ####### INTEGRATE AND ADD OVERLAPPING VARS #######
-        print("integrate and get overlapping calls")
-
-        # define the variants with annotation
 
         # integrate the dfs
-        varcall_files = [x[0] for x in list_small_vars_files]
-        small_vars_df = pd.concat(list(map(get_tab_as_df_or_empty_df, varcall_files)))
+        print("concatenating small variant calling files")
+        inputs_fn = [(x[0], Is+1, len(list_small_vars_files)) for Is, x in enumerate(list_small_vars_files)]
+
+        with multiproc.Pool(threads) as pool:
+            small_vars_df = pd.concat(pool.starmap(load_varcall_df_and_print_sampleID, inputs_fn))
+                
+            pool.close()
+            pool.terminate()
 
         # set the sample to be str
         small_vars_df["sampleID"] = small_vars_df["sampleID"].apply(str)
 
+        # sort
+        small_vars_df = small_vars_df.sort_values(by=["sampleID", "#Uploaded_variation"])
+
         # check that all the variants have an annotation
         all_vars = set(small_vars_df["#Uploaded_variation"])
+        print("checking if there are annotated vars")
+
         vars_with_annotation = set(get_tab_as_df_or_empty_df(small_var_annot_file)["#Uploaded_variation"])
         vars_with_no_annotation = all_vars.difference(vars_with_annotation)
         if len(vars_with_no_annotation):
@@ -19573,50 +19651,6 @@ def get_integrated_small_vars_df_severalSamples(paths_df, outdir, ploidy, run_pl
         if run_ploidy2_ifHaploid is True:
             if any(pd.isna(small_vars_df.relative_CN)): raise ValueError("there can't be NaNs in small_vars_df")
 
-        # add shared small varianrs
-        print("adding shared small variants")
-
-        # define variants that are called in any
-        any_called_variants_df = small_vars_df
-
-        # define PASS variants
-        ploidy_to_minAF = {1:0.9, 2:0.25, 3:0.0, 4:0.0}
-
-        if run_ploidy2_ifHaploid is True:
-
-            small_vars_df["is_correct_haploid"] = (small_vars_df.calling_ploidy==1) & (small_vars_df.mean_fractionReadsCov_PASS_algs>=0.9)
-            small_vars_df["is_correct_diploid"] = (small_vars_df.calling_ploidy==2) & (small_vars_df.mean_fractionReadsCov_PASS_algs>=0.25)
-
-            PASSatLeast2_variants_df = small_vars_df[(small_vars_df.NPASS>=2) & ((small_vars_df.is_correct_haploid) | (small_vars_df.is_correct_diploid))]
-
-        else: PASSatLeast2_variants_df = small_vars_df[(small_vars_df.NPASS>=2) & (small_vars_df.mean_fractionReadsCov_PASS_algs>=ploidy_to_minAF[ploidy])]
-
-        # map each sample to the variants of each type
-        def get_set_variants_from_df_s(df_s): return set(df_s["#Uploaded_variation"])
-        sampleID_to_any_called_variants = any_called_variants_df.groupby("sampleID").apply(get_set_variants_from_df_s)
-        sampleID_to_PASSatLeast2_variants = PASSatLeast2_variants_df.groupby("sampleID").apply(get_set_variants_from_df_s)
-
-        # create a dict with all sampleID_to_variants_series
-        typeVars_to_sampleID_to_variants_series = {"anyCalled":sampleID_to_any_called_variants, "PASSatLeast2":sampleID_to_PASSatLeast2_variants}
-
-        # add the missing samples
-        for sampleID_to_variants_series in typeVars_to_sampleID_to_variants_series.values():
-            for sampleID in samples_to_run: 
-                if sampleID not in set(sampleID_to_variants_series.index): sampleID_to_variants_series[sampleID] = set()
-
-        # add the intersection of each var with the types of vars in typeVars_to_sampleID_to_variants_series
-        for typeVars, sampleID_to_variants in typeVars_to_sampleID_to_variants_series.items():
-            print(typeVars, "map each sample")
-
-            # init the field of other samples
-            small_vars_df["other_samples_with_%s"%typeVars] = ""
-
-            # map each sample that is mapping 
-            for Is, (sampleID, variants) in enumerate(sampleID_to_variants.items()):
-                print(sampleID)
-                bool_to_text = {True: ","+sampleID, False:""}
-                small_vars_df["other_samples_with_%s"%typeVars] += small_vars_df["#Uploaded_variation"].isin(variants).map(bool_to_text)
-
         ##################################################
 
         # clean intermediate files
@@ -19625,6 +19659,7 @@ def get_integrated_small_vars_df_severalSamples(paths_df, outdir, ploidy, run_pl
         # write dfs
         print("writing")
         save_df_as_tab(small_vars_df, small_vars_df_file)
+        del small_vars_df
 
     #############################################
 

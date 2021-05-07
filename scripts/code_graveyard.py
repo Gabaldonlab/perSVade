@@ -18457,3 +18457,520 @@ def get_correct_INFO_with_bendIDs_and_bendStats(r, df_gridss):
 
 
 
+
+def get_integrated_small_vars_df_severalSamples(paths_df, outdir, ploidy, run_ploidy2_ifHaploid=False, threads=4, replace=False, fields_varCall="all", fields_varAnnot="all"):
+
+    """
+    This function generates several datsets under outdir that result from the integration of several small variant callsets by perSVade. These are the arguments:
+
+    - paths_df should be a df that contains sampleID and perSVade_outdir. These are the datasets to integrate. IT can be a filepath
+    - outdir is the directory where to store the integrated variant calling files
+    - ploidy indicates the ploidy of the runs
+    - run_ploidy2_ifHaploid indicates whether the option --run_ploidy2_ifHaploid was used in perSVade.
+    - fields_varCall and fields_varAnnot indicate whether to keep only some fields. They should be a list or "all"
+
+    """
+
+    ######## PROCESS INPUTS #########
+
+    # define paths_df
+    if type(paths_df)==str: paths_df = get_tab_as_df_or_empty_df(paths_df)
+    paths_df["sampleID"] = paths_df["sampleID"].apply(str)
+
+    # make the outdir
+    make_folder(outdir)
+
+    # debug the run_ploidy2_ifHaploid
+    if run_ploidy2_ifHaploid is True and ploidy!=1: raise ValueError("if run_ploidy2_ifHaploid is True, ploidy has to be 1")
+
+    # define the samples to run
+    samples_to_run = set(paths_df.sampleID)
+
+    #################################
+
+    ######### GET THE COVERAGE DF PER GENE ###########
+
+    coverage_df_file = "%s/merged_coverage.tab"%outdir
+
+    if file_is_empty(coverage_df_file) or replace is True:
+        print("getting per gene coverage df") # This took <10 Gb of RAM for 645 C. albincans samples
+
+        # init df
+        coverage_df = pd.DataFrame()
+
+        for Is, (sampleID, perSVade_outdir) in enumerate(paths_df[["sampleID", "perSVade_outdir"]].values):
+            print("%i/%i: %s"%(Is+1, len(paths_df), sampleID))
+
+            # add the coverage
+            s_coverage_df = pd.read_csv("%s/smallVars_CNV_output/CNV_results/genes_and_regions_coverage.tab"%(perSVade_outdir), sep="\t")
+            s_coverage_df["sampleID"] = sampleID
+            coverage_df = coverage_df.append(s_coverage_df)
+
+        # save and del the object
+        save_df_as_tab(coverage_df, coverage_df_file)
+        del coverage_df
+
+    ##################################################
+
+    ####### MERGED SMALL VARIANT CALLS ##########
+
+    small_vars_df_file = "%s/smallVars.tab"%outdir
+    small_var_annot_file = "%s/smallVars_annot.tab"%outdir
+
+    # get the simple dataframes
+    if file_is_empty(small_vars_df_file) or file_is_empty(small_var_annot_file) or replace is True:
+        print_if_verbose("getting small variant calls")
+
+        # init dfs
+        small_vars_df = pd.DataFrame()
+        small_var_annot = pd.DataFrame()
+
+        # define a tmpdir
+        tmpdir = "%s/tmp"%outdir; make_folder(tmpdir)
+
+        ######## GET INDIVIDUAL VARCALL FILES WITH DESIRED FIELDS #####
+
+        # This took <10 Gb of RAM for 645 C. albincans samples
+
+        # define the interesting ploidies
+        if run_ploidy2_ifHaploid is True: interesting_ploidies = [1, 2]
+        else: interesting_ploidies = [ploidy]
+
+        # load the first df to get the fields_varCall
+        first_perSVade_outdir = paths_df.perSVade_outdir.iloc[0]
+        first_small_vars_df = get_tab_as_df_or_empty_df("%s/smallVars_CNV_output/variant_calling_ploidy%i.tab"%(first_perSVade_outdir, ploidy))
+        first_small_vars_annot = get_tab_as_df_or_empty_df("%s/smallVars_CNV_output/variant_annotation_ploidy%i.tab"%(first_perSVade_outdir, ploidy))
+
+        # define the fields_varCall and fields_varAnnot
+        if fields_varCall=="all": fields_varCall = list(first_small_vars_df.keys())
+        if fields_varAnnot=="all": fields_varAnnot = list(first_small_vars_annot.keys())
+
+        # make sure that "#Uploaded_variation" is in annot
+        if "#Uploaded_variation" not in fields_varAnnot: raise ValueError("#Uploaded_variation shold be in fields_varAnnot")
+
+        # define a list of inputs to parallelize
+        inputs_fn = [(Is, perSVade_outdir, sampleID, target_ploidy, fields_varCall, fields_varAnnot, tmpdir) for Is, (sampleID, perSVade_outdir) in enumerate(paths_df[["sampleID", "perSVade_outdir"]].values) for target_ploidy in interesting_ploidies]
+
+        # get files in parallel
+        with multiproc.Pool(threads) as pool:
+            list_small_vars_files = pool.starmap(get_s_small_vars_df_and_s_small_var_annot, inputs_fn) 
+                
+            pool.close()
+            pool.terminate()
+
+        ###############################################################
+
+        ##### write the annotations with bash #######
+        if file_is_empty(small_var_annot_file):        
+            print("writing annotations")
+
+            # get all files
+            annot_files = [x[1] for x in list_small_vars_files]
+
+            # int the df with the annotations
+            df_annotation_all = pd.DataFrame(columns=fields_varAnnot)
+
+            # iterate through each annot file and update only new variants
+            for Iannot, annot_file in enumerate(annot_files):
+                print("getting annotation file %i/%i"%(Iannot+1, len(annot_files)))
+
+                # load df
+                df_annotation = pd.read_csv(annot_file, sep="\t", header=None, names=fields_varAnnot)
+
+                # define new vars
+                if len(df_annotation_all)==0: current_vars = set()
+                else: current_vars = set(df_annotation_all["#Uploaded_variation"])
+                all_vars = set(df_annotation["#Uploaded_variation"])
+                new_vars = all_vars.difference(current_vars)
+                print("There are %i/%i new variants"%(len(new_vars), len(all_vars)))
+
+                # get the df only with the new vars
+                df_annotation = df_annotation[df_annotation["#Uploaded_variation"].isin(new_vars)]
+                df_annotation_all = df_annotation_all.append(df_annotation)
+
+            # write the final file
+            print("writing final annotations")
+            save_df_as_tab(df_annotation_all, small_var_annot_file)
+
+
+
+
+
+            # concatenate them and set them unique
+            small_var_annot_file_tmp = "%s.tmp"%small_var_annot_file
+            run_cmd("cat %s | sort | uniq > %s"%(" ".join(annot_files), small_var_annot_file_tmp))
+
+            # add the header
+            print("adding header")
+            small_var_annot_file_tmp2 = "%s.tmp2"%small_var_annot_file_tmp
+            run_cmd("{ echo -n '%s\n'; cat %s; } > %s"%("\t".join(fields_varAnnot), small_var_annot_file_tmp, small_var_annot_file_tmp2))
+
+            # keep
+            remove_file(small_var_annot_file_tmp)
+            os.rename(small_var_annot_file_tmp2, small_var_annot_file)
+
+
+        #############################################
+
+        ####### INTEGRATE AND ADD OVERLAPPING VARS #######
+        print("integrate and get overlapping calls")
+
+        # define the variants with annotation
+
+        # integrate the dfs
+        varcall_files = [x[0] for x in list_small_vars_files]
+        small_vars_df = pd.concat(list(map(get_tab_as_df_or_empty_df, varcall_files)))
+
+        # set the sample to be str
+        small_vars_df["sampleID"] = small_vars_df["sampleID"].apply(str)
+
+        # check that all the variants have an annotation
+        all_vars = set(small_vars_df["#Uploaded_variation"])
+        vars_with_annotation = set(get_tab_as_df_or_empty_df(small_var_annot_file)["#Uploaded_variation"])
+        vars_with_no_annotation = all_vars.difference(vars_with_annotation)
+        if len(vars_with_no_annotation):
+            print("WARNING: There are %i/%i vars with no annotation:"%(len(vars_with_no_annotation), len(all_vars)))
+            for v in vars_with_no_annotation: 
+                if "*" not in v: print(v)
+
+        # check that the relative_CN is there
+        if run_ploidy2_ifHaploid is True:
+            if any(pd.isna(small_vars_df.relative_CN)): raise ValueError("there can't be NaNs in small_vars_df")
+
+        # add shared small varianrs
+        print("adding shared small variants")
+
+        # define variants that are called in any
+        any_called_variants_df = small_vars_df
+
+        # define PASS variants
+        ploidy_to_minAF = {1:0.9, 2:0.25, 3:0.0, 4:0.0}
+
+        if run_ploidy2_ifHaploid is True:
+
+            small_vars_df["is_correct_haploid"] = (small_vars_df.calling_ploidy==1) & (small_vars_df.mean_fractionReadsCov_PASS_algs>=0.9)
+            small_vars_df["is_correct_diploid"] = (small_vars_df.calling_ploidy==2) & (small_vars_df.mean_fractionReadsCov_PASS_algs>=0.25)
+
+            PASSatLeast2_variants_df = small_vars_df[(small_vars_df.NPASS>=2) & ((small_vars_df.is_correct_haploid) | (small_vars_df.is_correct_diploid))]
+
+        else: PASSatLeast2_variants_df = small_vars_df[(small_vars_df.NPASS>=2) & (small_vars_df.mean_fractionReadsCov_PASS_algs>=ploidy_to_minAF[ploidy])]
+
+        # map each sample to the variants of each type
+        def get_set_variants_from_df_s(df_s): return set(df_s["#Uploaded_variation"])
+        sampleID_to_any_called_variants = any_called_variants_df.groupby("sampleID").apply(get_set_variants_from_df_s)
+        sampleID_to_PASSatLeast2_variants = PASSatLeast2_variants_df.groupby("sampleID").apply(get_set_variants_from_df_s)
+
+        # create a dict with all sampleID_to_variants_series
+        typeVars_to_sampleID_to_variants_series = {"anyCalled":sampleID_to_any_called_variants, "PASSatLeast2":sampleID_to_PASSatLeast2_variants}
+
+        # add the missing samples
+        for sampleID_to_variants_series in typeVars_to_sampleID_to_variants_series.values():
+            for sampleID in samples_to_run: 
+                if sampleID not in set(sampleID_to_variants_series.index): sampleID_to_variants_series[sampleID] = set()
+
+        # add the intersection of each var with the types of vars in typeVars_to_sampleID_to_variants_series
+        for typeVars, sampleID_to_variants in typeVars_to_sampleID_to_variants_series.items():
+            print(typeVars, "map each sample")
+
+            # init the field of other samples
+            small_vars_df["other_samples_with_%s"%typeVars] = ""
+
+            # map each sample that is mapping 
+            for Is, (sampleID, variants) in enumerate(sampleID_to_variants.items()):
+                print(sampleID)
+                bool_to_text = {True: ","+sampleID, False:""}
+                small_vars_df["other_samples_with_%s"%typeVars] += small_vars_df["#Uploaded_variation"].isin(variants).map(bool_to_text)
+
+        ##################################################
+
+        # clean intermediate files
+        delete_folder(tmpdir)
+
+        # write dfs
+        print("writing")
+        save_df_as_tab(small_vars_df, small_vars_df_file)
+
+    #############################################
+
+
+def get_integrated_small_vars_df_severalSamples(paths_df, outdir, ploidy, run_ploidy2_ifHaploid=False, threads=4, replace=False, fields_varCall="all", fields_varAnnot="all"):
+
+    """
+    This function generates several datsets under outdir that result from the integration of several small variant callsets by perSVade. These are the arguments:
+
+    - paths_df should be a df that contains sampleID and perSVade_outdir. These are the datasets to integrate. IT can be a filepath
+    - outdir is the directory where to store the integrated variant calling files
+    - ploidy indicates the ploidy of the runs
+    - run_ploidy2_ifHaploid indicates whether the option --run_ploidy2_ifHaploid was used in perSVade.
+    - fields_varCall and fields_varAnnot indicate whether to keep only some fields. They should be a list or "all"
+
+    """
+
+    ######## PROCESS INPUTS #########
+
+    print_if_verbose("Beginning: %.3f Gb RAM available"%(psutil.virtual_memory().available/1e9))
+
+    # define paths_df
+    if type(paths_df)==str: paths_df = get_tab_as_df_or_empty_df(paths_df)
+    paths_df["sampleID"] = paths_df["sampleID"].apply(str)
+
+    # make the outdir
+    make_folder(outdir)
+
+    # debug the run_ploidy2_ifHaploid
+    if run_ploidy2_ifHaploid is True and ploidy!=1: raise ValueError("if run_ploidy2_ifHaploid is True, ploidy has to be 1")
+
+    # define the samples to run
+    samples_to_run = set(paths_df.sampleID)
+
+    #################################
+
+    ######### GET THE COVERAGE DF PER GENE ###########
+
+    coverage_df_file = "%s/merged_coverage.tab"%outdir
+
+    if file_is_empty(coverage_df_file) or replace is True:
+        print("getting per gene coverage df") # This took <10 Gb of RAM for 645 C. albincans samples
+
+        # init df
+        coverage_df = pd.DataFrame()
+
+        for Is, (sampleID, perSVade_outdir) in enumerate(paths_df[["sampleID", "perSVade_outdir"]].values):
+            print("%i/%i: %s"%(Is+1, len(paths_df), sampleID))
+
+            # add the coverage
+            s_coverage_df = pd.read_csv("%s/smallVars_CNV_output/CNV_results/genes_and_regions_coverage.tab"%(perSVade_outdir), sep="\t")
+            s_coverage_df["sampleID"] = sampleID
+            coverage_df = coverage_df.append(s_coverage_df)
+
+        # save and del the object
+        save_df_as_tab(coverage_df, coverage_df_file)
+        del coverage_df
+
+    ##################################################
+
+    ####### MERGED SMALL VARIANT CALLS ##########
+
+    small_vars_df_file = "%s/smallVars.tab"%outdir
+    small_var_annot_file = "%s/smallVars_annot.tab"%outdir
+
+    # get the simple dataframes
+    if file_is_empty(small_vars_df_file) or file_is_empty(small_var_annot_file) or replace is True:
+        print_if_verbose("getting small variant calls")
+
+        # init dfs
+        small_vars_df = pd.DataFrame()
+        small_var_annot = pd.DataFrame()
+
+        # define a tmpdir
+        tmpdir = "%s/tmp"%outdir; make_folder(tmpdir)
+
+        ######## GET INDIVIDUAL VARCALL FILES WITH DESIRED FIELDS #####
+
+        # This took <10 Gb of RAM for 645 C. albincans samples
+
+        # define the interesting ploidies
+        if run_ploidy2_ifHaploid is True: interesting_ploidies = [1, 2]
+        else: interesting_ploidies = [ploidy]
+
+        # load the first df to get the fields_varCall
+        first_perSVade_outdir = paths_df.perSVade_outdir.iloc[0]
+        first_small_vars_df = get_tab_as_df_or_empty_df("%s/smallVars_CNV_output/variant_calling_ploidy%i.tab"%(first_perSVade_outdir, ploidy))
+        first_small_vars_annot = get_tab_as_df_or_empty_df("%s/smallVars_CNV_output/variant_annotation_ploidy%i.tab"%(first_perSVade_outdir, ploidy))
+
+        # define the fields_varCall and fields_varAnnot
+        if fields_varCall=="all": fields_varCall = list(first_small_vars_df.keys())
+        if fields_varAnnot=="all": fields_varAnnot = list(first_small_vars_annot.keys())
+
+        # make sure that "#Uploaded_variation" is in annot
+        if "#Uploaded_variation" not in fields_varAnnot: raise ValueError("#Uploaded_variation shold be in fields_varAnnot")
+
+        # define a list of inputs to parallelize
+        inputs_fn = [(Is, perSVade_outdir, sampleID, target_ploidy, fields_varCall, fields_varAnnot, tmpdir) for Is, (sampleID, perSVade_outdir) in enumerate(paths_df[["sampleID", "perSVade_outdir"]].values) for target_ploidy in interesting_ploidies]
+
+        # get files in parallel
+        with multiproc.Pool(threads) as pool:
+            list_small_vars_files = pool.starmap(get_s_small_vars_df_and_s_small_var_annot, inputs_fn) 
+                
+            pool.close()
+            pool.terminate()
+
+        ###############################################################
+
+        ##### write the annotations with bash #######
+        if file_is_empty(small_var_annot_file):        
+            print("writing annotations")
+
+            # get all files
+            annot_files = [x[1] for x in list_small_vars_files]
+
+            # int the df with the annotations
+            df_annotation_all = pd.DataFrame(columns=fields_varAnnot)
+
+            # iterate through each annot file and update only new variants
+            for Iannot, annot_file in enumerate(annot_files):
+                print("getting annotation file %i/%i"%(Iannot+1, len(annot_files)))
+
+                # load df
+                df_annotation = pd.read_csv(annot_file, sep="\t", header=None, names=fields_varAnnot)
+
+                # define new vars
+                if len(df_annotation_all)==0: current_vars = set()
+                else: current_vars = set(df_annotation_all["#Uploaded_variation"])
+                all_vars = set(df_annotation["#Uploaded_variation"])
+                new_vars = all_vars.difference(current_vars)
+                print("There are %i/%i new variants"%(len(new_vars), len(all_vars)))
+
+                # get the df only with the new vars
+                df_annotation = df_annotation[df_annotation["#Uploaded_variation"].isin(new_vars)]
+                df_annotation_all = df_annotation_all.append(df_annotation)
+
+            # sort by variant
+            df_annotation_all = df_annotation_all.sort_values(by=["#Uploaded_variation"])
+
+            # write the final file
+            print("writing final annotations")
+            save_df_as_tab(df_annotation_all, small_var_annot_file)
+            del df_annotation_all
+
+        #############################################
+
+        ####### INTEGRATE AND ADD OVERLAPPING VARS #######
+        small_vars_df_file_raw = "%s.raw.py"%small_vars_df_file
+
+        if file_is_empty(small_vars_df_file_raw):
+
+            # integrate the dfs
+            print("concatenating small variant calling files")
+            inputs_fn = [(x[0], Is+1, len(list_small_vars_files)) for Is, x in enumerate(list_small_vars_files)]
+
+            with multiproc.Pool(threads) as pool:
+                small_vars_df = pd.concat(pool.starmap(load_varcall_df_and_print_sampleID, inputs_fn))
+                    
+                pool.close()
+                pool.terminate()
+
+            # set the sample to be str
+            small_vars_df["sampleID"] = small_vars_df["sampleID"].apply(str)
+
+            # sort
+            small_vars_df = small_vars_df.sort_values(by=["sampleID", "#Uploaded_variation"])
+
+            # check that all the variants have an annotation
+            all_vars = set(small_vars_df["#Uploaded_variation"])
+            print("checking if there are annotated vars")
+
+            vars_with_annotation = set(get_tab_as_df_or_empty_df(small_var_annot_file)["#Uploaded_variation"])
+            vars_with_no_annotation = all_vars.difference(vars_with_annotation)
+            if len(vars_with_no_annotation):
+                print("WARNING: There are %i/%i vars with no annotation:"%(len(vars_with_no_annotation), len(all_vars)))
+                for v in vars_with_no_annotation: 
+                    if "*" not in v: print(v)
+
+            # check that the relative_CN is there
+            if run_ploidy2_ifHaploid is True:
+                if any(pd.isna(small_vars_df.relative_CN)): raise ValueError("there can't be NaNs in small_vars_df")
+
+            # save
+            print("saving raw vars file")
+            save_object(small_vars_df, small_vars_df_file_raw)
+
+        print("loading small variants df")
+        small_vars_df = load_object(small_vars_df_file_raw).reset_index()
+
+        ##################################################
+
+        ######### ADD OVELAPS WITH OTHER variants ########
+
+        # define all the vars
+        all_vars = set(small_vars_df["#Uploaded_variation"])
+
+        # add a numeric variantID
+        print("adding numeric_variantID")
+        if "numeric_variantID" in set(small_vars_df.keys()): raise ValueError("numeric_variantID can't be in the variants df keys")
+
+        uploadedVariation_to_numericVar = dict(zip(all_vars, range(len(all_vars))))
+        small_vars_df["numeric_variantID"] = small_vars_df["#Uploaded_variation"].map(uploadedVariation_to_numericVar)
+        if any(pd.isna(small_vars_df.numeric_variantID)): raise ValueError("There can't be NaNs in numeric_variantID")
+
+        # add shared small varianrs
+        print("getting any-called and PASS vars")
+
+        # define the essential files
+        essential_fields = ["sampleID", "numeric_variantID"]        
+
+        # define variants that are called in any
+        any_called_variants_df = small_vars_df[essential_fields]
+
+        # define PASS variants
+        ploidy_to_minAF = {1:0.9, 2:0.25, 3:0.0, 4:0.0}
+
+        if run_ploidy2_ifHaploid is True:
+
+            small_vars_df["is_correct_haploid"] = (small_vars_df.calling_ploidy==1) & (small_vars_df.mean_fractionReadsCov_PASS_algs>=0.9)
+            small_vars_df["is_correct_diploid"] = (small_vars_df.calling_ploidy==2) & (small_vars_df.mean_fractionReadsCov_PASS_algs>=0.25)
+
+            PASSatLeast2_variants_df = small_vars_df[(small_vars_df.NPASS>=2) & ((small_vars_df.is_correct_haploid) | (small_vars_df.is_correct_diploid))][essential_fields]
+
+        else: PASSatLeast2_variants_df = small_vars_df[(small_vars_df.NPASS>=2) & (small_vars_df.mean_fractionReadsCov_PASS_algs>=ploidy_to_minAF[ploidy])][essential_fields]
+
+        # define tmpdirs
+        tmpdir_intesection_anyCalled = "%s/tmp_intersection_anyCalled"%outdir
+        tmpdir_intesection_PASSatLeast2 = "%s/tmp_intersection_PASSatLeast2"%outdir
+
+        make_folder(tmpdir_intesection_anyCalled)
+        make_folder(tmpdir_intesection_PASSatLeast2)
+
+        # add the intersection of each var with the types of vars in typeVars_to_sampleID_to_variants_series
+        for typeVars, varsDF, tmpdir_intersection in [("anyCalled", any_called_variants_df, tmpdir_intesection_anyCalled), ("PASSatLeast2", PASSatLeast2_variants_df, tmpdir_intesection_PASSatLeast2)]:
+            print(typeVars, "map each sample")
+
+            # set the sample as the index
+            all_samples_with_vars = set(varsDF.sampleID)
+
+            # write several times the series of the intersecting IDs into tmpdir_intersection
+            print_if_verbose("Before preparing the inputs of get_other_samples_with_variant_series_writeFile: %.3f Gb RAM available"%(psutil.virtual_memory().available/1e9))
+
+            print("writing files for each sample")
+            sorted_samples = sorted(samples_to_run)
+            inputs_fn = [(varsDF[varsDF.sampleID==sampleID], sampleID, small_vars_df.numeric_variantID, all_samples_with_vars, tmpdir_intersection) for sampleID in sorted_samples]
+
+            print_if_verbose("Before running get_other_samples_with_variant_series_writeFile: %.3f Gb RAM available"%(psutil.virtual_memory().available/1e9))
+
+            with multiproc.Pool(threads) as pool:
+                list_files_intersection = pool.starmap(get_other_samples_with_variant_series_writeFile, inputs_fn)
+                    
+                pool.close()
+                pool.terminate()
+
+            print_if_verbose("After running get_other_samples_with_variant_series_writeFile: %.3f Gb RAM available"%(psutil.virtual_memory().available/1e9))
+
+            # paste all the samples togethe into a single file
+            other_samples_with_var_file = "%s/pasted_files.txt"%tmpdir_intersection
+            run_cmd("paste %s -d '' | tr -d \\\" > %s"%(" ".join(["'%s'"%f for f in list_files_intersection]), other_samples_with_var_file))
+
+            # check that the number of lines of other_samples_with_var_file is the same as other_samples_with
+            nlines =  int(str(subprocess.check_output("wc -l '%s'"%other_samples_with_var_file, shell=True)).split("'")[1].split()[0])
+            if nlines!=len(small_vars_df): raise ValueError("the line numbers do not match")
+
+            # add as a series
+            small_vars_df["other_samples_with_%s"%typeVars]  = pd.read_csv(other_samples_with_var_file, sep="\t", header=None, names=["other_samples"])["other_samples"]
+
+            # check that there are no NaNs
+            if typeVars=="anyCalled" and any(pd.isna(small_vars_df["other_samples_with_%s"%typeVars])): raise ValueError("There should be no NaNs in other_samples_with_")
+
+        ##################################################
+
+        # clean intermediate files
+        delete_folder(tmpdir)
+        delete_folder(tmpdir_intesection_anyCalled)
+        delete_folder(tmpdir_intesection_PASSatLeast2)
+        remove_file(small_vars_df_file_raw)
+
+        # write dfs
+        print("writing")
+        save_df_as_tab(small_vars_df, small_vars_df_file)
+        del small_vars_df
+
+    #############################################
+
