@@ -19424,7 +19424,7 @@ def get_s_small_vars_df_and_s_small_var_annot(Is, perSVade_outdir, sampleID, tar
 
         # save
         small_vars_file_tmp = "%s.tmp"%small_vars_file
-        s_small_vars_df[fields_varCall].to_csv(small_vars_file_tmp, sep="\t", index=False, header=True)
+        s_small_vars_df[fields_varCall].to_csv(small_vars_file_tmp, sep="\t", index=False, header=False)
         os.rename(small_vars_file_tmp, small_vars_file)
 
     # var annotation
@@ -19620,25 +19620,32 @@ def get_integrated_small_vars_df_severalSamples(paths_df, outdir, ploidy, run_pl
 
         ####### INTEGRATE AND ADD OVERLAPPING VARS #######
 
-        # integrate the dfs
-        print("concatenating small variant calling files")
-        inputs_fn = [(x[0], Is+1, len(list_small_vars_files)) for Is, x in enumerate(list_small_vars_files)]
+        # integrate the the varinat calling files with cat
+        print("concatenating small variant calling files into %s"%small_vars_df_file)
 
-        with multiproc.Pool(threads) as pool:
-            small_vars_df = pd.concat(pool.starmap(load_varcall_df_and_print_sampleID, inputs_fn))
-                
-            pool.close()
-            pool.terminate()
+        # init file
+        fields_varCall = (fields_varCall + ["sampleID", "calling_ploidy"])
+        small_vars_df_file_tmp = "%s.tmp"%small_vars_df_file
+        run_cmd("echo '%s' > %s"%("\t".join(fields_varCall), small_vars_df_file_tmp))
+
+        # append each of the varcall files
+        varcall_files = [x[0] for x in list_small_vars_files]
+        for Iv, file in enumerate(varcall_files):
+            print("adding file %i/%i"%(Iv+1, len(varcall_files)))
+            run_cmd("cat %s >> %s"%(file, small_vars_df_file_tmp))
+
+        # quality control before saving:
+        print("quality control before saving")
+
+        # load df
+        small_vars_df = get_tab_as_df_or_empty_df(small_vars_df_file_tmp)
 
         # set the sample to be str
         small_vars_df["sampleID"] = small_vars_df["sampleID"].apply(str)
-
-        # sort
-        small_vars_df = small_vars_df.sort_values(by=["sampleID", "#Uploaded_variation"])
-
+        
         # check that all the variants have an annotation
         all_vars = set(small_vars_df["#Uploaded_variation"])
-        print("checking if there are annotated vars")
+        print("checking if there are unannotated vars")
 
         vars_with_annotation = set(get_tab_as_df_or_empty_df(small_var_annot_file)["#Uploaded_variation"])
         vars_with_no_annotation = all_vars.difference(vars_with_annotation)
@@ -19658,7 +19665,7 @@ def get_integrated_small_vars_df_severalSamples(paths_df, outdir, ploidy, run_pl
 
         # write dfs
         print("writing")
-        save_df_as_tab(small_vars_df, small_vars_df_file)
+        os.rename(small_vars_df_file_tmp, small_vars_df_file)
         del small_vars_df
 
     #############################################
