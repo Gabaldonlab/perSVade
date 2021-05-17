@@ -331,7 +331,7 @@ def update_df_resources_nord3Runs_testingAccuracy(df_resources_file, outdir_perS
     return df_resources, roundID
 
 
-def keep_STDfiles_nord3Runs_testingAccuracy(all_STDs_dir, outdir_perSVade, spName):
+def keep_STDfiles_nord3Runs_testingAccuracy(all_STDs_dir, outdir_perSVade, spName, type_testing="several_species"):
 
     """This function records all the new files from outdir_perSVade testing accuracy"""
 
@@ -342,8 +342,16 @@ def keep_STDfiles_nord3Runs_testingAccuracy(all_STDs_dir, outdir_perSVade, spNam
     stddir = "%s/STDfiles"%testing_Accuracy_dir
 
     # get the current STD file metadata. This indicates the run
-    stdout_report = "%s/%s_jobs_stdout.txt"%(stddir, spName)
-    stderr_report = "%s/%s_jobs_stderr.txt"%(stddir, spName)
+    if type_testing=="several_species":
+
+        stdout_report = "%s/%s_jobs_stdout.txt"%(stddir, spName)
+        stderr_report = "%s/%s_jobs_stderr.txt"%(stddir, spName)
+
+    elif type_testing=="human":
+
+        stdout_report = "%s/%s_stdout.txt"%(stddir, spName)
+        stderr_report = "%s/%s_stderr.txt"%(stddir, spName)
+
 
     if fun.file_is_empty(stdout_report): return
 
