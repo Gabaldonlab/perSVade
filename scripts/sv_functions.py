@@ -7356,7 +7356,8 @@ def get_windows_infoDF_with_predictedFromFeatures_coverage(genome, distToTel_chr
 
         # add the gc content
         gcontent_outfile = "%s_GCcontent.py"%windows_file
-        df = get_df_with_GCcontent(df, genome, gcontent_outfile, replace=replace)
+        #df["GCcontent"] = 0.5 # this is beacuse the distToTel_chrom_GC_to_coverage_fn is the same for all
+        df = get_df_with_GCcontent(df, genome, gcontent_outfile, replace=replace) # this is if get_df_with_GCcontent was real
 
         # predict genome from the sequence features 
         df["cov_predicted_from_features"] = df.apply(lambda r: distToTel_chrom_GC_to_coverage_fn(r["distance_to_telomere"], r["chromosome"], r["GCcontent"]), axis=1)
@@ -13158,24 +13159,61 @@ def get_df_with_GCcontent(df_windows, genome, gcontent_outfile, replace=False):
         initial_index = list(df_windows.index)
         initial_cols = list(df_windows.columns)
 
+        # init files to remove
+        files_to_remove  = []
+
         # resort
         df_windows = df_windows.sort_values(by=["chromosome", "start", "end"])
 
         print_if_verbose("getting GC content for %i new windows"%len(df_windows))
 
-        # get the GC content file for each position
-        gc_content_outfile_perPosition = generate_nt_content_file(genome, replace=replace, target_nts="GC")
-        gc_df = pd.read_csv(gc_content_outfile_perPosition, sep="\t")[["chromosome", "position", "is_in_GC"]].sort_values(by=["chromosome", "position"])
+        ######## CREATE THE gc_positions_bed FILE #########
 
-        # add the ID
-        gc_df["ID"] =  list(range(0, len(gc_df)))
-
-        # add the end
-        gc_df["position_plus1"] = gc_df.position + 1
-
-        # generate a bed with the gc positions
+        # init file
         gc_positions_bed = "%s.gc_positions.bed"%gcontent_outfile
-        gc_df[gc_df.is_in_GC==1].sort_values(by=["chromosome", "position"])[["chromosome", "position", "position_plus1", "ID"]].to_csv(gc_positions_bed, sep="\t", header=None, index=False)
+        remove_file(gc_positions_bed)
+        run_cmd("touch %s"%gc_positions_bed)
+
+        # init the last_chromID
+        last_chrom_ID = 0
+
+        # go through each chromosome to make it easier
+        for chrom in sorted(set(df_windows.chromosome)):
+            print_if_verbose("working on chromosome %s"%chrom)
+
+            # get the chromosome seq
+            chr_Seqs = [seq for seq in SeqIO.parse(genome, "fasta") if seq.id==chrom]
+            if len(chr_Seqs)!=1: raise ValueError("%s is not valid"%chrom)
+
+            genome_chrom = "%s.%s.fasta"%(genome, chrom)
+            SeqIO.write(chr_Seqs, genome_chrom, "fasta")
+
+            # get the GC content file for each position
+            gc_content_outfile_perPosition = generate_nt_content_file(genome_chrom, replace=replace, target_nts="GC")
+            gc_df = pd.read_csv(gc_content_outfile_perPosition, sep="\t")[["chromosome", "position", "is_in_GC"]].sort_values(by=["chromosome", "position"])
+
+            # add the ID
+            gc_df["ID"] =  list(range(last_chrom_ID, len(gc_df)+last_chrom_ID))
+
+            # redefine last_chrom_ID
+            last_chrom_ID = max(gc_df.ID)+1
+
+            # add the end
+            gc_df["position_plus1"] = gc_df.position + 1
+
+            # generate a bed with the gc positions
+            gc_positions_bed_chrom = "%s.%s.bed"%(gc_positions_bed, chrom)
+            gc_df[gc_df.is_in_GC==1].sort_values(by=["chromosome", "position"])[["chromosome", "position", "position_plus1", "ID"]].to_csv(gc_positions_bed_chrom, sep="\t", header=None, index=False)
+
+            del gc_df
+
+            # add to the main bed
+            run_cmd("cat %s >> %s"%(gc_positions_bed_chrom, gc_positions_bed))
+
+            # remove the genome_chrom
+            files_to_remove += [gc_positions_bed_chrom, genome_chrom, gc_content_outfile_perPosition]
+
+        ###################################################
 
         # generate the bed with the windows
         target_windows_bed = "%s.target_windows.bed"%gcontent_outfile
@@ -13214,10 +13252,13 @@ def get_df_with_GCcontent(df_windows, genome, gcontent_outfile, replace=False):
         df_windows["length"] = df_windows.end - df_windows.start
         df_windows["GCcontent"] = df_windows.n_GC_positions / df_windows.length
 
+        print_if_verbose(df_windows["GCcontent"] )
+
         # debug
         if any(pd.isna(df_windows.GCcontent)) or any(pd.isna(df_windows.n_GC_positions)) or any(df_windows.GCcontent>1): raise ValueError("Something went went wrong with the GC content calcilation")
 
-        for f in [gc_positions_bed, target_windows_bed, bedmap_outfile, bedmap_stderr]: remove_file(f)
+        files_to_remove += [gc_positions_bed, target_windows_bed, bedmap_outfile, bedmap_stderr]
+        for f in files_to_remove: remove_file(f)
 
         # at the end save the df windows
         df_windows.index = initial_index
