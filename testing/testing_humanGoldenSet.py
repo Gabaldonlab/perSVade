@@ -141,14 +141,17 @@ if running_in_cluster is False: run_in_cluster = False
 for genome_name, genome, mitochondrial_chromosome in [("hg38", hg38_genome, "chrM"), ("hg19", hg19_genome, "chrMT")]:
     print(genome_name)
 
+    # debug (only run hg19)
+    if genome_name!="hg19": continue
+
     # define the outdir
     outdir_perSVade = "%s/running_on_%s"%(outdir_testing, genome_name); fun.make_folder(outdir_perSVade)
 
     ############ KEEP THE RESOURCE CONSUMPTION ##################
 
-    print("getting resources")
-    all_STDs_dir = "%s/all_STDs_testingAccuracySeveralSpecies"%outdir_testing; fun.make_folder(all_STDs_dir)
-    test_fun.keep_STDfiles_nord3Runs_testingAccuracy(all_STDs_dir, outdir_perSVade, genome_name,  type_testing="human") 
+    #print("getting resources")
+    #all_STDs_dir = "%s/all_STDs_testingAccuracySeveralSpecies"%outdir_testing; fun.make_folder(all_STDs_dir)
+    #test_fun.keep_STDfiles_nord3Runs_testingAccuracy(all_STDs_dir, outdir_perSVade, genome_name,  type_testing="human") 
 
     #############################################################
 

@@ -72,11 +72,14 @@ def get_fullpath(x):
 
     """Takes a path and substitutes it bu the full path"""
 
+    # normal
     if x.startswith("/"): return x
-    elif x.startswith("."): path = "/".join(x.split("/")[1:])
-    else: path = x
 
-    return os.getcwd() + "/" + path
+    # a ./    
+    elif x.startswith("./"): return "%s/%s"%(os.getcwd(), "/".join(x.split("/")[1:]))
+
+    # others (including ../)
+    else: return "%s/%s"%(os.getcwd(), x)
 
 
 def get_date_and_time():
@@ -2724,6 +2727,9 @@ def soft_link_files(origin, target):
         origin = get_fullpath(origin)
         target = get_fullpath(target)
 
+        # check that the origin exists
+        if file_is_empty(origin): raise ValueError("The origin %s should exist"%origin)
+
         # remove previous lisqnk
         try: run_cmd("rm %s > /dev/null 2>&1"%target)
         except: pass
@@ -2732,6 +2738,9 @@ def soft_link_files(origin, target):
         print_if_verbose("softlinking. The std is in %s"%soft_linking_std)
         run_cmd("ln -s %s %s > %s 2>&1"%(origin, target, soft_linking_std))
         remove_file(soft_linking_std)
+
+    # check that it worked
+    if file_is_empty(target): raise ValueError("The target %s should exist"%target)
 
 def run_gridss_and_annotateSimpleType(sorted_bam, reference_genome, outdir, replace=False, threads=4, blacklisted_regions="", maxcoverage=50000):
 
@@ -3189,38 +3198,6 @@ def run_clove_filtered_bedpe(bedpe_file, outfile, sorted_bam, replace=False, med
         remove_file(clove_std)
         os.rename(outfile_tmp, outfile)
   
-def generate_nt_content_file(genome, target_nts="GC", replace=False):
-
-    """Takes a genome and outputs a file with chromosome, position and 1 or 0 regarding if any of the target_nts is the same in the genome. This is 0-based"""
-
-    target_nt_content_file = "%s.%scontent.tab"%(genome, target_nts)
-
-    if file_is_empty(target_nt_content_file) or replace is True:
-        print_if_verbose("calculating %s content"%target_nts)
-
-        # initialize a dict to create a genome df
-        genome_dict = {"chromosome":[], "position":[], "base":[]}
-        for seq in SeqIO.parse(genome, "fasta"): 
-
-            # load with the sequence content at each position
-            sequence_str = str(seq.seq).upper()
-            genome_dict["chromosome"] += [seq.id]*len(sequence_str)
-            genome_dict["position"] += list(range(0, len(sequence_str)))
-            genome_dict["base"] += list(sequence_str)
-
-        # get into df
-        genome_df = pd.DataFrame(genome_dict)
-
-        # add if the base is in target_nts
-        target_nts_set = set(target_nts.upper())
-        genome_df["is_in_%s"%target_nts] = genome_df["base"].isin(target_nts_set).apply(int)
-
-        # write
-        target_nt_content_file_tmp = "%s.tmp"%target_nt_content_file
-        genome_df.to_csv(target_nt_content_file_tmp, sep="\t", header=True, index=False)
-        os.rename(target_nt_content_file_tmp, target_nt_content_file)
-
-    return target_nt_content_file
 
 
 def get_distanceToTelomere_chromosome_GCcontent_to_coverage_fn(df_coverage_train, genome, outdir, expected_coverage_per_bp, mitochondrial_chromosome="mito_C_glabrata_CBS138", replace=False, threads=4, min_windows_to_model_coverage=10):
@@ -13159,106 +13136,34 @@ def get_df_with_GCcontent(df_windows, genome, gcontent_outfile, replace=False):
         initial_index = list(df_windows.index)
         initial_cols = list(df_windows.columns)
 
-        # init files to remove
-        files_to_remove  = []
-
         # resort
         df_windows = df_windows.sort_values(by=["chromosome", "start", "end"])
 
         print_if_verbose("getting GC content for %i new windows"%len(df_windows))
 
-        ######## CREATE THE gc_positions_bed FILE #########
+        # create the windows file
+        windows_bed = "%s.windows.bed"%gcontent_outfile
+        df_windows[["chromosome", "start", "end"]].to_csv(windows_bed, sep="\t", header=False, index=False)
 
-        # init file
-        gc_positions_bed = "%s.gc_positions.bed"%gcontent_outfile
-        remove_file(gc_positions_bed)
-        run_cmd("touch %s"%gc_positions_bed)
+        # index the genome
+        index_genome(genome, replace=replace)
 
-        # init the last_chromID
-        last_chrom_ID = 0
+        # run bedtools nuc to profile
+        bedtools_nuc_output = "%s.bedtools_nuc.out"%windows_bed
+        bedtools_nuc_stderr = "%s.generating.stderr"%bedtools_nuc_output
 
-        # go through each chromosome to make it easier
-        for chrom in sorted(set(df_windows.chromosome)):
-            print_if_verbose("working on chromosome %s"%chrom)
+        print_if_verbose("running bedtools nuc. The stderr is in %s"%bedtools_nuc_stderr)
+        run_cmd("%s nuc -fi %s -bed %s > %s 2>%s"%(bedtools, genome, windows_bed, bedtools_nuc_output, bedtools_nuc_stderr))
 
-            # get the chromosome seq
-            chr_Seqs = [seq for seq in SeqIO.parse(genome, "fasta") if seq.id==chrom]
-            if len(chr_Seqs)!=1: raise ValueError("%s is not valid"%chrom)
+        # load the output of bedtools nuc into a df and append to the
+        df_nucs = get_tab_as_df_or_empty_df(bedtools_nuc_output).rename(columns={"#1_usercol":"chromosome", "2_usercol":"start", "3_usercol":"end", "5_pct_gc":"GCcontent"})
 
-            genome_chrom = "%s.%s.fasta"%(genome, chrom)
-            SeqIO.write(chr_Seqs, genome_chrom, "fasta")
+        df_windows = df_windows.merge(df_nucs[["chromosome", "start", "end", "GCcontent"]], on=["chromosome", "start", "end"], how="left", validate="one_to_one")
 
-            # get the GC content file for each position
-            gc_content_outfile_perPosition = generate_nt_content_file(genome_chrom, replace=replace, target_nts="GC")
-            gc_df = pd.read_csv(gc_content_outfile_perPosition, sep="\t")[["chromosome", "position", "is_in_GC"]].sort_values(by=["chromosome", "position"])
+        if any(pd.isna(df_windows.GCcontent)): raise ValueError("There should be no NaNs in df_windows.GCcontent")
 
-            # add the ID
-            gc_df["ID"] =  list(range(last_chrom_ID, len(gc_df)+last_chrom_ID))
-
-            # redefine last_chrom_ID
-            last_chrom_ID = max(gc_df.ID)+1
-
-            # add the end
-            gc_df["position_plus1"] = gc_df.position + 1
-
-            # generate a bed with the gc positions
-            gc_positions_bed_chrom = "%s.%s.bed"%(gc_positions_bed, chrom)
-            gc_df[gc_df.is_in_GC==1].sort_values(by=["chromosome", "position"])[["chromosome", "position", "position_plus1", "ID"]].to_csv(gc_positions_bed_chrom, sep="\t", header=None, index=False)
-
-            del gc_df
-
-            # add to the main bed
-            run_cmd("cat %s >> %s"%(gc_positions_bed_chrom, gc_positions_bed))
-
-            # remove the genome_chrom
-            files_to_remove += [gc_positions_bed_chrom, genome_chrom, gc_content_outfile_perPosition]
-
-        ###################################################
-
-        # generate the bed with the windows
-        target_windows_bed = "%s.target_windows.bed"%gcontent_outfile
-        df_windows["IDwindow"] = list(range(0, len(df_windows)))
-        df_windows[["chromosome", "start", "end", "IDwindow"]].to_csv(target_windows_bed, sep="\t", header=None, index=False)
-
-        # run bedmap to get a file where each line corresponds to the regions to which each target_windows_bed
-        bedmap_outfile = "%s.bedmap.target_windows_overlappingGC.txt"%gcontent_outfile
-        bedmap_stderr = "%s.stderr"%bedmap_outfile
-
-        print_if_verbose("running bedmap. The stderr is in %s"%bedmap_stderr)
-        run_cmd("%s --fraction-map 1.0 --echo-map-id  --delim '\t' %s %s > %s 2>%s"%(bedmap, target_windows_bed, gc_positions_bed, bedmap_outfile, bedmap_stderr))
-
-        # load bedmap df into df
-        df_windows["overlapping_GC_IDs"] = open(bedmap_outfile, "r").readlines()
-
-        # add the n_GC_positions
-        def get_NaN_to_empty_str(x):
-            if pd.isna(x): return ""
-            else: return x
-
-        all_possibleIDs = set(gc_df.ID.apply(str))
-        def get_set_from_string(x): 
-
-            # define set
-            set_x = set(x.strip().split(";")).difference({""})
-
-            # debug 
-            if len(set_x.difference(all_possibleIDs))>0: raise ValueError("there are unexpected IDs in %s"%set_x)
-
-            return set_x
-
-        df_windows["n_GC_positions"] = df_windows.overlapping_GC_IDs.apply(get_NaN_to_empty_str).apply(get_set_from_string).apply(len)
-
-        # add the GC content
-        df_windows["length"] = df_windows.end - df_windows.start
-        df_windows["GCcontent"] = df_windows.n_GC_positions / df_windows.length
-
-        print_if_verbose(df_windows["GCcontent"] )
-
-        # debug
-        if any(pd.isna(df_windows.GCcontent)) or any(pd.isna(df_windows.n_GC_positions)) or any(df_windows.GCcontent>1): raise ValueError("Something went went wrong with the GC content calcilation")
-
-        files_to_remove += [gc_positions_bed, target_windows_bed, bedmap_outfile, bedmap_stderr]
-        for f in files_to_remove: remove_file(f)
+        # remove files
+        for f in [bedtools_nuc_output, bedtools_nuc_stderr, windows_bed]: remove_file(f)
 
         # at the end save the df windows
         df_windows.index = initial_index
