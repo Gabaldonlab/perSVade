@@ -150,8 +150,8 @@ for genome_name, genome, mitochondrial_chromosome in [("hg38", hg38_genome, "chr
     ############ KEEP THE RESOURCE CONSUMPTION ##################
 
     #print("getting resources")
-    #all_STDs_dir = "%s/all_STDs_testingAccuracySeveralSpecies"%outdir_testing; fun.make_folder(all_STDs_dir)
-    #test_fun.keep_STDfiles_nord3Runs_testingAccuracy(all_STDs_dir, outdir_perSVade, genome_name,  type_testing="human") 
+    all_STDs_dir = "%s/all_STDs_testingAccuracySeveralSpecies"%outdir_testing; fun.make_folder(all_STDs_dir)
+    test_fun.keep_STDfiles_nord3Runs_testingAccuracy(all_STDs_dir, outdir_perSVade, genome_name,  type_testing="human") 
 
     #############################################################
 
@@ -169,19 +169,27 @@ for genome_name, genome, mitochondrial_chromosome in [("hg38", hg38_genome, "chr
     # define the simulation ploidies as diploid
     simulation_ploidies = "diploid_hetero"
 
+    # simulations only around some chromosomes
+    simulation_chromosomes = "chr1,chr2,chr7,chr9,chrX,chrY,%s"%mitochondrial_chromosome
+
     # define the cmd
-    cmd = "%s --ref %s --threads %i -o %s --close_shortReads_table %s --n_close_samples 3 --nruns_per_sample 1 -f1 skip -f2 skip --mitochondrial_chromosome %s --testAccuracy --verbose --nsimulations 2 --skip_CNV_calling --simulation_ploidies %s --previous_repeats_table %s --StopAfter_testAccuracy --simulate_SVs_arround_HomologousRegions_maxEvalue %.10f --simulate_SVs_arround_HomologousRegions_queryWindowSize %i --simulate_SVs_arround_HomologousRegions_previousBlastnFile %s --StopAfter_testAccuracy_perSVadeRunning --min_gb_RAM_required 3 --fraction_available_mem 1.0 --skip_marking_duplicates"%(perSVade_py, genome, threads, outdir_perSVade, close_shortReads_table, mitochondrial_chromosome, simulation_ploidies, previous_repeats_table, simulate_SVs_arround_HomologousRegions_maxEvalue, simulate_SVs_arround_HomologousRegions_queryWindowSize, simulate_SVs_arround_HomologousRegions_previousBlastnFile)
+    cmd = "%s --ref %s --threads %i -o %s --close_shortReads_table %s --n_close_samples 3 --nruns_per_sample 1 -f1 skip -f2 skip --mitochondrial_chromosome %s --testAccuracy --verbose --nsimulations 2 --skip_CNV_calling --simulation_ploidies %s --previous_repeats_table %s --StopAfter_testAccuracy --simulate_SVs_arround_HomologousRegions_maxEvalue %.10f --simulate_SVs_arround_HomologousRegions_queryWindowSize %i --simulate_SVs_arround_HomologousRegions_previousBlastnFile %s --StopAfter_testAccuracy_perSVadeRunning --min_gb_RAM_required 3 --fraction_available_mem 1.0 --skip_marking_duplicates --simulation_chromosomes %s"%(perSVade_py, genome, threads, outdir_perSVade, close_shortReads_table, mitochondrial_chromosome, simulation_ploidies, previous_repeats_table, simulate_SVs_arround_HomologousRegions_maxEvalue, simulate_SVs_arround_HomologousRegions_queryWindowSize, simulate_SVs_arround_HomologousRegions_previousBlastnFile, simulation_chromosomes)
 
     # --fractionRAM_to_dedicate 0.5 is the default one. --skip_SV_CNV_calling would be to skip the CNV calling. --fractionRAM_to_dedicate 0.5
 
+    # define the tmpdir and remove
+    tmpdir_cluster = "/gpfs/scratch/bsc40/bsc40395"
+    for f in os.listdir(tmpdir_cluster): fun.delete_file_or_folder("%s/%s"%(tmpdir_cluster, f))
+
     # add options depending on the machine
-    if run_in_cluster is True: cmd += " --job_array_mode job_array --tmpdir /gpfs/scratch/bsc40/bsc40395"
+    if run_in_cluster is True: cmd += " --job_array_mode job_array --tmpdir %s"%tmpdir_cluster
     else: cmd += " --job_array_mode local"
 
     cmd_output = "%s/cmd_testing.std"%outdir_perSVade
     print("running std into %s"%cmd_output)
-    fun.run_cmd("%s > %s 2>&1"%(cmd, cmd_output)) # run with stdout
-    #fun.run_cmd(cmd); continue # run locally
+    #fun.run_cmd("%s > %s 2>&1"%(cmd, cmd_output)) # run with stdout
+    fun.run_cmd(cmd); continue # run locally
+    jgafgjda
 
     ###### RUN JOB ARRAYS ######
 
