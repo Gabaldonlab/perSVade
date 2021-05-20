@@ -1177,24 +1177,40 @@ def run_bwa_mem(fastq1, fastq2, ref, outdir, bamfile, sorted_bam, index_bam, nam
         if (file_is_empty(samfile) and file_is_empty(bamfile)) or replace is True:
 
             # remove previuous generated temporary file
-            if os.path.isfile("%s.tmp"%samfile): os.unlink("%s.tmp"%samfile)
+            remove_file("%s.tmp"%samfile)
+
+            # define the samfile_tmp
+            if tmpdir_writingFiles is not None: samfile_tmp = "%s/aligned_reads.sam.tmp"%(get_and_create_new_tmpdir(tmpdir_writingFiles))
+            else: samfile_tmp = "%s.tmp"%samfile
+
+            print("THE TMDIR IS ", tmpdir_writingFiles)
+
 
             bwa_mem_stderr = "%s.tmp.stderr"%samfile
             print_if_verbose("running bwa mem. The std is in %s"%bwa_mem_stderr)
-            cmd_bwa = '%s mem -R "@RG\\tID:%s\\tSM:%s" -t %i %s %s %s > %s.tmp 2>%s'%(bwa, name_sample, name_sample, threads, ref, fastq1, fastq2, samfile, bwa_mem_stderr); run_cmd(cmd_bwa)
-            os.rename("%s.tmp"%samfile , samfile)
+            cmd_bwa = '%s mem -R "@RG\\tID:%s\\tSM:%s" -t %i %s %s %s > %s 2>%s'%(bwa, name_sample, name_sample, threads, ref, fastq1, fastq2, samfile_tmp, bwa_mem_stderr); run_cmd(cmd_bwa)
+
             remove_file(bwa_mem_stderr)
+            os.rename(samfile_tmp , samfile)
 
         # convert to bam 
         if file_is_empty(bamfile) or replace is True:
+
+            # remove previuous generated temporary file
+            remove_file("%s.tmp"%bamfile)
+
+            # define the temporary file
+            if tmpdir_writingFiles is not None: bamfile_tmp = "%s/aligned_reads.bam.tmp"%(get_and_create_new_tmpdir(tmpdir_writingFiles))
+            else: bamfile_tmp = "%s.tmp"%bamfile
+
             bamconversion_stderr = "%s.tmp.stderr"%bamfile
             print_if_verbose("Converting to bam. The std is in %s"%bamconversion_stderr)
-            cmd_toBAM = "%s view -Sbu %s > %s.tmp 2>%s"%(samtools, samfile, bamfile, bamconversion_stderr); run_cmd(cmd_toBAM)
+            cmd_toBAM = "%s view -Sbu %s > %s 2>%s"%(samtools, samfile, bamfile_tmp, bamconversion_stderr); run_cmd(cmd_toBAM)
 
             # remove the sam
             os.unlink(samfile)
             remove_file(bamconversion_stderr)
-            os.rename("%s.tmp"%bamfile , bamfile)
+            os.rename(bamfile_tmp , bamfile)
 
 
         if MarkDuplicates is True:
@@ -1205,16 +1221,23 @@ def run_bwa_mem(fastq1, fastq2, ref, outdir, bamfile, sorted_bam, index_bam, nam
         if file_is_empty(sorted_bam) or replace is True:
             print_if_verbose("Sorting bam")
 
+            # define the RAM per core
+            allocated_ram = get_availableGbRAM(get_dir(sorted_bam))*fractionRAM_to_dedicate
+            max_MbRAM_per_thread = int((allocated_ram/threads)*1000)
+
             # remove all temporary files generated previously in samtools sort (they'd make a new sort to be an error)
             for outdir_file in os.listdir(outdir): 
                 fullfilepath = "%s/%s"%(outdir, outdir_file)
                 if outdir_file.startswith("aligned_reads") and ".tmp." in outdir_file: os.unlink(fullfilepath)
 
+            # define the temporary file
+            if tmpdir_writingFiles is not None: sorted_bam_tmp = "%s/aligned_reads.bam.sorted.tmp"%(get_and_create_new_tmpdir(tmpdir_writingFiles))
+            else: sorted_bam_tmp = "%s.tmp"%sorted_bam
+
             # sort
-            sorted_bam_tmp = "%s.tmp"%sorted_bam
             bam_sort_std = "%s.generating.txt"%sorted_bam
-            print_if_verbose("the sorting bam std is in %s"%bam_sort_std)
-            cmd_sort = "%s sort --threads %i -o %s %s > %s 2>&1"%(samtools, threads, sorted_bam_tmp, bamfile_MarkedDuplicates, bam_sort_std); run_cmd(cmd_sort)
+            print_if_verbose("the sorting bam std is in %s. Running on %i threads and %iMb RAM/thread"%(bam_sort_std, threads, max_MbRAM_per_thread))
+            cmd_sort = "%s sort --threads %i -m %iM -o %s %s > %s 2>&1"%(samtools, threads, max_MbRAM_per_thread, sorted_bam_tmp, bamfile_MarkedDuplicates, bam_sort_std); run_cmd(cmd_sort)
 
             # remove files
             for f in [bam_sort_std, bamfile_MarkedDuplicates, bamfile]: remove_file(f)
@@ -7803,7 +7826,7 @@ def simulate_readPairs_per_window(df_windows, genome, npairs, outdir, read_lengt
     # return the simulated reads
     return (all_fastqgz_1_correct, all_fastqgz_2_correct) 
 
-def simulate_and_align_PairedReads_perWindow(df_windows, genome_interest, reference_genome, npairs, read_length, outdir, median_insert_size, median_insert_size_sd, replace=False, threads=4):
+def simulate_and_align_PairedReads_perWindow(df_windows, genome_interest, reference_genome, npairs, read_length, outdir, median_insert_size, median_insert_size_sd, replace=False, threads=4, tmpdir=None):
 
     """Takes a dataframe with windows of the genome, which also has a predicted_relative_coverage (which indicates by how much should the coverage be multiplied in this window). This function generates a fastq (and deletes it at the end), aligns it and returns the bam. All files are written under outdir. It returns the aligned bamfile. All the chromosomes are simulated as linear."""
 
@@ -7830,7 +7853,7 @@ def simulate_and_align_PairedReads_perWindow(df_windows, genome_interest, refere
         ######################################################
 
         ##### align the reads and retun the bam ######
-        run_bwa_mem(read1_fastqgz, read2_fastqgz, reference_genome, outdir, sim_bamfile, sim_sorted_bam, sim_index_bam, name_sample="simulations_reference_genome", threads=threads, replace=replace, MarkDuplicates=False)
+        run_bwa_mem(read1_fastqgz, read2_fastqgz, reference_genome, outdir, sim_bamfile, sim_sorted_bam, sim_index_bam, name_sample="simulations_reference_genome", threads=threads, replace=replace, MarkDuplicates=False, tmpdir_writingFiles=tmpdir)
 
         # remove the fastq files
         print_if_verbose("deleting reads")
@@ -9496,9 +9519,20 @@ def get_and_report_filtering_accuracy_across_genomes_and_ploidies(df_benchmark, 
 
     return df_cross_benchmark_best, best_filters_series
 
-def get_best_parameters_for_GridssClove_run(sorted_bam, reference_genome, outdir, threads=4, replace=False, n_simulated_genomes=2, mitochondrial_chromosome="mito_C_glabrata_CBS138", simulation_ploidies=["haploid", "diploid_homo", "diploid_hetero", "ref:2_var:1", "ref:3_var:1", "ref:4_var:1", "ref:5_var:1", "ref:9_var:1", "ref:19_var:1", "ref:99_var:1"], range_filtering_benchmark="theoretically_meaningful", nvars=100, real_bedpe_breakpoints=None, median_insert_size=250, median_insert_size_sd=0):
+def get_best_parameters_for_GridssClove_run(sorted_bam, reference_genome, outdir, threads=4, replace=False, n_simulated_genomes=2, mitochondrial_chromosome="mito_C_glabrata_CBS138", simulation_ploidies=["haploid", "diploid_homo", "diploid_hetero", "ref:2_var:1", "ref:3_var:1", "ref:4_var:1", "ref:5_var:1", "ref:9_var:1", "ref:19_var:1", "ref:99_var:1"], range_filtering_benchmark="theoretically_meaningful", nvars=100, real_bedpe_breakpoints=None, median_insert_size=250, median_insert_size_sd=0, tmpdir=None, simulation_chromosomes=None):
 
     """This finds the optimum parameters for running GRIDSS clove and returns them. The parameters are equivalent to the run_GridssClove_optimising_parameters function"""
+
+    # re-define things as a function of whether to simulate on all or only a fraction of the chromosomes
+    if simulation_chromosomes is not None: 
+        simulation_chromosomes_set = set(simulation_chromosomes.split(","))
+        print(simulation_chromosomes_set)
+
+        YouHaveToWorkOnTheOption_simulation_chromosomes
+
+
+        # re-define the mtDNA, just keep if it is in the simulation_chromosomes
+
 
 
     # define plots dir
@@ -9544,7 +9578,7 @@ def get_best_parameters_for_GridssClove_run(sorted_bam, reference_genome, outdir
         df_REFgenome_info = get_windows_infoDF_with_predictedFromFeatures_coverage(reference_genome, distToTel_chrom_GC_to_coverage_fn, expected_coverage_per_bp, replace=replace, threads=threads)
 
         outdir_ref = "%s/simulation_reference_genome_%ibp_windows"%(outdir, window_l)
-        simulated_reference_bam_file = simulate_and_align_PairedReads_perWindow(df_REFgenome_info, reference_genome, reference_genome, total_nread_pairs, read_length, outdir_ref, median_insert_size, median_insert_size_sd, replace=replace, threads=threads)
+        simulated_reference_bam_file = simulate_and_align_PairedReads_perWindow(df_REFgenome_info, reference_genome, reference_genome, total_nread_pairs, read_length, outdir_ref, median_insert_size, median_insert_size_sd, replace=replace, threads=threads, tmpdir=tmpdir)
 
     else: simulated_reference_bam_file = None
 
@@ -9618,7 +9652,7 @@ def get_best_parameters_for_GridssClove_run(sorted_bam, reference_genome, outdir
             df_genome_info = get_windows_infoDF_with_predictedFromFeatures_coverage(rearranged_genome, distToTel_chrom_GC_to_coverage_fn, expected_coverage_per_bp, replace=replace, threads=threads)
 
             # get the aligned reads to the reference
-            simulation_bam_file = simulate_and_align_PairedReads_perWindow(df_genome_info, rearranged_genome, reference_genome, total_nread_pairs, read_length, simulation_outdir, median_insert_size, median_insert_size_sd, replace=replace, threads=threads)
+            simulation_bam_file = simulate_and_align_PairedReads_perWindow(df_genome_info, rearranged_genome, reference_genome, total_nread_pairs, read_length, simulation_outdir, median_insert_size, median_insert_size_sd, replace=replace, threads=threads, tmpdir=tmpdir)
 
             # define a path to the known SVs (know_SV_dict should be changed to sim_svtype_to_svfile)
 
@@ -9775,7 +9809,7 @@ def get_parameters_from_json(json_file):
 
     return gridss_blacklisted_regions, gridss_maxcoverage, gridss_filters_dict, max_rel_coverage_to_consider_del, min_rel_coverage_to_consider_dup
 
-def run_GridssClove_optimising_parameters(sorted_bam, reference_genome, outdir, threads=4, replace=False, n_simulated_genomes=2, mitochondrial_chromosome="mito_C_glabrata_CBS138", simulation_ploidies=["haploid", "diploid_homo", "diploid_hetero", "ref:2_var:1", "ref:3_var:1", "ref:4_var:1", "ref:5_var:1", "ref:9_var:1", "ref:19_var:1", "ref:99_var:1"], range_filtering_benchmark="theoretically_meaningful", nvars=100, fast_SVcalling=False, real_bedpe_breakpoints=None, gridss_VCFoutput="", replace_FromGridssRun_final_perSVade_run=False):
+def run_GridssClove_optimising_parameters(sorted_bam, reference_genome, outdir, threads=4, replace=False, n_simulated_genomes=2, mitochondrial_chromosome="mito_C_glabrata_CBS138", simulation_ploidies=["haploid", "diploid_homo", "diploid_hetero", "ref:2_var:1", "ref:3_var:1", "ref:4_var:1", "ref:5_var:1", "ref:9_var:1", "ref:19_var:1", "ref:99_var:1"], range_filtering_benchmark="theoretically_meaningful", nvars=100, fast_SVcalling=False, real_bedpe_breakpoints=None, gridss_VCFoutput="", replace_FromGridssRun_final_perSVade_run=False, tmpdir=None, simulation_chromosomes=None):
 
     """
     Takes some aligned reads and runs the GridssPipeline optimising the parameters of GRIDSS filtering. These are the different parameters of the function:
@@ -9827,7 +9861,7 @@ def run_GridssClove_optimising_parameters(sorted_bam, reference_genome, outdir, 
 
             parameter_optimisation_dir = "%s/parameter_optimisation"%outdir; make_folder(parameter_optimisation_dir)
 
-            gridss_blacklisted_regions, gridss_maxcoverage, gridss_filters_dict, max_rel_coverage_to_consider_del, min_rel_coverage_to_consider_dup, df_cross_benchmark_best = get_best_parameters_for_GridssClove_run(sorted_bam, reference_genome, parameter_optimisation_dir, threads=threads, replace=replace, n_simulated_genomes=n_simulated_genomes, mitochondrial_chromosome=mitochondrial_chromosome, simulation_ploidies=simulation_ploidies, range_filtering_benchmark=range_filtering_benchmark, nvars=nvars, real_bedpe_breakpoints=real_bedpe_breakpoints, median_insert_size=median_insert_size, median_insert_size_sd=median_insert_size_sd)
+            gridss_blacklisted_regions, gridss_maxcoverage, gridss_filters_dict, max_rel_coverage_to_consider_del, min_rel_coverage_to_consider_dup, df_cross_benchmark_best = get_best_parameters_for_GridssClove_run(sorted_bam, reference_genome, parameter_optimisation_dir, threads=threads, replace=replace, n_simulated_genomes=n_simulated_genomes, mitochondrial_chromosome=mitochondrial_chromosome, simulation_ploidies=simulation_ploidies, range_filtering_benchmark=range_filtering_benchmark, nvars=nvars, real_bedpe_breakpoints=real_bedpe_breakpoints, median_insert_size=median_insert_size, median_insert_size_sd=median_insert_size_sd, tmpdir=tmpdir, simulation_chromosomes=simulation_chromosomes)
 
         # get the parameters from an optimisation
         else: 
@@ -10554,7 +10588,7 @@ def get_bedpe_breakpoints_arround_repeats(repeats_table_file, replace=False, min
 
 
 
-def report_accuracy_realSVs_perSVadeRuns(close_shortReads_table, reference_genome, outdir, real_bedpe_breakpoints, threads=4, replace=False, n_simulated_genomes=2, mitochondrial_chromosome="mito_C_glabrata_CBS138", simulation_ploidies=["haploid", "diploid_homo", "diploid_hetero", "ref:2_var:1", "ref:3_var:1", "ref:4_var:1", "ref:5_var:1", "ref:9_var:1", "ref:19_var:1", "ref:99_var:1"], range_filtering_benchmark="theoretically_meaningful", nvars=100, job_array_mode="local", skip_cleaning_simulations_files_and_parameters=False, skip_cleaning_outdir=False, parameters_json_file=None, gff=None, replace_FromGridssRun_final_perSVade_run=False, fraction_available_mem=None, skip_CNV_calling=False, outdir_finding_realVars=None, replace_SV_CNVcalling=False, simulate_SVs_arround_HomologousRegions_previousBlastnFile=None, simulate_SVs_arround_HomologousRegions_maxEvalue=1e-5, simulate_SVs_arround_HomologousRegions_queryWindowSize=500, skip_SV_CNV_calling=False):
+def report_accuracy_realSVs_perSVadeRuns(close_shortReads_table, reference_genome, outdir, real_bedpe_breakpoints, threads=4, replace=False, n_simulated_genomes=2, mitochondrial_chromosome="mito_C_glabrata_CBS138", simulation_ploidies=["haploid", "diploid_homo", "diploid_hetero", "ref:2_var:1", "ref:3_var:1", "ref:4_var:1", "ref:5_var:1", "ref:9_var:1", "ref:19_var:1", "ref:99_var:1"], range_filtering_benchmark="theoretically_meaningful", nvars=100, job_array_mode="local", skip_cleaning_simulations_files_and_parameters=False, skip_cleaning_outdir=False, parameters_json_file=None, gff=None, replace_FromGridssRun_final_perSVade_run=False, fraction_available_mem=None, skip_CNV_calling=False, outdir_finding_realVars=None, replace_SV_CNVcalling=False, simulate_SVs_arround_HomologousRegions_previousBlastnFile=None, simulate_SVs_arround_HomologousRegions_maxEvalue=1e-5, simulate_SVs_arround_HomologousRegions_queryWindowSize=500, skip_SV_CNV_calling=False, tmpdir=None, simulation_chromosomes=None):
 
 
     """This function runs the SV pipeline for all the datasets in close_shortReads_table with the fastSV, optimisation based on uniform parameters and optimisation based on realSVs (specified in real_svtype_to_file). The latter is skipped if real_svtype_to_file is empty.
@@ -10656,6 +10690,8 @@ def report_accuracy_realSVs_perSVadeRuns(close_shortReads_table, reference_genom
                 # define the cmd. This is a normal perSvade.py run with the vars of the previous dir  
                 cmd = "python %s -r %s --threads %i --outdir %s --nvars %i --nsimulations %i --simulation_ploidies %s --range_filtering_benchmark %s --mitochondrial_chromosome %s -f1 %s -f2 %s --previous_repeats_table %s --min_CNVsize_coverageBased %i --keep_simulation_files --simulate_SVs_arround_HomologousRegions_maxEvalue %.10f --simulate_SVs_arround_HomologousRegions_queryWindowSize %i --fractionRAM_to_dedicate %.2f"%(perSVade_py, reference_genome, threads, outdir_runID, nvars, n_simulated_genomes, ",".join(simulation_ploidies), range_filtering_benchmark, mitochondrial_chromosome, r1, r2, previous_repeats_table, min_CNVsize_coverageBased, simulate_SVs_arround_HomologousRegions_maxEvalue, simulate_SVs_arround_HomologousRegions_queryWindowSize, fractionRAM_to_dedicate)
 
+                print("This is the TMPDIR", tmpdir)
+
                 # add arguments depending on the pipeline
                 if replace is True: cmd += " --replace"
                 if fast_SVcalling is True: cmd += " --fast_SVcalling"
@@ -10671,6 +10707,8 @@ def report_accuracy_realSVs_perSVadeRuns(close_shortReads_table, reference_genom
                 if simulate_SVs_arround_repeats is True: cmd += " --simulate_SVs_arround_repeats"
                 if simulate_SVs_arround_HomologousRegions is True: cmd += " --simulate_SVs_arround_HomologousRegions"
                 if simulate_SVs_arround_HomologousRegions_previousBlastnFile is not None: cmd += " --simulate_SVs_arround_HomologousRegions_previousBlastnFile %s"%simulate_SVs_arround_HomologousRegions_previousBlastnFile
+                if tmpdir is not None: cmd += " --tmpdir %s"%tmpdir
+                if simulation_chromosomes is not None: cmd += " --simulation_chromosomes %s"%simulation_chromosomes
 
                 """
                 # debug
@@ -12218,6 +12256,16 @@ def get_new_tmpdir(tmpdir_writingFiles):
     tmpdir_name = id_generator(15, chars=string.ascii_uppercase, already_existing_ids=already_existing_files)
 
     return "%s/%s"%(tmpdir_writingFiles, tmpdir_name)
+
+
+def get_and_create_new_tmpdir(tmpdir_writingFiles):
+
+    """Gets a tmpdir and creates it"""
+
+    new_tmpdir = get_new_tmpdir(tmpdir_writingFiles)
+    make_folder(new_tmpdir)
+
+    return new_tmpdir
 
 def get_bam_with_duplicatesMarkedSpark(bam, threads=4, replace=False, remove_duplicates=False, tmpdir_writingFiles=None):
 
@@ -18939,7 +18987,7 @@ def get_SV_CNV_df_with_overlaps_with_all_samples(SV_CNV, outdir, tol_bp, pct_ove
             sortedWindowID_to_relativeCN = df_CN_all.set_index("sorted_window_ID", drop=False).merged_relative_CN
 
             # go through several pct overlaps
-            for min_pct_overlap in [0.1, 0.25, 0.5, 0.75, 0.9, 0.95]: 
+            for min_pct_overlap in [0.25, 0.5, 0.75, 0.9]: 
                 print("getting CNVs overlapping by at least %.2f"%min_pct_overlap)
 
                 # define samples
@@ -19658,6 +19706,61 @@ def get_integrated_CNperWindow_df_severalSamples(paths_df, outdir, threads=4, re
 
     return integrated_CNperWindow_df
 
+def get_df_gridss_and_df_bedpe_for_integratedSV_CNV(Is, nsamples, sampleID, perSVade_outdir, outdir_integrating_gridss_df):
+
+    """This function generates a gridss and bedpe df for one sample and returns both dataframes"""
+
+    print("%i/%i: %s"%(Is+1, nsamples, sampleID))
+
+    # get the outdir
+    outdir_gridss = "%s/SVdetection_output/final_gridss_running"%(perSVade_outdir)
+
+    # define the filenames original
+    origin_gridss_vcf_raw_file = "%s/gridss_output.raw.vcf"%outdir_gridss
+    origin_gridss_vcf_filt_file = "%s/gridss_output.filt.vcf"%outdir_gridss
+
+    # put them into the outdir_integrating_gridss_df
+    gridss_vcf_raw_file = "%s/%s_gridss_output.raw.vcf"%(outdir_integrating_gridss_df, sampleID)
+    gridss_vcf_filt_file = "%s/%s_gridss_output.filt.vcf"%(outdir_integrating_gridss_df, sampleID)
+    soft_link_files(origin_gridss_vcf_raw_file, gridss_vcf_raw_file)
+    soft_link_files(origin_gridss_vcf_filt_file, gridss_vcf_filt_file)
+
+    ## GET THE BEDPE ##
+
+    # get the bedpe files
+    bedpe_raw = get_tab_as_df_or_empty_df(get_bedpe_from_svVCF(gridss_vcf_raw_file, outdir_integrating_gridss_df, replace=False, only_simple_conversion=True))
+    bedpe_filt = get_tab_as_df_or_empty_df(get_bedpe_from_svVCF(gridss_vcf_filt_file, outdir_integrating_gridss_df, replace=False, only_simple_conversion=True))
+
+    # add whether it is PASS
+    pass_breakpoints = set(bedpe_filt.name)
+    bedpe_raw["PASSed_filters"] = bedpe_raw.name.isin(pass_breakpoints)
+    
+    # add name and keep
+    bedpe_raw["sampleID"] = sampleID
+
+    ###################
+
+    ## GET THE GRIDSS ##
+
+    # get the gridss vcfs
+    gridss_vcf_raw = get_df_and_header_from_vcf(gridss_vcf_raw_file)[0]
+    gridss_vcf_filt = get_df_and_header_from_vcf(gridss_vcf_filt_file)[0]
+
+    # change names
+    sample_name_vcf = gridss_vcf_raw.columns[-1]
+    gridss_vcf_raw = gridss_vcf_raw.rename(columns={sample_name_vcf:"DATA"})
+    gridss_vcf_filt = gridss_vcf_filt.rename(columns={sample_name_vcf:"DATA"})
+
+    # add whether it passed the filters
+    pass_variants = set(gridss_vcf_filt.ID)
+    gridss_vcf_raw["PASSed_filters"] = gridss_vcf_raw.ID.isin(pass_variants)
+    gridss_vcf_raw["sampleID"] = sampleID
+
+    ####################
+
+    return gridss_vcf_raw , bedpe_raw
+
+
 def get_integrated_SV_CNV_df_severalSamples(paths_df, outdir, gff, reference_genome, threads=4, replace=False, integrated_CNperWindow_file=None, fields_varCall="all", fields_varAnnot="all", tol_bp=50, pct_overlap=0.75):
 
     """
@@ -19691,7 +19794,7 @@ def get_integrated_SV_CNV_df_severalSamples(paths_df, outdir, gff, reference_gen
     # define the samples to run
     samples_to_run = set(paths_df.sampleID)
 
-    ####### GET THE SIMLY MERGED DFS ##########
+    ####### GET THE SIMPLY MERGED DFS ##########
 
     if file_is_empty(SV_CNV_file_simple) or file_is_empty(SV_CNV_annot_file) or replace is True:
         print("getting stacked SV_CNV files")
@@ -19730,8 +19833,10 @@ def get_integrated_SV_CNV_df_severalSamples(paths_df, outdir, gff, reference_gen
     ###########################################
 
     # load the CNV per window calling df
+    print("loading %s"%integrated_CNperWindow_file)
     if integrated_CNperWindow_file is  not None: df_CN_all = get_tab_as_df_or_empty_df(integrated_CNperWindow_file)
     else: df_CN_all = None
+
 
     ####### GET THE INTEGRATED GRIDSS DF AND BEDPE DF ######
 
@@ -19745,62 +19850,29 @@ def get_integrated_SV_CNV_df_severalSamples(paths_df, outdir, gff, reference_gen
         delete_folder(outdir_integrating_gridss_df)
         make_folder(outdir_integrating_gridss_df)
 
-        # init
+        # run in parallel the obtention of gridss and bedpe dfs
+        inputs_fn = [(Is, len(paths_df), sampleID, perSVade_outdir, outdir_integrating_gridss_df) for Is, (sampleID, perSVade_outdir) in enumerate(paths_df[["sampleID", "perSVade_outdir"]].values)]
+
+        # get files in parallel
+        print("running get_df_gridss_and_df_bedpe_for_integratedSV_CNV")
+        with multiproc.Pool(threads) as pool:
+            list_df_gridss_df_bedpe_s = pool.starmap(get_df_gridss_and_df_bedpe_for_integratedSV_CNV, inputs_fn) 
+                
+            pool.close()
+            pool.terminate()
+
+        # get the dfs
+        print("concatenating df_gridss")
+
         df_gridss_all = pd.DataFrame()
         df_bedpe_all = pd.DataFrame()
 
-        for Is, (sampleID, perSVade_outdir) in enumerate(paths_df[["sampleID", "perSVade_outdir"]].values):
-            print("%i/%i: %s"%(Is+1, len(paths_df), sampleID))
+        for Is, (df_gridss, df_bepde) in  enumerate(list_df_gridss_df_bedpe_s):
+            print("appending sample %i/%i"%(Is+1, len(paths_df)))
 
-            # get the outdir
-            outdir_gridss = "%s/SVdetection_output/final_gridss_running"%(perSVade_outdir)
-
-            # define the filenames original
-            origin_gridss_vcf_raw_file = "%s/gridss_output.raw.vcf"%outdir_gridss
-            origin_gridss_vcf_filt_file = "%s/gridss_output.filt.vcf"%outdir_gridss
-
-            # put them into the outdir_integrating_gridss_df
-            gridss_vcf_raw_file = "%s/%s_gridss_output.raw.vcf"%(outdir_integrating_gridss_df, sampleID)
-            gridss_vcf_filt_file = "%s/%s_gridss_output.filt.vcf"%(outdir_integrating_gridss_df, sampleID)
-            soft_link_files(origin_gridss_vcf_raw_file, gridss_vcf_raw_file)
-            soft_link_files(origin_gridss_vcf_filt_file, gridss_vcf_filt_file)
-
-            ## GET THE BEDPE ##
-
-            # get the bedpe files
-            bedpe_raw = get_tab_as_df_or_empty_df(get_bedpe_from_svVCF(gridss_vcf_raw_file, outdir_integrating_gridss_df, replace=False, only_simple_conversion=True))
-            bedpe_filt = get_tab_as_df_or_empty_df(get_bedpe_from_svVCF(gridss_vcf_filt_file, outdir_integrating_gridss_df, replace=False, only_simple_conversion=True))
-
-            # add whether it is PASS
-            pass_breakpoints = set(bedpe_filt.name)
-            bedpe_raw["PASSed_filters"] = bedpe_raw.name.isin(pass_breakpoints)
-            
-            # add name and keep
-            bedpe_raw["sampleID"] = sampleID
-            df_bedpe_all = df_bedpe_all.append(bedpe_raw)
-            ###################
-
-            ## GET THE GRIDSS ##
-
-            # get the gridss vcfs
-            gridss_vcf_raw = get_df_and_header_from_vcf(gridss_vcf_raw_file)[0]
-            gridss_vcf_filt = get_df_and_header_from_vcf(gridss_vcf_filt_file)[0]
-
-            # change names
-            sample_name_vcf = gridss_vcf_raw.columns[-1]
-            gridss_vcf_raw = gridss_vcf_raw.rename(columns={sample_name_vcf:"DATA"})
-            gridss_vcf_filt = gridss_vcf_filt.rename(columns={sample_name_vcf:"DATA"})
-
-            # add whether it passed the filters
-            pass_variants = set(gridss_vcf_filt.ID)
-            gridss_vcf_raw["PASSed_filters"] = gridss_vcf_raw.ID.isin(pass_variants)
-            gridss_vcf_raw["sampleID"] = sampleID
-
-            # keep
-            df_gridss_all = df_gridss_all.append(gridss_vcf_raw)
-
-            ####################
-
+            df_gridss_all = df_gridss_all.append(df_gridss)
+            df_bedpe_all = df_bedpe_all.append(df_bepde)
+        
         # clean
         delete_folder(outdir_integrating_gridss_df)
 

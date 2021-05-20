@@ -121,6 +121,8 @@ SVcalling_args.add_argument("--parameters_json_file", dest="parameters_json_file
 
 SVcalling_args.add_argument("--fast_SVcalling", dest="fast_SVcalling", action="store_true", default=False, help="Run SV calling with a default set of parameters. There will not be any optimisation nor reporting of accuracy. This is expected to work almost as fast as gridss and clove together. If --parameters_json_file, the parameters are substituted by the json parameters.")
 
+SVcalling_args.add_argument("--simulation_chromosomes", dest="simulation_chromosomes", type=str, default=None, help="A comma-sepparated set of chromosomes (i.e.: chr1,chr2,chr3) in which to perform simulations. By default it takes all the chromosomes.")
+
 SVcalling_args.add_argument("--nvars", dest="nvars", default=50, type=int, help="Number of variants to simulate for each SVtype.")
 
 SVcalling_args.add_argument("--nsimulations", dest="nsimulations", default=2, type=int, help="The number of 'replicate' simulations that will be produced.")
@@ -332,6 +334,11 @@ opt.ref = new_reference_genome_file
 all_chroms = {s.id for s in SeqIO.parse(opt.ref, "fasta")}
 if any([x not in all_chroms for x in opt.mitochondrial_chromosome.split(",")]) and opt.mitochondrial_chromosome!="no_mitochondria":
     raise ValueError("The provided mitochondrial_chromosomes are not in the reference genome.")
+
+# check that the simulation_chromosomes are in all_chroms
+if opt.simulation_chromosomes is not None: 
+	strange_chroms = set(opt.simulation_chromosomes.split(",")).difference(all_chroms)
+	if len(strange_chroms)>0: raise ValueError("The --simulation_chromosomes argument was not properly set. There are some chromosome IDs (%s) not found in the provided reference genome"%strange_chroms)
 
 # get the genome len
 genome_length = sum(fun.get_chr_to_len(opt.ref).values())
@@ -700,8 +707,9 @@ if opt.testAccuracy is True:
         raise ValueError("You have to specify a --close_shortReads_table or --real_bedpe_breakpoints and not run in --fast_SVcalling to test the accuracy of the pipeline on several datasets (--testAccuracy)")
 
     ### RUN PERSVADE ###
+    print("testing perSVade on several samples. --tmpdir is %s"%opt.tmpdir)
 
-    dict_perSVade_outdirs = fun.report_accuracy_realSVs_perSVadeRuns(opt.close_shortReads_table, opt.ref, "%s/testing_Accuracy"%opt.outdir, real_bedpe_breakpoints, threads=opt.threads, replace=opt.replace, n_simulated_genomes=opt.nsimulations, mitochondrial_chromosome=opt.mitochondrial_chromosome, simulation_ploidies=simulation_ploidies, range_filtering_benchmark=opt.range_filtering_benchmark, nvars=opt.nvars, job_array_mode=opt.job_array_mode, parameters_json_file=opt.parameters_json_file, gff=opt.gff, replace_FromGridssRun_final_perSVade_run=opt.replace_FromGridssRun_final_perSVade_run, fraction_available_mem=opt.fraction_available_mem, replace_SV_CNVcalling=opt.replace_SV_CNVcalling, skip_CNV_calling=opt.skip_CNV_calling, outdir_finding_realVars=outdir_finding_realVars, simulate_SVs_arround_HomologousRegions_previousBlastnFile=opt.simulate_SVs_arround_HomologousRegions_previousBlastnFile, simulate_SVs_arround_HomologousRegions_maxEvalue=opt.simulate_SVs_arround_HomologousRegions_maxEvalue, simulate_SVs_arround_HomologousRegions_queryWindowSize=opt.simulate_SVs_arround_HomologousRegions_queryWindowSize, skip_SV_CNV_calling=opt.skip_SV_CNV_calling)
+    dict_perSVade_outdirs = fun.report_accuracy_realSVs_perSVadeRuns(opt.close_shortReads_table, opt.ref, "%s/testing_Accuracy"%opt.outdir, real_bedpe_breakpoints, threads=opt.threads, replace=opt.replace, n_simulated_genomes=opt.nsimulations, mitochondrial_chromosome=opt.mitochondrial_chromosome, simulation_ploidies=simulation_ploidies, range_filtering_benchmark=opt.range_filtering_benchmark, nvars=opt.nvars, job_array_mode=opt.job_array_mode, parameters_json_file=opt.parameters_json_file, gff=opt.gff, replace_FromGridssRun_final_perSVade_run=opt.replace_FromGridssRun_final_perSVade_run, fraction_available_mem=opt.fraction_available_mem, replace_SV_CNVcalling=opt.replace_SV_CNVcalling, skip_CNV_calling=opt.skip_CNV_calling, outdir_finding_realVars=outdir_finding_realVars, simulate_SVs_arround_HomologousRegions_previousBlastnFile=opt.simulate_SVs_arround_HomologousRegions_previousBlastnFile, simulate_SVs_arround_HomologousRegions_maxEvalue=opt.simulate_SVs_arround_HomologousRegions_maxEvalue, simulate_SVs_arround_HomologousRegions_queryWindowSize=opt.simulate_SVs_arround_HomologousRegions_queryWindowSize, skip_SV_CNV_calling=opt.skip_SV_CNV_calling, tmpdir=opt.tmpdir, simulation_chromosomes=opt.simulation_chromosomes)
 
     if opt.StopAfter_testAccuracy_perSVadeRunning is True: 
         print("You already ran all the configurations of perSVade. Stopping after the running of perSVade on testAccuracy")
@@ -740,7 +748,7 @@ start_time_SVcalling =  time.time()
 if opt.skip_SVcalling is False and not any([x=="skip" for x in {opt.fastq1, opt.fastq2}]):
 
     SVdetection_outdir = "%s/SVdetection_output"%opt.outdir
-    outdir_gridss_final = fun.run_GridssClove_optimising_parameters(sorted_bam, opt.ref, SVdetection_outdir, threads=opt.threads, replace=opt.replace, n_simulated_genomes=opt.nsimulations, mitochondrial_chromosome=opt.mitochondrial_chromosome, simulation_ploidies=simulation_ploidies, range_filtering_benchmark=opt.range_filtering_benchmark, nvars=opt.nvars, fast_SVcalling=opt.fast_SVcalling, real_bedpe_breakpoints=real_bedpe_breakpoints, replace_FromGridssRun_final_perSVade_run=opt.replace_FromGridssRun_final_perSVade_run)
+    outdir_gridss_final = fun.run_GridssClove_optimising_parameters(sorted_bam, opt.ref, SVdetection_outdir, threads=opt.threads, replace=opt.replace, n_simulated_genomes=opt.nsimulations, mitochondrial_chromosome=opt.mitochondrial_chromosome, simulation_ploidies=simulation_ploidies, range_filtering_benchmark=opt.range_filtering_benchmark, nvars=opt.nvars, fast_SVcalling=opt.fast_SVcalling, real_bedpe_breakpoints=real_bedpe_breakpoints, replace_FromGridssRun_final_perSVade_run=opt.replace_FromGridssRun_final_perSVade_run, tmpdir=opt.tmpdir, simulation_chromosomes=opt.simulation_chromosomes)
 
 end_time_SVcalling =  time.time()
 
