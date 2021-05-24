@@ -257,9 +257,9 @@ NON_PROT_ALTERRING_MUTATIONS = ALL_MUTATIONS.difference(PROT_ALTERRING_MUTATIONS
 
 
 # types of SVs
-SVs_ALL_MUTATIONS = {'coding_sequence_variant_BND', 'upstream_gene_variant_BND', '3_prime_UTR_variant', 'feature_elongation', 'feature_truncation', 'coding_sequence_variant', 'intergenic_variant', 'upstream_gene_variant', '5_prime_UTR_variant', 'transcript_amplification', '5_prime_UTR_variant_BND', 'downstream_gene_variant', 'intron_variant_BND', 'intron_variant', 'intergenic_variant_BND', '3_prime_UTR_variant_BND', 'downstream_gene_variant_BND', 'non_coding_transcript_exon_variant_BND', 'non_coding_transcript_exon_variant', 'transcript_ablation', '-', "inframe_insertion", "frameshift_variant"}
+SVs_ALL_MUTATIONS = {'coding_sequence_variant_BND', 'upstream_gene_variant_BND', '3_prime_UTR_variant', 'feature_elongation', 'feature_truncation', 'coding_sequence_variant', 'intergenic_variant', 'upstream_gene_variant', '5_prime_UTR_variant', 'transcript_amplification', '5_prime_UTR_variant_BND', 'downstream_gene_variant', 'intron_variant_BND', 'intron_variant', 'intergenic_variant_BND', '3_prime_UTR_variant_BND', 'downstream_gene_variant_BND', 'non_coding_transcript_exon_variant_BND', 'non_coding_transcript_exon_variant', 'transcript_ablation', '-', "inframe_insertion", "frameshift_variant", "non_coding_transcript_variant_BND", "splice_acceptor_variant", "splice_donor_variant", "splice_region_variant", "-", "start_retained_variant", "stop_gained", "synonymous_variant", "protein_altering_variant", "missense_variant", "inframe_deletion", "stop_lost", "non_coding_transcript_variant", "stop_retained_variant", "start_lost", "incomplete_terminal_codon_variant"}
 
-SVs_TRANSCRIPT_DISRUPTING_MUTATIONS = {'coding_sequence_variant_BND', 'feature_elongation', 'feature_truncation', 'coding_sequence_variant', 'transcript_amplification', 'transcript_ablation', 'intron_variant_BND', 'non_coding_transcript_exon_variant_BND', 'intron_variant', 'non_coding_transcript_exon_variant', '3_prime_UTR_variant', '5_prime_UTR_variant', '5_prime_UTR_variant_BND', '3_prime_UTR_variant_BND', "inframe_insertion", "frameshift_variant"}
+SVs_TRANSCRIPT_DISRUPTING_MUTATIONS = {'coding_sequence_variant_BND', 'feature_elongation', 'feature_truncation', 'coding_sequence_variant', 'transcript_amplification', 'transcript_ablation', 'intron_variant_BND', 'non_coding_transcript_exon_variant_BND', 'intron_variant', 'non_coding_transcript_exon_variant', '3_prime_UTR_variant', '5_prime_UTR_variant', '5_prime_UTR_variant_BND', '3_prime_UTR_variant_BND', "inframe_insertion", "frameshift_variant", "non_coding_transcript_variant_BND", "splice_acceptor_variant", "splice_donor_variant", "splice_region_variant", "stop_gained", "synonymous_variant", "start_retained_variant", "protein_altering_variant", "missense_variant", "inframe_deletion", "stop_lost", "non_coding_transcript_variant", "stop_retained_variant", "start_lost", "incomplete_terminal_codon_variant"}
 
 SVs_NON_TRANSCRIPT_DISRUPTING_MUTATIONS = SVs_ALL_MUTATIONS.difference(SVs_TRANSCRIPT_DISRUPTING_MUTATIONS)
 
@@ -1176,15 +1176,8 @@ def run_bwa_mem(fastq1, fastq2, ref, outdir, bamfile, sorted_bam, index_bam, nam
         samfile = "%s/aligned_reads.sam"%outdir;
         if (file_is_empty(samfile) and file_is_empty(bamfile)) or replace is True:
 
-            # remove previuous generated temporary file
-            remove_file("%s.tmp"%samfile)
-
             # define the samfile_tmp
-            if tmpdir_writingFiles is not None: samfile_tmp = "%s/aligned_reads.sam.tmp"%(get_and_create_new_tmpdir(tmpdir_writingFiles))
-            else: samfile_tmp = "%s.tmp"%samfile
-
-            print("THE TMDIR IS ", tmpdir_writingFiles)
-
+            samfile_tmp = "%s.tmp"%samfile
 
             bwa_mem_stderr = "%s.tmp.stderr"%samfile
             print_if_verbose("running bwa mem. The std is in %s"%bwa_mem_stderr)
@@ -1196,16 +1189,12 @@ def run_bwa_mem(fastq1, fastq2, ref, outdir, bamfile, sorted_bam, index_bam, nam
         # convert to bam 
         if file_is_empty(bamfile) or replace is True:
 
-            # remove previuous generated temporary file
-            remove_file("%s.tmp"%bamfile)
-
             # define the temporary file
-            if tmpdir_writingFiles is not None: bamfile_tmp = "%s/aligned_reads.bam.tmp"%(get_and_create_new_tmpdir(tmpdir_writingFiles))
-            else: bamfile_tmp = "%s.tmp"%bamfile
+            bamfile_tmp = "%s.tmp"%bamfile
 
             bamconversion_stderr = "%s.tmp.stderr"%bamfile
             print_if_verbose("Converting to bam. The std is in %s"%bamconversion_stderr)
-            cmd_toBAM = "%s view -Sbu %s > %s 2>%s"%(samtools, samfile, bamfile_tmp, bamconversion_stderr); run_cmd(cmd_toBAM)
+            cmd_toBAM = "%s view --threads %i -Sbu %s > %s 2>%s"%(samtools, threads, samfile, bamfile_tmp, bamconversion_stderr); run_cmd(cmd_toBAM)
 
             # remove the sam
             os.unlink(samfile)
@@ -1231,8 +1220,7 @@ def run_bwa_mem(fastq1, fastq2, ref, outdir, bamfile, sorted_bam, index_bam, nam
                 if outdir_file.startswith("aligned_reads") and ".tmp." in outdir_file: os.unlink(fullfilepath)
 
             # define the temporary file
-            if tmpdir_writingFiles is not None: sorted_bam_tmp = "%s/aligned_reads.bam.sorted.tmp"%(get_and_create_new_tmpdir(tmpdir_writingFiles))
-            else: sorted_bam_tmp = "%s.tmp"%sorted_bam
+            sorted_bam_tmp = "%s.tmp"%sorted_bam
 
             # sort
             bam_sort_std = "%s.generating.txt"%sorted_bam
@@ -3223,11 +3211,11 @@ def run_clove_filtered_bedpe(bedpe_file, outfile, sorted_bam, replace=False, med
   
 
 
-def get_distanceToTelomere_chromosome_GCcontent_to_coverage_fn(df_coverage_train, genome, outdir, expected_coverage_per_bp, mitochondrial_chromosome="mito_C_glabrata_CBS138", replace=False, threads=4, min_windows_to_model_coverage=10):
+def get_distanceToTelomere_chromosome_GCcontent_to_coverage_fn(df_coverage_train, genome, outdir, mitochondrial_chromosome="mito_C_glabrata_CBS138", replace=False, threads=4, min_windows_to_model_coverage=10):
 
     """This function takes a training df_coverage (with windows of a genome) and returns a lambda function that takes GC content, chromosome and  distance to the telomere and returns coverage. This takes the absolute coverage"""
 
-    print_if_verbose("getting coverage-predictor function for expected coverage per bp=%i"%expected_coverage_per_bp)
+    print_if_verbose("getting coverage-predictor function.")
 
     # rename the training df
     df = df_coverage_train.rename(columns={"#chrom":"chromosome"})
@@ -6940,6 +6928,10 @@ def clean_perSVade_outdir(outdir):
        "aligned_reads.bam.sorted.tmp.sortingBam_std.txt",
        "aligned_reads.bam.sorted.noMarkDups.MarkDups.metrics",
        "aligned_reads.bam.sorted.read_length_dist_first5000reads.txt",
+       "aligned_reads.bam.sorted.subsetChromsForSimulation.bam",
+       "aligned_reads.bam.sorted.subsetChromsForSimulation.bam.bai",
+       "aligned_reads.bam.sorted.subsetChromsForSimulation.bam.flagstat",
+       "aligned_reads.bam.sorted.subsetChromsForSimulation.bam.read_length_dist_first5000reads.txt",
 
        # files under SVdetection
        "SVdetection_output/gridss_finished.txt",
@@ -7019,6 +7011,9 @@ def clean_perSVade_outdir(outdir):
                                             "reference_genome.fasta_genomeGraph_withoutBPs.py.graph.py",
                                             "reference_genome.fasta.GCcontent.tab"
                                             ]
+
+    # add files of the subsetChroms
+    files_to_remove_reference_genome_dir += [f for f in os.listdir("%s/reference_genome_dir"%outdir) if "subsetChromsForSimulation" in f]
 
     files_to_remove += ["reference_genome_dir/%s"%f for f in files_to_remove_reference_genome_dir]
     #######################################
@@ -9519,20 +9514,91 @@ def get_and_report_filtering_accuracy_across_genomes_and_ploidies(df_benchmark, 
 
     return df_cross_benchmark_best, best_filters_series
 
+def get_sorted_bam_subsetChroms(sorted_bam, chromosomes_set, replace=False, threads=4):
+
+    """This function takes a sorted bam and generates a similar one, only keeping the chromosomes_set"""
+
+    # define outdir
+    subset_sorted_bam = "%s.subsetChromsForSimulation.bam"%sorted_bam
+
+    if file_is_empty(subset_sorted_bam) or replace is True:
+
+        # define tmp files
+        subset_sorted_bam_tmp = "%s.tmp.bam"%subset_sorted_bam
+        subset_sorted_bam_stderr = "%s.generating.stderr"%subset_sorted_bam_tmp
+
+        print_if_verbose("subsetting %s with only these chroms: %s. The outfile is in %s"%(sorted_bam, chromosomes_set, subset_sorted_bam))
+
+        # run
+        run_cmd("%s view --threads %i -b %s %s > %s 2>%s"%(samtools, threads, sorted_bam, " ".join(sorted(chromosomes_set)), subset_sorted_bam_tmp, subset_sorted_bam_stderr))
+
+        # clean
+        remove_file(subset_sorted_bam_stderr)
+        os.rename(subset_sorted_bam_tmp, subset_sorted_bam)
+
+    # index the bam
+    if file_is_empty("%s.bai"%subset_sorted_bam) or replace is True: index_bam(subset_sorted_bam, threads=threads)
+
+    return subset_sorted_bam
+
+
 def get_best_parameters_for_GridssClove_run(sorted_bam, reference_genome, outdir, threads=4, replace=False, n_simulated_genomes=2, mitochondrial_chromosome="mito_C_glabrata_CBS138", simulation_ploidies=["haploid", "diploid_homo", "diploid_hetero", "ref:2_var:1", "ref:3_var:1", "ref:4_var:1", "ref:5_var:1", "ref:9_var:1", "ref:19_var:1", "ref:99_var:1"], range_filtering_benchmark="theoretically_meaningful", nvars=100, real_bedpe_breakpoints=None, median_insert_size=250, median_insert_size_sd=0, tmpdir=None, simulation_chromosomes=None):
 
     """This finds the optimum parameters for running GRIDSS clove and returns them. The parameters are equivalent to the run_GridssClove_optimising_parameters function"""
 
+    ################ REDEFINE OBJECTS BASED ON simulation_chromosomes ##########
+
     # re-define things as a function of whether to simulate on all or only a fraction of the chromosomes
     if simulation_chromosomes is not None: 
+
+        # redefine objects
+        reference_genome = cp.deepcopy(reference_genome)
+        sorted_bam = cp.deepcopy(sorted_bam)
+        mitochondrial_chromosome = cp.deepcopy(mitochondrial_chromosome)
+
+        # define the set of target chromosomes
         simulation_chromosomes_set = set(simulation_chromosomes.split(","))
-        print(simulation_chromosomes_set)
 
-        YouHaveToWorkOnTheOption_simulation_chromosomes
+        # redefine the mitochondrial_chromosome so that it overlaps mitochondrial_chromosome
+        if mitochondrial_chromosome!="no_mitochondria":
 
+            interesting_mitochondrial_chromosomes = set(mitochondrial_chromosome.split(",")).intersection(simulation_chromosomes_set)
+            
+            if len(interesting_mitochondrial_chromosomes)>0: mitochondrial_chromosome = ",".join(sorted(interesting_mitochondrial_chromosomes))
 
-        # re-define the mtDNA, just keep if it is in the simulation_chromosomes
+            else: mitochondrial_chromosome = "no_mitochondria"
 
+        # redefine the reference genome
+        interesting_chromRecords = [seq for seq in SeqIO.parse(reference_genome, "fasta") if seq.id in simulation_chromosomes_set]
+        if len(interesting_chromRecords)!=len(simulation_chromosomes_set): raise ValueError("not all chroms are in reference genome")
+
+        reference_genome = "%s.subsetChromsForSimulation.fasta"%reference_genome
+        SeqIO.write(interesting_chromRecords, reference_genome, "fasta")
+
+        # index the genome
+        index_genome(reference_genome)
+
+        # redefine the sorted_bam
+        sorted_bam = get_sorted_bam_subsetChroms(sorted_bam, simulation_chromosomes_set, replace=replace, threads=threads)
+
+        # redefine the real_bedpe_breakpoints so that it only includes breakpoints in simulation_chromosomes_set
+        if real_bedpe_breakpoints is not None:
+
+            # redefine
+            real_bedpe_breakpoints = cp.deepcopy(real_bedpe_breakpoints)
+
+            # load df
+            bedpe_fields = ["chrom1", "start1", "end1", "chrom2", "start2", "end2", "name", "score", "strand1", "strand2"]
+            df_bedpe = pd.read_csv(real_bedpe_breakpoints, sep="\t", header=-1, names=bedpe_fields)
+
+            # filter 
+            df_bedpe = df_bedpe[(df_bedpe.chrom1.isin(simulation_chromosomes_set)) & (df_bedpe.chrom2.isin(simulation_chromosomes_set))]
+
+            # rewrite
+            real_bedpe_breakpoints = "%s.subsetChromsForSimulation.bedpe"%real_bedpe_breakpoints
+            df_bedpe.to_csv(real_bedpe_breakpoints, sep="\t", index=False, header=False)
+
+    ############################################################################
 
 
     # define plots dir
@@ -9549,6 +9615,7 @@ def get_best_parameters_for_GridssClove_run(sorted_bam, reference_genome, outdir
     total_nread_pairs = count_number_read_pairs(sorted_bam, replace=replace, threads=threads)
     #total_nread_pairs  = 100000 # this is to debug the simulation pipeline
     expected_coverage_per_bp = int((total_nread_pairs*read_length) / sum(chr_to_len.values())) +  1 # the expected coverage per position with pseudocount
+
     print_if_verbose("There are %i read pairs in your library. The expected coverage is %ix."%(total_nread_pairs, expected_coverage_per_bp))
 
     ###### MODELLING COVERAGE ######
@@ -9558,7 +9625,7 @@ def get_best_parameters_for_GridssClove_run(sorted_bam, reference_genome, outdir
     outdir_coverage_calculation = "%s/coverage_per_regions%ibb"%(outdir, window_l); make_folder(outdir_coverage_calculation)
     df_coverage_train = pd.read_csv(generate_coverage_per_window_file_parallel(reference_genome, outdir_coverage_calculation, sorted_bam, windows_file="none", replace=replace, threads=threads), sep="\t")
 
-    distToTel_chrom_GC_to_coverage_fn = get_distanceToTelomere_chromosome_GCcontent_to_coverage_fn(df_coverage_train, reference_genome, outdir_coverage_calculation, expected_coverage_per_bp, mitochondrial_chromosome=mitochondrial_chromosome, replace=replace, threads=threads)
+    distToTel_chrom_GC_to_coverage_fn = get_distanceToTelomere_chromosome_GCcontent_to_coverage_fn(df_coverage_train, reference_genome, outdir_coverage_calculation, mitochondrial_chromosome=mitochondrial_chromosome, replace=replace, threads=threads)
 
     print_if_verbose("coverage model obtained")
 
@@ -10689,8 +10756,6 @@ def report_accuracy_realSVs_perSVadeRuns(close_shortReads_table, reference_genom
 
                 # define the cmd. This is a normal perSvade.py run with the vars of the previous dir  
                 cmd = "python %s -r %s --threads %i --outdir %s --nvars %i --nsimulations %i --simulation_ploidies %s --range_filtering_benchmark %s --mitochondrial_chromosome %s -f1 %s -f2 %s --previous_repeats_table %s --min_CNVsize_coverageBased %i --keep_simulation_files --simulate_SVs_arround_HomologousRegions_maxEvalue %.10f --simulate_SVs_arround_HomologousRegions_queryWindowSize %i --fractionRAM_to_dedicate %.2f"%(perSVade_py, reference_genome, threads, outdir_runID, nvars, n_simulated_genomes, ",".join(simulation_ploidies), range_filtering_benchmark, mitochondrial_chromosome, r1, r2, previous_repeats_table, min_CNVsize_coverageBased, simulate_SVs_arround_HomologousRegions_maxEvalue, simulate_SVs_arround_HomologousRegions_queryWindowSize, fractionRAM_to_dedicate)
-
-                print("This is the TMPDIR", tmpdir)
 
                 # add arguments depending on the pipeline
                 if replace is True: cmd += " --replace"
@@ -16154,16 +16219,53 @@ def get_vcf_df_from_insertion_r(r, gridss_fields):
     df_vcf = df_vcf.append(df_chrB)
 
     # define the chromosome A region
-    if r["Copied"] is True: SVTYPE = "DUP"
-    else: SVTYPE = "BND"
-    df = pd.DataFrame({1 : {"#CHROM":r["ChrA"], "POS":r["StartA"], "ALT":"<%s>"%SVTYPE}}).transpose()
-    df["INFO"] = "SVTYPE=%s;END=%i;%s"%(SVTYPE, r["EndA"], backbone_info)
+    if r["Copied"] is True: 
+
+        # if it is copied define a single DUP region
+        df = pd.DataFrame({1 : {"#CHROM":r["ChrA"], "POS":r["StartA"], "ALT":"<DUP>"}}).transpose()
+        df["INFO"] = "SVTYPE=DUP;END=%i;%s"%(r["EndA"], backbone_info)
+
+    else: 
+
+        # if it is cut and paste define two regions
+        df1 =  pd.DataFrame({1 : {"#CHROM":r["ChrA"], "POS":r["StartA"], "ALT":"<BND>"}}).transpose()
+        df2 =  pd.DataFrame({2 : {"#CHROM":r["ChrA"], "POS":r["EndA"], "ALT":"<BND>"}}).transpose()
+
+        df = df1.append(df2)
+
+        df["INFO"] = "SVTYPE=BND;%s"%(backbone_info)
+
     df_vcf = df_vcf.append(df)
 
     # add the ID to all of them
     df_vcf["ID"] =  r["IDstring"]
 
     return df_vcf
+
+def get_vcf_df_from_inversion_r(r, gridss_fields):
+
+    """This function is like get_vcf_df_from_insertion_r but with inversions"""
+
+    # initialize
+    df_vcf = pd.DataFrame()
+
+    # define the backbone info string
+    backbone_info = ";".join(["%s=%s"%(f, r[f]) for f in gridss_fields])
+
+    # get one BND for each breakend of the inversion
+    df1 =  pd.DataFrame({0 : {"#CHROM":r["Chr"], "POS":r["Start"], "ALT":"<BND>"}}).transpose()
+    df2 =  pd.DataFrame({1 : {"#CHROM":r["Chr"], "POS":r["End"], "ALT":"<BND>"}}).transpose()
+
+    df_vcf = df1.append(df2)
+
+    # add infoq
+    df_vcf["INFO"] = "SVTYPE=BND;%s"%(backbone_info)
+
+    # add the ID
+    df_vcf["ID"] = r["IDstring"]
+
+    return df_vcf
+
 
 def get_vcf_df_from_remaining_r(r, gridss_fields):
 
@@ -16330,8 +16432,8 @@ def get_vcf_df_for_svDF(svDF, svtype, reference_genome, df_gridss):
     df_vcf = pd.DataFrame()
 
     # get the simple SVs
-    svtype_to_SVTYPE = {"tandemDuplications":"TDUP", "deletions":"DEL", "inversions":"BND"}
-    if svtype in {"tandemDuplications", "deletions", "inversions"}:
+    svtype_to_SVTYPE = {"tandemDuplications":"TDUP", "deletions":"DEL"}
+    if svtype in {"tandemDuplications", "deletions"}:
 
         # add obvious fields
         df_vcf["#CHROM"] = svDF["Chr"]
@@ -16370,6 +16472,8 @@ def get_vcf_df_for_svDF(svDF, svtype, reference_genome, df_gridss):
         # add the info
         info_fields = ["SVTYPE"] + gridss_fields
         df_vcf["INFO"] = df_vcf.apply(lambda r: ";".join(["%s=%s"%(f, r[f]) for f in info_fields]), axis=1)
+
+    elif svtype=="inversions":  df_vcf = pd.concat([get_vcf_df_from_inversion_r(r, gridss_fields) for I, r in svDF.iterrows()])
 
     elif svtype=="insertions": df_vcf = pd.concat([get_vcf_df_from_insertion_r(r, gridss_fields) for I, r in svDF.iterrows()])
 
@@ -18085,6 +18189,124 @@ def get_current_clusterName_mareNostrum():
     return cluster_name
 
 
+def get_SV_CNV_and_SV_CNV_annot_into_file(Is, nsamples, sampleID, tmpdir, SV_CNV_vcf, SV_CNV_var_annotation, fields_varCall, fields_varAnnot, replace):
+
+    """This function takes a SV_CNV_vcf and its annotation and generates a file without headers into tpdir"""
+
+    print_if_verbose("getting SV vcf and annot file for sample %i/%i"%(Is+1, nsamples))
+
+    # define files
+    SV_CNV_file = "%s/%s_SV_CNV_noHeader.tab"%(tmpdir, sampleID)
+    SV_CNV_annot_file = "%s/%s_SV_CNV_annot_noHeader.tab"%(tmpdir, sampleID)
+
+    # generate the SV_CNV_file
+    if file_is_empty(SV_CNV_file) or replace is True:
+
+        # load df
+        vcf_df = get_vcf_df_with_INFO_as_single_fields(get_df_and_header_from_vcf(SV_CNV_vcf)[0])
+        
+        # add the sample ID
+        vcf_df["sampleID"] = sampleID
+
+        # write
+        SV_CNV_file_tmp = "%s.tmp"%SV_CNV_file
+        vcf_df[fields_varCall].to_csv(SV_CNV_file_tmp, sep="\t", header=False, index=False)
+        os.rename(SV_CNV_file_tmp, SV_CNV_file)
+
+    # generate the SV_CNV_annot_file
+    if file_is_empty(SV_CNV_annot_file) or replace is True:
+
+        # load df
+        annotation_df = pd.read_csv(SV_CNV_var_annotation, sep="\t")
+
+        # write
+        SV_CNV_annot_file_tmp = "%s.tmp"%SV_CNV_annot_file
+        annotation_df[fields_varAnnot].to_csv(SV_CNV_annot_file_tmp, sep="\t", header=False, index=False)
+        os.rename(SV_CNV_annot_file_tmp, SV_CNV_annot_file)
+
+    return (SV_CNV_file, SV_CNV_annot_file)
+
+
+
+def get_integrated_variants_into_one_df_only_SV_CNV(df, file_prefix, replace=False, remove_files=False, threads=4):
+
+    """
+    This function takes a df (or a .tab file) with the following fields:
+    
+       - SV_CNV_vcf. The vcf of the integrated SV and CNV calling by perSVade.
+       - SV_CNV_var_annotation. The annotation of SV_CNV_vcf
+
+       Either of the two should be provided
+
+       The index of the df shouold be the sample ID.
+
+    """
+
+    # define a tmpdir
+    tmpdir = "%s_intermediate_files"%file_prefix
+    make_folder(tmpdir)
+
+    # define files
+    SV_CNV_file = "%s_SV_CNV.tab"%file_prefix
+    SV_CNV_annot_file = "%s_SV_CNV_annot.tab"%file_prefix
+
+    if file_is_empty(SV_CNV_file) or file_is_empty(SV_CNV_annot_file) or replace is True:
+        print_if_verbose("getting simple SV CNV dfs")
+
+        # define the fields based on the first vcf
+        fields_varCall = list(get_vcf_df_with_INFO_as_single_fields(get_df_and_header_from_vcf(df.iloc[0]["SV_CNV_vcf"])[0]).keys()) + ["sampleID"]
+        fields_varAnnot = list(pd.read_csv(df.iloc[0]["SV_CNV_var_annotation"], sep="\t").keys())
+
+        # define the inputs to run in parallel
+        inputs_fn = [(Is, len(df), sampleID, tmpdir, r["SV_CNV_vcf"], r["SV_CNV_var_annotation"], fields_varCall, fields_varAnnot, replace) for Is, (sampleID, r) in enumerate(df.iterrows())]
+
+        # define files in parallel
+        with multiproc.Pool(threads) as pool:
+            list_files = pool.starmap(get_SV_CNV_and_SV_CNV_annot_into_file, inputs_fn) # a list that has the SV_CNV and SV_CNV_annot for each sample
+                
+            pool.close()
+            pool.terminate()
+
+        # create the SV_CNV_file
+        if file_is_empty(SV_CNV_file) or replace is True:
+            print_if_verbose("concatenating SV_CNV files")
+
+            SV_CNV_file_tmp = "%s.tmp"%SV_CNV_file
+            run_cmd("echo '%s' > %s"%("\t".join(fields_varCall), SV_CNV_file_tmp))
+            run_cmd("cat %s >> %s"%(" ".join([x[0] for x in list_files]), SV_CNV_file_tmp))
+
+            os.rename(SV_CNV_file_tmp, SV_CNV_file)
+
+        # create the SV_CNV_annot_file
+        if file_is_empty(SV_CNV_annot_file) or replace is True:
+            print_if_verbose("concatenating SV_CNV_annot files")
+
+            # get df
+            SV_CNV_annot_noHeader = "%s/varcallAnnot_allFiles_noHeader.tab"%tmpdir
+            run_cmd("cat %s > %s"%(" ".join([x[1] for x in list_files]), SV_CNV_annot_noHeader))
+            SV_CNV_annot_df = pd.read_csv(SV_CNV_annot_noHeader, sep="\t", header=None, names=fields_varAnnot)
+
+            # drop duplicates
+            SV_CNV_annot_df = SV_CNV_annot_df.drop_duplicates()
+
+            # save
+            save_df_as_tab(SV_CNV_annot_df, SV_CNV_annot_file)
+
+
+    # clean
+    delete_folder(tmpdir)
+
+    # load dfs and return 
+    print_if_verbose("loading final SV_CNV dfs")
+    SV_CNV = get_tab_as_df_or_empty_df(SV_CNV_file)
+    SV_CNV_annot = get_tab_as_df_or_empty_df(SV_CNV_annot_file)
+
+    return SV_CNV, SV_CNV_annot
+
+
+        
+
+
 def get_integrated_variants_into_one_df(df, file_prefix, replace=False, remove_files=False):
 
     """This function takes a df (or a .tab file) with the following fields:
@@ -18547,6 +18769,9 @@ def load_gff3_intoDF(gff_path, replace=False):
         # set the id as index
         gff = gff.set_index("ID", drop=False)
 
+        # define all the IDs
+        all_unique_IDs = set(gff.index)
+
         # add the upmost_parent (which should be the geneID)
         print("getting upmost parent")
         def get_utmost_parent(row, gff_df):
@@ -18557,7 +18782,18 @@ def load_gff3_intoDF(gff_path, replace=False):
             if row["Parent"]=="": return row["ID"]
 
             # else you go to the parent
-            else: return get_utmost_parent(gff_df.loc[row["Parent"]], gff_df)
+            else: 
+
+                # define the ID of the parent
+                if row["Parent"] in all_unique_IDs: parentID = row["Parent"] # normal
+
+                elif sum(gff_df.ANNOTATION_ID==row["Parent"])>1: # split parents, take the first one
+                    parentID = gff_df[gff_df.ANNOTATION_ID==row["Parent"]].ID.iloc[0]
+
+                else: raise ValueError("%s is not a valid Parent ID"%(r["Parent"])) # errors
+
+                # get the upmost parent from the parent
+                return get_utmost_parent(gff_df.loc[parentID], gff_df)
 
         gff["upmost_parent"] = gff.apply(lambda row: get_utmost_parent(row, gff), axis=1)
         gff = gff.set_index("upmost_parent", drop=False)
@@ -19805,7 +20041,7 @@ def get_integrated_SV_CNV_df_severalSamples(paths_df, outdir, gff, reference_gen
         # get the integrated SV_CNV dfs
         df_data = pd.DataFrame(sampleID_to_SV_dataDict).transpose()
         file_prefix = "%s/integrated_SV_CNV_calling"%outdir
-        SV_CNV, SV_CNV_annot = get_integrated_variants_into_one_df(df_data, file_prefix, replace=True, remove_files=True)[2:]
+        SV_CNV, SV_CNV_annot = get_integrated_variants_into_one_df_only_SV_CNV(df_data, file_prefix, replace=True, remove_files=True, threads=threads)
 
         # add the gff
         gff_df = load_gff3_intoDF(gff, replace=False)
@@ -19827,16 +20063,19 @@ def get_integrated_SV_CNV_df_severalSamples(paths_df, outdir, gff, reference_gen
 
         # save dfs
         print("writing")
-        save_df_as_tab(SV_CNV, SV_CNV_file_simple)
         save_df_as_tab(SV_CNV_annot, SV_CNV_annot_file)
+        save_df_as_tab(SV_CNV, SV_CNV_file_simple)
         
+
+    # clean unnecessary files derived from the run of get_integrated_variants_into_one_df_only_SV_CNV
+    for f in ["integrated_SV_CNV_calling_SV_CNV_annot.tab", "integrated_SV_CNV_calling_SV_CNV.tab"]: remove_file("%s/%s"%(outdir, f))
+
     ###########################################
 
     # load the CNV per window calling df
     print("loading %s"%integrated_CNperWindow_file)
     if integrated_CNperWindow_file is  not None: df_CN_all = get_tab_as_df_or_empty_df(integrated_CNperWindow_file)
     else: df_CN_all = None
-
 
     ####### GET THE INTEGRATED GRIDSS DF AND BEDPE DF ######
 

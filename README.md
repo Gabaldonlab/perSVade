@@ -272,9 +272,67 @@ perSVade includes an option to skip the parameter optimisation: `--fast_SVcallin
 
 ### What is in SV_and_CNV_variant_calling.vcf?
 
-This is a vcf that contains all called SVs and CNVs, in a way that is focused on how each SV affects particular regions of the genome. We consider that this is useful for further functional annotation. These are the important fields:
+This is a vcf that contains all called SVs and CNVs, in a way that is focused on how each SV affects particular regions of the genome. This is useful for further functional annotation. Each SV can be split across multiple rows, as it can affect several regions of the genome. All the rows that are related to the same SV are identified by the field `variantID` in `INFO`. On top of this, each row has a unique identifier indicated by the field `ID`. Some SVs generate de novo-inserted sequences around the breakends, and each of these de novo insertions are represented in a single row. Note that each of the rows may indicate a region under CNV (with the `SVTYPE` in `INFO` as `DEL`, `DUP` or `TDUP`), a region with some rearrangement (with the `SVTYPE` in `INFO` as `BND`) or a region with a de novo insertion (with the `SVTYPE` in `INFO` as `insertionBND`). These three types of regions can be interpreted by the Ensembl Variant Effect Predictor (VEP, also implemented in perSVade) for functional annotation. The fields `#CHROM` and `POS` indicate the position of the SV, and the field `END` from `INFO` indicates the end of a region under SV when applicable.
 
-- 
+More precisely, this is how each of the SV types are represented (check the FAQ **How are the SVs encoded into single files?** to understand what the fileds in `<>` mean):
+
+- Each deletion or tandem duplication is represented with a `variantID=DEL|<Chr>:<Start>-<End>` or `variantID=TDUP|<Chr>:<Start>-<End>`, respectively. There may be up to three rows related to each of these variants:
+
+    - One row for the deleted/duplicated region (for deletions this wold have an ID `DEL|CNV|<Chr>:<Start>-<End>`). The fields `POS` and `END` in `INFO` indicate the deleted/duplicated region. The `SVTYPE` from `INFO` is `DEL` or `TDUP`. 
+
+    - Up to two rows for each of the de novo insertions (for deletions there may be one row with an ID `DEL|insertion-<Chr>-<Start>|<Chr>:<Start>-<End>` and another with an ID `DEL|insertion-<Chr>-<End>|<Chr>:<Start>-<End>`) around each of the breakends. The `SVTYPE` from `INFO` is `insertionBND`.
+
+- Each inversion is is represented with a `variantID=INV|<Chr>:<Start>-<End>`. There may be several rows related to each inversion:
+
+    - One row for each of the breakends of the inverted region (with an ID `INV|BND-<Chr>-<Start>|<Chr>:<Start>-<End>` and `INV|BND-<Chr>-<End>|<Chr>:<Start>-<End>`). The `SVTYPE` from `INFO` is `BND`. 
+
+    - One row for each of the de novo insertions around the breakends tha generate this inversion. Each of them has an ID `INV|insertion-<#CHROM>-<POS>|<Chr>-<Start>:<End>`, where `#CHROM` and `<POS>` are equal to the equivalent vcf fields. The `SVTYPE` from `INFO` is `insertionBND`.
+
+- Each copy-paste insertion is represented with a `variantID=INS|<ChrA>:<StartA>-<EndA>|<ChrB>:<StartB>|copyPaste`. There are  several rows related to each insertion:
+
+    - One row for the duplicated region (in ChrA), with an ID `INS|CNV|<ChrA>:<StartA>-<EndA>|<ChrB>:<StartB>|copyPaste`. The fields `POS` and `END` in `INFO` indicated the copied region.  The `SVTYPE` from `INFO` is `DUP`.
+
+    - One row for the insertion position (in ChrB), with an ID `INS|BND-<ChrB>-<StartB>|<ChrA>:<StartA>-<EndA>|<ChrB>:<StartB>|copyPaste`. The field `POS` indicate the insertion position. The `SVTYPE` from `INFO` is `BND`. 
+
+    - One row for each of the de novo insertions around the breakends tha generate this insertion. Each of them has an ID `INS|insertion-<#CHROM>-<POS>|<ChrA>:<StartA>-<EndA>|<ChrB>:<StartB>|copyPaste`, where `#CHROM` and `<POS>` are equal to the equivalent vcf fields. The `SVTYPE` from `INFO` is `insertionBND`.
+
+- Each cut-paste insertion is represented with a `variantID=INS|<ChrA>:<StartA>-<EndA>|<ChrB>:<StartB>|cutPaste`. There are  several rows related to each insertion:
+
+    - One row for each of the breakends of the cut region (in ChrA), with IDs `INS|BND-<ChrA>-<StartA>|<ChrA>:<StartA>-<EndA>|<ChrB>:<StartB>|cutPaste` and `INS|BND-<ChrA>-<EndA>|<ChrA>:<StartA>-<EndA>|<ChrB>:<StartB>|cutPaste`. The `SVTYPE` from `INFO` is `BND`.
+
+    - One row for the insertion position (in ChrB), with an ID `INS|BND-<ChrB>-<StartB>|<ChrA>:<StartA>-<EndA>|<ChrB>:<StartB>|cutPaste`. The field `POS` indicate the insertion position. The `SVTYPE` from `INFO` is `BND`. 
+
+    - One row for each of the de novo insertions around the breakends tha generate this insertion. Each of them has an ID `INS|insertion-<#CHROM>-<POS>|<ChrA>:<StartA>-<EndA>|<ChrB>:<StartB>|copyPaste`, where `#CHROM` and `<POS>` are equal to the equivalent vcf fields. The `SVTYPE` from `INFO` is `insertionBND`.
+
+
+- Each balanced translocation is represented with a `variantID=TRA|<ChrA>:<StartA>-<EndA><><ChrB>:<StartB>-<EndB>`. There are  several rows related to each translocation:
+
+    - One row for each of the breakend regions, with IDs `TRA|BND-<ChrA>-<EndA>|<ChrA>:<StartA>-<EndA><><ChrB>:<StartB>-<EndB>` for the ChrA breakend and `TRA|BND-<ChrB>-<POS>|<ChrA>:<StartA>-<EndA><><ChrB>:<StartB>-<EndB>` for the ChrB breakend. Note that the `<POS>` is equivalent to the vcf field. The `SVTYPE` from `INFO` is `BND`.
+
+    - One row for each of the de novo insertions around the breakends tha generate this translocation. Each of them has an ID `TRA|insertion-<#CHROM>-<POS>|<ChrA>:<StartA>-<EndA><><ChrB>:<StartB>-<EndB>`, where `#CHROM` and `<POS>` are equal to the equivalent vcf fields. The `SVTYPE` from `INFO` is `insertionBND`.
+
+- Each unclassified breakpoint is represented with a  `variantID=<breakpoint_SVTYPE>like|<#CHROM>:<POS>-<CHR2>:<END>`, where `<breakpoint_SVTYPE>` can be DEL, TAN, INV1, INV2, ITX1, ITX2, INVTX1, INVTX2. There are several rows related to each unclassified breakpoint:
+
+    - One row for each of the breakend regions, with IDs `<breakpoint_SVTYPE>like|BND-<#CHROM>-<POS>|<#CHROM>:<POS>-<CHR2>:<END>` for the `#CHROM` breakend and `<breakpoint_SVTYPE>like|BND-<CHR2>-<END>|<#CHROM>:<POS>-<CHR2>:<END>` for the `CHR2` breakend. The `SVTYPE` from `INFO` is `BND`.
+
+    - One row for each of the de novo insertions around the breakends tha generate this breakpoint. Each of them has an ID `<breakpoint_SVTYPE>like|insertion-<#CHROM>-<POS>|<breakpoint_SVTYPE>like|<#CHROM>:<POS>-<CHR2>:<END>`, where `#CHROM` and `<POS>` are equal to the equivalent vcf fields. The `SVTYPE` from `INFO` is `insertionBND`.
+
+
+- The complex inverted SVs are represented with a `variantID=<varID>|<CHR2>:<START>-<END>|<#CHR2>:<POS>`, where `<varID>` can be CVD (inverted intrachromosomal duplication), CVT (inverted intrachromosomal cut-paste insertion) or IVT (inverted interchromosomal cut-paste insertion). Each of them is split across multiple vcf rows:
+
+    - CVD's are encoded as copy-paste insertions.
+    - CVT's and IVT's are encoded as cut-paste insertions.
+
+- The coverage-based deletion/duplication calls are represented with a `variantID=coverageDUP|CNV|<#CHROM>:<POS>-<END>` or `variantID=coverageDEL|CNV|<#CHROM>:<POS>-<END>`, respectively. There is one row for each variant. The `SVTYPE` from `INFO` is `DUP` or `DEL`. The range between `POS` and `END` indicates the span of the duplication/deletion.  The field `merged_relative_CN` from `INFO` indicates the most conservative relative copy number state (closest to 1.0) of this region as called by the different CNV callers. In a diploid organism, merged_relative_CN of 0.5 would indicate monosomy and 1.5 trisomy of the indicated region. The field `median_coverage_corrected` indicates the relative coverage (where 1.0 would mean a coverage as the median of the genome) after correction in the coverage-based CNV calling pipeline.
+
+
+Other important remarks and fields:
+
+- In SVs, the field `BREAKEND_real_AF` from `INFO` indicates the fraction of reads mapped to that position that support each of the breakends (indicated by `BREAKENDIDs` from `INFO`) that form the SV in the corresponding row. In the case of `DUP`, `DEL` and `TDUP` records, this is a comma-sepparated string. In the case of `BND` or `insertionBND` records this is a float, as there is only one breakend. This value can give you a rough idea of the genortype of the SV. However, note that an SV can have both homozygous and heterozygous breakends at the same time. SV genotyping is still an unsolved problem. Check https://github.com/PapenfussLab/gridss/wiki/GRIDSS-Documentation#calculating-variant-allele-fraction-vaf for more information on how gridss calculates these variant allele frequencies. In order to generate higher-confidence calls it may be interesting to filter out SVs that have low values of BREAKEND_real_AF (i.e. filter out SVs where none of the breakends has BREAKEND_real_AF>0.1).
+
+- In 
+
+    -
 
 - 
 
