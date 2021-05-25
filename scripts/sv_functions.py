@@ -19744,7 +19744,7 @@ def get_integrated_small_vars_df_severalSamples(paths_df, outdir, ploidy, run_pl
     """
     This function generates several datsets under outdir that result from the integration of several small variant callsets by perSVade. These are the arguments:
 
-    - paths_df should be a df that contains sampleID and perSVade_outdir. These are the datasets to integrate. IT can be a filepath
+    - paths_df should be a df that contains sampleID and perSVade_outdir. These are the datasets to integrate. IT can be a tab-sepparated file with these columns.
     - outdir is the directory where to store the integrated variant calling files
     - ploidy indicates the ploidy of the runs
     - run_ploidy2_ifHaploid indicates whether the option --run_ploidy2_ifHaploid was used in perSVade.

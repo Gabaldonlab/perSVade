@@ -127,9 +127,14 @@ Below are some examples of different analyses that can be done with perSVade. We
 
 `./scripts/perSVade.py --ref reference_genome.fasta --threads 4 -o ./output_directory -f1 reads_FWD.fastq.gz -f2 reads_FWD.fastq.gz --mitochondrial_chromosome chr_mito --mitochondrial_code 3 --gDNA_code 12 -gff features.gff  --run_smallVarsCNV --skip_SVcalling --skip_CNV_calling --caller all --coverage 20 --ploidy 2 --remove_smallVarsCNV_nonEssentialFiles --skip_repeat_analysis`
 
-- SV and read depth-based CNV calling (on bins of 300 bp) and annotation personalizing the number of simulations. Parameter optimisation will be ran on random SV simulations. There will be a quality control and trimming of the reads:
+- SV and read depth-based CNV calling (on bins of 300 bp) and annotation personalizing the number of simulations. Parameter optimisation will be ran on random SV simulations. There will be a quality control and trimming of the reads. The consideration of repeats will be avoided:
 
 `./scripts/perSVade.py --ref reference_genome.fasta --threads 4 -o ./output_directory -f1 reads_FWD.fastq.gz -f2 reads_FWD.fastq.gz --mitochondrial_chromosome chr_mito --mitochondrial_code 3 --gDNA_code 12 -gff features.gff  --coverage 20 --ploidy 2 --skip_repeat_analysis --nvars 50 --nsimulations 2 --simulation_ploidies diploid_hetero --range_filtering_benchmark theoretically_meaningful --QC_and_trimming_reads --min_chromosome_len 5000 --window_size_CNVcalling 300 --cnv_calling_algs HMMcopy,AneuFinder`
+
+
+- SV, read depth-based CNV (on bins of 300 bp) and small variant calling. There will be a quality control and trimming of the reads. The consideration of repeats will be avoided:
+
+`./scripts/perSVade.py --ref reference_genome.fasta --threads 16 -o ./output_directory -f1 reads_FWD.fastq.gz  -f2 reads_FWD.fastq.gz --mitochondrial_chromosome  chr_mito -gff annotations.gff --run_smallVarsCNV --caller all --coverage 20 --mitochondrial_code 4  --gDNA_code 12 --ploidy 2 --remove_smallVarsCNV_nonEssentialFiles --min_chromosome_len 100000 --verbose --nvars 50 --nsimulations 2 --simulation_ploidies auto --range_filtering_benchmark theoretically_meaningful --min_CNVsize_coverageBased 600 --window_size_CNVcalling 300 --cnv_calling_algs HMMcopy,AneuFinder --skip_repeat_analysis --QC_and_trimming_reads`
 
 ## Output 
 
@@ -323,17 +328,58 @@ More precisely, this is how each of the SV types are represented (check the FAQ 
     - CVD's are encoded as copy-paste insertions.
     - CVT's and IVT's are encoded as cut-paste insertions.
 
-- The coverage-based deletion/duplication calls are represented with a `variantID=coverageDUP|CNV|<#CHROM>:<POS>-<END>` or `variantID=coverageDEL|CNV|<#CHROM>:<POS>-<END>`, respectively. There is one row for each variant. The `SVTYPE` from `INFO` is `DUP` or `DEL`. The range between `POS` and `END` indicates the span of the duplication/deletion.  The field `merged_relative_CN` from `INFO` indicates the most conservative relative copy number state (closest to 1.0) of this region as called by the different CNV callers. In a diploid organism, merged_relative_CN of 0.5 would indicate monosomy and 1.5 trisomy of the indicated region. The field `median_coverage_corrected` indicates the relative coverage (where 1.0 would mean a coverage as the median of the genome) after correction in the coverage-based CNV calling pipeline.
-
+- The coverage-based deletion/duplication calls are represented with a `variantID=coverageDUP|CNV|<#CHROM>:<POS>-<END>` or `variantID=coverageDEL|CNV|<#CHROM>:<POS>-<END>`, respectively. There is one row for each variant. The `SVTYPE` from `INFO` is `DUP` or `DEL`. The range between `POS` and `END` indicates the span of the duplication/deletion.  The field `merged_relative_CN` from `INFO` indicates the most conservative relative copy number state (closest to 1.0) of this region as called by the different CNV callers. In a diploid organism, merged_relative_CN of 0.5 would indicate monosomy and 1.5 trisomy of the indicated region. The field `median_coverage_corrected` indicates the relative coverage (where 1.0 would mean a coverage as the median of the genome) after correction in the coverage-based CNV calling pipeline. 
 
 Other important remarks and fields:
 
 - In SVs, the field `BREAKEND_real_AF` from `INFO` indicates the fraction of reads mapped to that position that support each of the breakends (indicated by `BREAKENDIDs` from `INFO`) that form the SV in the corresponding row. In the case of `DUP`, `DEL` and `TDUP` records, this is a comma-sepparated string. In the case of `BND` or `insertionBND` records this is a float, as there is only one breakend. This value can give you a rough idea of the genortype of the SV. However, note that an SV can have both homozygous and heterozygous breakends at the same time. SV genotyping is still an unsolved problem. Check https://github.com/PapenfussLab/gridss/wiki/GRIDSS-Documentation#calculating-variant-allele-fraction-vaf for more information on how gridss calculates these variant allele frequencies. In order to generate higher-confidence calls it may be interesting to filter out SVs that have low values of BREAKEND_real_AF (i.e. filter out SVs where none of the breakends has BREAKEND_real_AF>0.1).
 
-- In 
+- Coverage-based CNV calling is error-prone, so that it is advisable to filter out CNVs where `median_coverage_corrected` and `merged_relative_CN` do not match (i.e: duplications (merged_relative_CN>1) with a median_coverage_corrected around 1).
 
-    -
+- The field `RELCOVERAGE` from `INFO` indicates the relative coverage normalised by the median coverage across windows of the genome for the region under CNV in tandem duplications, deletions, copy-paste insertions and coverage-inferred CNVs. The fields `RELCOVERAGE_TO_5` and `RELCOVERAGE_TO_3` from `INFO` indicate the relative coverage normalised by the coverage of the 5' or 3' region, respectively. These values can be used as an additional quality control for the called CNVs.
 
-- 
+### How can I compare the variants called in different samples?
 
-## Resource consumption
+This is not a trivial task, particularly for SVs and CNVs, where the same variant may be represented slightly different in two different perSVade runs. For example, we generally consider that two SVs of a given type (i.e. a deletion) are the same if they overlap by >75% and have their breakends <50 bp appart. We have developed some python functions to introduce this definition of "same variant" across different samples. 
+
+These functions are in `./scripts/sv_functions.py` (see **Quick start** for an example of how to import this script as a module).
+
+Below are some key functions:
+
+- `sv_functions.get_integrated_small_vars_df_severalSamples` is a function to integrate the files from the small variant and per gene coverage analysis, into single files for all samples. These are the generated files:
+
+    - `merged_coverage.tab` includes the stacked `smallVars_CNV_output/CNV_results/genes_and_regions_coverage.tab` files, where the column `sampleID` indicates the the sampleID.
+
+    - `smallVars.tab` includes the stacked `smallVars_CNV_output/variant_calling_ploidy2.tab` files, where the column `sampleID` indicates the the sampleID.
+
+    - `smallVars_annot.tab` includes all the annotated variants (from the `smallVars_CNV_output/variant_annotation_ploidy2.tab` files).
+
+- `sv_functions.get_integrated_CNperWindow_df_severalSamples` stacks all the `CNV_calling/final_df_coverage.tab` files across different samples. It generates the `integrated_CNperWindow.tab` file where the column `sampleID` indicates the the sampleID.
+
+- `sv_functions.get_integrated_SV_CNV_df_severalSamples` integrates the SV and coverage-based CNV calling and annotation files for several samples and provides some information about the overlaps between samples. It requires a valid .gff file. These are the generated files:
+
+    - `SV_CNV.simple.tab` includes the stacked `SVcalling_output/SV_and_CNV_variant_calling.tab` files, where the column `sampleID` indicates the the sampleID.
+
+    - `SV_CNV_annot.tab` includes the variant annotations as in `SVcalling_output/SV_and_CNV_variant_calling.tab_annotated_VEP.tab` for all samples. This table also includes the fields `is_protein_coding_gene` (a boolean indicating if the variant overlaps a protein-coding gene) and `is_transcript_disrupting` (a boolean indicating if the variant disrupts a transcript). Beware that duplications are also considered to be 'transcript-disrupting'.
+
+    - `SV_CNV.tab` is similar to `SV_CNV.simple.tab`, but it includes relevant information to compare the variants across samples. These are some useful extra fields that are found in this table, for each variant:
+
+        - `overlapping_samples_byBreakPoints_allCalled`: A comma-sepparated string with the sample IDs where gridss found at least one breakpoint overlapping the variant. This can be considered as a false positive-prone estimator of samples  that share this variant, as some of the breakpoints may not be real. This field is only meaningful for SVs called by gridss and clove. 
+
+        - `overlapping_samples_byBreakPoints_PASS`: A comma-sepparated string with the sample IDs where gridss found at least one breakpoint (passing the filters of gridss as defined by perSVade) overlapping the variant. This can be considered as a false negative-prone estimator of samples  that share this variant, as some of the breakpoints may be missed due to only considering high-confidence breakpoints to compute the overlaps. This field is only meaningful for SVs called by gridss and clove. 
+
+        - `overlapping_samples_CNV_atLeast_<min_pct_overlap>` (where `<min_pct_overlap>` may be 0.25, 0.5, 0.75 or 0.8): In coverage-based CNVs, a comma-sepparated string with the sample IDs that may have the same CNV. A CNV is considered to be found in another sample if it has an equal or more extreme (farther from 1.0) copy number (CN) in at least `<min_pct_overlap>` of the windows of the given CNV. For example, a duplication in a region of sample A is considered to be also found sample B (according to `overlapping_samples_CNV_atLeast_0.75`) if at least 75% of the windows of that same region in sampleB have a CN number above or equal the CN in A. This field is only meaningful for coverage-based CNVs.
+
+        - `variantID_across_samples`: is an identifier of each SV/CNV that is unique across different samples. By default, two SVs of a given type (i.e. a deletion) are the same if they overlap by >75% and have their breakends <50 bp appart.
+
+Other remarks:
+
+- You can type `help(<function_name>)` from a python terminal to get more details about the arguments of these functions.
+
+- All these functions take an argument called `paths_df`. This should be a table (either a pandas dataframe object or a tab-delimited file with header names) with the columns `sampleID` (this should be a unique identifier of each sample) and `perSVade_outdir` (the path to the perSVade outdir of that sample).
+
+- We reccomment using the fields `overlapping_samples_byBreakPoints_allCalled`, `overlapping_samples_byBreakPoints_PASS` and `overlapping_samples_CNV_atLeast_<min_pct_overlap>` if we are interested in filtering out variants in a given sample that are found in other 'background' samples. For example, using `overlapping_samples_byBreakPoints_allCalled` and `overlapping_samples_CNV_atLeast_0.25` as the overlapping fields would be a conservative way to ensure that the variant is not in any of the 'background' samples.
+
+- The field `variantID_across_samples` is useful for analyses where we want to work with variants shared across different samples (i.e.: clustering samples by the variants)
+
+## Resource consumption5
