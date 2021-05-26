@@ -6465,10 +6465,18 @@ def get_IDstring_for_svDF_r(r, svtype):
 
             ID = "%slike|%s:%i-%s:%i"%(r["SVTYPE"], r["#CHROM"], r["POS"], r["CHR2"], r["END"])
 
-        elif r["SVTYPE"] in {"CVT", "CVD", "IVT"}:
+        elif r["SVTYPE"] in {"CVD", "IVT"}:
 
             # these are all SVs that are understood but not among the generally classified events. They imply one region copied or translocated into another
             ID = "%s|%s:%i-%i|%s:%i"%(r["SVTYPE"], r["CHR2"], r["START"], r["END"], r["#CHROM"], r["POS"])
+
+        elif r["SVTYPE"]=="CVT":
+
+            # check
+            if r["END"]<=r["POS"]: raise ValueError("END shold be after POS in CVT")
+
+            # this just has start and end in the same chromosome
+            ID = "%s|%s:%i|%s:%i"%(r["SVTYPE"],  r["#CHROM"], r["POS"], r["CHR2"], r["END"])
 
         else: raise ValueError("%s is not considered"%r["SVTYPE"])
 
@@ -7910,6 +7918,11 @@ def sort_bam(bam, sorted_bam, threads=4):
 
     """Sorts a bam file into sorted_bam"""
 
+    # remove the previously generated .tmp. file
+    for f in os.listdir(get_dir(sorted_bam)):
+        
+        if f.startswith("%s.tmp."%(get_file(sorted_bam))): remove_file("%s/%s"%(get_dir(sorted_bam), f))
+
     sorting_std = "%s.generating.std"%sorted_bam
     print_if_verbose("sorting bam. The std is in %s"%sorting_std)
     run_cmd("%s sort --threads %i -o %s %s > %s 2>&1"%(samtools, threads, sorted_bam, bam, sorting_std))
@@ -8021,8 +8034,11 @@ def keep_relevant_filters_lists_inparallel(filterName_to_filtersList, df_gridss,
     unconservative_filterName_to_filter = {"min_Nfragments":-1, "min_af":-1, "wrong_FILTERtags":("",), "filter_polyGC":False, "filter_noSplitReads":False, "filter_noReadPairs":False, "maximum_strand_bias":1.1, "maximum_microhomology":1000000000000, "maximum_lenght_inexactHomology":1000000000000, "range_filt_DEL_breakpoints":(0,1), "min_length_inversions":-1, "dif_between_insert_and_del":0, "max_to_be_considered_small_event":1, "wrong_INFOtags":wrong_INFOtags, "min_size":min_size, "min_af_EitherSmallOrLargeEvent":-1, "min_QUAL":0, "filter_overlappingRepeats":False}
 
     # define an unconservative set of breakpoints
-    unconservative_breakpoints = tuple(sorted([bp for bp, N in Counter(df_gridss.breakpointID).items() if N==2]))
-    print_if_verbose("There are %i bp in total"%len(unconservative_breakpoints))
+    #unconservative_breakpoints = tuple(sorted([bp for bp, N in Counter(df_gridss.breakpointID).items() if N==2]))
+    unconservative_breakpoints = get_tupleBreakpoints_for_filters_GRIDSS(df_gridss, unconservative_filterName_to_filter, reference_genome)
+    print_if_verbose("There are %i bp in total with unconservative filtering"%len(unconservative_breakpoints))
+
+    if len(unconservative_breakpoints)==0: raise ValueError("There are no breakpoints after unconservative filtering. Something is wrong with the unconservative filters")
 
     # define a list of filters dict, only changing one of the values in filterName_to_filtersList, recording at the same time an ID
     filters_dict_list = [] # a list of filterDicts
@@ -8037,7 +8053,7 @@ def keep_relevant_filters_lists_inparallel(filterName_to_filtersList, df_gridss,
             # keep  
             filter_changing_list.append((filterName, filterVal))
             filters_dict_list.append(filters_dict)
-
+    
     # run in a map or a pool the obtention of tuples of breakpoints for each parameter combination
     inputs_fn = [(df_gridss, fd, reference_genome) for fd in filters_dict_list]
 
@@ -8052,6 +8068,8 @@ def keep_relevant_filters_lists_inparallel(filterName_to_filtersList, df_gridss,
     # map the filter changing to the dict and the breakpoints
     filterChanging_to_filtersDict = dict(zip(filter_changing_list, filters_dict_list))
     filterChanging_to_breakpoints = dict(zip(filter_changing_list, bp_tuples_list))
+
+    print(filterChanging_to_breakpoints)
 
     # get those filters that change the df
     if type_filtering=="keeping_all_filters_that_change":
@@ -8162,7 +8180,7 @@ def write_breakpoints_for_parameter_combinations_and_get_filterIDtoBpoints_grids
             filter_polyGC_l = [True, False]
             filter_noSplitReads_l = [True, False]
             filter_noReadPairs_l = [True, False]
-            maximum_strand_bias_l = [0.9, 0.95, 0.99, 1.0]
+            maximum_strand_bias_l = [0.9, 0.95, 0.99, 1.0, 1.1]
             maximum_microhomology_l = [10, 50, 100, 200, 1000, 100000000]
             maximum_lenght_inexactHomology_l = [10, 50, 100, 200, 1000, 10000000]
             range_filt_DEL_breakpoints_l = [(100, 800), (50, 900), (200, 700), (0,1)]
@@ -8209,7 +8227,6 @@ def write_breakpoints_for_parameter_combinations_and_get_filterIDtoBpoints_grids
             max_to_be_considered_small_event_l = [1000]
             min_QUAL_l = [0, 500, 1000, 1000000000]
             filter_overlappingRepeats_l = [False, True]
-
 
         elif range_filtering=="theoretically_meaningful":
 
@@ -8271,7 +8288,7 @@ def write_breakpoints_for_parameter_combinations_and_get_filterIDtoBpoints_grids
         else: raise ValueError("%s is not a valid range_filtering parameter, it has to be 'large', 'medium', 'small' or 'single' "%range_filtering)
 
         # define filters that are always the same
-        wrong_INFOtags = ("IMPRECISE",)
+        wrong_INFOtags = ("IMPRECISE",) # it could be 'NONE' or 'IMPRECISE' 
         min_size = 50
 
         # map the filters through a dict
@@ -8281,7 +8298,7 @@ def write_breakpoints_for_parameter_combinations_and_get_filterIDtoBpoints_grids
         keep_relevant_filters_lists_inparallel(filterName_to_filtersList, df_gridss_twoBreakEnds, reference_genome, type_filtering="keeping_filters_that_yield_uniqueBPs", wrong_INFOtags=wrong_INFOtags, min_size=min_size, threads=threads) # it can also be keeping_all_filters_that_change or keeping_filters_that_yield_uniqueBPs or none
 
         # initialize objects to store the filtering
-        I = 1
+        I = 0
         filters_dict_list = []
 
         # go through each range of filters
@@ -8348,6 +8365,10 @@ def write_breakpoints_for_parameter_combinations_and_get_filterIDtoBpoints_grids
         # save the map between each filter 
         print_if_verbose("writing files")
         filtersID_to_breakpoints = dict(zip(bpoints_to_ID.values(), bpoints_to_ID.keys()))
+
+        if len(filtersID_to_breakpoints)==0: raise ValueError("The object filtersID_to_breakpoints is empty. This means that with the tested parameter range there are no breakpoints called in this simulations. Maybe you can specify '--range_filtering_benchmark large' to sample a larger set of parameters.")
+
+        # save
         save_object(filtersID_to_breakpoints, filtersID_to_breakpoints_file)
 
     else: filtersID_to_breakpoints = load_object(filtersID_to_breakpoints_file)
@@ -8824,10 +8845,16 @@ def benchmark_GridssClove_for_knownSV(sample_bam, reference_genome, know_SV_dict
             df_bedpe["IDs_set"] = df_bedpe.IDs.apply(lambda x: set(x.split("||")))
 
             # write the breakpoints. The point of this is that with many parameter combinations we may yield the same breakpoints, so that it's more efficient to create them first
+
+            # get the filters
             outdir_parameter_combinations = "%s/several_parameter_combinations_filter_%s_af%.2f"%(gridss_outdir, range_filtering, expected_AF)
-            #delete_folder(outdir_parameter_combinations) # DEBUG
+
+            delete_folder(outdir_parameter_combinations) # DEBUG
             make_folder(outdir_parameter_combinations)
             filtersID_to_breakpoints = write_breakpoints_for_parameter_combinations_and_get_filterIDtoBpoints_gridss(df_gridss, df_bedpe, outdir_parameter_combinations, reference_genome, range_filtering=range_filtering, expected_AF=expected_AF, replace=replace, threads=threads) # this is a dataframe with all the filter combinations and the map between filterID and the actual filtering
+
+            # debug
+            if len(filtersID_to_breakpoints)==0: raise ValueError("You could not find filters for range_filtering=%s"%range_filtering)
 
             # define the paths to the breakpoints
             paths_to_bedpe_breakpoints = ["%s/%s/filtered_breakpoints.bedpe"%(outdir_parameter_combinations, filterID) for filterID in filtersID_to_breakpoints]
@@ -10667,7 +10694,7 @@ def get_bedpe_breakpoints_arround_repeats(repeats_table_file, replace=False, min
 
 
 
-def report_accuracy_realSVs_perSVadeRuns(close_shortReads_table, reference_genome, outdir, real_bedpe_breakpoints, threads=4, replace=False, n_simulated_genomes=2, mitochondrial_chromosome="mito_C_glabrata_CBS138", simulation_ploidies=["haploid", "diploid_homo", "diploid_hetero", "ref:2_var:1", "ref:3_var:1", "ref:4_var:1", "ref:5_var:1", "ref:9_var:1", "ref:19_var:1", "ref:99_var:1"], range_filtering_benchmark="theoretically_meaningful", nvars=100, job_array_mode="local", skip_cleaning_simulations_files_and_parameters=False, skip_cleaning_outdir=False, parameters_json_file=None, gff=None, replace_FromGridssRun_final_perSVade_run=False, fraction_available_mem=None, skip_CNV_calling=False, outdir_finding_realVars=None, replace_SV_CNVcalling=False, simulate_SVs_arround_HomologousRegions_previousBlastnFile=None, simulate_SVs_arround_HomologousRegions_maxEvalue=1e-5, simulate_SVs_arround_HomologousRegions_queryWindowSize=500, skip_SV_CNV_calling=False, tmpdir=None, simulation_chromosomes=None):
+def report_accuracy_realSVs_perSVadeRuns(close_shortReads_table, reference_genome, outdir, real_bedpe_breakpoints, threads=4, replace=False, n_simulated_genomes=2, mitochondrial_chromosome="mito_C_glabrata_CBS138", simulation_ploidies=["haploid", "diploid_homo", "diploid_hetero", "ref:2_var:1", "ref:3_var:1", "ref:4_var:1", "ref:5_var:1", "ref:9_var:1", "ref:19_var:1", "ref:99_var:1"], range_filtering_benchmark="theoretically_meaningful", nvars=100, job_array_mode="local", skip_cleaning_simulations_files_and_parameters=False, skip_cleaning_outdir=False, parameters_json_file=None, gff=None, replace_FromGridssRun_final_perSVade_run=False, fraction_available_mem=None, skip_CNV_calling=False, outdir_finding_realVars=None, replace_SV_CNVcalling=False, simulate_SVs_arround_HomologousRegions_previousBlastnFile=None, simulate_SVs_arround_HomologousRegions_maxEvalue=1e-5, simulate_SVs_arround_HomologousRegions_queryWindowSize=500, skip_SV_CNV_calling=False, tmpdir=None, simulation_chromosomes=None, testAccuracy_skipHomRegionsSimulation=False):
 
 
     """This function runs the SV pipeline for all the datasets in close_shortReads_table with the fastSV, optimisation based on uniform parameters and optimisation based on realSVs (specified in real_svtype_to_file). The latter is skipped if real_svtype_to_file is empty.
@@ -10718,14 +10745,20 @@ def report_accuracy_realSVs_perSVadeRuns(close_shortReads_table, reference_genom
 
     # initialize the cmds to run 
     all_cmds = []
+
+    # define the configuraion 
+    if testAccuracy_skipHomRegionsSimulation is False: types_simulations = ["arroundHomRegions", "uniform", "fast", "realSVs"]
+    else: types_simulations = ["uniform", "fast", "realSVs"]
     
     # predefine if some jobs need to be ran
-    types_simulations = ["arroundHomRegions", "uniform", "fast", "realSVs"]
     n_remaining_jobs = sum([sum([file_is_empty("%s/%s/%s/perSVade_finished_file.txt"%(outdir, typeSimulations, runID)) for runID in set(df_reads.runID)]) for typeSimulations in types_simulations])
     print_if_verbose("There are %i remaining jobs"%n_remaining_jobs)
 
     # go through each run and configuration
     for typeSimulations, bedpe_breakpoints, fast_SVcalling, simulate_SVs_arround_repeats, simulate_SVs_arround_HomologousRegions in [("arroundHomRegions", None, False, False, True), ("uniform", None, False, False, False), ("realSVs", real_bedpe_breakpoints, False, False, False), ("fast", None, True, False, False)]:
+
+        # skip the homRegions if specified
+        if testAccuracy_skipHomRegionsSimulation is True and typeSimulations=="arroundHomRegions": continue
 
         # define an outdir for this type of simulations
         outdir_typeSimulations = "%s/%s"%(outdir, typeSimulations); make_folder(outdir_typeSimulations)
@@ -10786,15 +10819,6 @@ def report_accuracy_realSVs_perSVadeRuns(close_shortReads_table, reference_genom
                 if simulate_SVs_arround_HomologousRegions_previousBlastnFile is not None: cmd += " --simulate_SVs_arround_HomologousRegions_previousBlastnFile %s"%simulate_SVs_arround_HomologousRegions_previousBlastnFile
                 if tmpdir is not None: cmd += " --tmpdir %s"%tmpdir
                 if simulation_chromosomes is not None: cmd += " --simulation_chromosomes %s"%simulation_chromosomes
-
-                """
-                # debug
-                if typeSimulations=="arroundHomRegions": 
-                    print(cmd)
-                    yadgjhgdajhgdajhgagdh
-
-                else: continue
-                """
 
 
                 # if the running in slurm is false, just run the cmd
@@ -16298,8 +16322,8 @@ def get_vcf_df_from_remaining_r(r, gridss_fields):
         # add infoq
         df_vcf["INFO"] = "SVTYPE=BND;%s"%(backbone_info)
 
-    # events with breakpoints
-    elif r["SVTYPE"] in {"CVT", "IVT"}:
+    # events with 3 breakpoints
+    elif r["SVTYPE"]=="IVT":
 
         # get one BND for each breakend
         df1 =  pd.DataFrame({0 : {"#CHROM":r["#CHROM"], "POS":r["POS"], "ALT":"<BND>"}}).transpose()
@@ -16307,6 +16331,18 @@ def get_vcf_df_from_remaining_r(r, gridss_fields):
         df3 =  pd.DataFrame({2 : {"#CHROM":r["CHR2"], "POS":r["END"], "ALT":"<BND>"}}).transpose()
 
         df_vcf = df1.append(df2).append(df3)
+
+        # add info
+        df_vcf["INFO"] = "SVTYPE=BND;%s"%(backbone_info)
+
+    # events with 2 breakpoints
+    elif r["SVTYPE"]=="CVT":
+
+        # get one BND for each breakend
+        df1 =  pd.DataFrame({0 : {"#CHROM":r["#CHROM"], "POS":r["POS"], "ALT":"<BND>"}}).transpose()
+        df2 =  pd.DataFrame({1 : {"#CHROM":r["CHR2"], "POS":r["END"], "ALT":"<BND>"}}).transpose()
+
+        df_vcf = df1.append(df2)
 
         # add info
         df_vcf["INFO"] = "SVTYPE=BND;%s"%(backbone_info)
@@ -18510,7 +18546,7 @@ def get_bed_df_from_variantID(varID):
 
         dict_bed = {0 : {"chromosome":chrom, "start":start, "end":end, "ID":varID, "type_overlap":type_overlap}}
 
-    elif svtype.endswith("like"):
+    elif svtype.endswith("like") or svtype=="CVT":
 
         posA, posB = varID.split("|")[1].split("-")
 
@@ -18527,6 +18563,7 @@ def get_bed_df_from_variantID(varID):
 
         dict_bed = {0 : {"chromosome":chromA, "start":startA, "end":endA, "ID":varID+"-A", "type_overlap":type_overlap},
                     1 : {"chromosome":chromB, "start":startB, "end":endB, "ID":varID+"-B", "type_overlap":type_overlap}}
+
 
     elif svtype in {"INS"}:
 
@@ -18545,12 +18582,13 @@ def get_bed_df_from_variantID(varID):
 
     # complex inverted duplication. A region is duplicated, inverted and inserted into another region of the genome. This applies also to complex inverted translocations (intrachromosomal (CVT) or interchromosomal (IVT)). A regions is cut, duplicated, inverted and inserted into anothe region of the genome
 
-    elif svtype in {"CVD", "IVT", "CVT"}:
+    elif svtype in {"CVD", "IVT"}:
 
         # get the region A nd the posB
         regionA, posB = varID.split("|")[1:]
 
         chromA = "%s_%s"%(svtype, regionA.split(":")[0])
+        print(chromA, varID, regionA)
         startA, endA = [int(x) for x in regionA.split(":")[1].split("-")]
 
         chromB = "%s_%s"%(svtype, posB.split(":")[0])
@@ -20082,12 +20120,16 @@ def concatenate_list_headerLess_files_into_tab_file(headerLess_fileList, file, f
 
         file_tmp = "%s.tmp"%file
         run_cmd("echo '%s' > %s"%("\t".join(fields), file_tmp))
-        run_cmd("cat %s >> %s"%(" ".join(headerLess_fileList), file_tmp))
+
+        for If, f in enumerate(headerLess_fileList):
+
+            print_if_verbose("appending file %i/%i"%(If+1, len(headerLess_fileList)))
+            run_cmd("cat %s >> %s"%(f, file_tmp))
 
         os.rename(file_tmp, file)
 
 
-def get_integrated_SV_CNV_df_severalSamples(paths_df, outdir, gff, reference_genome, threads=4, replace=False, integrated_CNperWindow_file=None, fields_varCall="all", fields_varAnnot="all", tol_bp=50, pct_overlap=0.75):
+def get_integrated_SV_CNV_df_severalSamples(paths_df, outdir, gff, reference_genome, threads=4, replace=False, integrated_CNperWindow_file=None, fields_varCall="all", fields_varAnnot="all", tol_bp=50, pct_overlap=0.75, add_overlapping_samples_eachSV=True):
 
     """
     This function integrates the SV and CNV calling .vcf file from different perSVade runs
@@ -20098,6 +20140,7 @@ def get_integrated_SV_CNV_df_severalSamples(paths_df, outdir, gff, reference_gen
     - gff and reference_genome should be the same ones provided to perSVade
     - fields_varCall and fields_varAnnot indicate whether to keep only some fields. They should be a list or "all"
     - tol_bp and pct_overlap are parameters for definining that two SVs are the same. By default, two SVs are defined to be the same if they are from the same type, the breakends overlap by <50 bp and (in the case of inversions, duplications, deletions) the overlap is >=75% 
+    - add_overlapping_samples_eachSV is a boolean that indicates whether to add the samples tha overlap each of the SVs. Default is True.
 
     """
 
@@ -20117,7 +20160,11 @@ def get_integrated_SV_CNV_df_severalSamples(paths_df, outdir, gff, reference_gen
     integrated_gridss_df = "%s/integrated_gridss_df.tab"%(outdir)
     integrated_bedpe_df = "%s/integrated_bedpe_df.tab"%(outdir)
 
-    for f in [SV_CNV_file, SV_CNV_file_simple, SV_CNV_annot_file, integrated_gridss_df, integrated_bedpe_df]: remove_file(f) # debug
+    """
+    for f in [SV_CNV_file, SV_CNV_file_simple, SV_CNV_annot_file, integrated_gridss_df, integrated_bedpe_df, "%s/getting_common_variantID_acrossSamples"%outdir]: delete_file_or_folder(f) # debug
+
+    return None
+    """
 
     # define the samples to run
     samples_to_run = set(paths_df.sampleID)
@@ -20205,11 +20252,6 @@ def get_integrated_SV_CNV_df_severalSamples(paths_df, outdir, gff, reference_gen
 
     ###########################################
 
-    # load the CNV per window calling df
-    print("loading %s"%integrated_CNperWindow_file)
-    if integrated_CNperWindow_file is  not None: df_CN_all = get_tab_as_df_or_empty_df(integrated_CNperWindow_file)
-    else: df_CN_all = None
-
     ######### GET THE COMMON DF OF SVs #########
 
     if file_is_empty(SV_CNV_file) or replace is True:
@@ -20222,7 +20264,14 @@ def get_integrated_SV_CNV_df_severalSamples(paths_df, outdir, gff, reference_gen
         outdir_common_variantID_acrossSamples = "%s/getting_common_variantID_acrossSamples"%outdir
         
         # add the overlaps with other samples
-        SV_CNV = get_SV_CNV_df_with_overlaps_with_all_samples(SV_CNV, outdir_common_variantID_acrossSamples, tol_bp, pct_overlap, outdir, df_bedpe_all, df_CN_all, threads, reference_genome)
+        if add_overlapping_samples_eachSV is True: 
+
+            # load the CNV per window calling df
+            print("loading %s"%integrated_CNperWindow_file)
+            if integrated_CNperWindow_file is  not None: df_CN_all = get_tab_as_df_or_empty_df(integrated_CNperWindow_file)
+            else: df_CN_all = None
+
+            SV_CNV = get_SV_CNV_df_with_overlaps_with_all_samples(SV_CNV, outdir_common_variantID_acrossSamples, tol_bp, pct_overlap, outdir, df_bedpe_all, df_CN_all, threads, reference_genome)
 
         # get the common variant ID
         print("adding the common variant ID")

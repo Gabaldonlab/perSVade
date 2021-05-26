@@ -19320,3 +19320,145 @@ def generate_nt_content_file(genome, target_nts="GC", replace=False):
         os.rename(target_nt_content_file_tmp, target_nt_content_file)
 
     return target_nt_content_file
+
+
+def get_overlapping_df_bedpe_multiple_samples(df_bedpe_all, outdir, tol_bp, pct_overlap, threads, replace=False):
+
+    """Takes a df bedpe and returns a df with the overlapping breakpoints """
+
+    # add the unique breakpointID
+    df_bedpe_all["unique_bpID"] = df_bedpe_all.sampleID.apply(str) + "_" + df_bedpe_all.name
+
+    # define file
+    df_overlapping_BPs_file = "%s/df_bedpe_all_with_overlapping_BPs.py"%outdir
+    initial_fields = list(df_bedpe_all.keys())
+
+    if file_is_empty(df_overlapping_BPs_file) or replace is True:
+
+        print("getting overlapping breakpoints")
+
+        # this is a df were the rows are some target breakpoints (the ones that PASS the filters) and each column is a different breakpoint. The cell will be True if they are equivalent breakpoints
+
+        if len(df_bedpe_all)!=len(set(df_bedpe_all.unique_bpID)): raise ValueError("The breakpoint IDs are not unique in the bedpe")
+        df_bedpe_all = df_bedpe_all.set_index("unique_bpID", drop=False)
+
+        # add the positions
+        df_bedpe_all["pos1"] = (df_bedpe_all.start1 + (df_bedpe_all.end1-df_bedpe_all.start1)/2).apply(int)
+        df_bedpe_all["pos2"] = (df_bedpe_all.start2 + (df_bedpe_all.end2-df_bedpe_all.start2)/2).apply(int)
+        df_bedpe_all["pos1_plus1"] = df_bedpe_all["pos1"] + 1
+        df_bedpe_all["pos2_plus1"] = df_bedpe_all["pos2"] + 1
+
+        # add the type of breakpoint
+        bool_to_text = {True:"intra_chromosomal", False:"inter_chromosomal"}
+        df_bedpe_all["type_breakpoint"] = (df_bedpe_all.chrom1==df_bedpe_all.chrom2).map(bool_to_text)
+
+        # add the merge of chromosome and strand
+        df_bedpe_all["chrom_strand_1"] = df_bedpe_all.chrom1 + "_" + df_bedpe_all.strand1
+        df_bedpe_all["chrom_strand_2"] = df_bedpe_all.chrom2 + "_" + df_bedpe_all.strand2
+        df_bedpe_all["unique_bpID_1"] = df_bedpe_all.unique_bpID + "_1"
+        df_bedpe_all["unique_bpID_2"] = df_bedpe_all.unique_bpID + "_2"
+
+        #### GET BREAKPOINTS THAT OVERLAP BY POSITION #####
+
+        # adds to df_bedpe_all an bpoints_overlapping_by_pos, which is a set of the breakpoints were both breakedns overlap by tol_bp
+
+        # get a bed that has the positions of the breakends
+        df_positions = pd.concat([df_bedpe_all[["chrom_strand_%i"%I, "pos%i"%I, "pos%i_plus1"%I, "unique_bpID_%i"%I]].rename(columns=dict(zip(["chrom_strand_%i"%I, "pos%i"%I, "pos%i_plus1"%I, "unique_bpID_%i"%I], ["chrom", "start", "end", "ID"]))) for I in [1, 2]]).sort_values(by=["chrom", "start", "end"])
+
+        bed_positions = "%s/breakend_positions.bed"%outdir
+        df_positions.to_csv(bed_positions, sep="\t", header=False, index=False)
+
+        # define the stderr
+        bedmap_stderr = "%s/running_bedmap.stderr"%outdir
+
+        # run bedmap tol_bp. These are breakpoints that overlap by at leasttol_bp
+        bedmap_outfile = "%s/bedmap_outfile_range.txt"%outdir
+        run_cmd("%s --delim '\t' --range %i --echo-map-id %s > %s 2>%s"%(bedmap, tol_bp, bed_positions, bedmap_outfile, bedmap_stderr))
+
+        # add to df bed
+        df_overlap_tolBp  = pd.read_csv(bedmap_outfile, sep="\t", header=None, names=["overlapping_IDs"])
+        df_overlap_tolBp["ID"] = list(df_positions.ID)
+        df_positions = df_positions.merge(df_overlap_tolBp, on="ID", how="left", validate="one_to_one")
+        if len(df_overlap_tolBp)!=len(df_positions): raise ValueError("the length should be as the bed") # debug
+
+        # add the unique ID
+        def get_bpointID(x): return "_".join(x.split("_")[0:-1])
+        df_positions["breakpointID"] = df_positions.ID.apply(get_bpointID)
+
+        # add the other bend ID
+        number_to_ther_number = {"1":"2", "2":"1"}
+        def get_other_bendID_name(bendID): return number_to_ther_number[bendID.split("_")[-1]]
+        df_positions["other_bendID"] = df_positions.breakpointID + "_" + df_positions.ID.apply(get_other_bendID_name)
+
+        # add the overlapping breakendIDs as a set
+        def get_as_list(x): return x.split(";")
+        df_positions["overlapping_bends"] = df_positions.overlapping_IDs.apply(get_as_list).apply(set)
+
+        # map breakends
+        bend_to_bpoint = dict(df_positions.set_index("ID").breakpointID)
+        bend_to_otherBend = dict(df_positions.set_index("ID").other_bendID)
+        bpoint_to_bends = df_positions.groupby("breakpointID").apply(lambda df_bp: set(df_bp.ID))
+        bend_to_overlapping_bends = dict(df_positions.set_index("ID")["overlapping_bends"])
+
+        # get the 
+        def get_all_overlapping_bends_from_bpID(bpID): return set.union(*[bend_to_overlapping_bends[bend] for bend in bpoint_to_bends[bpID]])
+        df_bedpe_all["overlapping_bends"] =  df_bedpe_all.unique_bpID.apply(get_all_overlapping_bends_from_bpID)
+
+        def get_bpoints_overlapping_by_pos(all_overlapping_bends): return {bend_to_bpoint[bend] for bend in all_overlapping_bends if bend_to_otherBend[bend] in all_overlapping_bends}
+        df_bedpe_all["bpoints_overlapping_by_pos"] = df_bedpe_all.overlapping_bends.apply(get_bpoints_overlapping_by_pos)
+
+        ###################################################
+
+        ############ DEFINE BREAKPOINTS OVERLAPPING BY PCT_OVERLAP ######
+        print("geting pct_overlaps")
+
+        # add to df_bedpe_all a bpoints_overlapping_by_region, just for the intrachromosomal events
+ 
+        # get a bed that thas the regions of interchromosomal breakpoints
+        df_intra_chrom = df_bedpe_all[df_bedpe_all.type_breakpoint=="intra_chromosomal"]
+        if not all (df_intra_chrom.pos2>df_intra_chrom.pos1): raise ValueError("pos2 should be after pos1 in intrachromosomal breakpoints")
+
+        bed_intrachromosomal_regions = "%s/intrachromosomal_regions.bed"%outdir
+        df_intra_chrom["chrom_and_orientations"] = df_intra_chrom.chrom1 + "_" + df_intra_chrom.strand1 + "_" + df_intra_chrom.strand2
+        df_intra_chrom = df_intra_chrom.sort_values(by=["chrom_and_orientations", "pos1", "pos2"])
+        df_intra_chrom[["chrom_and_orientations", "pos1", "pos2", "unique_bpID"]].to_csv(bed_intrachromosomal_regions, sep="\t", header=False, index=False)
+
+        # run bedmap pct overlap
+        bedmap_outfile = "%s/bedmap_outfile_pctOverlap.txt"%outdir
+        run_cmd("%s --delim '\t' --fraction-both %.2f --echo-map-id %s > %s 2>%s"%(bedmap, pct_overlap, bed_intrachromosomal_regions, bedmap_outfile, bedmap_stderr))
+
+        df_overlap_pctOverlap  = pd.read_csv(bedmap_outfile, sep="\t", header=None, names=["overlapping_IDs"])
+        df_overlap_pctOverlap["ID"] = list(df_intra_chrom.unique_bpID)
+        df_overlap_pctOverlap["overlapping_IDs_set"] = df_overlap_pctOverlap.overlapping_IDs.apply(get_as_list).apply(set)
+
+        # add the set to the breakpoint (also with missing vals)
+        bpoint_to_overlappingBpoints_pctOverlap = df_overlap_pctOverlap.set_index("ID")["overlapping_IDs_set"]
+        inter_chromosomal_bpoints = df_bedpe_all[df_bedpe_all.type_breakpoint=="inter_chromosomal"].unique_bpID
+        bpoint_to_overlappingBpoints_pctOverlap = bpoint_to_overlappingBpoints_pctOverlap.append(pd.Series(dict(zip(inter_chromosomal_bpoints, [set()]*len(inter_chromosomal_bpoints)))))
+
+        df_bedpe_all = df_bedpe_all.set_index("unique_bpID", drop=False)
+        df_bedpe_all["bpoints_overlapping_by_region"] = bpoint_to_overlappingBpoints_pctOverlap.loc[df_bedpe_all.index]
+
+        ###################################################################
+
+        # get the overlap, which depends on the type
+        def get_overlapping_bpoints(r):
+
+            # define things
+            by_region_bps = r["bpoints_overlapping_by_region"].difference({r["unique_bpID"]})
+            by_pos_bps = r["bpoints_overlapping_by_pos"].difference({r["unique_bpID"]})
+
+            if r.type_breakpoint=="intra_chromosomal": return by_region_bps.intersection(by_pos_bps)
+            elif r.type_breakpoint=="inter_chromosomal": return by_pos_bps
+            else: raise ValueError("r %s is not valid"%r)
+
+        df_bedpe_all["overlapping_bpoints_final"] = df_bedpe_all.apply(get_overlapping_bpoints, axis=1)
+
+        # save
+        save_object(df_bedpe_all[initial_fields + ["overlapping_bpoints_final"]], df_overlapping_BPs_file)
+
+    # load bepe with adds
+    df_bedpe_all_withAdds = load_object(df_overlapping_BPs_file)
+
+    return df_bedpe_all_withAdds
+

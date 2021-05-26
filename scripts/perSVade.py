@@ -129,7 +129,7 @@ SVcalling_args.add_argument("--nsimulations", dest="nsimulations", default=2, ty
 
 SVcalling_args.add_argument("--simulation_ploidies", dest="simulation_ploidies", type=str, default="auto", help='A comma-sepparated string of the ploidies to simulate for parameter optimisation. It can have any of "haploid", "diploid_homo", "diploid_hetero", "ref:2_var:1", "ref:3_var:1", "ref:4_var:1", "ref:5_var:1", "ref:9_var:1", "ref:19_var:1", "ref:99_var:1" . By default it will be inferred from the ploidy. For example, if you are running on ploidy=2, it will optimise for diploid_hetero.')
 
-SVcalling_args.add_argument("--range_filtering_benchmark", dest="range_filtering_benchmark", type=str, default="theoretically_meaningful", help='The range of parameters that should be tested in the SV optimisation pipeline. It can be any of large, medium, small, theoretically_meaningful, theoretically_meaningful_NoFilterRepeats or single.')
+SVcalling_args.add_argument("--range_filtering_benchmark", dest="range_filtering_benchmark", type=str, default="theoretically_meaningful", help='The range of parameters that should be tested in the SV optimisation pipeline. It can be any of large, medium, small, theoretically_meaningful, theoretically_meaningful_NoFilterRepeats or single. ')
 
 SVcalling_args.add_argument("--simulate_SVs_arround_repeats", dest="simulate_SVs_arround_repeats", action="store_true", default=False, help="Simulate SVs arround repeats. This requires that there are some repeats inferred. This option will generate a simulated set of breakpoints arround repeats, if possible of the same family, and with random orientations.")
 
@@ -278,6 +278,8 @@ debug_args.add_argument("--StopAfter_replace_SV_CNVcalling", dest="StopAfter_rep
 
 debug_args.add_argument("--testAccuracy", dest="testAccuracy", action="store_true", default=False, help="Reports the accuracy  of your calling on the real data, simulations and fastSVcalling for all the WGS runs specified in --close_shortReads_table. ")
 
+debug_args.add_argument("--testAccuracy_skipHomRegionsSimulation", dest="testAccuracy_skipHomRegionsSimulation", action="store_true", default=False, help="If --testAccuracy is provided, skip the simulation of SVs around hom regions ")
+
 debug_args.add_argument("--correct_close_shortReads_table_by_nRunsAndSamples", dest="correct_close_shortReads_table_by_nRunsAndSamples", action="store_true", default=False, help="Corrects --close_shortReads_table keeping only nruns and nsamples. ")
 
 debug_args.add_argument("--skip_cleaning_outdir", dest="skip_cleaning_outdir", action="store_true", default=False, help="Will NOT remove all the unnecessary files of the perSVade outdir")
@@ -310,6 +312,8 @@ fun.make_folder(opt.outdir)
 
 # define the final file. and exit if it exists
 final_file = "%s/perSVade_finished_file.txt"%opt.outdir
+if opt.replace or opt.replace_SV_CNVcalling or opt.replace_FromGridssRun_final_perSVade_run or opt.replace_var_integration: fun.remove_file(final_file)
+
 if not fun.file_is_empty(final_file): 
     
     print("WARNING: %s exists, suggesting that perSVade was already  run in this folder. Remove this file if you want this command to work. Exiting..."%final_file)
@@ -709,7 +713,7 @@ if opt.testAccuracy is True:
     ### RUN PERSVADE ###
     print("testing perSVade on several samples. --tmpdir is %s"%opt.tmpdir)
 
-    dict_perSVade_outdirs = fun.report_accuracy_realSVs_perSVadeRuns(opt.close_shortReads_table, opt.ref, "%s/testing_Accuracy"%opt.outdir, real_bedpe_breakpoints, threads=opt.threads, replace=opt.replace, n_simulated_genomes=opt.nsimulations, mitochondrial_chromosome=opt.mitochondrial_chromosome, simulation_ploidies=simulation_ploidies, range_filtering_benchmark=opt.range_filtering_benchmark, nvars=opt.nvars, job_array_mode=opt.job_array_mode, parameters_json_file=opt.parameters_json_file, gff=opt.gff, replace_FromGridssRun_final_perSVade_run=opt.replace_FromGridssRun_final_perSVade_run, fraction_available_mem=opt.fraction_available_mem, replace_SV_CNVcalling=opt.replace_SV_CNVcalling, skip_CNV_calling=opt.skip_CNV_calling, outdir_finding_realVars=outdir_finding_realVars, simulate_SVs_arround_HomologousRegions_previousBlastnFile=opt.simulate_SVs_arround_HomologousRegions_previousBlastnFile, simulate_SVs_arround_HomologousRegions_maxEvalue=opt.simulate_SVs_arround_HomologousRegions_maxEvalue, simulate_SVs_arround_HomologousRegions_queryWindowSize=opt.simulate_SVs_arround_HomologousRegions_queryWindowSize, skip_SV_CNV_calling=opt.skip_SV_CNV_calling, tmpdir=opt.tmpdir, simulation_chromosomes=opt.simulation_chromosomes)
+    dict_perSVade_outdirs = fun.report_accuracy_realSVs_perSVadeRuns(opt.close_shortReads_table, opt.ref, "%s/testing_Accuracy"%opt.outdir, real_bedpe_breakpoints, threads=opt.threads, replace=opt.replace, n_simulated_genomes=opt.nsimulations, mitochondrial_chromosome=opt.mitochondrial_chromosome, simulation_ploidies=simulation_ploidies, range_filtering_benchmark=opt.range_filtering_benchmark, nvars=opt.nvars, job_array_mode=opt.job_array_mode, parameters_json_file=opt.parameters_json_file, gff=opt.gff, replace_FromGridssRun_final_perSVade_run=opt.replace_FromGridssRun_final_perSVade_run, fraction_available_mem=opt.fraction_available_mem, replace_SV_CNVcalling=opt.replace_SV_CNVcalling, skip_CNV_calling=opt.skip_CNV_calling, outdir_finding_realVars=outdir_finding_realVars, simulate_SVs_arround_HomologousRegions_previousBlastnFile=opt.simulate_SVs_arround_HomologousRegions_previousBlastnFile, simulate_SVs_arround_HomologousRegions_maxEvalue=opt.simulate_SVs_arround_HomologousRegions_maxEvalue, simulate_SVs_arround_HomologousRegions_queryWindowSize=opt.simulate_SVs_arround_HomologousRegions_queryWindowSize, skip_SV_CNV_calling=opt.skip_SV_CNV_calling, tmpdir=opt.tmpdir, simulation_chromosomes=opt.simulation_chromosomes, testAccuracy_skipHomRegionsSimulation=opt.testAccuracy_skipHomRegionsSimulation)
 
     if opt.StopAfter_testAccuracy_perSVadeRunning is True: 
         print("You already ran all the configurations of perSVade. Stopping after the running of perSVade on testAccuracy")
