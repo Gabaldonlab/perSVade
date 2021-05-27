@@ -231,7 +231,7 @@ These are all the important files that can be generated with perSVade (check the
 
 Read mapping around repetitive elements of the genome can be innacurate, potentially yielding false positive SVs around them. Conversely,  there are some SVs expected to appear around repeats (i.e.: those derived from transposable elements insertions). This means that the decision on how to handle SVs around such regions is not trivial. By default, perSVade runs `RepeatModeler` and `RepeatMasker` to annotate repetitive regions, which is used to assess whether removing SV calls overlapping these elements increases the overall accuracy. If so, they are removed.
 
-This can be problematic for two reasons. First, the prediction of repeats is time-consuming for large genomes. Second, some repeat families (i.e.: simple repeats, low complexity regions) may yield more false positive calls than others (i.e.: large transposons), so that treating all repetitive elements together may not be always the best option.
+This can be suboptimal for two reasons. First, the prediction of repeats is time-consuming for large genomes. Second, some repeat families (i.e.: simple repeats, low complexity regions) may yield more false positive calls than others (i.e.: large transposons), so that treating all repetitive elements together may not be always the best option.
 
 perSVade includes two options to circumvent this:
 
@@ -271,7 +271,7 @@ perSVade generates a single .tab file for each type of SV (inversions, deletions
 
 - Unclassified SVs: There is one .tab file ("unclassified_SVs.tab") that reports all the variants that are called by `clove` and cannot be assigned to any of the above SV types. These include unclassified breakpoints (which could be part of unresolved/unkown complex variants) and complex inverted SVs (which are non-standard SVs). These types of SVs are not included in the simulations, so that the accuracy on them is unknown. This is why we group them together into a single file. For unclassified breakpoints, the "SVTYPE" indicates which is the orientation of the two breakends (there are 4 possible orientations, and the "SVTYPE" is different depending on if the two breakends are in the same chromosome or not). "#CHROM" - "POS" indicate one breakend and "#CHR" - "END" the other. "START" is -1 for such unclassified breakpoints. Complex inverted SVs represent variants were a region (indicated by "CHR2", "START", "END") is copied ("SVTYPE" is CVD) or cut ("SVTYPE" is IVT (different chromosomes)), inverted and inserted into "#CHROM"-"POS". Complex inverted translocations ("SVTYPE" is CVT) are variants where a region of a chromosome (defined by "#CHROM", "POS" and "END") is cut, inverted and inserted right in the 3'.
 
-### perSVAde's parameter optimisation is too slow. I just want to run SV calling with some pre-defined filters. How can I do this?
+### perSVade's parameter optimisation is too slow. I just want to run SV calling with some pre-defined filters. How can I do this?
 
 perSVade includes an option to skip the parameter optimisation: `--fast_SVcalling`. This uses some default parameters for the filtering. You can also customize the filters by providing a .json file with them through `--parameters_json_file`. The default parameters encoded as .json are in  `misc/default_perSVade_parameters.json`, and this file can be used as a template to provide custom parameters with `--parameters_json_file`.
 

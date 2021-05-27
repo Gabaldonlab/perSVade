@@ -19462,3 +19462,175 @@ def get_overlapping_df_bedpe_multiple_samples(df_bedpe_all, outdir, tol_bp, pct_
 
     return df_bedpe_all_withAdds
 
+
+def get_SV_CNV_df_with_common_variantID_acrossSamples(SV_CNV, outdir, pct_overlap, tol_bp):
+
+    """
+    Takes a SV_CNV df and returns it with the field 'variantID_across_samples'. It uses bedmap to be particularly efficient. The basis of this is that if two variants are of the same type and overlap by pct_overlap or tol_bp they are called to be the same.
+    """
+
+    print_if_verbose("getting beds")
+    make_folder(outdir)
+
+    # get all variantIDs
+    all_variantIDs = SV_CNV[["INFO_variantID"]].drop_duplicates()["INFO_variantID"]
+    print("There are %i unique SV_CNVs"%len(all_variantIDs))
+
+    # create a bed with all the regions that need to be matching in order to be considered the same
+    df_bed_all = pd.concat(map(get_bed_df_from_variantID, all_variantIDs)).sort_values(by=["chromosome", "start", "end"])
+    df_bed_all.index = list(range(0, len(df_bed_all)))
+
+    # write the bed
+    variants_bed = "%s/variants_regions.bed"%outdir
+    df_bed_all[["chromosome", "start", "end", "ID"]].to_csv(variants_bed, sep="\t", index=False, header=False)
+
+    ######### RUN BEDMAP TO MAP VARIANTS TO EACH OTHER #########
+
+    print_if_verbose("running bedmap")
+
+    # define the stderr
+    bedmap_stderr = "%s/running_bedmap_.stderr"%outdir
+
+    # run bedmap tol_bp
+    bedmap_outfile = "%s/bedmap_outfile_range.txt"%outdir
+    run_cmd("%s --delim '\t' --range %i --echo-map-id %s > %s 2>%s"%(bedmap, tol_bp, variants_bed, bedmap_outfile, bedmap_stderr))
+
+    df_overlap_tolBp  = pd.read_csv(bedmap_outfile, sep="\t", header=None, names=["overlapping_IDs"])
+    df_overlap_tolBp["ID"] = list(df_bed_all.ID)
+    df_overlap_tolBp = df_overlap_tolBp.set_index("ID", drop=False)
+
+    # run bedmap pct overlap
+    bedmap_outfile = "%s/bedmap_outfile_pctOverlap.txt"%outdir
+    run_cmd("%s --delim '\t' --fraction-both %.2f --echo-map-id %s > %s 2>%s"%(bedmap, pct_overlap, variants_bed, bedmap_outfile, bedmap_stderr))
+
+    df_overlap_pctOverlap  = pd.read_csv(bedmap_outfile, sep="\t", header=None, names=["overlapping_IDs"])
+    df_overlap_pctOverlap["ID"] = list(df_bed_all.ID)
+    df_overlap_pctOverlap = df_overlap_pctOverlap.set_index("ID", drop=False)
+
+    # get a unique df_overlap, which only considers overlaps that fullfill both the Bp and pct overlap
+    df_overlap = pd.DataFrame()
+    df_overlap["ID"] = df_overlap_tolBp.ID
+    df_overlap = df_overlap.set_index("ID", drop=False)
+
+    # at the IDs that overlap by either measures 
+    df_overlap["IDs_overlap_pos"] = df_overlap_tolBp.loc[df_overlap.index, "overlapping_IDs"].apply(lambda x: set(x.split(";")))
+
+    df_overlap["IDs_overlap_fraction"] = df_overlap_pctOverlap.loc[df_overlap.index, "overlapping_IDs"].apply(lambda x: set(x.split(";")))
+
+    df_overlap["IDs_overlap_both"] = df_overlap.apply(lambda r: r["IDs_overlap_pos"].intersection(r["IDs_overlap_fraction"]), axis=1)
+
+    df_overlap["IDs_overlap_any"] = df_overlap.apply(lambda r: r["IDs_overlap_pos"].union(r["IDs_overlap_fraction"]), axis=1)
+
+    ###############################################
+
+    ######## MAP EACH VARID TO THE OTHER IDs ########
+
+    print_if_verbose("map variants through IDs")
+
+    # map each variantID to the bedIDs
+    varID_to_bedIDs = dict(df_bed_all.groupby("variantID").apply(lambda df_varID: set(df_varID.ID)))
+
+    # map each bedID to the type overlap field
+    bedID_to_typeOverlapF = dict("IDs_overlap_" + df_bed_all.set_index("ID")["type_overlap"])
+
+    # define a dict that represents the important fields of df_overlap
+    typeOverlapF_to_bedID_to_overlappingBedIDs  = {"IDs_overlap_both" : dict(df_overlap.IDs_overlap_both), "IDs_overlap_pos" : dict(df_overlap.IDs_overlap_pos)}
+
+
+    # init
+    varID_to_overlapping_varIDs = {}
+    print_if_verbose("iterating to generate varID_to_overlapping_varIDs")
+    total_nvars = len(varID_to_bedIDs)
+
+    # define functions to speed things up
+    def get_bedIDs_q_and_bedIDs_t_are_overlapping(bedIDs_t, bedIDs_q):
+
+        variants_are_overlapping = all(map(lambda bedID_q: 
+                any(map(lambda bedID_t: bedID_t in typeOverlapF_to_bedID_to_overlappingBedIDs[bedID_to_typeOverlapF[bedID_q]][bedID_q], bedIDs_t)), 
+                bedIDs_q))
+
+        return variants_are_overlapping
+
+    # go through each variantID
+    for varI, (varID_q, bedIDs_q) in enumerate(varID_to_bedIDs.items()):
+
+        if (varI%10)==0: print_if_verbose("already traversed %.4f%s vars"%(((varI/total_nvars)*100, "%")))
+
+        # define a series of all the other variants
+        series_target_variants = pd.Series(varID_to_bedIDs).apply(get_bedIDs_q_and_bedIDs_t_are_overlapping, bedIDs_q=bedIDs_q)
+
+        # add
+        varID_to_overlapping_varIDs[varID_q] = set(series_target_variants[series_target_variants].index)
+
+
+        print(series_target_variants)
+
+        adjhgagjgda
+
+
+        if (counterI%100000)==0: print_if_verbose("already traversed %.4f%s of combinations"%(((counterI/ncombinations_I)*100, "%")))
+
+
+        # init 
+        varID_to_overlapping_varIDs[varID_q] = set()
+
+        # go through the targets, and ke
+        for varID_t, bedIDs_t in varID_to_bedIDs.items():
+
+            # progress
+            #print(varID_t, bedIDs_t)
+
+            #continue
+
+            # In order to have the variants overlapping, all the query bedIDs should be overlapped by at least one target bedID according to bedID_to_typeOverlapF
+
+            #variants_are_overlapping = all([ any([ bedID_t in df_overlap.loc[bedID_q, bedID_to_typeOverlapF[bedID_q]] for bedID_t in bedIDs_t ]) for bedID_q in bedIDs_q ]) # slow
+
+            #variants_are_overlapping = all([ any([ bedID_t in typeOverlapF_to_bedID_to_overlappingBedIDs[bedID_to_typeOverlapF[bedID_q]][bedID_q] for bedID_t in bedIDs_t ]) for bedID_q in bedIDs_q ])
+
+
+            #variants_are_overlapping = all([ any(map(lambda bedID_t: bedID_t in typeOverlapF_to_bedID_to_overlappingBedIDs[bedID_to_typeOverlapF[bedID_q]][bedID_q], bedIDs_t)) for bedID_q in bedIDs_q ])
+
+            
+
+
+            if variants_are_overlapping is True: varID_to_overlapping_varIDs[varID_q].add(varID_t)
+
+            counterI+=1
+
+    # print
+    """
+    for varID, o_varIDs in varID_to_overlapping_varIDs.items(): 
+        if "coverage" not in varID: print(varID, o_varIDs)
+
+    """
+
+    #################################################
+
+    ########## ADD THE variantID_across_samples ##########
+
+    print_if_verbose("add variantID_across_samples")
+
+    # get the list of clusters of the variant IDs
+    list_clusters_varIDs = get_list_clusters_from_dict(varID_to_overlapping_varIDs)
+
+    # create a dict that maps each clusterID to the cluster
+    print_if_verbose("generating clusterID_to_varIDs")
+    keys_clusterID_to_varIDs = list(map(lambda x: "cluster%i_%s"%(x[0], next(iter(x[1])).split("|")[0]), enumerate(list_clusters_varIDs)))
+    clusterID_to_varIDs = dict(zip(keys_clusterID_to_varIDs, list_clusters_varIDs))
+    #clusterID_to_varIDs = {"cluster%i_%s"%(I, next(iter(varIDs)).split("|")[0]) : varIDs for I, varIDs in enumerate(list_clusters_varIDs)}
+
+    # map each varID to the clusterID
+    print_if_verbose("generating varID_to_clusterID")
+    varID_to_clusterID = {}
+    for clusterID, varIDs in clusterID_to_varIDs.items():
+        for varID in varIDs: varID_to_clusterID[varID] = clusterID
+
+    # add to the final df
+    SV_CNV["variantID_across_samples"] = SV_CNV.INFO_variantID.map(varID_to_clusterID)
+    if any(pd.isna(SV_CNV.variantID_across_samples)): raise ValueError("There should be no NaNs in variantID_across_samples")
+
+    #######################################################
+
+    return SV_CNV
+
