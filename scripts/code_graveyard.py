@@ -19634,3 +19634,44 @@ def get_SV_CNV_df_with_common_variantID_acrossSamples(SV_CNV, outdir, pct_overla
 
     return SV_CNV
 
+
+
+
+def get_filtered_SV_CNV_df(SV_CNV, SV_CNV_annot, SV_CNV_filt_file, replace=False, min_minAF=0.25, min_maxAF=0.9, min_lenCNV=600, max_relative_CN_deletion=0.0, min_relative_CN_duplication=2.0, max_relative_coverage_deletion=0.1, min_relative_coverage_duplication=1.7):
+
+    """Gets the CNV data and returns them filtered. It also adds some fields."""
+
+    if file_is_empty(SV_CNV_filt_file) or replace is True:
+
+        # add the number of samples with this variant
+        cluster_varID_to_n_samples =  SV_CNV.groupby("variantID_across_samples").apply(lambda df_c: len(set(df_c["sampleID"])))
+
+        SV_CNV["nsamples_with_var"] = SV_CNV["variantID_across_samples"].apply(lambda x: cluster_varID_to_n_samples[x])
+        total_n_samples = len(set(SV_CNV.sampleID))
+
+        # get a df where each SV is one actual varID
+        varIDs_df = SV_CNV[["INFO_variantID", "sampleID"]].drop_duplicates()
+        varIDs_df.index = list(range(0, len(varIDs_df)))
+        varIDs_df = varIDs_df.apply(lambda r: get_several_fields_for_one_varID_and_sampleID(r, SV_CNV), axis=1)
+
+        # add to the df
+        SV_CNV_merged = SV_CNV.merge(varIDs_df, how="left", left_on=["INFO_variantID", "sampleID"], right_on=["variantID", "sampleID"], validate="many_to_one")
+
+        # get the filtered SV_CNV
+        idx_correct_SVs = (SV_CNV_merged.type_var=="SV") & (SV_CNV_merged.nsamples_with_var<total_n_samples) & (SV_CNV_merged.maxAF>=min_maxAF) & (SV_CNV_merged.minAF>=min_minAF)
+
+        idx_correct_SVs_coverageCNV = (SV_CNV_merged.type_var=="coverageCNV") & (SV_CNV_merged.length_var>=min_lenCNV) & (SV_CNV_merged.nsamples_with_var<total_n_samples) & ((SV_CNV_merged.INFO_merged_relative_CN<=max_relative_CN_deletion) | (SV_CNV_merged.INFO_merged_relative_CN>=min_relative_CN_duplication)) & (SV_CNV_merged.apply(get_is_correct_coverage_deletion_or_duplication_from_SV_CNV_r, max_relative_coverage_deletion=max_relative_coverage_deletion, min_relative_coverage_duplication=min_relative_coverage_duplication, axis=1))
+
+        SV_CNV_filt = SV_CNV_merged[(idx_correct_SVs) | (idx_correct_SVs_coverageCNV)]
+
+        # add whether it is transcript disrupting in some cases
+        transcript_disrupting_vars = set(SV_CNV_annot[SV_CNV_annot.is_transcript_disrupting]["#Uploaded_variation"])
+        SV_CNV_filt["is_transcript_disrupting_inSomeGenes"] = SV_CNV_filt.ID.isin(transcript_disrupting_vars)
+
+        save_object(SV_CNV_filt, SV_CNV_filt_file)
+
+    # load dfs
+    SV_CNV_filt = load_object(SV_CNV_filt_file)
+
+    return SV_CNV_filt
+
