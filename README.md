@@ -27,11 +27,11 @@ These are the steps to install perSVade. If you are running it in the BSC (inter
 
 Download the perSVade source code from one of the releases and decompress. For example:
 
-`wget https://github.com/Gabaldonlab/perSVade/archive/v0.8.tar.gz`
+`wget https://github.com/Gabaldonlab/perSVade/archive/v0.9.tar.gz`
 
-`tar -xvf v0.8.tar.gz; rm v0.8.tar.gz`
+`tar -xvf v0.9.tar.gz; rm v0.9.tar.gz`
 
-This already contains all the scripts to run the pipeline. Note that the created file (for example `perSVade-v0.8`) will be referred as `<perSVade_dir>`
+This already contains all the scripts to run the pipeline. Note that the created file (for example `perSVade-v0.9`) will be referred as `<perSVade_dir>`
 
 ### 2. Create a conda environment with most dependencies
 
@@ -88,11 +88,11 @@ If you are working from any cluster that has access to the BSC /gpfs filesystem 
 
 `source /gpfs/projects/bsc40/mschikora/anaconda3/etc/profile.d/conda.sh`  # activate the conda environment of mschikora
 
-`conda activate perSVade_v0.8_env` # activate the environment of perSVade version 0.8. You can change the version
+`conda activate perSVade_v0.9_env` # activate the environment of perSVade version 0.9. You can change the version
 
 You can next run perSVade from the releases folder (these are stable versions of the pipeline). For example:
 
-`python /gpfs/projects/bsc40/mschikora/scripts/perSVade/releases/perSVade-0.8/scripts/perSVade.py -r <path to the reference genome (fasta)> -o <output_directory> -p <ploidy, 1 or 2> -f1 <forward_reads.fastq.gz> -f2 <reverse_reads.fastq.gz> `
+`python /gpfs/projects/bsc40/mschikora/scripts/perSVade/releases/perSVade-0.9/scripts/perSVade.py -r <path to the reference genome (fasta)> -o <output_directory> -p <ploidy, 1 or 2> -f1 <forward_reads.fastq.gz> -f2 <reverse_reads.fastq.gz> `
 
 IMPORTANT NOTE: The activation of the perSVade conda environment works well from version 0.7 on. This means that you can activate from the login of MN or interactive nodes. However, the activation of older versions (v0.4 and below) is costly, and it overloads the login nodes. If you want to use an old version of perSVade, always activate it on an interactive node (i.e.: `salloc`). In addition, you can't run the perSVade pipeline from a login, because it takes too many resources. You can submit perSVade as a job or run from an interactive session with `salloc -n 1 --time=02:00:00 -c 48 --qos debug`.
 
@@ -369,7 +369,7 @@ Below are some key functions:
 
         - `overlapping_samples_byBreakPoints_PASS`: A comma-sepparated string with the sample IDs where gridss found at least one breakpoint (passing the filters of gridss as defined by perSVade) overlapping the variant. This can be considered as a false negative-prone estimator of samples  that share this variant, as some of the breakpoints may be missed due to only considering high-confidence breakpoints to compute the overlaps. This field is only meaningful for SVs called by gridss and clove. 
 
-        - `overlapping_samples_CNV_atLeast_<min_pct_overlap>` (where `<min_pct_overlap>` may be 0.25, 0.5, 0.75 or 0.8): In coverage-based CNVs, a comma-sepparated string with the sample IDs that may have the same CNV. A CNV is considered to be found in another sample if it has an equal or more extreme (farther from 1.0) copy number (CN) in at least `<min_pct_overlap>` of the windows of the given CNV. For example, a duplication in a region of sample A is considered to be also found sample B (according to `overlapping_samples_CNV_atLeast_0.75`) if at least 75% of the windows of that same region in sampleB have a CN number above or equal the CN in A. This field is only meaningful for coverage-based CNVs.
+        - `overlapping_samples_CNV_atLeast_<min_pct_overlap>` (where `<min_pct_overlap>` may be 0.25, 0.5, 0.75 or 0.9): In coverage-based CNVs, a comma-sepparated string with the sample IDs that may have the same CNV. A CNV is considered to be found in another sample if it has an equal or more extreme (farther from 1.0) copy number (CN) in at least `<min_pct_overlap>` of the windows of the given CNV. For example, a duplication in a region of sample A is considered to be also found sample B (according to `overlapping_samples_CNV_atLeast_0.75`) if at least 75% of the windows of that same region in sampleB have a CN number above or equal the CN in A. This field is only meaningful for coverage-based CNVs.
 
         - `variantID_across_samples`: is an identifier of each SV/CNV that is unique across different samples. By default, two SVs of a given type (i.e. a deletion) are the same if they overlap by >75% and have their breakends <50 bp appart.
 
