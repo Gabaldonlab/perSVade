@@ -152,9 +152,9 @@ if opt.gff is not None and not fun.file_is_empty(variantAnnotation_table) and op
 ############### CNV #################
 #####################################
 
-if opt.skip_cnv_analysis is False or opt.gff is None:
+if opt.skip_cnv_analysis is False and opt.gff is not None:
 
-    print("Starting CNV per gene analysis")
+    print("Starting CNV per gene analysis. This step only runs if -gff is specified.")
 
     # make a folder for the CNV anlysis
     cnv_outdir = "%s/CNV_results"%opt.outdir
@@ -190,7 +190,7 @@ if opt.skip_cnv_analysis is False or opt.gff is None:
  
     # In Laia's script, she calculates coverage as the median reads per gene (cov per gene) / mean of the cov per gene across all genes
 
-print("CNV analysis finished")
+print("per gene CNV analysis finished")
 
 
 #####################################
