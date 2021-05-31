@@ -8069,8 +8069,6 @@ def keep_relevant_filters_lists_inparallel(filterName_to_filtersList, df_gridss,
     filterChanging_to_filtersDict = dict(zip(filter_changing_list, filters_dict_list))
     filterChanging_to_breakpoints = dict(zip(filter_changing_list, bp_tuples_list))
 
-    print(filterChanging_to_breakpoints)
-
     # get those filters that change the df
     if type_filtering=="keeping_all_filters_that_change":
 
