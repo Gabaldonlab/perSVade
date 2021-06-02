@@ -126,7 +126,7 @@ import seaborn as sns
 CWD = get_fullpath("/".join(__file__.split("/")[0:-1])); sys.path.insert(0, CWD)
 
 # import modules
-import pyloess_Loess as pyloess_fun
+#import pyloess_Loess as pyloess_fun # old way to do loess
 
 # define the EnvDir where the environment is defined
 EnvDir = "/".join(sys.executable.split("/")[0:-2])
@@ -20040,6 +20040,8 @@ def write_df_CN_one_sample_noHeader(Is, nsamples, sampleID, perSVade_outdir, tmp
         os.rename(df_CN_file_tmp, df_CN_file)
 
     return df_CN_file
+
+
 
 def get_integrated_CNperWindow_df_severalSamples(paths_df, outdir, threads=4, replace=False, fields=["sampleID", "chromosome", "start", "end", "merged_relative_CN"]):
 
