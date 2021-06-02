@@ -383,4 +383,48 @@ Other remarks:
 
 - The field `variantID_across_samples` is useful for analyses where we want to work with variants shared across different samples (i.e.: hierarchical clustering of samples by the variants)
 
+### How do I deal with the output of the get_integrated_SV_CNV_df_severalSamples function?
+
+This is indeed a bit tricky. We here provide an example of running this function and processing the outputs using pandas dataframes. This example is related to an imaginary dataset where we called variants (both SVs and coverage-based CNVs) for one drug resistant sample (called "R") and two susceptible samples (called "S1" and "S2"). This would be a workflow for finding variants that are found in "R" and not in "S1" or "S2" and may drive the resistance:
+
+```
+# load the functions
+import pandas as pd
+import sys 
+
+sys.path.insert(0, "<perSVade_dir>/scripts")
+import sv_functions as fun
+
+# define an outdir
+integrated_files_dir = "./integrated_files"
+
+# define a dataframe with the paths to the perSVade output directories
+paths_df = pd.DataFrame({"sampleID" : ["R", "S1", "S2"],
+                         "perSVade_outdir": ["./outdir_R", "./outdir_S1", "./outdir_S2"]})
+
+# get a file with the Copy Number (CN) per window, which is necessary to compute the overlaps between CNV calls
+integrated_CNperWindow_file = fun.get_integrated_CNperWindow_df_severalSamples(paths_df, integrated_files_dir, threads=4)
+
+# generate files with the integrated SVs and CNVs. This requires a variant annotation file
+fun.get_integrated_SV_CNV_df_severalSamples(paths_df, integrated_files_dir, <gff>, <reference_genome>, threads=4, integrated_CNperWindow_file=integrated_CNperWindow_file, tol_bp=50, pct_overlap=0.75, add_overlapping_samples_eachSV=True):
+
+# import the generated df with the variants. This is equivalent to the "SV_and_CNV_variant_calling.vcf" but with INFO fields split across different columns and some extra fields.
+df_vars = pd.read_csv("./integrated_files/SV_CNV.tab", sep="\t")
+
+# keep vars that are only in "R" and none of the others
+def get_df_vars_r_in_bgSamples(r, bg_samples):
+
+    samples_overlapping_by_breakpoints = set(str(r["overlapping_samples_byBreakPoints_allCalled"]).split(","))
+    samples_overlapping_by_CN = set(str(r["overlapping_samples_CNV_atLeast_0.25"]).split(","))
+
+    all_samples_overlapping = samples_overlapping_by_breakpoints.union(samples_overlapping_by_CN)
+    return len(bg_samples.intersection(all_samples_overlapping))>0
+
+df_vars_R = df[(df_vars.sampleID=="R") & ~(df_vars.apply(get_df_vars_r_in_bgSamples, bg_samples={"S1", "S2"}, axis=1))]
+
+# print the variants, using the IDs that are unique across samples 
+print(set(df_vars_R.variantID_across_samples))
+
+
+```
 ## Resource consumption5
