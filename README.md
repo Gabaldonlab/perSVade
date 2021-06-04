@@ -406,7 +406,7 @@ paths_df = pd.DataFrame({"sampleID" : ["R", "S1", "S2"],
 integrated_CNperWindow_file = fun.get_integrated_CNperWindow_df_severalSamples(paths_df, integrated_files_dir, threads=4)
 
 # generate files with the integrated SVs and CNVs. This requires a variant annotation file
-fun.get_integrated_SV_CNV_df_severalSamples(paths_df, integrated_files_dir, <gff>, <reference_genome>, threads=4, integrated_CNperWindow_file=integrated_CNperWindow_file, tol_bp=50, pct_overlap=0.75, add_overlapping_samples_eachSV=True):
+fun.get_integrated_SV_CNV_df_severalSamples(paths_df, integrated_files_dir, <gff>, <reference_genome>, threads=4, integrated_CNperWindow_file=integrated_CNperWindow_file, tol_bp=50, pct_overlap=0.75, add_overlapping_samples_eachSV=True)
 
 # import the generated df with the variants. This is equivalent to the "SV_and_CNV_variant_calling.vcf" but with INFO fields split across different columns and some extra fields.
 df_vars = pd.read_csv("./integrated_files/SV_CNV.tab", sep="\t")
@@ -424,7 +424,6 @@ df_vars_R = df[(df_vars.sampleID=="R") & ~(df_vars.apply(get_df_vars_r_in_bgSamp
 
 # print the variants, using the IDs that are unique across samples 
 print(set(df_vars_R.variantID_across_samples))
-
 
 ```
 ## Resource consumption5
