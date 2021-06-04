@@ -19825,7 +19825,7 @@ def get_other_samples_with_variant_series_writeFile(varsDF, sampleID, small_vars
 
     return final_file
 
-def get_integrated_small_vars_df_severalSamples(paths_df, outdir, ploidy, run_ploidy2_ifHaploid=False, threads=4, replace=False, fields_varCall="all", fields_varAnnot="all"):
+def get_integrated_small_vars_df_severalSamples(paths_df, outdir, ploidy, gff, run_ploidy2_ifHaploid=False, threads=4, replace=False, fields_varCall="all", fields_varAnnot="all"):
 
     """
     This function generates several datsets under outdir that result from the integration of several small variant callsets by perSVade. These are the arguments:
@@ -19936,34 +19936,36 @@ def get_integrated_small_vars_df_severalSamples(paths_df, outdir, ploidy, run_pl
             # get all files
             annot_files = [x[1] for x in list_small_vars_files]
 
-            # int the df with the annotations
-            df_annotation_all = pd.DataFrame(columns=fields_varAnnot)
+            # get the concatenated annot files without header
+            df_annotation_all_file = "%s.all_vars.tab"%small_var_annot_file
+            run_cmd("cat '%s' > '%s'"%(annot_files[0], df_annotation_all_file))
 
-            # iterate through each annot file and update only new variants
-            for Iannot, annot_file in enumerate(annot_files):
-                print("getting annotation file %i/%i"%(Iannot+1, len(annot_files)))
+            for If, f in enumerate(annot_files[1:]):
+                print_if_verbose("appending df %i/%i"%(If, len(annot_files)-1))
+                run_cmd("cat '%s' >> '%s'"%(f, df_annotation_all_file))
 
-                # load df
-                df_annotation = pd.read_csv(annot_file, sep="\t", header=None, names=fields_varAnnot)
+            # get a uniquely sorted df
+            print("sorting and removing duplicates")
+            df_annotation_unique_file =  "%s.unique_vars.tab"%small_var_annot_file
+            run_cmd("sort --parallel=%i -uo %s %s"%(threads, df_annotation_unique_file, df_annotation_all_file))
 
-                # define new vars
-                if len(df_annotation_all)==0: current_vars = set()
-                else: current_vars = set(df_annotation_all["#Uploaded_variation"])
-                all_vars = set(df_annotation["#Uploaded_variation"])
-                new_vars = all_vars.difference(current_vars)
-                print("There are %i/%i new variants"%(len(new_vars), len(all_vars)))
+            # get df 
+            print("loading df_annotation_unique_file")
+            df_annotation_unique = pd.read_csv(df_annotation_unique_file, sep="\t", names=fields_varAnnot)
 
-                # get the df only with the new vars
-                df_annotation = df_annotation[df_annotation["#Uploaded_variation"].isin(new_vars)]
-                df_annotation_all = df_annotation_all.append(df_annotation)
+            # drop duplicates
+            print_if_verbose("dropping duplicates")
+            df_annotation_unique = df_annotation_unique.drop_duplicates().sort_values(by=["#Uploaded_variation"])
 
-            # sort by variant
-            df_annotation_all = df_annotation_all.sort_values(by=["#Uploaded_variation"])
+            # rename the Gene so that it is consistent with the upmost_parent of the gff
+            df_annotation_unique = get_annotation_df_with_Gene_as_upmost_parent_in_gff(df_annotation_unique, gff)
 
             # write the final file
             print("writing final annotations")
-            save_df_as_tab(df_annotation_all, small_var_annot_file)
-            del df_annotation_all
+            remove_file(df_annotation_all_file)
+            remove_file(df_annotation_unique_file)
+            save_df_as_tab(df_annotation_unique, small_var_annot_file)
+            del df_annotation_unique
 
         #############################################
 
@@ -20179,6 +20181,63 @@ def concatenate_list_headerLess_files_into_tab_file(headerLess_fileList, file, f
         os.rename(file_tmp, file)
 
 
+
+def get_annotation_df_with_Gene_as_upmost_parent_in_gff(annot_df, gff):
+
+    """Takes the variant annotation df and returns it with a 'Gene' field that is matched in the gff as a string. It gets the upmost_parent from the Gene"""
+
+    print_if_verbose("running get_annotation_df_with_Gene_as_in_gff")
+
+    # load gff
+    gff_df = load_gff3_intoDF(gff, replace=False)
+
+    # keep only gffs where the upmost parent is a gene
+    gff_df = gff_df[gff_df.upmost_parent_feature.isin({"gene", "pseudogene"})]
+
+    annot_fields = ["#Uploaded_variation", "Gene", "Feature"]
+    if len(annot_df)==0: return annot_df
+
+    # change the important fields to strings
+    for f in [x for x in gff_df.keys() if x not in {"start", "end", "numeric_idx"}]: gff_df[f] = gff_df[f].apply(get_value_as_str_forIDXmapping)
+    annot_df["Gene"] = annot_df.Gene.apply(get_value_as_str_forIDXmapping)
+
+    if any(pd.isna(annot_df.Gene)): raise ValueError("There can't be NaNs in annot_df.Gene")
+
+    # init a boolean that indicates that a correct field was found
+    gff_field_was_found = False
+
+    # go through the gff fields and match those that are equivalent to the gene
+    all_original_geneIDs = set(annot_df.Gene).difference({"-"})
+    for f in gff_df.keys():
+
+        # get df with no NaNs in this field
+        gff_df_field = gff_df[~pd.isna(gff_df[f])]
+
+        # get all the gff geneIDs
+        all_gff_geneIDs = set(gff_df_field[f])
+
+        # check if all the original geneIDs are in all_gff_geneIDs
+        if (all_original_geneIDs.intersection(all_gff_geneIDs))==all_original_geneIDs: 
+            print("%s is the field that maps the Gene"%f)
+
+            # change
+            originalID_to_upmostParent = dict(gff_df_field[[f, "upmost_parent"]].drop_duplicates().set_index(f)["upmost_parent"])
+            originalID_to_upmostParent["-"] = "-"
+
+            annot_df["Gene"] = annot_df.Gene.map(originalID_to_upmostParent)
+            if any(pd.isna(annot_df.Gene)): raise ValueError("There can't be NaNs in annot_df.Gene")
+
+            gff_field_was_found = True
+            break
+    # debug
+    if gff_field_was_found is False: raise ValueError("no gff was found to match the Gene annotation")
+
+    # check that all the genes are in upmost_parent
+    strange_GeneIDs = set(annot_df.Gene).difference(set(gff_df.upmost_parent)).difference({"-"})
+    if len(strange_GeneIDs)>0: raise ValueError("There are some geneIDs that are not in upmost_parent: %s"%strange_GeneIDs)
+
+    return annot_df
+    
 def get_integrated_SV_CNV_df_severalSamples(paths_df, outdir, gff, reference_genome, threads=4, replace=False, integrated_CNperWindow_file=None, fields_varCall="all", fields_varAnnot="all", tol_bp=50, pct_overlap=0.75, add_overlapping_samples_eachSV=True):
 
     """
@@ -20211,11 +20270,11 @@ def get_integrated_SV_CNV_df_severalSamples(paths_df, outdir, gff, reference_gen
     integrated_bedpe_df = "%s/integrated_bedpe_df.tab"%(outdir)
 
     """
-    for f in [SV_CNV_file, SV_CNV_file_simple, SV_CNV_annot_file, integrated_gridss_df, integrated_bedpe_df, "%s/getting_common_variantID_acrossSamples"%outdir]: delete_file_or_folder(f) # debug
+    for f in ['SV_CNV_annot.tab', 'SV_CNV.simple.tab', 'SV_CNV_filt.py', 'smallVars_filt.py', 'smallVars_annot.tab']: delete_file_or_folder("%s/%s"%(outdir, f))
 
     return None
     """
-    
+
 
     # define the samples to run
     samples_to_run = set(paths_df.sampleID)
@@ -20232,6 +20291,9 @@ def get_integrated_SV_CNV_df_severalSamples(paths_df, outdir, gff, reference_gen
         df_data = pd.DataFrame(sampleID_to_SV_dataDict).transpose()
         file_prefix = "%s/integrated_SV_CNV_calling"%outdir
         SV_CNV, SV_CNV_annot = get_integrated_variants_into_one_df_only_SV_CNV(df_data, file_prefix, replace=True, remove_files=True, threads=threads)
+
+        # get the annotations df with the genes and features as in the gff
+        SV_CNV_annot = get_annotation_df_with_Gene_as_upmost_parent_in_gff(SV_CNV_annot, gff)
 
         # add the gff
         gff_df = load_gff3_intoDF(gff, replace=False)
