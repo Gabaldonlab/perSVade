@@ -466,7 +466,7 @@ else:
 
 
 if opt.StopAfter_repeatsObtention is True:
-    print("Stopping after the obtention of repeats")
+    print("Stopping after the obtention of repeats. They can be found in %s"%repeats_table_file)
     sys.exit(0)
 
 ####### GENERATE A real_bedpe_breakpoints ARROUND REPEATS IF NECESSARY ##########

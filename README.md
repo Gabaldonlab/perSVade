@@ -136,6 +136,11 @@ Below are some examples of different analyses that can be done with perSVade. We
 
 `./scripts/perSVade.py --ref reference_genome.fasta --threads 16 -o ./output_directory -f1 reads_FWD.fastq.gz  -f2 reads_FWD.fastq.gz --mitochondrial_chromosome  chr_mito -gff annotations.gff --run_smallVarsCNV --caller all --coverage 20 --mitochondrial_code 4  --gDNA_code 12 --ploidy 2 --remove_smallVarsCNV_nonEssentialFiles --min_chromosome_len 100000 --verbose --nvars 50 --nsimulations 2 --simulation_ploidies auto --range_filtering_benchmark theoretically_meaningful --min_CNVsize_coverageBased 600 --window_size_CNVcalling 300 --cnv_calling_algs HMMcopy,AneuFinder --skip_repeat_analysis --QC_and_trimming_reads`
 
+- Run RepeatModeller and RepeatMasker to obtain the repeats annotation in your reference genome (For BSC users: this has only been tested in MareNostrum4):
+
+`./scripts/perSVade.py --ref reference_genome.fasta --threads 16 -o ./output_directory -f1 skip -f2 skip --mitochondrial_chromosome  no_mitochondria --StopAfter_repeatsObtention`
+
+
 ## Output 
 
 perSVade outputs several files depending on the arguments. Before checking the output make sure that there is a file in the output directory called `perSVade_finished_file.txt`, which indicates that the pipeline worked and includes a report of the timing. 
