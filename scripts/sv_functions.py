@@ -8846,8 +8846,7 @@ def benchmark_GridssClove_for_knownSV(sample_bam, reference_genome, know_SV_dict
 
             # get the filters
             outdir_parameter_combinations = "%s/several_parameter_combinations_filter_%s_af%.2f"%(gridss_outdir, range_filtering, expected_AF)
-
-            delete_folder(outdir_parameter_combinations) # DEBUG
+            #delete_folder(outdir_parameter_combinations) # DEBUG
             make_folder(outdir_parameter_combinations)
             filtersID_to_breakpoints = write_breakpoints_for_parameter_combinations_and_get_filterIDtoBpoints_gridss(df_gridss, df_bedpe, outdir_parameter_combinations, reference_genome, range_filtering=range_filtering, expected_AF=expected_AF, replace=replace, threads=threads) # this is a dataframe with all the filter combinations and the map between filterID and the actual filtering
 
@@ -20121,6 +20120,10 @@ def get_df_gridss_and_df_bedpe_for_integratedSV_CNV(Is, nsamples, sampleID, perS
         bedpe_raw = get_tab_as_df_or_empty_df(get_bedpe_from_svVCF(gridss_vcf_raw_file, outdir_integrating_gridss_df, replace=False, only_simple_conversion=True))
         bedpe_filt = get_tab_as_df_or_empty_df(get_bedpe_from_svVCF(gridss_vcf_filt_file, outdir_integrating_gridss_df, replace=False, only_simple_conversion=True))
 
+        # change the name of the bedpe dataframes so that it ends with 'o' (not with h as sometimes happens)
+        bedpe_raw["name"] = bedpe_raw.name.apply(lambda x: x[:-1]+"o")
+        bedpe_filt["name"] = bedpe_filt.name.apply(lambda x: x[:-1]+"o")
+
         # add whether it is PASS
         pass_breakpoints = set(bedpe_filt.name)
         bedpe_raw["PASSed_filters"] = bedpe_raw.name.isin(pass_breakpoints)
@@ -20275,6 +20278,10 @@ def get_integrated_SV_CNV_df_severalSamples(paths_df, outdir, gff, reference_gen
     return None
     """
 
+    """
+    #for f in [integrated_gridss_df, integrated_bedpe_df]: remove_file(f)
+    #return None
+    """
 
     # define the samples to run
     samples_to_run = set(paths_df.sampleID)
