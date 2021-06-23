@@ -242,6 +242,10 @@ replacing_args.add_argument("--replace_FromGridssRun_final_perSVade_run", dest="
 
 replacing_args.add_argument("--replace_var_integration", dest="replace_var_integration", action="store_true", help="Replace all the variant integration steps for smallVariantCalling.")
 
+replacing_args.add_argument("--replace_var_annotation", dest="replace_var_annotation", action="store_true", help="Replace all the variant annotation steps for smallVariantCalling, SV and CNV calling.")
+
+
+
 ###########################
 
 
@@ -320,8 +324,11 @@ if not fun.file_is_empty(final_file):
     sys.exit(0)
 
 # define the name as the sample as the first 10 characters of the outdir
-name_sample = fun.get_file(opt.outdir)[0:10]
-print("Running perSVade into %s"%opt.outdir)
+if opt.outdir.endswith("/"): name_sample = "sampleX"
+else: name_sample = fun.get_file(opt.outdir)[0:10]
+if len(name_sample)==0: raise ValueError("name_sample should not be empty")
+
+print("Running perSVade into %s. The name_sample is %s"%(opt.outdir, name_sample))
 
 #### REPLACE THE REF GENOME ####
 
@@ -341,8 +348,8 @@ if any([x not in all_chroms for x in opt.mitochondrial_chromosome.split(",")]) a
 
 # check that the simulation_chromosomes are in all_chroms
 if opt.simulation_chromosomes is not None: 
-	strange_chroms = set(opt.simulation_chromosomes.split(",")).difference(all_chroms)
-	if len(strange_chroms)>0: raise ValueError("The --simulation_chromosomes argument was not properly set. There are some chromosome IDs (%s) not found in the provided reference genome"%strange_chroms)
+    strange_chroms = set(opt.simulation_chromosomes.split(",")).difference(all_chroms)
+    if len(strange_chroms)>0: raise ValueError("The --simulation_chromosomes argument was not properly set. There are some chromosome IDs (%s) not found in the provided reference genome"%strange_chroms)
 
 # get the genome len
 genome_length = sum(fun.get_chr_to_len(opt.ref).values())
@@ -352,6 +359,13 @@ print("The genome has %.2f Mb"%(genome_length/1000000 ))
 
 #### REPLACE THE GFF ####
 target_gff = "%s/reference_genome_features.gff"%reference_genome_dir
+
+# if you want to repeat the annotation, remove all the files in the reference genome dir that are related to the annotation
+if opt.replace_var_annotation is True:
+    for f in os.listdir(reference_genome_dir): 
+
+        file_path = "%s/%s"%(reference_genome_dir, f)
+        if file_path.startswith(target_gff): fun.remove_file(file_path)
 
 # copy the gff
 if opt.gff is None: print("WARNING: gff was not provided. This will be a problem if you want to annotate small variant calls")
@@ -446,12 +460,14 @@ if opt.parameters_json_file is not None:
     fun.default_min_rel_coverage_to_consider_dup = min_rel_coverage_to_consider_dup
 
 
+
+
 # get the gff info
 if opt.gff is not None: correct_gff, gff_with_biotype = fun.get_correct_gff_and_gff_with_biotype(opt.gff, replace=opt.replace)
 
 # check that the tmpdir exists
 if opt.tmpdir is not None:
-	if not os.path.isdir(opt.tmpdir): raise ValueError("The folder that you specified with --tmpdir does not exist")
+    if not os.path.isdir(opt.tmpdir): raise ValueError("The folder that you specified with --tmpdir does not exist")
 
 # get the repeats table
 if opt.skip_repeat_analysis is False:
@@ -819,6 +835,11 @@ if run_SV_CNV_calling is True:
     # get variant annotation
     if opt.gff is not None:
 
+        # remove the annotated vcf if needed 
+        if opt.replace_var_annotation is True: 
+            fun.remove_file("%s_annotated_VEP.tab"%SV_CNV_vcf)
+            fun.remove_file("%s_annotated_VEP.tab.raw.tbl.tmp_summary.html"%SV_CNV_vcf)
+
         print("annotating SV, CNV variants with VEP")
         SV_CNV_vcf_annotated = fun.annotate_SVs_inHouse(SV_CNV_vcf, gff_with_biotype, opt.ref, replace=opt.replace, threads=opt.threads, mitochondrial_chromosome=opt.mitochondrial_chromosome, mito_code=opt.mitochondrial_code, gDNA_code=opt.gDNA_code)
 
@@ -866,6 +887,11 @@ if opt.run_smallVarsCNV:
     # run for each ploidy
     for ploidy_varcall in ploidies_varcall:
 
+        # remove the annotation-derived outputs
+        if opt.replace_var_annotation is True: 
+            fun.remove_file("%s/variant_annotation_ploidy%i.tab"%(outdir_varcall, ploidy_varcall))
+            fun.delete_folder("%s/CNV_results"%outdir_varcall)
+            
         # run the variant calling command
         varcall_cmd += " -p %i"%ploidy_varcall
         if __name__ == '__main__': fun.run_cmd(varcall_cmd)
@@ -885,8 +911,8 @@ if opt.run_smallVarsCNV:
 end_time_smallVarsCNV =  time.time()
 
 if opt.StopAfter_smallVarCall is True:
-	print("WARNING: Ending after the running of small variant calling...")
-	sys.exit(0)
+    print("WARNING: Ending after the running of small variant calling...")
+    sys.exit(0)
 
 #####################################
 #####################################
