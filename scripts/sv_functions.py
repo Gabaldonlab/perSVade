@@ -18640,6 +18640,9 @@ def get_bed_df_from_variantID(varID):
     # get as df
     df_bed = pd.DataFrame(dict_bed).transpose()
 
+    # check that there are no negatives
+    if any(df_bed.start<0) or any(df_bed.end<0): raise ValueError("there are negative starts or ends for varID %s"%varID)
+
     # add the variantID, which will be useful to track, and is not necessarily unique
     df_bed["variantID"] = varID
 
@@ -19118,6 +19121,8 @@ def get_overlapping_df_bedpe_multiple_samples(df_bedpe_all, outdir, tol_bp, pct_
         # get a bed that has the positions of the breakends
         df_positions = pd.concat([df_bedpe_all[["chrom_strand_%i"%I, "pos%i"%I, "pos%i_plus1"%I, "unique_bpID_%i"%I]].rename(columns=dict(zip(["chrom_strand_%i"%I, "pos%i"%I, "pos%i_plus1"%I, "unique_bpID_%i"%I], ["chrom", "start", "end", "ID"]))) for I in [1, 2]]).sort_values(by=["chrom", "start", "end"])
 
+        if any(df_positions.start<0) or any(df_positions.end<0): raise ValueError("there are some start or end positions <0")
+         
         bed_positions = "%s/breakend_positions.bed"%outdir
         df_positions.to_csv(bed_positions, sep="\t", header=False, index=False)
 
@@ -20183,8 +20188,24 @@ def concatenate_list_headerLess_files_into_tab_file(headerLess_fileList, file, f
 
         os.rename(file_tmp, file)
 
+def get_gff_df_with_extraFields_for_converting_Gene_to_upmost_parent(gff_df):
 
+    """This function adds some fields to the gff_df if required. This is needed for some species"""
 
+    # define the initial gff keys
+    initial_gff_fields = set(gff_df.keys())
+
+    # merge get ANNOTATION_Dbxref_GeneID or ANNOTATION_ID (if the latter is missing)
+    if "ANNOTATION_Dbxref_GeneID" in initial_gff_fields:
+
+        def get_ANNOTATION_Dbxref_GeneID_or_ANNOTATION_ID(r):
+            if pd.isna(r.ANNOTATION_Dbxref_GeneID): return r.ANNOTATION_ID
+            else: return r.ANNOTATION_Dbxref_GeneID
+
+        gff_df["ANNOTATION_Dbxref_GeneID_or_ANNOTATION_ID"] = gff_df.apply(get_ANNOTATION_Dbxref_GeneID_or_ANNOTATION_ID, axis=1)
+
+    return gff_df
+    
 def get_annotation_df_with_Gene_as_upmost_parent_in_gff(annot_df, gff):
 
     """Takes the variant annotation df and returns it with a 'Gene' field that is matched in the gff as a string. It gets the upmost_parent from the Gene"""
@@ -20209,6 +20230,9 @@ def get_annotation_df_with_Gene_as_upmost_parent_in_gff(annot_df, gff):
     # init a boolean that indicates that a correct field was found
     gff_field_was_found = False
 
+    # add some extra fields, which match specific requirements
+    gff_df = get_gff_df_with_extraFields_for_converting_Gene_to_upmost_parent(gff_df)
+
     # go through the gff fields and match those that are equivalent to the gene
     all_original_geneIDs = set(annot_df.Gene).difference({"-"})
     for f in gff_df.keys():
@@ -20219,12 +20243,19 @@ def get_annotation_df_with_Gene_as_upmost_parent_in_gff(annot_df, gff):
         # get all the gff geneIDs
         all_gff_geneIDs = set(gff_df_field[f])
 
+        # define the missing genes
+        original_geneIDs_not_in_gff_f = all_original_geneIDs.difference(all_gff_geneIDs)
+
         # check if all the original geneIDs are in all_gff_geneIDs
-        if (all_original_geneIDs.intersection(all_gff_geneIDs))==all_original_geneIDs: 
+        if len(original_geneIDs_not_in_gff_f)==0:
             print("%s is the field that maps the Gene"%f)
 
-            # change
-            originalID_to_upmostParent = dict(gff_df_field[[f, "upmost_parent"]].drop_duplicates().set_index(f)["upmost_parent"])
+            # map each orginal geneID to the upmost parent
+            def get_upmost_parent_from_df_f(df_f):
+                if len(df_f)!=1: print("WARNING: The %s %s has several upmost_parent\n:%s\nTaking the first..."%(f, df_f.name, df_f.upmost_parent))
+                return df_f.upmost_parent.iloc[0]
+
+            originalID_to_upmostParent = dict(gff_df_field[[f, "upmost_parent"]].drop_duplicates().groupby(f).apply(get_upmost_parent_from_df_f))
             originalID_to_upmostParent["-"] = "-"
 
             annot_df["Gene"] = annot_df.Gene.map(originalID_to_upmostParent)
@@ -20232,6 +20263,10 @@ def get_annotation_df_with_Gene_as_upmost_parent_in_gff(annot_df, gff):
 
             gff_field_was_found = True
             break
+
+        # print if there are really similar fields
+        elif len(original_geneIDs_not_in_gff_f)<100: print("for field %s, these are the missing geneIDs:\n %s"%(f, original_geneIDs_not_in_gff_f))
+
     # debug
     if gff_field_was_found is False: raise ValueError("no gff was found to match the Gene annotation")
 
