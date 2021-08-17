@@ -175,7 +175,7 @@ for genome_name, genome, mitochondrial_chromosome in [("hg38", hg38_genome, "chr
     # define the cmd
     cmd = "%s --ref %s --threads %i -o %s --close_shortReads_table %s --n_close_samples 3 --nruns_per_sample 1 -f1 skip -f2 skip --mitochondrial_chromosome %s --testAccuracy --verbose --nsimulations 2 --skip_CNV_calling --simulation_ploidies %s --previous_repeats_table %s --StopAfter_testAccuracy --simulate_SVs_arround_HomologousRegions_maxEvalue %.10f --simulate_SVs_arround_HomologousRegions_queryWindowSize %i --simulate_SVs_arround_HomologousRegions_previousBlastnFile %s --StopAfter_testAccuracy_perSVadeRunning --min_gb_RAM_required 3 --fraction_available_mem 1.0 --skip_marking_duplicates --simulation_chromosomes %s --testAccuracy_skipHomRegionsSimulation"%(perSVade_py, genome, threads, outdir_perSVade, close_shortReads_table, mitochondrial_chromosome, simulation_ploidies, previous_repeats_table, simulate_SVs_arround_HomologousRegions_maxEvalue, simulate_SVs_arround_HomologousRegions_queryWindowSize, simulate_SVs_arround_HomologousRegions_previousBlastnFile, simulation_chromosomes)
 
-    # --fractionRAM_to_dedicate 0.5 is the default one. --skip_SV_CNV_calling would be to skip the CNV calling. --fractionRAM_to_dedicate 0.5. The testAccuracy_skipHomRegionsSimulation is necessary to skip the simulation around Homologous regions (which don't make sense in humans)
+    # --fractionRAM_to_dedicate 0.5 is the default one. --skip_SV_CNV_calling would be to skip the CNV calling. --fractionRAM_to_dedicate 0.5. The testAccuracy_skipHomRegionsSimulation is necessary to skip the simulation around Homologous regions (which don't make sense in humans because there are too many)
 
     # define the tmpdir and remove
     print("removing scratch dir")

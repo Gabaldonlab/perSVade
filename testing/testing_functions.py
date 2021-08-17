@@ -86,14 +86,6 @@ For C. glabrata I got the nanopore reads from ~/../mmarcet/nanopore/GABALDON02/a
 #("7955", "Danio_rerio", 2, "NC_002333.2")]
 #("9606", "Homo_sapiens", 2, "NC_012920.1")]
 
-"""
-species_Info = [("5478", "Candida_glabrata", 1, "mito_C_glabrata_CBS138", 10000000000000000),
-                ("5476", "Candida_albicans", 2, "Ca22chrM_C_albicans_SC5314", 10000000000000000),
-                ("5207", "Cryptococcus_neoformans", 1, "CP003834.1", 10000000000000000),
-                ("746128", "Aspergillus_fumigatus", 1, "CM016889.1", 10000000000000000),
-                ("3702", "Arabidopsis_thaliana", 2, "BK010421.1,AP000423.1", 30),
-                ("7227", "Drosophila_melanogaster", 2, "KJ947872.2", 30)]
-"""
 
 species_Info = [("5478", "Candida_glabrata", 1, "mito_C_glabrata_CBS138", 10000000000000000),
                 ("5476", "Candida_albicans", 2, "Ca22chrM_C_albicans_SC5314", 10000000000000000),
@@ -101,76 +93,7 @@ species_Info = [("5478", "Candida_glabrata", 1, "mito_C_glabrata_CBS138", 100000
                 ("3702", "Arabidopsis_thaliana", 2, "BK010421.1,AP000423.1", 30),
                 ("7227", "Drosophila_melanogaster", 2, "KJ947872.2", 30)]
 
-#species_Info = [("7227", "Drosophila_melanogaster", 2, "KJ947872.2", 30)]
-
-
-"""
-species_Info = [("3702", "Arabidopsis_thaliana", 2, "BK010421.1,AP000423.1", 30),
-                ("7227", "Drosophila_melanogaster", 2, "KJ947872.2", 30)]
-"""
-"""
-species_Info = [("5476", "Candida_albicans", 2, "Ca22chrM_C_albicans_SC5314", 10000000000000000),
-                ("3702", "Arabidopsis_thaliana", 2, "BK010421.1,AP000423.1", 30)]
-"""
-
-#species_Info = [("5207", "Cryptococcus_neoformans", 1, "CP003834.1", 10000000000000000)]
-
-
-"""
-species_Info = [("5478", "Candida_glabrata", 1, "mito_C_glabrata_CBS138", 10000000000000000),
-                ("5207", "Cryptococcus_neoformans", 1, "CP003834.1", 10000000000000000),
-                ("3702", "Arabidopsis_thaliana", 2, "BK010421.1,AP000423.1", 30)]
-
-"""
-"""
-species_Info = [("5207", "Cryptococcus_neoformans", 1, "CP003834.1", 10000000000000000),
-                ("3702", "Arabidopsis_thaliana", 2, "BK010421.1,AP000423.1", 30),
-                ("7227", "Drosophila_melanogaster", 2, "KJ947872.2", 30)]
-
-"""
-
-"""
-species_Info = [("5478", "Candida_glabrata", 1, "mito_C_glabrata_CBS138", 10000000000000000),
-                ("5476", "Candida_albicans", 2, "Ca22chrM_C_albicans_SC5314", 10000000000000000),
-                ("5207", "Cryptococcus_neoformans", 1, "CP003834.1", 10000000000000000)]
-
-"""
-
-"""
-species_Info = [("5476", "Candida_albicans", 2, "Ca22chrM_C_albicans_SC5314", 10000000000000000),
-                ("3702", "Arabidopsis_thaliana", 2, "BK010421.1,AP000423.1", 30),
-                ("7227", "Drosophila_melanogaster", 2, "KJ947872.2", 30)]
-"""
-
-"""
-species_Info = [("5207", "Cryptococcus_neoformans", 1, "CP003834.1", 10000000000000000),
-                ("746128", "Aspergillus_fumigatus", 1, "CM016889.1", 10000000000000000),
-                ("3702", "Arabidopsis_thaliana", 2, "BK010421.1,AP000423.1", 30),
-                ("7227", "Drosophila_melanogaster", 2, "KJ947872.2", 30)]
-"""
-"""
-species_Info = [("5478", "Candida_glabrata", 1, "mito_C_glabrata_CBS138", 10000000000000000),
-                ("5207", "Cryptococcus_neoformans", 1, "CP003834.1", 10000000000000000)]
-"""
-"""
-species_Info = [
-                ("746128", "Aspergillus_fumigatus", 1, "CM016889.1", 10000000000000000),
-                ("3702", "Arabidopsis_thaliana", 2, "BK010421.1,AP000423.1", 30)
-                ]
-"""
-
-#species_Info = [("5478", "Candida_glabrata", 1, "mito_C_glabrata_CBS138", 10000000000000000)]
-#species_Info = [("5207", "Cryptococcus_neoformans", 1, "CP003834.1", 10000000000000000)]
-#species_Info = [("5476", "Candida_albicans", 2, "Ca22chrM_C_albicans_SC5314", 10000000000000000)]
-
-#species_Info = [("3702", "Arabidopsis_thaliana", 2, "BK010421.1,AP000423.1", 30)]
-
-#species_Info = [("7227", "Drosophila_melanogaster", 2, "KJ947872.2", 30)]
-
-"""
-species_Info = [("3702", "Arabidopsis_thaliana", 2, "BK010421.1,AP000423.1", 30),
-                ("7227", "Drosophila_melanogaster", 2, "KJ947872.2", 30)]
-"""
+species_to_taxID = {x[1]:int(x[0]) for x in species_Info}
 
 ###################################
 
@@ -1563,5 +1486,248 @@ def get_blastn_regions_genome_against_itself_equal_regions(windows_multifasta, r
         fun.save_df_as_tab(blast_df, blastn_outfile)
 
     return blastn_outfile
+
+def print_df_keys(df):
+
+    """print df keys"""
+
+    for k in df.keys(): 
+        if any(~pd.isna(df[k])): print( "\n", k, "\n", df[k],  "\n")
+
+
+def get_flagstat_file_from_bamfile(bamfile, threads=4, replace=False):
+
+    """runs flagstat on bamfile"""
+
+    flagstat_file = "%s.flagstat"%bamfile; flagstat_file_tmp = "%s.tmp"%flagstat_file
+
+    # get the total n reads
+    if fun.file_is_empty(flagstat_file) or replace is True:
+
+        read_count_stderr = "%s.generating.stderr"%flagstat_file
+        print("calculating n reads. The stderr is in %s"%read_count_stderr)
+        fun.run_cmd("%s flagstat --threads %i %s > %s 2>%s"%(fun.samtools, threads, bamfile, flagstat_file_tmp, read_count_stderr))
+        fun.remove_file(read_count_stderr)
+
+        os.rename(flagstat_file_tmp, flagstat_file)
+
+    return flagstat_file
+
+
+def get_df_resources_simulations(CurDir, threads):
+
+    """Generates a df with the resources used by each simulation in perSVade. It takes the 5 testing species and the hg38 human datasets. This was run on 16 threads and 6000 Mb RAM/thread (1800 Mb RAM/thread) in Nord3."""
+
+
+    ########### DEFINE A DF WITH ALL THE CONCATENATED PATHS TO STDOUTs ################
+
+    # add the human ones
+    df_stdouts_human = pd.DataFrame()
+
+    human_dir = "%s/outdirs_testing_humanGoldenSet/all_STDs_testingAccuracySeveralSpecies"%CurDir
+    for f in [x for  x in os.listdir(human_dir) if x.startswith("hg38_") and x.endswith("_jobEnding.txt")]: 
+        df_stdouts_human = df_stdouts_human.append(fun.get_tab_as_df_or_empty_df("%s/%s"%(human_dir, f)))
+
+    df_stdouts_human["species"] = "Homo_sapiens"
+    df_stdouts_human["dest_stdout"] = ["%s/%s"%(human_dir, f) for f in df_stdouts_human.dest_stdout]
+    df_stdouts_human["jobs_file"] = ["%s/%s"%(human_dir, f) for f in df_stdouts_human.jobs_file]
+
+
+    # add all the testing species
+    df_stdouts_testing = pd.DataFrame()
+
+    testingSpecies_dir = "%s/outdirs_testing_severalSpecies/all_STDs_testingAccuracySeveralSpecies"%CurDir
+    for f in [x for  x in os.listdir(testingSpecies_dir) if x.endswith("_jobEnding.txt")]: 
+        df_stdouts_testing = df_stdouts_testing.append(fun.get_tab_as_df_or_empty_df("%s/%s"%(testingSpecies_dir, f)))
+
+
+    df_stdouts_testing["species"] = df_stdouts_testing.jobs_file.apply(lambda f: "_".join(f.split("_")[0:2]))
+    df_stdouts_testing["dest_stdout"] = ["%s/%s"%(testingSpecies_dir, f) for f in df_stdouts_testing.dest_stdout]
+    df_stdouts_testing["jobs_file"] = ["%s/%s"%(testingSpecies_dir, f) for f in df_stdouts_testing.jobs_file]
+
+    # merge and add fields
+    df_stdouts = df_stdouts_human.append(df_stdouts_testing)
+    df_stdouts["outdir_task"] = df_stdouts.outdir_task.apply(lambda x: x.replace("/gpfs/projects/bsc40/mschikora", ParentDir))
+    df_stdouts["type_simulation"] = df_stdouts.outdir_task.apply(lambda x: x.split("/")[-2])
+    df_stdouts["sampleID"] = df_stdouts.outdir_task.apply(lambda x: x.split("/")[-1])
+
+    ################################################################################### 
+
+    ######### DEFINE THE RESOURCES DF ##########
+
+    # create a df were each line is a combination of species, sampleID and type_simulation. Note that taskID indicates the number in the stdout related to this command
+
+    def add_time_and_memory_to_df_stdouts_r(r):
+
+        # define the lines in the stdout
+        main_stdout_lines = [l.strip() for l in open(r.dest_stdout, "r").readlines()]
+
+        # get the job ID
+        all_jobIDs = {int(l.split("Subject: Job ")[1].split("[")[0]) for l in main_stdout_lines if l.startswith("Subject: Job")}
+        if len(all_jobIDs)!=1: raise ValueError("There are more than 1 job IDS: %s"%all_jobIDs)
+        jobID = next(iter(all_jobIDs))
+
+        # get the line in stdout with related to this task
+        jobID_line = [Iline for Iline,l in enumerate(main_stdout_lines) if l.startswith("Subject: Job %i[%i]:"%(jobID, r.taskID))][0]
+        requested_mem_Mb = [float(l.split("Total Requested Memory :")[1].split()[0]) for l in main_stdout_lines[jobID_line:] if "Total Requested Memory :" in l and "MB" in l][0]
+        max_mem_Mb = [float(l.split("Max Memory :")[1].split()[0]) for l in main_stdout_lines[jobID_line:] if "Max Memory :" in l and "MB" in l][0]
+        cpu_time = [float(l.split("CPU time :")[1].split()[0]) for l in main_stdout_lines[jobID_line:] if "CPU time :" in l and "sec" in l][0]
+
+        # get the elapsed time in seconds
+        start_date =  [l.strip().split()[3:] for l in main_stdout_lines[jobID_line:] if l.startswith("Started at")][0]
+        end_date =  [l.strip().split()[4:] for l in main_stdout_lines[jobID_line:] if l.startswith("Results reported on")][0]
+
+        s_month = start_date[0]
+        s_day = int(start_date[1])
+        s_h, s_min, s_sec = [float(x) for x in start_date[2].split(":")]
+        s_year = int(start_date[3])
+
+        e_month = end_date[0]
+        e_day = int(end_date[1])
+        e_h, e_min, e_sec = [float(x) for x in end_date[2].split(":")]
+        e_year = int(end_date[3])  
+
+        # define the number of days that distanced the start and the end. Each month is particular
+        if s_year==e_year and s_year==2021 and s_month=="Feb" and e_month=="Mar": transcurred_days = e_day - (s_day-28)
+
+        # most cases
+        else: 
+            transcurred_days = e_day-s_day
+            if s_month!=e_month: raise ValueError("s_month %s is different to e_month %s"%(s_month, e_month))  
+            if s_year!=e_year: raise ValueError("s_year %s is different to e_year %s"%(s_year, e_year))  
+
+        # get the total time
+        run_time =  transcurred_days*(24*3600) + (e_h-s_h)*3600 + (e_min-s_min)*60 + (e_sec-s_sec)
+
+        # checks
+        for x in [cpu_time, max_mem_Mb, requested_mem_Mb, run_time]:
+            if pd.isna(x) or x<=0.0: raise ValueError("there is an error with the parsing of the output: %s"%x)
+
+        # add things to r
+        r["run_time"] = run_time
+        r["max_mem_Mb"] = max_mem_Mb
+        r["cpu_time"] = cpu_time
+        r["requested_mem_Mb"] = requested_mem_Mb
+
+        return r
+
+    def get_resources_dict(df):
+
+        # keep indexes
+        species, sampleID, type_simulation = df.name
+
+        # add the time and the row
+        df = df.apply(add_time_and_memory_to_df_stdouts_r, axis=1)
+
+        # check that there is only one row with 'perSVade_finished'
+        if sum(df.perSVade_finished)!=1: raise ValueError("There should be only one job where perSVade was finished")
+
+        # check that the requested memory was always the same
+        if len(set(df.requested_mem_Mb))!=1: raise ValueError("the requested memory was different across runs")
+
+        # check that the outdir task is the same
+        if len(set(df.outdir_task))!=1: raise ValueError("the outdir task was different across runs")
+
+        # define the dict with all the data
+        data_dict = {"species":species, "sampleID":sampleID, "type_simulation":type_simulation, "run time (h)":sum(df.run_time)/3600, "max memory (Gb)":max(df.max_mem_Mb)/1000, "cpu_time":sum(df.cpu_time), "requested_mem_Mb":df.requested_mem_Mb.iloc[0],  "outdir_task":df.outdir_task.iloc[0]}
+
+        return data_dict
+
+    df_resources = df_stdouts[df_stdouts.perSVade_was_ran].groupby(["species", "sampleID", "type_simulation"]).apply(get_resources_dict).reset_index(drop=True).apply(pd.Series)
+
+    ############################################
+
+    ####### ADD FIELDS FOR PLOTTING #########
+    print("adding extra fields for plotting")
+
+    # add the genome size in bp
+    species_to_genome_size = {species :  sum(fun.get_chr_to_len("%s/genomes_and_annotations/%s.fasta"%(CurDir, species)).values())  for species in set(df_resources.species)}
+    df_resources["genome size (Mb)"] = df_resources.species.apply(lambda x: species_to_genome_size[x])/1e6
+
+    # add the number of reads 
+    def get_number_pairs_from_outdir_task(o):
+
+        flagstat_lines = open(get_flagstat_file_from_bamfile("%s/aligned_reads.bam.sorted"%o, threads=threads), "r").readlines()
+
+        return [int(l.split()[0]) for l in flagstat_lines if "mapped" in l][0]
+
+    df_resources["mapped pairs"] = df_resources.outdir_task.apply(get_number_pairs_from_outdir_task)
+
+    print(df_resources["mapped pairs"])
+
+    adkhagahgad
+
+    #########################################
+
+    return df_resources
+
+def plot_used_resources_testing_on_simulations(CurDir, ProcessedDataDir, PlotsDir, threads):
+
+    """This function plots the resources used in simulations, sepparated by simulation type, taking the hg38 as example."""
+
+    ########## GET THE DATASET WITH THE USED RESOURCES ########
+
+    df_resources_file = "%s/used_resources_simulations.py"%ProcessedDataDir
+    if fun.file_is_empty(df_resources_file):
+
+        print("getting resources df")
+        df_resources = get_df_resources_simulations(CurDir, threads)
+
+        fun.save_object(df_resources, df_resources_file)
+
+    df_resources = fun.load_object(df_resources_file)
+
+    print(df_resources)
+
+    ###########################################################
+
+    ######## PLOT THE SCATTER WITH TIME AND MAX MEMORY CONSUMED ######
+
+    # define graphics
+    typeSimulations_to_color = {"uniform":"blue", "realSVs":"red", "arroundHomRegions":"black", "fast":"gray"}
+    species_to_marker = {"Candida_glabrata":"o", "Candida_albicans":"<", "Cryptococcus_neoformans":"s", "Arabidopsis_thaliana":"^", "Drosophila_melanogaster":"P", "Homo_sapiens":"*"}
+
+    # sort for plotting 
+    df_resources = df_resources.sort_values(by=["species", "type_simulation"])
+
+
+    # init figure
+    fig = plt.figure(figsize=(8,8))
+
+    # go through different subplots
+    for I, (xfield, yfield) in enumerate([("genome size (Mb)", "run time (h)"), ("mapped reads", "run time (h)"), ("genome size (Mb)", "max memory (Gb)"), ("mapped reads", "max memory (Gb)")]):
+
+        Ip = I+1
+
+        # init the subplot
+        ax = plt.subplot(2,2,Ip)
+        ax = sns.scatterplot(data=df_resources, x=xfield, y=yfield, style="species", alpha=.95, markers=species_to_marker, edgecolor="white", linewidth=0.7, hue="type_simulation", palette=typeSimulations_to_color)
+
+
+        adhgahjadgda
+
+        # remove axes
+        if Ip in {1,2}: ax.set_xlabel("")
+        if Ip in {3,4}: ax.set_ylabel("")
+
+        # add title 
+        if Ip==1: ax.set_title("perSVade resource consumption")
+
+        # add legend
+        if Ip==2: ax.legend(bbox_to_anchor=(0.1, 0.1), loc=2, borderaxespad=0.)
+        else: ax.get_legend().remove()
+
+
+        adjhaggjda
+
+
+    plt.subplots_adjust(wspace=0.01, hspace=0.01)
+
+    plt.show()
+
+    jgfadjgad
+
+    ##################################################################
+
 
                                                                                 
