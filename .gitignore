@@ -1,5 +1,7 @@
 testing/misc_testing
 testing/Cglabrata
+testing/plots
+testing/cross_accuracy_calculations_realSVs
 testing/testing_perSVade_benchmark_stderr.txt
 testing/testing_perSVade_benchmark_stdout.txt
 testing/failed_assemblies_taxID5207

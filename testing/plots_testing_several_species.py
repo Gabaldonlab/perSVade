@@ -39,6 +39,7 @@ perSVade_py = "%s/perSVade.py"%perSVade_dir
 # define dirs
 outdir_testing = "%s/scripts/perSVade/perSVade_repository/testing/outdirs_testing_severalSpecies"%ParentDir; fun.make_folder(outdir_testing)
 outdir_testing_GoldenSet = "%s/scripts/perSVade/perSVade_repository/testing/outdirs_testing_severalSpecies_goldenSet"%ParentDir; fun.make_folder(outdir_testing)
+outdir_testing_human = "%s/scripts/perSVade/perSVade_repository/testing/outdirs_testing_humanGoldenSet/running_on_hg38"%ParentDir
 
 CurDir = "%s/scripts/perSVade/perSVade_repository/testing"%ParentDir; fun.make_folder(outdir_testing)
 genomes_and_annotations_dir = "%s/genomes_and_annotations"%CurDir
@@ -49,35 +50,41 @@ ProcessedDataDir = "%s/processed_data"%PlotsDir; fun.make_folder(ProcessedDataDi
 
 #%% GET PROCESSED DFs
 
-"""
-# get cross-accuracy measurements
-df_cross_accuracy_benchmark = test_fun.get_cross_accuracy_df_several_perSVadeSimulations(outdir_testing, genomes_and_annotations_dir, replace=False)
+# get a cross accuracy df from the real SVs, both based on the golden set and the human real set of SVs
+df_cross_accuracy_benchmark_realSVs = test_fun.get_cross_accuracy_df_realSVs(CurDir, ProcessedDataDir, threads=4, replace=False)
 
-# load golden set df
+khgadhjggda
+
+# get cross-accuracy measurements testing on simulations (it already includes the human hg38 as testing)
+df_cross_accuracy_benchmark = test_fun.get_cross_accuracy_df_several_perSVadeSimulations(outdir_testing, outdir_testing_human, genomes_and_annotations_dir, replace=False)
+
+# load golden set df that comes from the testing (it does not include the human testing)
 df_goldenSetAccuracy = test_fun.get_accuracy_df_goldenSet(outdir_testing_GoldenSet)
 
-# load used parameters 
-df_parameters_used = test_fun.get_used_parameters_testing_several_species(outdir_testing)
-"""
+# load used parameters (this already includes the human hg38)
+df_parameters_used = test_fun.get_used_parameters_testing_several_species(outdir_testing, outdir_testing_human)
+
 #%% PLOT USED RESOURCES
 
 # it plots the used memory and time in the testing on simulations
 threads = 48
 test_fun.plot_used_resources_testing_on_simulations(CurDir, ProcessedDataDir, PlotsDir, threads)
-ahdgjhgadhg
 
 #%% PLOT USED PARAMETERS
 
 filename = "%s/used_parameters_testing_several_species.pdf"%PlotsDir
 df_plot = test_fun.get_heatmaps_used_parameters(df_parameters_used, filename)
 
-#%% CROSS BENCHMARKING PLOT
+#%% CROSS BENCHMARKING PLOT SIMULATIONS
+
+# define the accuracy_f
+accuracy_f = "recall"; # it could be Fvalue, precision or recall
 
 # all data
 fileprefix = "%s/all_cross_accuracy"%PlotsDir
-test_fun.generate_heatmap_accuracy_of_parameters_on_test_samples(df_cross_accuracy_benchmark, fileprefix, replace=False, threads=4, accuracy_f="Fvalue", svtype="integrated", col_cluster = False, row_cluster = False, show_only_species_and_simType=True)
+test_fun.generate_heatmap_accuracy_of_parameters_on_test_samples(df_cross_accuracy_benchmark, fileprefix, replace=False, threads=4, accuracy_f=accuracy_f, svtype="integrated", col_cluster = False, row_cluster = False, show_only_species_and_simType=True)
 
-#%% CROSS BENCHMARKING PLOT ONLY RANDOM SVs
+#%% CROSS BENCHMARKING PLOT SIMULATIONS ONLY UNIFORM SVs
 
 df_plot = df_cross_accuracy_benchmark[(df_cross_accuracy_benchmark.parms_typeSimulations.isin({"fast", "uniform"})) & (df_cross_accuracy_benchmark.test_typeSimulations=="uniform")]
 
@@ -85,19 +92,19 @@ df_plot = df_cross_accuracy_benchmark[(df_cross_accuracy_benchmark.parms_typeSim
 fileprefix = "%s/all_cross_accuracy_onlyUniform"%PlotsDir
 test_fun.generate_heatmap_accuracy_of_parameters_on_test_samples(df_plot, fileprefix, replace=False, threads=4, accuracy_f="Fvalue", svtype="integrated", col_cluster = False, row_cluster = False, show_only_species_and_simType=True, multiplier_width_colorbars=1.5, show_only_species=True)
 
+#%% CROSSBENCHMARKING DISTRIBUTION PER CATHEGORIES
 
-#%% CROSS-ACCURACY JITTER PLOTS PER CATHEGORY
-    
+# define the accuracy_f
+accuracy_f = "recall"; # it could be Fvalue, precision or recall
+
+# plots the cross accuracy in a distributions-like manner
 fileprefix = "%s/cross_accuracy_distribution"%PlotsDir
-ax  = test_fun.get_crossaccuracy_distributions(df_cross_accuracy_benchmark, fileprefix, accuracy_f="precision",  svtype="integrated")
-    
+test_fun.get_crossbenchmarking_distributions_differentSetsOfParameters(df_cross_accuracy_benchmark, fileprefix, accuracy_f=accuracy_f, svtype="integrated")
 
 
-#%% CROSS-ACCURACY JITTER PLOTS PER CATHEGORY ONE SINGLE TYPE
-    
-fileprefix = "%s/cross_accuracy_distribution_onlyUniform_SameRun"%PlotsDir
-test_fun.plot_accuracy_distributions_sameRun_bySpecies(df_cross_accuracy_benchmark, fileprefix, accuracy_f="Fvalue", all_types_simulations={"fast", "uniform"})
-    
+
+
+
 #%% GOLDEN ACCURACY BAR PLOTS
 
 fileprefix = "%s/goldenSetAccuracy"%PlotsDir
@@ -127,14 +134,4 @@ for taxID, spName, ploidy, mitochondrial_chromosome, max_coverage_sra_reads in t
 print("testing several species finished")
 sys.exit(0)
 
-#%% 
-#%% 
-#%% 
-#%% 
-#%% 
-#%% 
-#%% 
-#%% 
-#%%
-#%% CODE GRAVEYARD
-
+#%% OLD 

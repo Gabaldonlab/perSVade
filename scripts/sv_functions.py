@@ -9025,7 +9025,7 @@ def get_benchmarking_df_for_testSVs_from_trainSV_filterSets(test_SVdict, outdir,
 ################# GRAPHICS FUNCTIONS #################
 ######################################################
 
-def plot_clustermap_with_annotation(df, row_colors_df, col_colors_df, filename, title="clustermap", col_cluster=False, row_cluster=False, colorbar_label="default label", adjust_position=True, legend=True, idxs_separator_pattern="_", texts_to_strip={"L001"}, default_label_legend="control", df_annotations=None, cmap=sns.color_palette("RdBu_r", 50), ylabels_graphics_df=None, grid_lines=True, add_to_legend_x=1, figsize=None, multiplier_width_colorbars=1):
+def plot_clustermap_with_annotation(df, row_colors_df, col_colors_df, filename, title="clustermap", col_cluster=False, row_cluster=False, colorbar_label="default label", adjust_position=True, legend=True, idxs_separator_pattern="_", texts_to_strip={"L001"}, default_label_legend="control", df_annotations=None, cmap=sns.color_palette("RdBu_r", 50), ylabels_graphics_df=None, grid_lines=True, add_to_legend_x=1, figsize=None, multiplier_width_colorbars=1, vmax=None, vmin=None):
 
     """Takes a df were the index is the annotation and the cols are samples. It will be saved under filename. ylabels_graphics_df can be a df containing fontweight and color for each index value in df"""
 
@@ -9064,7 +9064,7 @@ def plot_clustermap_with_annotation(df, row_colors_df, col_colors_df, filename, 
         figsize = (len(df.columns)*0.3, len(df)*0.35)
 
         # get the clustermap
-        cm = sns.clustermap(df, col_cluster=col_cluster, row_cluster=row_cluster, row_colors=row_colors_df, col_colors=col_colors_df, cbar_kws={'label': colorbar_label}, xticklabels=False, square=False, figsize=figsize, cmap=cmap, annot=annot, fmt="", annot_kws={"size": 6.5}, linecolor=linecolor, linewidths=linewidths, yticklabels=yticklabels) # figsize=figsize, linecolor=linecolor, linewidths=linewidths, yticklabels=yticklabels
+        cm = sns.clustermap(df, col_cluster=col_cluster, row_cluster=row_cluster, row_colors=row_colors_df, col_colors=col_colors_df, cbar_kws={'label': colorbar_label}, xticklabels=False, square=False, figsize=figsize, cmap=cmap, annot=annot, fmt="", annot_kws={"size": 6.5}, linecolor=linecolor, linewidths=linewidths, yticklabels=yticklabels, vmax=vmax, vmin=vmin) # figsize=figsize, linecolor=linecolor, linewidths=linewidths, yticklabels=yticklabels
 
         # move the heatmap to the right
         hm_pos = cm.ax_heatmap.get_position()

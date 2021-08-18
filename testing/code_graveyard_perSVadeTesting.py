@@ -197,3 +197,16 @@ for type_optimisation in ["uniform", "realSVs"]:
 
 
 print("plots correctly performed")
+
+
+#%% CROSS-ACCURACY JITTER PLOTS PER CATHEGORY
+    
+fileprefix = "%s/cross_accuracy_distribution"%PlotsDir
+ax  = test_fun.get_crossaccuracy_distributions(df_cross_accuracy_benchmark, fileprefix, accuracy_f="precision",  svtype="integrated")
+    
+
+
+#%% CROSS-ACCURACY JITTER PLOTS PER CATHEGORY ONE SINGLE TYPE
+    
+fileprefix = "%s/cross_accuracy_distribution_onlyUniform_SameRun"%PlotsDir
+test_fun.plot_accuracy_distributions_sameRun_bySpecies(df_cross_accuracy_benchmark, fileprefix, accuracy_f="Fvalue", all_types_simulations={"fast", "uniform"})
