@@ -418,12 +418,7 @@ if len(cnv_calling_algs.difference(all_expected_cnv_calling_algs))>0: raise Valu
 if opt.pooled_sequencing is True: print("WARNING: Running on pooled sequencing.  These are the simulated ploidies for the SV calling parameter optimisation:", simulation_ploidies)
 
 # the window length for all operations
-valid_chrom_lens = [len_seq for chrom, len_seq  in fun.get_chr_to_len(opt.ref).items() if chrom not in opt.mitochondrial_chromosome.split(",") and len_seq>=opt.min_chromosome_len]
-if len(valid_chrom_lens)==0: raise ValueError("There are no chromosomes to calculate the window_l. Decrease --min_chromosome_len.")
-print("There are %i chromosomes to calculate window length"%len(valid_chrom_lens))
-fun.window_l = int(np.median(valid_chrom_lens)*0.05) + 1
-if pd.isna(fun.window_l): fun.window_l = 1000
-print("using a window length of %i"%fun.window_l)
+fun.window_l = fun.get_perSVade_window_l(opt.ref, opt.mitochondrial_chromosome, opt.min_chromosome_len)
 
 # define the verbosity. If opt.verbose is False, none of the 'print' statements of sv_functions will have an effect
 fun.printing_verbose_mode = opt.verbose

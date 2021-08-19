@@ -4357,6 +4357,26 @@ def download_srr_subsetReads_onlyFastqDump(srr, download_dir, subset_n_reads=100
 
     return reads1, reads2
 
+def get_perSVade_window_l(reference_genome, mitochondrial_chromosome, min_chromosome_len):
+
+    """Returns the window length used by perSVade"""
+
+    # define the valid chromosome lengths
+    valid_chrom_lens = [len_seq for chrom, len_seq  in get_chr_to_len(reference_genome).items() if chrom not in mitochondrial_chromosome.split(",") and len_seq>=min_chromosome_len]
+
+    # debug and report
+    if len(valid_chrom_lens)==0: raise ValueError("There are no chromosomes to calculate the window_l. Decrease --min_chromosome_len.")
+    print("There are %i chromosomes to calculate window length"%len(valid_chrom_lens))
+
+    # define the window length
+    final_window_length = int(np.median(valid_chrom_lens)*0.05) + 1
+    if pd.isna(final_window_length): final_window_length = 1000
+
+    # report
+    print("using a window length of %i"%final_window_length)
+
+    return final_window_length
+
 def run_freebayes_for_region(region, outvcf_folder, ref, sorted_bam, ploidy, coverage, replace, pooled_sequencing):
 
     """Takes a region (chromosome:start-end) and the fasta file and an outvcf and runs freebayes on it"""
@@ -6329,6 +6349,8 @@ def benchmark_processedSVs_against_knownSVs_inHouse(svtype_to_predsvfile, know_S
     The 'analysis_benchmarking' feature was removed from this version 
 
     fast_mode indicates to use bedmap for the comparisons.
+
+    consider_all_svtypes defines if all the SVtypes should be considered. If False, it will only consider the svtypes from the known dict
     """
 
     # map cmplex events to a boolean field
