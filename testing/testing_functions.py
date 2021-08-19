@@ -14,6 +14,7 @@ from matplotlib import gridspec
 import subprocess
 import itertools
 from matplotlib.lines import Line2D
+import copy as cp
 
 # define the parent dir of the cluster or not
 ParentDir = "%s/samba"%(os.getenv("HOME")); # local
@@ -426,7 +427,7 @@ def get_df_accuracy_of_parameters_on_test_samples(parameters_df, test_df, outdir
 
     # define the metadata of each df
     parameters_df_metadata = [k for k in parameters_df.keys() if k not in {"parameters_json"}]
-    test_df_metadata = [k for k in test_df.keys() if k not in {"sorted_bam", "gridss_vcf", "reference_genome", "mitochondrial_chromosome", "svtables_prefix"}]
+    test_df_metadata = [k for k in test_df.keys() if k not in {"sorted_bam", "gridss_vcf", "reference_genome", "mitochondrial_chromosome", "svtables_prefix", "interesting_svtypes"}]
 
     # define the outdir
     outdir_cross_benchmark_files = "%s/tmp_files"%outdir; fun.make_folder(outdir_cross_benchmark_files)
@@ -474,11 +475,15 @@ def get_df_accuracy_of_parameters_on_test_samples(parameters_df, test_df, outdir
 
                 if fun.file_is_empty(df_benchmarking_file): 
 
-                    all_cmds.append("%s --reference_genome %s --df_benchmarking_file %s --sorted_bam %s --gridss_vcf %s --svtables_prefix %s --threads %i --parameters_json %s --verbose --mitochondrial_chromosome %s"%(testing_script, test_row.reference_genome, df_benchmarking_file, test_row.sorted_bam, test_row.gridss_vcf, test_row.svtables_prefix, threads, unique_parms_row.parameters_json, test_row.mitochondrial_chromosome))
+                    # define cmd
+                    cmd_test = "%s --reference_genome %s --df_benchmarking_file %s --sorted_bam %s --gridss_vcf %s --svtables_prefix %s --threads %i --parameters_json %s --verbose --mitochondrial_chromosome %s"%(testing_script, test_row.reference_genome, df_benchmarking_file, test_row.sorted_bam, test_row.gridss_vcf, test_row.svtables_prefix, threads, unique_parms_row.parameters_json, test_row.mitochondrial_chromosome)
 
+                    if "interesting_svtypes" in set(test_row.keys()): cmd_test += " --interesting_svtypes %s"%(test_row.interesting_svtypes)
+
+                    # keep cmd and continue
+                    all_cmds.append(cmd_test)
                     continue
 
-              
                 # append
                 list_dfs_benchmark_files.append((Idf, df_benchmarking_file, parms_row, test_row, parameters_df_metadata, test_df_metadata, all_keys))
                 Idf += 1
@@ -489,7 +494,10 @@ def get_df_accuracy_of_parameters_on_test_samples(parameters_df, test_df, outdir
 
         # run cmds
         if run_in_cluster is False: 
-            for cmd in all_cmds_unique: fun.run_cmd(cmd)
+            for cmd in all_cmds_unique: 
+
+                fun.run_cmd(cmd)
+                raiseErrorAfterFirstTry
 
         # run in the cluster
         elif len(all_cmds_unique)>0:
@@ -1109,35 +1117,388 @@ def get_parameters_df_cross_accuracy_df_realSVs(CurDir, humanSample_to_refGenome
 
     return parameters_df
 
+def generate_highConfidence_and_all_SVs_files_ONcalling_severalParameter_combinations(dict_paths, outdir, reference_genome, replace, threads, run_in_parallel=True):
+
+    """This function generates the SV files from different combinations of filtering the ON SV calls. It takes parts of fun.get_df_accuracy_perSVade_vs_longReads_one_sample. It will generate a folder with high confidence and one with low confidence thresholds"""
+
+    # define final files
+    final_file = "%s/ONbased_SVfiles_generated.txt"%outdir
+    fun.make_folder(outdir)
+
+    if fun.file_is_empty(final_file) or replace is True:
+        print("generating SV files from ON reads")
+
+        # define parms
+        min_svim_QUAL = 2
+
+        # get the svim and sniffles dfs
+        svim_df = fun.get_svim_as_df(dict_paths["svim_outdir"], reference_genome, min_svim_QUAL)
+        sniffles_df = fun.get_sniffles_as_df(dict_paths["sniffles_outdir"], reference_genome)
+
+        # define SVIM and SNIFFLES filters (same number each)
+        all_min_QUAL_svim = [3, 5, 7, 10, 12, 15, 20, 30, 40, 50] # max of 100
+        all_min_RE_sniffles = np.linspace(min(sniffles_df.INFO_RE), np.percentile(sniffles_df.INFO_RE, 90), len(all_min_QUAL_svim))
+
+        # define necessary things for clove runs
+        sorted_bam_longReads =  "%s/aligned_reads.sorted.bam"%dict_paths["svim_outdir"]
+
+        # define general parameters
+        type_SVs_longReads = "all_SVs" # take all SVs, not only one ploidy
+        filter_IMPRECISE_sniffles = True # remove the SVs with a tag of 'IMPRECISE'
+        remaining_treatment = "drop" # do not consider the 'remaining' SVs
+        tol_bp = 50 # standard to define the overlaps
+        pct_overlap = 0.75 # standard to define the overlaps
+
+        # define an outdir for this type of overlaps
+        outdir_SVIMandSNIFFLEScalling = "%s/svim_and_snifflesCalling_%s_%s_%s_%s"%(outdir, type_SVs_longReads, filter_IMPRECISE_sniffles, remaining_treatment, tol_bp); fun.make_folder(outdir_SVIMandSNIFFLEScalling)
+
+        # define the inputs of 
+        svim_inputs = [(min_QUAL_svim, tol_bp, "svim", "QUAL", svim_df, outdir_SVIMandSNIFFLEScalling, sorted_bam_longReads, reference_genome, type_SVs_longReads, filter_IMPRECISE_sniffles, remaining_treatment) for min_QUAL_svim in all_min_QUAL_svim]
+
+        sniffles_inputs = [(min_RE_sniffles, tol_bp, "sniffles", "INFO_RE", sniffles_df, outdir_SVIMandSNIFFLEScalling, sorted_bam_longReads, reference_genome, type_SVs_longReads, filter_IMPRECISE_sniffles, remaining_treatment) for min_RE_sniffles in all_min_RE_sniffles]
+
+        inputs_fn = svim_inputs + sniffles_inputs
+        inputs_fn = [tuple(list(x)+[I]) for I,x in enumerate(inputs_fn)]
+
+        # run fn
+        print("getting SVIM and SNIFFLES sv_to_svdf for %i filters"%(len(inputs_fn)))
+        
+        if run_in_parallel is False: list_tuples_svtype_to_svDF_ON = list(map(lambda x: fun.get_svtype_to_svDF_withFiltering(x[0], x[1], x[2], x[3], x[4], x[5], x[6], x[7], x[8], x[9], x[10], x[11]), inputs_fn))
+
+        else:
+            with multiproc.Pool(threads) as pool:
+                list_tuples_svtype_to_svDF_ON = pool.starmap(fun.get_svtype_to_svDF_withFiltering, inputs_fn)
+                
+                pool.close()
+                pool.terminate()
+
+        # get the commonID between svim and sniffles
+        ON_svtype_to_svDF = fun.process_list_tuples_svtype_to_svDF_ON_to_add_commonID(cp.deepcopy(list_tuples_svtype_to_svDF_ON), outdir_SVIMandSNIFFLEScalling,  tol_bp, pct_overlap)
+
+        # generate a folder with the high-confidence and all SVs 
+        print("writing SVs")
+        for threshold_fractionParms, typeSVs in [(0.5, "high_confidence_ONvars"), (0.0, "all_ONvars")]:
+
+            # get the filtered dict
+            ON_svtype_to_svDF_filt = {svtype : svDF[svDF.fraction_filters_withSV>=threshold_fractionParms] for svtype, svDF in ON_svtype_to_svDF.items()}
+
+            # write each of the SVs
+            outdir_SVs = "%s/%s"%(outdir, typeSVs); fun.make_folder(outdir_SVs)
+            for svtype, svDF in ON_svtype_to_svDF_filt.items(): fun.save_df_as_tab(svDF, "%s/SVs_%s.tab"%(outdir_SVs, svtype))
+
+        # at the end generate the file
+        open(final_file, "w").write("ONreads generated")
+
+
 def get_df_benchmark_cross_accuracy_ONbasedGoldenSet(CurDir, parameters_df, outdir_cross_accuracy_ONbased, threads, replace):
 
     """This function runs each of the parameters_df on two subsets of SVs (high-confidence for recall and all SVs for precision) for all other samples. It writes the results under outdir_cross_accuracy_ONbased. 
 
-    Note that the test_df should end with [["species", "sampleID", "typeSimulations", "simName", "simulation_ploidy", "sorted_bam", "gridss_vcf", "reference_genome", "mitochondrial_chromosome", "svtables_prefix", "interesting_svtypes"]]"""
+    Note that the test_df should end with [["species", "sampleID", "sorted_bam", "gridss_vcf", "reference_genome", "mitochondrial_chromosome", "svtables_prefix", "interesting_svtypes"]]"""
 
     # define outdirs
     fun.make_folder(outdir_cross_accuracy_ONbased)
     df_benchmark_ONbased_file = "%s/df_benchmark_ONbased.tab"%outdir_cross_accuracy_ONbased
 
     if fun.file_is_empty(df_benchmark_ONbased_file) or replace is True:
-        print("getting df-cross-accuracy ONbased")
-
-
-
-        adaghajgahjgdhjgad
+        print("getting df-cross-accuracy ONbased on %i threads"%threads)
 
         ######## GENERATE ALL THE ON-BASED 'REAL' SV CALLS AS DONE IN THE GOLDEN-SET TESTING IMPLEMENTED IN PERSVADE ########
 
+        # init the testing dfs dict
+        typeONvars_to_test_df_dict = {}
+
+        # go through each species and sample
+        for taxID, spName, ploidy, mitochondrial_chromosome, max_coverage_sra_reads in species_Info:
+
+            # go through all the samples of the golden set testing
+            for sampleID in sorted(set(parameters_df[parameters_df.species==spName].sampleID)):
+                print(spName, sampleID)
+
+                # define the reference genome
+                outdir_sampleID = "%s/%s_%s"%(outdir_cross_accuracy_ONbased, spName, sampleID); fun.make_folder(outdir_sampleID)
+                origin_reference_genome = "%s/genomes_and_annotations/%s.fasta"%(CurDir, spName)
+                reference_genome = "%s/reference_genome.fasta"%outdir_sampleID
+                fun.soft_link_files(origin_reference_genome, reference_genome)
+
+                # generate all the ON-based SVs files as done in fun.get_df_accuracy_perSVade_vs_longReads_one_sample
+                goldenSetDir = "%s/outdirs_testing_severalSpecies_goldenSet/%s_%s/testing_goldenSetAccuracy"%(CurDir, taxID, spName)
+                dict_paths = {"svim_outdir":"%s/ONT_SV_calling/%s/svim_output"%(goldenSetDir, sampleID),
+                              "sniffles_outdir":"%s/ONT_SV_calling/%s/sniffles_output"%(goldenSetDir, sampleID)}
+
+                generate_highConfidence_and_all_SVs_files_ONcalling_severalParameter_combinations(dict_paths, outdir_sampleID, reference_genome, replace, threads)
+
+                # define files for the test_df. Note that we take one single run from perSVade
+                perSVade_outdir = "%s/perSVade_SV_calling/perSVade_calling_uniform_%s"%(goldenSetDir, sampleID)
+                sorted_bam = "%s/aligned_reads.bam.sorted"%perSVade_outdir
+                gridss_vcf = "%s/SVdetection_output/final_gridss_running/gridss_output.raw.vcf"%perSVade_outdir # this already has the withSimpleEventType
+
+                # obtain the CollectInsertSizeMetrics file
+                fun.get_insert_size_distribution(sorted_bam, replace=replace, threads=threads) 
+
+                # obtain the coverage per window
+                destination_dir = "%s.calculating_windowcoverage"%sorted_bam
+                min_chromosome_len = 100000
+                fun.window_l = fun.get_perSVade_window_l(reference_genome, mitochondrial_chromosome, min_chromosome_len)
+                coverage_file = fun.generate_coverage_per_window_file_parallel(origin_reference_genome, destination_dir, sorted_bam, windows_file="none", replace=replace, run_in_parallel=True, delete_bams=True, threads=threads) # get the per window coverage
+
+                # fill the test_df_dict:
+                for typeSVs in ["high_confidence_ONvars", "all_ONvars"]:
+
+                    # define the dictionary with all the fields for the test df
+                    #perSVade_outdir
+                    dict_data = {"species":spName, "sampleID":sampleID, "sorted_bam":sorted_bam, "gridss_vcf":gridss_vcf, "reference_genome":origin_reference_genome, "mitochondrial_chromosome":mitochondrial_chromosome, "svtables_prefix": "%s/%s/SVs"%(outdir_sampleID, typeSVs), "interesting_svtypes":"insertions,deletions,translocations,inversions,tandemDuplications"}
+
+                    # define the files
+                    typeONvars_to_test_df_dict.setdefault(typeSVs, {}).setdefault((spName, sampleID), dict_data)
+
         #####################################################################################################################
 
-        print_df_keys(parameters_df)
 
-        dakjhajkhkjadda
+        ######## GET THE ACCURACY DF FOR EACH TYPE OF ON SVs ###########
+
+        # init a dict that maps each type of ON vars to the cross-accuracy df
+        typeONvars_to_crossAccuracy_df = {}
+
+        for typeONvars, test_df_dict in typeONvars_to_test_df_dict.items():
+            print("running get_df_accuracy_of_parameters_on_test_samples on %s"%typeONvars)
+
+            # define the test_df
+            test_df = pd.DataFrame(test_df_dict).transpose()[["species", "sampleID", "sorted_bam", "gridss_vcf", "reference_genome", "mitochondrial_chromosome", "svtables_prefix", "interesting_svtypes"]]
+
+            # define the cross-accuracy benchmark
+            outdir_cross_accuracy_typeONvars = "%s/cross_accuracy_%s"%(outdir_cross_accuracy_ONbased, typeONvars)
+            typeONvars_to_crossAccuracy_df[typeONvars] = get_df_accuracy_of_parameters_on_test_samples(parameters_df, test_df, outdir_cross_accuracy_typeONvars, replace=replace)
+
+        # merge the two
+        print("integrating and saving")
+        merge_fields = ["parms_species", "parms_sampleID", "parms_typeSimulations", "test_species", "test_sampleID", "svtype"]
+        df_benchmark_ONbased = typeONvars_to_crossAccuracy_df["high_confidence_ONvars"].merge(typeONvars_to_crossAccuracy_df["all_ONvars"], on=merge_fields, validate="one_to_one", suffixes=("_highConf", "_allVars"))
+
+        # add fields, derived from different sets of SVs
+        df_benchmark_ONbased["recall"] = df_benchmark_ONbased.recall_highConf # the recall relates to the high confidence
+        df_benchmark_ONbased["precision"] = df_benchmark_ONbased.precision_allVars # precision is calculated on all vars
+
+        def calculate_Fvalue_from_r(r):
+
+            if r.precision<=0.0 or r.recall<=0.0: Fvalue = 0.0
+            else: Fvalue = (2*r.precision*r.recall)/(r.precision+r.recall)
+
+            return Fvalue
+
+        df_benchmark_ONbased["Fvalue"] = df_benchmark_ONbased.apply(calculate_Fvalue_from_r, axis=1)
+
+        if any(pd.isna(df_benchmark_ONbased.Fvalue)): raise ValueError("there are nans in the Fvalue")
+
+        ################################################################
+
+        # save
+        fun.save_df_as_tab(df_benchmark_ONbased, df_benchmark_ONbased_file)
 
 
+    df_benchmark_ONbased = fun.get_tab_as_df_or_empty_df(df_benchmark_ONbased_file)
 
-        print(outdir_cross_accuracy_ONbased)
+    return df_benchmark_ONbased
 
+def get_svtables_prefix_human_goldenSets(human_goldenSet_dir, knownSVs_dir, sampleID, reference_genome):
+
+    """This function generates under knownSVs_dir the files with known SVs (correctly formated), returning the prefix and the interesting_svtypes"""
+
+    print("getting get_svtables_prefix_human_goldenSets for %s"%sampleID)
+
+    ############ GENERATING SV FILES ################
+
+    # define all the chromosomes
+    all_chromosomes = set(fun.get_chr_to_len(reference_genome))
+
+    # define the prefix
+    svtables_prefix = "%s/SVs"%knownSVs_dir
+
+    # NA12878 has only deletions. In the NatComm review they ignore deletions close to ENCODE DAC list (not done here). The downloaded file needs some refactoring to adjust the chromosomes
+    if sampleID=="NA12878run1":
+
+        # get the deletions df and modify fields
+        deletions_df = fun.get_tab_as_df_or_empty_df("%s/data/NA12878_deletions.bed"%human_goldenSet_dir)
+        deletions_df["Chr"] = ["chr%s"%x for x in deletions_df.Chr]
+        deletions_df["ID"] = ["deletion%i"%I for I in range(len(deletions_df))]
+
+        # keep only deletions >50bp
+        deletions_df["svlen"] = deletions_df.End - deletions_df.Start
+        deletions_df = deletions_df[deletions_df.svlen>=50]
+
+        # write as deletions
+        fun.save_df_as_tab(deletions_df[fun.svtype_to_fieldsDict["deletions"]["all_fields"]], "%s_deletions.tab"%svtables_prefix)
+
+    # HG002run1 comes from a GiAB project. All kinds of SVs (They exclude variants that fall in the high-confidenceTier1regionsdefined region). We will only use variants in th  high-confidence set. The perSVade output can only be adapated to the deletions, as the HG002run1 DUP mainly show the sequence, but it is not clear if it is a tandem duplication
+
+    elif sampleID=="HG002run1":
+
+        # get the vcf loaded
+        vcf_df = fun.get_vcf_df_with_INFO_as_single_fields(fun.get_df_and_header_from_vcf("%s/data/HG002_SVs_Tier1_v0.6.vcf"%human_goldenSet_dir)[0])
+
+        # get only the deletions
+        deletions_df = vcf_df[(vcf_df.INFO_SVTYPE=="DEL") & (vcf_df.INFO_REPTYPE.isin({"SIMPLEDEL", "SUBSDEL"}))]
+
+        # calculate the len
+        deletions_df["REF_len"] = deletions_df.REF.apply(len)
+        deletions_df["ALT_len"] = deletions_df.ALT.apply(len)
+        if any(deletions_df.ALT_len>=deletions_df.REF_len): raise ValueError("The ALT seq should be shorter")
+
+        deletions_df["svlen"] = deletions_df.REF_len
+
+        # keep only deletions >50bp
+        deletions_df = deletions_df[deletions_df.svlen>=50]
+
+        # add fields
+        deletions_df["Start"] = deletions_df.POS-1
+        deletions_df["End"] = deletions_df.Start + deletions_df.svlen
+        deletions_df["Chr"] = ["chr%s"%x for x in deletions_df["#CHROM"]]
+
+        # write as deletions
+        fun.save_df_as_tab(deletions_df[fun.svtype_to_fieldsDict["deletions"]["all_fields"]], "%s_deletions.tab"%svtables_prefix)
+
+    # CHMrun1 correspond to two syntetically merged haploid cell lines. The union of all variants forund in CHM1 and CHM13 is taken as the through set. I will only keep deletions and inversions
+
+    elif sampleID=="CHMrun1":
+
+        svtypes_CHM = ["inversions", "deletions"]
+        positions_fields = ["Chr", "Start", "End"]
+        svtype_to_svDF = {svtype : pd.DataFrame(columns=positions_fields) for svtype in svtypes_CHM}
+
+        # go through each of the diploids
+        for chmID in ["CHM1", "CHM13"]:
+
+            # load the vcf 
+            vcf_df = fun.get_vcf_df_with_INFO_as_single_fields(fun.get_df_and_header_from_vcf("%s/data/%s_SVs.annotated.vcf"%(human_goldenSet_dir, chmID))[0])
+
+            # remove variants involving strange chroms
+            vcf_df = vcf_df[~(vcf_df["#CHROM"].apply(lambda c: c.endswith("_random"))) & ~(vcf_df["#CHROM"].apply(lambda c: c.startswith("chrUn_")))]
+
+            # remove variants whose length is below 50
+            vcf_df = vcf_df[vcf_df.INFO_SVLEN>=50]
+
+            # go through each svtype and get the svDF
+            for svtype in svtypes_CHM:
+
+                svDF = vcf_df[vcf_df.INFO_SVTYPE==(svtype[0:-1])]
+                svDF["Chr"] = svDF["#CHROM"]
+                svDF["Start"] = svDF.POS-1
+                svDF["End"] = svDF.Start + svDF.INFO_SVLEN
+
+                svtype_to_svDF[svtype] = svtype_to_svDF[svtype].append(svDF[positions_fields])
+
+        # write the concatenated SVs
+        for svtype, svDF in svtype_to_svDF.items():
+
+            # get the filtered svDF with ID
+            svDF_filt = svDF.sort_values(by=positions_fields).drop_duplicates()
+            svDF_filt["ID"] = ["%s%i"%(svtype, I) for I in range(len(svDF_filt))]
+
+            # write
+            fun.save_df_as_tab(svDF_filt[fun.svtype_to_fieldsDict[svtype]["all_fields"]], "%s_%s.tab"%(svtables_prefix, svtype))
+
+    else: raise ValueError("%s was not taken into consideration"%sampleID)
+
+    #################################################
+
+    ################ DEBUGGING AND SAVING ##############
+
+    # define the interesting svtypes and check integrity of files
+    interesting_svtypes_list = []
+
+    for svtype, fieldsDict in fun.svtype_to_fieldsDict.items():
+
+        # get the svfile (if existing)
+        svfile = "%s_%s.tab"%(svtables_prefix, svtype)
+        if fun.file_is_empty(svfile): continue
+
+        # load df
+        svDF = fun.get_tab_as_df_or_empty_df(svfile)
+
+        # keep
+        interesting_svtypes_list.append(svtype)
+
+        # check that the chromosomes are correct
+        for chr_f in fieldsDict["chromosome_fields"]:
+
+            strange_chromosomes = set(svDF[chr_f]).difference(all_chromosomes)
+            if len(strange_chromosomes)>0: raise ValueError("There are some strange chromosomes in the deletions_df: %s"%strange_chromosomes)
+
+        # check that the fileds are correct
+        if list(svDF.keys())!=fieldsDict["all_fields"]: raise ValueError("The fields %s are not correct for %s"%(svDF.keys(), svtype))
+
+    # debug
+    if len(interesting_svtypes_list)==0: raise("There should be some SVs")
+
+    # join
+    interesting_svtypes = ",".join(interesting_svtypes_list)
+
+    ####################################################
+
+    # return
+    return svtables_prefix, interesting_svtypes
+
+def get_df_benchmark_cross_accuracy_humanGoldenSet(CurDir, parameters_df, outdir_cross_accuracy_human, humanSample_to_refGenomeID, threads, replace):
+
+    """This function runs each of the parameters_df on the human dataset of cross-accuracy. This is analogous to  get_df_benchmark_cross_accuracy_ONbasedGoldenSet.
+
+    Note that the test_df should end with [["species", "sampleID", "sorted_bam", "gridss_vcf", "reference_genome", "mitochondrial_chromosome", "svtables_prefix", "interesting_svtypes"]]"""
+
+    # define outdirs
+    fun.make_folder(outdir_cross_accuracy_human)
+    df_benchmark_human_file = "%s/df_benchmark_human.tab"%outdir_cross_accuracy_human
+
+    if fun.file_is_empty(df_benchmark_human_file) or replace is True:
+        print("getting df-cross-accuracy human on %i threads"%threads)
+
+        # define general things
+        human_goldenSet_dir = "%s/outdirs_testing_humanGoldenSet"%CurDir
+        refGenomeID_to_mtChromosome = {"hg38":"chrM", "hg19":"chrMT"}
+
+        # init dict with the test data
+        test_df_dict = {}
+
+        for sampleID, refGenomeID in humanSample_to_refGenomeID.items():
+
+            # define the general things
+            perSVade_outdir = "%s/running_on_%s/testing_Accuracy/uniform/%s"%(human_goldenSet_dir, refGenomeID, sampleID)
+            sorted_bam = "%s/aligned_reads.bam.sorted"%perSVade_outdir
+            gridss_vcf = "%s/SVdetection_output/final_gridss_running/gridss_output.raw.vcf"%perSVade_outdir
+            reference_genome = "%s/data/%s.fa.corrected.fasta"%(human_goldenSet_dir, refGenomeID)
+            mitochondrial_chromosome = refGenomeID_to_mtChromosome[refGenomeID]
+
+            # obtain the CollectInsertSizeMetrics file
+            fun.get_insert_size_distribution(sorted_bam, replace=replace, threads=threads) 
+
+            # obtain the coverage per window
+            destination_dir = "%s.calculating_windowcoverage"%sorted_bam
+            min_chromosome_len = 100000
+            fun.window_l = fun.get_perSVade_window_l(reference_genome, mitochondrial_chromosome, min_chromosome_len)
+            coverage_file = fun.generate_coverage_per_window_file_parallel(reference_genome, destination_dir, sorted_bam, windows_file="none", replace=replace, run_in_parallel=True, delete_bams=True, threads=threads) # get the per window coverage
+
+            # note that the reference genomes have chr1 ... chrX ... chrM/chrMT, which needs to be adapted in the sv files
+
+            # make a knownSVs dir
+            knownSVs_dir = "%s/knownSVs_%s"%(outdir_cross_accuracy_human, sampleID); fun.make_folder(knownSVs_dir)
+
+            # get the known SV files
+            svtables_prefix, interesting_svtypes = get_svtables_prefix_human_goldenSets(human_goldenSet_dir, knownSVs_dir, sampleID, reference_genome)      
+
+            # add to the test_df_dict
+            test_df_dict["sampleID"] = {"species":"Homo_sapiens", "sampleID":sampleID, "sorted_bam":sorted_bam, "gridss_vcf":gridss_vcf, "reference_genome":reference_genome, "mitochondrial_chromosome":mitochondrial_chromosome, "svtables_prefix":svtables_prefix, "interesting_svtypes":interesting_svtypes}
+
+        # run the cross accuracy
+        test_df = pd.DataFrame(test_df_dict).transpose()[["species", "sampleID", "sorted_bam", "gridss_vcf", "reference_genome", "mitochondrial_chromosome", "svtables_prefix", "interesting_svtypes"]]
+
+        outdir_cross_accuracy_human_generatingFiles = "%s/cross_accuracy_files"%outdir_cross_accuracy_human
+        df_benchmark_human = get_df_accuracy_of_parameters_on_test_samples(parameters_df, test_df, outdir_cross_accuracy_human_generatingFiles, replace=replace, threads=16)
+
+        # save
+        save_df_as_tab(df_benchmark_human, df_benchmark_human_file)
+
+    # return
+    df_benchmark_human = get_tab_as_df_or_empty_df(df_benchmark_human_file)
+    return df_benchmark_human
 
 def get_cross_accuracy_df_realSVs(CurDir, ProcessedDataDir, threads=4, replace=False):
 
@@ -1155,9 +1516,22 @@ def get_cross_accuracy_df_realSVs(CurDir, ProcessedDataDir, threads=4, replace=F
         # get the training parameters df (only one per each sample, and taking only the corresponding reference genome from the human datasets)
         parameters_df = get_parameters_df_cross_accuracy_df_realSVs(CurDir, humanSample_to_refGenomeID)
 
+        # get the df_bechmark for the human golden set
+        outdir_cross_accuracy_human = "%s/cross_accuracy_human"%outdir_cross_accuracy
+        df_benchmark_human = get_df_benchmark_cross_accuracy_humanGoldenSet(CurDir, parameters_df, outdir_cross_accuracy_human, humanSample_to_refGenomeID, threads, replace)
+
+        print(df_benchmark_human)
+
+        adkdahjagjadgjgjhd
+
         # get the df_benchmark for the ON-based golden set SVs (non-human species)
         outdir_cross_accuracy_ONbased = "%s/cross_accuracy_ONbased"%outdir_cross_accuracy
         df_benchmark_ONbased = get_df_benchmark_cross_accuracy_ONbasedGoldenSet(CurDir, parameters_df, outdir_cross_accuracy_ONbased, threads, replace)
+
+
+        print(df_benchmark_ONbased)
+
+        adghajhgdajhgad
 
         # get the df_benchmark for the human golden set
         adkhgahjgad

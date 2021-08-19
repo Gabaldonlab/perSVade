@@ -35,9 +35,13 @@ parser.add_argument("--sorted_bam", dest="sorted_bam", required=True, help="The 
 parser.add_argument("--parameters_json", dest="parameters_json", required=True, help="The sorted_bam")
 parser.add_argument("--gridss_vcf", dest="gridss_vcf", required=True, help="The gridss_vcf")
 parser.add_argument("--svtables_prefix", dest="svtables_prefix", required=True, help="The svtables_prefix")
+parser.add_argument("--interesting_svtypes", dest="interesting_svtypes", type=str, required=False, default="insertions,deletions,translocations,inversions,tandemDuplications", help="A comma-sepparated set of svtypes on which to focus the analysis. By default this is done on all but the remaining cathegory")
 parser.add_argument("--threads", dest="threads", default=4, type=int, help="Number of threads, Default: 4")
 parser.add_argument("--verbose", dest="verbose", action="store_true", help="verbosity mode")
+
 opt = parser.parse_args()
+
+
 
 ################
 
@@ -57,7 +61,8 @@ sorted_bam = "%s/aligned_reads.sorted.bam"%(outdir)
 fun.soft_link_files(opt.sorted_bam, sorted_bam)
 fun.soft_link_files(opt.sorted_bam+".bai", sorted_bam+".bai")
 fun.soft_link_files(opt.sorted_bam+".CollectInsertSizeMetrics.out", sorted_bam+".CollectInsertSizeMetrics.out")
-fun.soft_link_files(opt.sorted_bam+".coverage_per_window.tab", sorted_bam+".coverage_per_window.tab")
+
+if not fun.file_is_empty(opt.sorted_bam+".coverage_per_window.tab"): fun.soft_link_files(opt.sorted_bam+".coverage_per_window.tab", sorted_bam+".coverage_per_window.tab")
 
 gridss_vcf = "%s/gridss_vcf.vcf"%outdir
 fun.soft_link_files(opt.gridss_vcf, gridss_vcf)
@@ -66,7 +71,12 @@ reference_genome = "%s/reference_genome.fasta"%outdir
 fun.soft_link_files(opt.reference_genome, reference_genome)
 fun.soft_link_files(opt.reference_genome+".repeats.tab", reference_genome+".repeats.tab")
 
-# softlink the svfiles
+# define the interesting svtypes as a set
+interesting_svtypes = set(opt.interesting_svtypes.split(","))
+allPossible_interesting_svtypes = {"remaining", "insertions", "deletions", "translocations", "inversions", "tandemDuplications"}
+
+strage_svtypes = interesting_svtypes.difference(allPossible_interesting_svtypes)
+if len(strage_svtypes)>0: raise ValueError("There are some strange svtypes: %s"%strage_svtypes)
 
 # define the median coverage
 windows_file_dir = "%s.calculating_windowcoverage"%opt.sorted_bam
@@ -84,9 +94,9 @@ median_insert_size, median_insert_size_sd  = fun.get_insert_size_distribution(so
 sv_dict, df_gridss = fun.run_gridssClove_given_filters(sorted_bam, reference_genome, outdir, median_coverage, replace=False, threads=opt.threads, gridss_blacklisted_regions=gridss_blacklisted_regions, gridss_VCFoutput=gridss_vcf, gridss_maxcoverage=gridss_maxcoverage, median_insert_size=median_insert_size, median_insert_size_sd=median_insert_size_sd, gridss_filters_dict=gridss_filters_dict, run_in_parallel=True, max_rel_coverage_to_consider_del=max_rel_coverage_to_consider_del, min_rel_coverage_to_consider_dup=min_rel_coverage_to_consider_dup, replace_FromGridssRun=False)
 
 
-# get the known SV dict
+# get the known SV dict (the only considered one)
 known_sv_dict = {}
-for svtype in {"insertions", "deletions", "translocations", "inversions", "tandemDuplications"}:
+for svtype in interesting_svtypes:
 
 	origin_svfile = "%s_%s.tab"%(opt.svtables_prefix, svtype)
 	dest_svfile = "%s/%s.tab"%(outdir, svtype)

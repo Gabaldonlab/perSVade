@@ -16,9 +16,11 @@ import matplotlib.pyplot as plt
 ParentDir = "%s/samba"%(os.getenv("HOME")); # local
 if os.path.exists(ParentDir):
     run_in_cluster = False    
+    threads=4
 
 else:
     run_in_cluster = True    
+    threads=48
     ParentDir = "/gpfs/projects/bsc40/mschikora"
         
 # define the dir where all perSVade code is
@@ -51,7 +53,7 @@ ProcessedDataDir = "%s/processed_data"%PlotsDir; fun.make_folder(ProcessedDataDi
 #%% GET PROCESSED DFs
 
 # get a cross accuracy df from the real SVs, both based on the golden set and the human real set of SVs
-df_cross_accuracy_benchmark_realSVs = test_fun.get_cross_accuracy_df_realSVs(CurDir, ProcessedDataDir, threads=4, replace=False)
+df_cross_accuracy_benchmark_realSVs = test_fun.get_cross_accuracy_df_realSVs(CurDir, ProcessedDataDir, threads=threads, replace=False)
 
 khgadhjggda
 
