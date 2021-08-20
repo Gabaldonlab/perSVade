@@ -509,7 +509,7 @@ def get_df_accuracy_of_parameters_on_test_samples(parameters_df, test_df, outdir
             fun.generate_jobarray_file(jobs_filename, "gettingCloseShortReads")
 
             # submit to the cluster
-            fun.run_jobarray_file_MN4_greasy(jobs_filename, "getting_crossAccuracy", time="02:00:00", queue="debug", threads_per_job=threads, nodes=6) # max 8 nodes
+            fun.run_jobarray_file_MN4_greasy(jobs_filename, "getting_crossAccuracy", time="02:00:00", queue="debug", threads_per_job=threads, nodes=8) # max 8 nodes (often ran on 6 nodes)
             #fun.run_jobarray_file_MN4_greasy(jobs_filename, "getting_crossAccuracy", time="10:00:00", queue="bsc_ls", threads_per_job=threads, nodes=3)
 
             # exit before it starts
@@ -1485,19 +1485,19 @@ def get_df_benchmark_cross_accuracy_humanGoldenSet(CurDir, parameters_df, outdir
             svtables_prefix, interesting_svtypes = get_svtables_prefix_human_goldenSets(human_goldenSet_dir, knownSVs_dir, sampleID, reference_genome)      
 
             # add to the test_df_dict
-            test_df_dict["sampleID"] = {"species":"Homo_sapiens", "sampleID":sampleID, "sorted_bam":sorted_bam, "gridss_vcf":gridss_vcf, "reference_genome":reference_genome, "mitochondrial_chromosome":mitochondrial_chromosome, "svtables_prefix":svtables_prefix, "interesting_svtypes":interesting_svtypes}
+            test_df_dict[sampleID] = {"species":"Homo_sapiens", "sampleID":sampleID, "sorted_bam":sorted_bam, "gridss_vcf":gridss_vcf, "reference_genome":reference_genome, "mitochondrial_chromosome":mitochondrial_chromosome, "svtables_prefix":svtables_prefix, "interesting_svtypes":interesting_svtypes}
 
         # run the cross accuracy
         test_df = pd.DataFrame(test_df_dict).transpose()[["species", "sampleID", "sorted_bam", "gridss_vcf", "reference_genome", "mitochondrial_chromosome", "svtables_prefix", "interesting_svtypes"]]
 
         outdir_cross_accuracy_human_generatingFiles = "%s/cross_accuracy_files"%outdir_cross_accuracy_human
-        df_benchmark_human = get_df_accuracy_of_parameters_on_test_samples(parameters_df, test_df, outdir_cross_accuracy_human_generatingFiles, replace=replace, threads=16)
+        df_benchmark_human = get_df_accuracy_of_parameters_on_test_samples(parameters_df, test_df, outdir_cross_accuracy_human_generatingFiles, replace=replace, threads=24)
 
         # save
-        save_df_as_tab(df_benchmark_human, df_benchmark_human_file)
+        fun.save_df_as_tab(df_benchmark_human, df_benchmark_human_file)
 
     # return
-    df_benchmark_human = get_tab_as_df_or_empty_df(df_benchmark_human_file)
+    df_benchmark_human = fun.get_tab_as_df_or_empty_df(df_benchmark_human_file)
     return df_benchmark_human
 
 def get_cross_accuracy_df_realSVs(CurDir, ProcessedDataDir, threads=4, replace=False):
@@ -1520,30 +1520,42 @@ def get_cross_accuracy_df_realSVs(CurDir, ProcessedDataDir, threads=4, replace=F
         outdir_cross_accuracy_human = "%s/cross_accuracy_human"%outdir_cross_accuracy
         df_benchmark_human = get_df_benchmark_cross_accuracy_humanGoldenSet(CurDir, parameters_df, outdir_cross_accuracy_human, humanSample_to_refGenomeID, threads, replace)
 
-        print(df_benchmark_human)
-
-        adkdahjagjadgjgjhd
-
         # get the df_benchmark for the ON-based golden set SVs (non-human species)
         outdir_cross_accuracy_ONbased = "%s/cross_accuracy_ONbased"%outdir_cross_accuracy
         df_benchmark_ONbased = get_df_benchmark_cross_accuracy_ONbasedGoldenSet(CurDir, parameters_df, outdir_cross_accuracy_ONbased, threads, replace)
 
-
-        print(df_benchmark_ONbased)
-
-        adghajhgdajhgad
-
-        # get the df_benchmark for the human golden set
-        adkhgahjgad
-
         # merge and save
+        df_benchmark_all = df_benchmark_human.append(df_benchmark_ONbased)
+        fun.save_df_as_tab(df_benchmark_all, df_benchmark_all_file)
 
+    # load
+    df_benchmark_all = fun.get_tab_as_df_or_empty_df(df_benchmark_all_file)
 
+    ########### ADD METADATA #############
 
-        print(parameters_df)
+    # add the type of comparison
+    print("running get_type_comparison")
+    def get_type_comparison(r):
 
-        adkjadhakjhadh
+        # trained on fast
+        if r["parms_species"]=="none": return "fast"
 
+        # trained on the same sample as tested
+        elif r["parms_species"]==r["test_species"] and r["parms_sampleID"]==r["test_sampleID"]: return "same_sample"
+
+        # trained on the same species
+        elif r["parms_species"]==r["test_species"]: return "same_species"
+
+        # trained on other speceis
+        elif r["parms_species"]!=r["test_species"]: return "different_species"
+
+        else: raise ValueError("r is not valid")
+
+    df_benchmark_all["type_comparison"] = df_benchmark_all.apply(get_type_comparison, axis=1)
+
+    ######################################
+
+    return df_benchmark_all
 
 
 def generate_heatmap_accuracy_of_parameters_on_test_samples(df_benchmark, fileprefix, replace=False, threads=4, accuracy_f="Fvalue", svtype="integrated", col_cluster = False, row_cluster = False, show_only_species_and_simType=False, multiplier_width_colorbars=3, show_only_species=False):
@@ -1640,7 +1652,6 @@ def generate_heatmap_accuracy_of_parameters_on_test_samples(df_benchmark, filepr
         row_colors_df = row_colors_df[["parms_species"]]
         col_colors_df = col_colors_df[["test_species"]]
 
-
     # get the plot
     filename = "%s_cross_accuracy_%s_%s_%s_%s.pdf"%(fileprefix, accuracy_f, svtype, col_cluster, row_cluster)
     print("getting %s"%filename)
@@ -1650,6 +1661,134 @@ def generate_heatmap_accuracy_of_parameters_on_test_samples(df_benchmark, filepr
 
     fun.plot_clustermap_with_annotation(df_square, row_colors_df, col_colors_df, filename, title="cross accuracy", col_cluster=col_cluster, row_cluster=row_cluster, colorbar_label=accuracy_f, adjust_position=True, legend=True, idxs_separator_pattern="||||", texts_to_strip={"L001"}, default_label_legend="control", df_annotations=df_annotations, cmap=sns.color_palette("RdBu_r", 50), ylabels_graphics_df=None, grid_lines=False, figsize=figsize, multiplier_width_colorbars=multiplier_width_colorbars, vmax=1.0, vmin=0.0)
 
+
+def get_value_to_color(values, palette="mako", n=100, type_color="rgb", center=None):
+
+    """TAkes an array and returns the color that each array has. Checj http://seaborn.pydata.org/tutorial/color_palettes.html"""
+
+    # get the colors
+    colors = sns.color_palette(palette, n)
+
+    # change the colors
+    if type_color=="rgb": colors = colors
+    elif type_color=="hex": colors = [rgb_to_hex(c) for c in colors]
+    else: raise ValueError("%s is not valid"%palette)
+
+    # if they are strings
+    if type(list(values)[0])==str:
+
+        palette_dict = dict(zip(values, colors))
+        value_to_color = palette_dict
+
+    # if they are numbers
+    else:
+
+        # map eaqually distant numbers to colors
+        if center==None:
+            min_palette = min(values)
+            max_palette = max(values)
+        else: 
+            max_deviation = max([abs(fn(values)-center) for fn in [min, max]])
+            min_palette = center - max_deviation
+            max_palette = center + max_deviation
+
+        all_values_palette = list(np.linspace(min_palette, max_palette, n))
+        palette_dict = dict(zip(all_values_palette, colors))
+
+        # get value to color
+        value_to_color = {v : palette_dict[find_nearest(all_values_palette, v)] for v in values}
+
+    return value_to_color, palette_dict
+
+def generate_heatmap_accuracy_of_parameters_on_test_samples_realSVs(df_benchmark, fileprefix, replace=False, threads=4, accuracy_f="Fvalue", svtype="integrated", col_cluster = False, row_cluster = False, multiplier_width_colorbars=3, show_only_species=False):
+
+    """
+    This is similar to generate_heatmap_accuracy_of_parameters_on_test_samples, but adapted to the realSVs
+    """
+
+    print("plotting cross-accuracy")
+
+    # define graphics
+    species_to_color = {'none': 'gray', 'Drosophila_melanogaster': 'darkorange', 'Arabidopsis_thaliana': 'olive', 'Cryptococcus_neoformans': 'lightcoral', 'Candida_albicans': 'magenta', 'Candida_glabrata': 'lightseagreen', "Homo_sapiens":"brown"}
+
+    typeSimulations_to_color = {"uniform":"blue", "realSVs":"red", "arroundHomRegions":"black", "fast":"gray"}
+
+    all_sampleIDs = sorted(set(df_benchmark.parms_sampleID).union(set(df_benchmark.test_sampleID)))
+    sampleID_to_color = get_value_to_color(all_sampleIDs)[0]
+
+    cathegory_to_colors_dict = {"parms_species" : species_to_color,
+                                "parms_typeSimulations" : typeSimulations_to_color,
+                                "test_species" : species_to_color,
+                                "parms_sampleID":sampleID_to_color,
+                                "test_sampleID":sampleID_to_color}
+
+    # keep only the df with the svtype
+    df_plot = df_benchmark[(df_benchmark.svtype==svtype)]
+
+    # define square df
+    parms_keys = ["parms_species", "parms_typeSimulations", "parms_sampleID"]
+    test_keys = ["test_species", "test_sampleID"]
+    df_plot = df_plot.sort_values(by=(parms_keys + test_keys))
+
+    df_plot["parms_idx"] = df_plot.apply(lambda r: "||||".join([str(r[k]) for k in parms_keys]), axis=1)
+    df_plot["test_idx"] = df_plot.apply(lambda r: "||||".join([str(r[k]) for k in test_keys]), axis=1)
+    df_square = df_plot[["parms_idx", "test_idx", accuracy_f]].pivot(index='parms_idx', columns='test_idx', values=accuracy_f)
+
+    # sort by species
+    print("sorting")
+    species_to_order =  {'none': 0, "Candida_glabrata":1, "Candida_albicans":2, "Cryptococcus_neoformans":3, "Arabidopsis_thaliana":4, "Drosophila_melanogaster":5, "Homo_sapiens":6}
+    index_to_order = {c : species_to_order[c.split("||||")[0]]  for c in df_square.index}
+    col_to_order = {c : species_to_order[c.split("||||")[0]]  for c in df_square.columns}
+
+    sorted_index = sorted(df_square.index, key=(lambda x: index_to_order[x]))
+    sorted_cols = sorted(df_square.columns, key=(lambda x: col_to_order[x]))
+
+    df_square = df_square.loc[sorted_index, sorted_cols]
+
+    # add the label
+    type_comparison_to_label = {"same_sample":"*", "fast":"", "same_species":"", "different_species":""}
+    df_plot["label"] = df_plot.type_comparison.apply(lambda x: type_comparison_to_label[x])
+    df_annotations = df_plot[["parms_idx", "test_idx", "label"]].pivot(index='parms_idx', columns='test_idx', values="label").loc[sorted_index, sorted_cols]
+
+    # define dicts mapping objects
+    type_keys_to_keys = {"parms":parms_keys, "test":test_keys}
+
+    # generate the cols colors df
+    def get_colors_series(idx, type_keys="parms"):
+        # type_keys can be parms or test
+
+        # get the color dicts
+        keys = type_keys_to_keys[type_keys]
+
+        # get the content
+        idx_content = idx.split("||||")
+
+        # define the series
+        field_to_color = {keys[I] : cathegory_to_colors_dict[keys[I]][c] for I,c in enumerate(idx_content)}
+
+        return pd.Series(field_to_color)
+    
+    row_colors_df = pd.Series(df_square.index, index=df_square.index).apply(lambda x: get_colors_series(x, type_keys="parms"))
+    col_colors_df = pd.Series(df_square.columns, index=df_square.columns).apply(lambda x: get_colors_series(x, type_keys="test"))
+
+    # keep only simulation type and species
+    row_colors_df = row_colors_df[["parms_species", "parms_typeSimulations"]]
+    col_colors_df = col_colors_df[["test_species"]]
+
+    # keep only species colors
+    if show_only_species is True:
+
+        row_colors_df = row_colors_df[["parms_species"]]
+        col_colors_df = col_colors_df[["test_species"]]
+
+    # get the plot
+    filename = "%s_cross_accuracy_%s_%s_%s_%s.pdf"%(fileprefix, accuracy_f, svtype, col_cluster, row_cluster)
+    print("getting %s"%filename)
+
+    # define the figure size
+    figsize = (int(len(df_square.columns)*0.03), int(len(df_square)*0.03))
+
+    fun.plot_clustermap_with_annotation(df_square, row_colors_df, col_colors_df, filename, title="cross accuracy", col_cluster=col_cluster, row_cluster=row_cluster, colorbar_label=accuracy_f, adjust_position=True, legend=True, idxs_separator_pattern="||||", texts_to_strip={"L001"}, default_label_legend="control", df_annotations=df_annotations, cmap=sns.color_palette("RdBu_r", 50), ylabels_graphics_df=None, grid_lines=False, figsize=figsize, multiplier_width_colorbars=multiplier_width_colorbars, vmax=1.0, vmin=0.0)
 
 
 
@@ -1715,6 +1854,7 @@ def get_fastqgz_from_bam(bamfile, threads=4, replace=False, already_sorted_by_re
 
     return reads1_gz, reads2_gz
 
+
 def get_crossbenchmarking_distributions_differentSetsOfParameters(df_cross_accuracy_benchmark, fileprefix, accuracy_f="Fvalue", svtype="integrated"):
 
     """Takes the cross benchmarking dataset and plots on the X different simulation types. Each row is one species, and the color is the type of parameter"""
@@ -1737,7 +1877,7 @@ def get_crossbenchmarking_distributions_differentSetsOfParameters(df_cross_accur
     df_cross_accuracy_benchmark["training parameters"] = df_cross_accuracy_benchmark.type_comparison.apply(lambda x: typeComparison_to_newTypeComparison[x])
 
     # define graphics
-    trainingParmsToColor = {"default":"gray", "different spp": "lightcoral", "same spp":"olive", "same simulation":"red", "same sample":"black"}
+    trainingParmsToColor = {"default":"gray", "different spp": "greenyellow", "same spp":"lime", "same simulation":"green", "same sample":"black"}
 
 
     # init fig
@@ -1757,7 +1897,7 @@ def get_crossbenchmarking_distributions_differentSetsOfParameters(df_cross_accur
             ax = plt.subplot(nrows, ncols, I); I+=1
 
             # get the stripplot
-            if len(df_plot)>0: ax = sns.stripplot(data=df_plot, x="test_typeSimulations", y=accuracy_f, hue="training parameters", palette=trainingParmsToColor,  dodge=True,  linewidth=.01, edgecolor="gray", size=3, alpha=.3)
+            if len(df_plot)>0: ax = sns.stripplot(data=df_plot, x="test_typeSimulations", y=accuracy_f, hue="training parameters", palette=trainingParmsToColor,  dodge=True,  linewidth=.01, edgecolor="gray", size=3, alpha=.6)
 
             # set the ylims
             ax.set_ylim([-0.05, 1.1])
@@ -1783,6 +1923,74 @@ def get_crossbenchmarking_distributions_differentSetsOfParameters(df_cross_accur
             # get the legen only in the first box
             if Ir==0 and Ic==(ncols-1): ax.legend(bbox_to_anchor=(1, 1)) 
             elif len(df_plot)>0: ax.get_legend().remove()
+
+    # spaces
+    plt.subplots_adjust(wspace=0.00, hspace=0.1)
+    filename = "%s_%s_%s.pdf"%(fileprefix, accuracy_f, svtype)
+    fig.savefig(filename, bbox_inches='tight')
+
+
+
+def get_crossbenchmarking_distributions_differentSetsOfParameters_realSVs(df_cross_accuracy_benchmark, fileprefix, accuracy_f="Fvalue", svtype="integrated"):
+
+    """This is like get_crossbenchmarking_distributions_differentSetsOfParameters but for real SVs"""
+
+    # keep one df
+    df_cross_accuracy_benchmark = df_cross_accuracy_benchmark[df_cross_accuracy_benchmark.svtype==svtype]
+
+    # define parms
+    sorted_species = ["Candida_glabrata", "Candida_albicans", "Cryptococcus_neoformans", "Arabidopsis_thaliana", "Drosophila_melanogaster", "Homo_sapiens"]
+
+    # add the order of the type of teh comparison
+    sorted_typeComparisons = ["fast", "different_species", "same_species", "same_sample"]
+    typeComparison_to_orderI = dict(zip(sorted_typeComparisons, range(len(sorted_typeComparisons))))
+    df_cross_accuracy_benchmark["type_comparison_I"] = df_cross_accuracy_benchmark.type_comparison.apply(lambda x: typeComparison_to_orderI[x])
+
+    # add a shorter to type comparison
+    typeComparison_to_newTypeComparison = {"fast":"default", "different_species": "different spp", "same_species":"same spp", "same_sample":"same sample"}
+    df_cross_accuracy_benchmark["training parameters"] = df_cross_accuracy_benchmark.type_comparison.apply(lambda x: typeComparison_to_newTypeComparison[x])
+
+    # define graphics
+    trainingParmsToColor = {"default":"gray", "different spp": "greenyellow", "same spp":"lime", "same sample":"black"}
+
+    # add fields
+    df_cross_accuracy_benchmark["test_typeSVs"] = "real SVs"
+
+    # init fig
+    nrows = len(sorted_species)
+    I = 1
+    fig = plt.figure(figsize=(1*0.8, nrows*1.3))
+
+    for Ir, test_species in enumerate(sorted_species):
+        print(test_species)
+
+        # get df
+        df_plot =  df_cross_accuracy_benchmark[(df_cross_accuracy_benchmark.test_species==test_species)].sort_values(by=["type_comparison_I"])
+
+        # get the subplot
+        ax = plt.subplot(nrows, 1, I); I+=1
+
+        # get the stripplot
+        if len(df_plot)>0: ax = sns.stripplot(data=df_plot, x="test_typeSVs", y=accuracy_f, hue="training parameters", palette=trainingParmsToColor,  dodge=True,  linewidth=.01, edgecolor="gray", size=3, alpha=.75)
+
+        # set the ylims
+        #ax.set_ylim([-0.05, 1.1])
+
+        # remove title
+        ax.set_title("")
+        if Ir==2: ax.set_ylabel("%s\n%s. %s"%(accuracy_f, test_species.split("_")[0][0], test_species.split("_")[1]))
+        else: ax.set_ylabel("%s. %s"%(test_species.split("_")[0][0], test_species.split("_")[1]))
+
+        # remove the xticklabels except in the last row
+        ax.set_xlabel("")
+        ax.set_xticks([])
+        if test_species!=sorted_species[-1]: ax.set_xticklabels([])
+        else: 
+            ax.set_xlabel("real SVs", rotation=75)
+
+        # get the legen only in the first box
+        if Ir==0: ax.legend(bbox_to_anchor=(1, 1)) 
+        elif len(df_plot)>0: ax.get_legend().remove()
 
     # spaces
     plt.subplots_adjust(wspace=0.00, hspace=0.1)

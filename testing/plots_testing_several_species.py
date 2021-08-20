@@ -55,8 +55,6 @@ ProcessedDataDir = "%s/processed_data"%PlotsDir; fun.make_folder(ProcessedDataDi
 # get a cross accuracy df from the real SVs, both based on the golden set and the human real set of SVs
 df_cross_accuracy_benchmark_realSVs = test_fun.get_cross_accuracy_df_realSVs(CurDir, ProcessedDataDir, threads=threads, replace=False)
 
-khgadhjggda
-
 # get cross-accuracy measurements testing on simulations (it already includes the human hg38 as testing)
 df_cross_accuracy_benchmark = test_fun.get_cross_accuracy_df_several_perSVadeSimulations(outdir_testing, outdir_testing_human, genomes_and_annotations_dir, replace=False)
 
@@ -94,25 +92,39 @@ df_plot = df_cross_accuracy_benchmark[(df_cross_accuracy_benchmark.parms_typeSim
 fileprefix = "%s/all_cross_accuracy_onlyUniform"%PlotsDir
 test_fun.generate_heatmap_accuracy_of_parameters_on_test_samples(df_plot, fileprefix, replace=False, threads=4, accuracy_f="Fvalue", svtype="integrated", col_cluster = False, row_cluster = False, show_only_species_and_simType=True, multiplier_width_colorbars=1.5, show_only_species=True)
 
-#%% CROSSBENCHMARKING DISTRIBUTION PER CATHEGORIES
+#%% CROSSACCURACY DISTRIBUTION PER CATHEGORIES
 
 # define the accuracy_f
-accuracy_f = "recall"; # it could be Fvalue, precision or recall
+accuracy_f = "Fvalue"; # it could be Fvalue, precision or recall
 
 # plots the cross accuracy in a distributions-like manner
 fileprefix = "%s/cross_accuracy_distribution"%PlotsDir
 test_fun.get_crossbenchmarking_distributions_differentSetsOfParameters(df_cross_accuracy_benchmark, fileprefix, accuracy_f=accuracy_f, svtype="integrated")
 
+#%% CROSSACCURACY REAL SVs HEATMAP
 
+# define the accuracy_f
+accuracy_f = "Fvalue"; # it could be Fvalue, precision or recall
 
+# all data
+fileprefix = "%s/all_cross_accuracy_realSVs"%PlotsDir
+test_fun.generate_heatmap_accuracy_of_parameters_on_test_samples_realSVs(df_cross_accuracy_benchmark_realSVs, fileprefix, replace=False, threads=4, accuracy_f=accuracy_f, svtype="integrated", col_cluster = False, row_cluster = False)
 
+#%% CROSSACCURACY DISTRIBUTION REAL SVs PER CATHEGORIES
 
-#%% GOLDEN ACCURACY BAR PLOTS
+# define the accuracy_f
+accuracy_f = "Fvalue"; # it could be Fvalue, precision or recall
+
+# plots the cross accuracy in a distributions-like manner
+fileprefix = "%s/cross_accuracy_distribution_realSVs"%PlotsDir
+test_fun.get_crossbenchmarking_distributions_differentSetsOfParameters_realSVs(df_cross_accuracy_benchmark_realSVs, fileprefix, accuracy_f=accuracy_f, svtype="integrated")
+
+#%% GOLDEN ACCURACY BAR PLOTS (ONLY DEFAULT AND OPTIMISED PARAMETERS)
 
 fileprefix = "%s/goldenSetAccuracy"%PlotsDir
 test_fun.plot_goldenSet_accuracy_barplots(df_goldenSetAccuracy, fileprefix, accuracy_f="Fvalue", svtype="integrated")
 
-#%% GOLDEN ACCURACY LINE PLOT
+#%% GOLDEN ACCURACY LINE PLOT (ONLY DEFAULT AND OPTIMISED PARAMETERS)
 
 fileprefix = "%s/goldenSetAccuracy_lineplot"%PlotsDir
 test_fun.plot_goldenSet_accuracy_lineplots(df_goldenSetAccuracy, fileprefix, accuracy_f="recall", svtype="integrated")
@@ -135,5 +147,3 @@ for taxID, spName, ploidy, mitochondrial_chromosome, max_coverage_sra_reads in t
 #%% PRINT OUT
 print("testing several species finished")
 sys.exit(0)
-
-#%% OLD 
