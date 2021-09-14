@@ -1855,6 +1855,100 @@ def get_fastqgz_from_bam(bamfile, threads=4, replace=False, already_sorted_by_re
     return reads1_gz, reads2_gz
 
 
+def get_crossbenchmarking_distributions_default_and_best(df_cross_accuracy_benchmark, fileprefix, accuracy_f="Fvalue", width_multiplier=2.8, legend_deviation=1.9):
+
+    """Plots the svtype vs accuracy. The rows are different species. The cols are different types of simulations  """
+
+    # keep only default and same sample
+    df_cross_accuracy_benchmark = df_cross_accuracy_benchmark[df_cross_accuracy_benchmark.type_comparison.isin({"fast", "same_run_and_simulation"})]
+
+    # define things
+    sorted_species = ["Candida_glabrata", "Candida_albicans", "Cryptococcus_neoformans", "Arabidopsis_thaliana", "Drosophila_melanogaster", "Homo_sapiens"]
+    sorted_simTypes = ["uniform", "realSVs", "arroundHomRegions"]
+    simType_to_CorrectSimType = {"uniform":"random", "realSVs":"real", "arroundHomRegions":"homologous"}
+
+    # sort by svtype
+    sorted_svtypes = ["deletions", "tandemDuplications", "inversions", "insertions", "translocations", "integrated"]
+    svtype_to_orderI = dict(zip(sorted_svtypes, range(len(sorted_svtypes))))
+    df_cross_accuracy_benchmark["svtype_I"] = df_cross_accuracy_benchmark.svtype.apply(lambda x: svtype_to_orderI[x])
+
+    # add the parameters
+    typeComparison_to_newTypeComparison = {"fast":"default", "same_run_and_simulation":"optimized"}
+    df_cross_accuracy_benchmark["parameters"] = df_cross_accuracy_benchmark.type_comparison.apply(lambda x: typeComparison_to_newTypeComparison[x])
+
+
+    # define graphics
+    parms_to_color = {"default":"gray", "optimized":"red"}
+
+    # create small svtype
+    svtype_to_shortSVtype = {"deletions":"del", "tandemDuplications":"tan", "insertions":"ins", "translocations":"tra", "inversions":"inv", "integrated":"all"}
+
+    df_cross_accuracy_benchmark["svtype"] = df_cross_accuracy_benchmark.svtype.apply(lambda x: svtype_to_shortSVtype[x])
+
+
+    # init fig
+    nrows = len(sorted_species)
+    ncols = len(sorted_simTypes)
+
+    I = 1
+    fig = plt.figure(figsize=(ncols*width_multiplier, nrows*1.3))
+
+    for Ir, test_species in enumerate(sorted_species):
+        for Ic, test_simType in enumerate(sorted_simTypes):
+            print(test_species, test_simType)
+
+            # get df
+            df_plot =  df_cross_accuracy_benchmark[(df_cross_accuracy_benchmark.test_species==test_species) & (df_cross_accuracy_benchmark.test_typeSimulations==test_simType)].sort_values(by=["svtype_I"])
+
+            #do not add empty
+            if len(df_plot)==0: continue
+
+            # get the subplot
+            ax = plt.subplot(nrows, ncols, I); I+=1
+
+            # get the stripplot
+            ax = sns.stripplot(data=df_plot, x="svtype", y=accuracy_f, hue="parameters", palette=parms_to_color,  dodge=True,  linewidth=.3, edgecolor="black", size=4, alpha=.9)
+
+            # set the ylims
+            ax.set_ylim([-0.05, 1.1])
+
+            # add title
+            if Ir==0: ax.set_title(simType_to_CorrectSimType[test_simType])
+
+            # define ylabels
+            if Ir==2: ax.set_ylabel("%s\n%s. %s"%(accuracy_f, test_species.split("_")[0][0], test_species.split("_")[1]))
+            else: ax.set_ylabel("%s. %s"%(test_species.split("_")[0][0], test_species.split("_")[1]))
+
+            # remove the xticklabels except in the last row
+            if Ir==(nrows-1) and Ic==1: ax.set_xlabel("SV type")
+            else: ax.set_xlabel("")
+            
+            if test_species!=sorted_species[-1] and not (test_species=="Drosophila_melanogaster" and test_simType=="arroundHomRegions"): ax.set_xticklabels([])
+            else: 
+                plt.setp(ax.get_xticklabels(), rotation=90, fontsize=10)
+
+            # add the 0.75 lines
+            plt.axhline(0.75, linestyle="--", linewidth=.7, color="k")
+
+            # remove the yticks unless it is the first column
+            if Ic!=0: 
+                ax.set_yticklabels([])
+                ax.set_yticks([])
+                ax.set_ylabel("")
+
+            # get the legen only in the last box
+            #if Ir==0 and Ic==(ncols-1): ax.legend(bbox_to_anchor=(1, 1), title="parameters") 
+            if Ir==(nrows-1) and Ic==(ncols-2): ax.legend(bbox_to_anchor=(legend_deviation, 0.5), title="parameters") 
+
+            elif len(df_plot)>0: ax.get_legend().remove()
+
+    # spaces
+    plt.subplots_adjust(wspace=0.05, hspace=0.1)
+    filename = "%s_%s.pdf"%(fileprefix, accuracy_f)
+    fig.savefig(filename, bbox_inches='tight')
+
+
+
 def get_crossbenchmarking_distributions_differentSetsOfParameters(df_cross_accuracy_benchmark, fileprefix, accuracy_f="Fvalue", svtype="integrated"):
 
     """Takes the cross benchmarking dataset and plots on the X different simulation types. Each row is one species, and the color is the type of parameter"""

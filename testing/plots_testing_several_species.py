@@ -75,6 +75,17 @@ test_fun.plot_used_resources_testing_on_simulations(CurDir, ProcessedDataDir, Pl
 filename = "%s/used_parameters_testing_several_species.pdf"%PlotsDir
 df_plot = test_fun.get_heatmaps_used_parameters(df_parameters_used, filename)
 
+#%% ACCURACY ON SIMULATIONS VS DEFAULT
+
+# define the accuracy_f
+accuracy_f = "precision"; width_multiplier = 1.6; legend_deviation = 2.1 
+accuracy_f = "recall"; width_multiplier = 1.6; legend_deviation = 2.1 
+#accuracy_f = "Fvalue"; width_multiplier = 2.8; legend_deviation = 1.9
+
+# all data
+fileprefix = "%s/accuracy_simulations_vs_default"%PlotsDir
+test_fun.get_crossbenchmarking_distributions_default_and_best(df_cross_accuracy_benchmark, fileprefix, accuracy_f=accuracy_f, width_multiplier=width_multiplier, legend_deviation=legend_deviation)
+
 #%% CROSS BENCHMARKING PLOT SIMULATIONS
 
 # define the accuracy_f
@@ -104,7 +115,7 @@ test_fun.get_crossbenchmarking_distributions_differentSetsOfParameters(df_cross_
 #%% CROSSACCURACY REAL SVs HEATMAP
 
 # define the accuracy_f
-accuracy_f = "Fvalue"; # it could be Fvalue, precision or recall
+accuracy_f = "precision"; # it could be Fvalue, precision or recall
 
 # all data
 fileprefix = "%s/all_cross_accuracy_realSVs"%PlotsDir

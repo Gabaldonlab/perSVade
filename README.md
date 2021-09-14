@@ -23,19 +23,31 @@ perSVade runs `bwa mem` to align the short reads, generating a sorted .bam file 
 
 These are the steps to install perSVade. If you are running it in the BSC (internal use) you can skip this (see **Running in BSC clusters**).
 
-### 1. Downloading the perSVade source code
-
-Download the perSVade source code from one of the releases and decompress. For example:
+In order to install perSVade, download the perSVade source code from one of the releases and decompress:
 
 `wget https://github.com/Gabaldonlab/perSVade/archive/0.10.tar.gz`
 
 `tar -xvf 0.10.tar.gz; rm 0.10.tar.gz`
 
-This already contains all the scripts to run the pipeline. Note that the created file (for example `perSVade-v0.9`) will be referred as `<perSVade_dir>`
+This already contains all the scripts to run the pipeline. Note that the created file (for example `perSVade-v0.9`) will be referred as `<perSVade_dir>`. You should use the latest version.
 
-### 2. Create a conda environment with most dependencies
+### Option 1: Download a docker image with pipeline installed
 
-perSVade is written in python, R and bash for Linux. Most of the dependecies can be installed through conda. It is advisable that you install these dependencies by creating a conda environment (for example called perSVade_env) with all of them, which we provide, with the following commands:
+We created a docker image (see https://www.docker.com) which can generate a container with perSVade installed. Once you have docker installed, you can run the following command to load the perSVade image: 
+
+`docker load -i <perSVade_dir>/perSVade_docker_image.tar`
+
+This will generate an image called `mikischikora/persvade:<version>`, which you can see with `docker images`. By running this image (i.e. `docker run -i mikischikora/persvade:<version> <commands>`) you create a container (like a virtual machine inside your computer) that contains the content of this github repository (under `/perSVade/`, which is the working directory) and all the environment ready to use perSVade. For example, if you type `docker run -i mikischikora/persvade:<version> ls` you'll see how the container's working directory has the same structure as this github repository.
+
+As an example, the command below would output all the options of perSVade:
+
+`docker run -i mikischikora/persvade:<version> scripts/perSVade.py --help`
+
+
+### Option 2: Install all the dependencies on your own
+
+
+You can also install all the dependencies of perSVade on your own, which is a more tedious and error-prone process. perSVade is written in python, R and bash for Linux. Most of the dependecies can be installed through conda. It is advisable that you install these dependencies by creating a conda environment (for example called perSVade_env) with all of them, which we provide, with the following commands:
 
 `cd <perSVade_dir>`
 
@@ -43,13 +55,11 @@ perSVade is written in python, R and bash for Linux. Most of the dependecies can
 
 `conda activate <env_name>`
 
-### 3. Automatic installation of additional dependencies 
-
 In addition, you should install some additional dependencies and setup of other environments with the following command:
 
 `./installation/setup_environment.sh`
 
-Make sure that this script ends with the message: `SUCCESS: all perSVade dependencies were properly installed.`
+We note that this script may not work in all machines. It is flexible to some extent, but there may be some system libraries incompatible with the dependencies. Make sure that this script ends with the message: `SUCCESS: all perSVade dependencies were properly installed.`
 
 NOTE: This will create the following additional environments:
 
@@ -67,11 +77,21 @@ Make sure that none of them exist before running this script. You can change `<e
 
 We note that this was tested with `conda 4.8.0` on a Linux-x86 64-bit architecture, installed at 03/2019. If you have a different conda version, you may change a bit the perSVade_env.yml file so that it does not create dependency problems.
 
-### 4. Test installation
+As an example, the command below would output all the options of perSVade:
 
-We highly recommend to test that all dependencies were properly installed with the following commands:
+`conda activate <env_name> && ./scripts/perSVade.py --help`
 
-`./installation/test_installation/test_installation.py`
+### Test installation
+
+We recommend to test that all dependencies were properly installed (particularly if you used Option 2). 
+
+- If you used Option 1, you can use:
+
+    `docker run -v <full_path_testing_outputs>:/perSVade/installation/test_installation/testing_outputs -i mikischikora/persvade:<version> ./installation/test_installation/test_installation.py` 
+
+    Note that the script `test_installation.py` writes data into `/perSVade/installation/test_installation/testing_outputs` inside the container. Without the -v option, this data would be lost once the `docker run` command was finished, as the container is destroyed. The argument `-v <full_path_testing_outputs>:/perSVade/installation/test_installation/testing_outputs` (with the format `-v <path in host>:<path in container>`) allows the data to persist in the `<full_path_testing_outputs>` of the host machine. `full_path_testing_outputs` should be the full path to a directory where this data should be written.
+
+- If you used Option 2, you can use `conda activate <env_name> && ./installation/test_installation/test_installation.py`
 
 This process should take arround 45 minutes on 4 cores. Verify that it finishes with the following message:
 
