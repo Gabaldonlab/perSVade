@@ -39,7 +39,7 @@ then
 	echo "installing gztool for architechture $architechture ..."
 	wget https://github.com/circulosmeos/gztool/releases/download/v0.11.5/gztool-linux.x86_64
 	mv gztool-linux.x86_64 gztool
-
+	
 elif [ $architechture = "aarch64" ]
 then
 	echo "installing gztool for architechture $architechture"

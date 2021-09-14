@@ -111,13 +111,19 @@ np.seterr(divide='ignore', invalid='ignore')
 
 
 
-# load a specific matplotlib library for cluster envs
-try:
-    import matplotlib as mpl
-    mpl.use('Agg')
+# load a specific matplotlib library for cluster envs. The BSC machine gets interactive plotting for debugging functions
+if str(subprocess.check_output("uname -a", shell=True)).startswith("b'Linux bscls063 4.12.14-lp150.12.48-default"): 
+
     import matplotlib.pyplot as plt
 
-except: import matplotlib.pyplot as plt
+else:
+
+    try:
+        import matplotlib as mpl
+        mpl.use('Agg')
+        import matplotlib.pyplot as plt
+
+    except: import matplotlib.pyplot as plt
 
 
 import seaborn as sns
@@ -9223,7 +9229,7 @@ def plot_clustermap_with_annotation(df, row_colors_df, col_colors_df, filename, 
     return cm
 
 
-def getPlots_filtering_accuracy_across_genomes_and_ploidies(df_cross_benchmark, PlotsDir, simName_to_color={"simulation_1":"black", "simulation_2":"red", "simulation_3":"green"}, simType_to_color={'biased_towards_repeats':"red", 'realData':"black", 'uniform':"blue", "simulated":"blue"}, ploidy_to_color={'consensus_ref': 'gray', 'haploid': 'black', 'diploid_hetero': 'maroon', 'ref:3_var:1': 'red', 'ref:9_var:1': 'lightsalmon', 'ref:99_var:1': 'white'}, svtype_to_color={"tandemDuplications": "gray", "deletions": "black", "inversions": "blue", "translocations": "olive", "insertions": "red", "remaining":"magenta", "integrated":"c"}):
+def getPlots_filtering_accuracy_across_genomes_and_ploidies(df_cross_benchmark, PlotsDir, simName_to_color={"simulation_1":"black", "simulation_2":"red", "simulation_3":"green", "simulation_4":"gray", "simulation_5":"blue"}, simType_to_color={'biased_towards_repeats':"red", 'realData':"black", 'uniform':"blue", "simulated":"blue"}, ploidy_to_color={'consensus_ref': 'gray', 'haploid': 'black', 'diploid_hetero': 'maroon', 'ref:3_var:1': 'red', 'ref:9_var:1': 'lightsalmon', 'ref:99_var:1': 'white'}, svtype_to_color={"tandemDuplications": "gray", "deletions": "black", "inversions": "blue", "translocations": "olive", "insertions": "red", "remaining":"magenta", "integrated":"c"}):
 
     """This function takes a df that has several training and testing genomes with accuracy in each, and makes several plots to represent the data under outdir """
 
