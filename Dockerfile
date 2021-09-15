@@ -5,8 +5,12 @@ FROM continuumio/miniconda3:4.8.2
 # define the working directory (creates the folder /perSVade inside the virtual machine)
 WORKDIR /perSVade
 
-# copy all the necessary files into /perSVade. This is everything from the github repository
+# copy all the necessary files into /perSVade. This is everything from the github repository.
 COPY . .
+
+# remove the scripts and test installation files, in order to be able to mount the folder from outside (only for debugging the container)
+#RUN rm -r /perSVade/scripts/*
+#RUN rm -r /perSVade/installation/test_installation/*
 
 # install mamba
 RUN conda install -y -c conda-forge mamba=0.15.3
@@ -91,7 +95,7 @@ RUN tar -xvf $installation_dir/Ninja_data/NINJA_repo_05112020.tar.gz && mv NINJA
 RUN cd $installation_dir/NINJA_repo_05112020 && make build
 RUN cp $ninja_binary $new_ninja_binary
 
-# test that NINJA was properly installed
+# test that NINJA was properly installed (skip in debug mode)
 RUN $new_ninja_binary --in $installation_dir/test_installation/testing_inputs/MERS_CoV_genome.fasta --out $installation_dir/Ninja_data/ninja_test.out && echo "Ninja installation worked!!!"
 
 # Reactivate the perSVade_env:
@@ -144,7 +148,7 @@ RUN mamba install -n $picard_env_name -c bioconda -y picard=2.18.26
 ############################################
 
 # activate perSVade's environment on running. "conda run --no-capture-output" would be to skip the generation of STDs
-ENTRYPOINT ["conda", "run", "-n", "perSVade_env"] 
+ENTRYPOINT ["conda", "run", "--no-capture-output", "--live-stream", "-n", "perSVade_env"] 
 
 ####### GENERAL COMMENTS ########
 
@@ -155,19 +159,16 @@ ENTRYPOINT ["conda", "run", "-n", "perSVade_env"]
 # we can pass arguments like -v <host_path>:<docker_path>
 # 'FROM continuumio/miniconda3:4.8.2' would be to have the directly installed conda, closest to reality. 4.10.3 is the latest
 # run a terminal with 'docker run -it mikischikora/persvade:v1 bash'
-# you can save this image with 'docker save -o ./perSVade_docker_image.tar mikischikora/persvade:v1', and load with 'docker load -i ./perSVade_docker_image.tar'
 
-#### the commands below change the location of the docker images  #######
-# mkdir /data/newdocker; mkdir /data/newdocker/docker
-# chmod -R 777 /data/newdocker/docker
-# Update docker.serive file on linux which resides under: /usr/lib/systemd/system:
-##### subl /usr/lib/systemd/system/docker.service
-##### add add -g /data/newdocker/docker in the existing ExecStart statement.
+# publish the image with 'docker push mikischikora/persvade:v1'
+# you can save this image with 'docker save mikischikora/persvade:v1 | gzip > ./perSVade_docker_image.tar.gz'
 
-# rm -rf /var/lib/docker  --> remove current data 
-# systemctl stop docker --> stop
-# ps aux | grep -i docker | grep -v grep --> this should output no commands
-# systemctl daemon-reload --> restart
-# systemctl start docker --> start
+# and load with 'docker load -i ./perSVade_docker_image.tar'
+
+# testing docker with linked data in /home/mschikora (debug mode):
+# docker run --memory "20g" -v /home/mschikora/samba/scripts/perSVade/perSVade_repository/scripts:/perSVade/scripts -v /home/mschikora/samba/scripts/perSVade/perSVade_repository/installation/test_installation:/perSVade/installation/test_installation mikischikora/persvade:v1 python -u ./installation/test_installation/test_installation.py
+
+# testing installation with the actual scripts inside the container
+# docker run --memory "28g" -v /home/mschikora/samba/scripts/perSVade/perSVade_repository/installation/test_installation/testing_outputs:/perSVade/installation/test_installation/testing_outputs mikischikora/persvade:v1 python -u ./installation/test_installation/test_installation.py
 
 #################################

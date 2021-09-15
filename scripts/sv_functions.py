@@ -483,6 +483,9 @@ taxID_to_sampleID_to_srrs_goldenSet = {3702: {"Athaliana_sample" : {"illumina_pa
 ####################################
 
 
+
+
+
 def get_date_and_time_for_print():
 
     """Gets the date of today"""
@@ -492,6 +495,12 @@ def get_date_and_time_for_print():
 
     return "[%s, %s]"%(current_day, current_time)
 
+
+def print_with_runtime(*x):
+
+    """prints with runtime info"""
+
+    print(get_date_and_time_for_print(), *x)
 
 def print_if_verbose(*x):
 
@@ -616,6 +625,14 @@ def union_empty_sets(set_iterable):
 
     return set.union(*list(set_iterable) + [set()])
 
+def run_cmd_simple(cmd):
+
+    """Runs os.system in cmd"""
+
+    out_stat = os.system(cmd) 
+    if out_stat!=0: raise ValueError("\n%s\n did not finish correctly. Out status: %i"%(cmd, out_stat))
+
+
 def run_cmd(cmd, env=EnvName):
 
     """This function runs a cmd with a given env"""
@@ -624,12 +641,23 @@ def run_cmd(cmd, env=EnvName):
     SOURCE_CONDA_CMD = "source %s/etc/profile.d/conda.sh"%CondaDir
     cmd_prefix = "%s && conda activate %s &&"%(SOURCE_CONDA_CMD, env)
 
-    # define the running
-    cmd_to_run = "%s %s"%(cmd_prefix, cmd)
+    # define the cmd
+    cmd_to_run = "%s %s"%(cmd_prefix, cmd) # old, tested on local machine
+
+    # define a bash script to print the cmd and run
+    nchars = 15
+    already_existing_ids = {f.split(".sh")[0] for f in os.listdir(".") if len(f)==(nchars+3) and f.endswith(".sh")} # +3 for the ".sh"
+    bash_script = "./%s.sh"%(id_generator(size=nchars, already_existing_ids=already_existing_ids, chars=string.ascii_uppercase))
+
+    # write the bash script
+    open(bash_script, "w").write(cmd_to_run+"\n")
 
     # run
-    out_stat = os.system(cmd_to_run) 
+    out_stat = os.system("bash %s"%bash_script) 
     if out_stat!=0: raise ValueError("\n%s\n did not finish correctly. Out status: %i"%(cmd_to_run, out_stat))
+
+    # remove the script
+    run_cmd_simple("rm %s"%bash_script)
 
 def get_weigthed_median(df, field, weight_field, type_algorithm="fast"):
 
@@ -897,6 +925,8 @@ def get_availableGbRAM(outdir):
     # get the memory with psutil
     available_mem = psutil.virtual_memory().available/1e9
 
+    print(available_mem)
+
     # define the fraction_total_running 
     if fraction_available_mem is None:
 
@@ -909,6 +939,9 @@ def get_availableGbRAM(outdir):
         elif str(subprocess.check_output("uname -a", shell=True)).startswith("b'Linux bscls063 4.12.14-lp150.12.48-default"): 
 
             availableGbRAM = available_mem
+
+        # In the docker container
+        #elif os.path.isfile("/.dockerenv"): 
 
         # others. Calculate from filling the memory
         else:

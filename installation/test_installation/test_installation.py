@@ -26,8 +26,8 @@ test_gff = "%s/reduced_annotation.gff"%testing_inputs_dir
 
 # load the functions (test if you can import python packages)
 import sv_functions as fun
-print("loading python packages worked successfully")
-fun.printing_verbose_mode = False
+fun.print_with_runtime("loading python packages worked successfully")
+fun.printing_verbose_mode = False # this may be changed
 
 # define the testing inuts dir 
 testing_outputs_dir = "%s/testing_outputs"%test_dir # this is the normal place
@@ -35,12 +35,14 @@ testing_outputs_dir = "%s/testing_outputs"%test_dir # this is the normal place
 test_output_perSVade = "%s/perSVade_output"%testing_outputs_dir
 outdir_small_variantCalling = "%s/smallVars_CNV_output"%test_output_perSVade
 
-print("all output files will be written to %s"%testing_outputs_dir)
+fun.print_with_runtime("all output files will be written to %s"%testing_outputs_dir)
 
 # delete and cretae outdir
 #fun.delete_folder(testing_outputs_dir)
 fun.make_folder(testing_outputs_dir)
 fun.make_folder(test_output_perSVade)
+
+fun.print_with_runtime("setting all the files")
 
 # redefine the reference genome location
 ref_genome = "%s/reduced_genome.fasta"%testing_outputs_dir
@@ -82,6 +84,9 @@ Calbicans_chr1_2_6 = "%s/Candida_albicans_chr1_2_6.fasta"%testing_outputs_dir
 fun.soft_link_files(inputs_Calbicans_chr1_2_6, Calbicans_chr1_2_6)
 
 ########################################
+
+# calculate the memory that is available
+#fun.print_with_runtime("running testings on %s Gb of RAM"%(fun.get_availableGbRAM(testing_outputs_dir)))
 
 # check that that the database has been created
 repeat_masker_db = "%s/Libraries/RepeatMasker.lib.nsq"%(fun.repeatmasker_dir) 
@@ -132,9 +137,7 @@ real_bedpe_breakpoints = test_fun.test_realSVgeneration(Cglabrata_subsampled_rea
 # test the parameter optimisation based on real_bedpe_breakpoints
 #test_fun.test_parameter_optimisation_perSVade_real(Cglabrata_subsampled_reads_dir, Cglabrata_subsampled_perSVade_outdir, Cglabrata_repeats, Cglabrata_genome, real_bedpe_breakpoints, replace=False)
 
-# test CNV calling with each of the three programs
-
-# test ONT read calling
+# test CNV calling with each of the three programs (CONY is not tested because it should not be used by default)
 
 ### TESTING THINGS THAT ARE DISPENSABLE ###
 
@@ -147,7 +150,7 @@ real_bedpe_breakpoints = test_fun.test_realSVgeneration(Cglabrata_subsampled_rea
 
 ############################################
 
-print("\n\n---\nSUCCESS: perSVade was properly installed\n---\n\n")
+fun.print_with_runtime("\n\n---\nSUCCESS: perSVade was properly installed\n---\n\n")
 
 
 
