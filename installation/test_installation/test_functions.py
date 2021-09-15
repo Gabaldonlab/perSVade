@@ -38,7 +38,7 @@ def test_get_repeat_maskerDF(test_genome, replace=False):
 
     try: 
 
-        print("trying to generate repeats for %s"%test_genome)
+        fun.print_with_runtime("trying to generate repeats for %s"%test_genome)
 
         # define the ref genome
         df_repeats, repeat_masker_outfile_default = fun.get_repeat_maskerDF(test_genome, threads=threads, replace=replace)
@@ -48,18 +48,18 @@ def test_get_repeat_maskerDF(test_genome, replace=False):
 
         if set(list(df_repeats.keys()))!=expected_fields: raise ValueError("something went wrong with the repeats generation")
 
-        print("repeats were generated correctly for %s"%test_genome)
+        fun.print_with_runtime("repeats were generated correctly for %s"%test_genome)
 
     except Exception as err:
 
 
-        print("\n\n---\nWARNING: The running of RepeatModeller and/or RepeatMasker did not work. This is expected to happen in old linux systems with a GLIBC version <2.12. You may provide the already calculated repeats through the command --previous_repeats_table. This is returned by the function of get_repeat_maskerDF from sv_functions.py . \n---\n\n")
+        fun.print_with_runtime("\n\n---\nWARNING: The running of RepeatModeller and/or RepeatMasker did not work. This is expected to happen in old linux systems with a GLIBC version <2.12. You may provide the already calculated repeats through the command --previous_repeats_table. This is returned by the function of get_repeat_maskerDF from sv_functions.py . \n---\n\n")
 
-        print("---\nThis is the error:")
+        fun.print_with_runtime("---\nThis is the error:")
 
         traceback.print_tb(err.__traceback__)
-        print(err)
-        print("---\n")
+        fun.print_with_runtime(err)
+        fun.print_with_runtime("---\n")
 
 def test_conda_env_generation(outdir, replace=False):
 
@@ -74,26 +74,26 @@ def test_conda_env_generation(outdir, replace=False):
     if fun.file_is_empty(correct_env_file) or replace is True:
 
         # remove previous env
-        print("removing previous env")
+        fun.print_with_runtime("removing previous env")
         try: fun.run_cmd("conda remove -y -n %s --all"%test_env_name)
-        except: print("%s does not exist"%test_env_name)
+        except: fun.print_with_runtime("%s does not exist"%test_env_name)
 
         # export file
-        print("creating %s yml"%EnvName)
+        fun.print_with_runtime("creating %s yml"%EnvName)
         yml_file = "%s/%s.yml"%(outdir, test_env_name)
         fun.run_cmd("conda env export --no-builds --from-history -n %s --file %s"%(EnvName, yml_file))
 
         # create environment
-        print("re-generating as %s"%test_env_name)
+        fun.print_with_runtime("re-generating as %s"%test_env_name)
         fun.run_cmd("conda env create --file %s --name %s"%(yml_file, test_env_name))
         
         # test that the activation works
-        print("activating %s"%test_env_name)
+        fun.print_with_runtime("activating %s"%test_env_name)
         cmd_activation = "source %s/etc/profile.d/conda.sh && conda activate %s && python -c 'import sys; sys.path.insert(0, \"%s\"); import sv_functions as fun'"%(AnacondaDir, test_env_name, fun.get_fullpath(scripts_dir))
         fun.run_cmd(cmd_activation)
 
         # remove file
-        print("removing envs")
+        fun.print_with_runtime("removing envs")
         fun.remove_file(yml_file)
 
         # remove env
@@ -102,7 +102,7 @@ def test_conda_env_generation(outdir, replace=False):
         # create file stating that the env is correct
         open(correct_env_file, "w").write("env is correct")
 
-    print("%s can be correctly regenerated"%EnvName)
+    fun.print_with_runtime("%s can be correctly regenerated"%EnvName)
 
 def test_read_simulation_and_get_reads(genome, window_l=2000, npairs=50000, read_length=150, median_insert_size=250, median_insert_size_sd=50, threads=threads, replace=False):
 
@@ -141,7 +141,7 @@ def test_read_simulation_and_get_reads(genome, window_l=2000, npairs=50000, read
         # simulate reads
         fun.simulate_readPairs_per_window(df_windows, genome, npairs, outdir_reads, read_length, median_insert_size, median_insert_size_sd, replace=False, threads=threads) 
 
-    print("read simulation works well")
+    fun.print_with_runtime("read simulation works well")
     return reads1, reads2
 
 def test_bwa_mem_and_get_bam(r1, r2, ref_genome, replace=False):
@@ -164,7 +164,7 @@ def test_bwa_mem_and_get_bam(r1, r2, ref_genome, replace=False):
     name_sample = "test_sample"
 
     # run
-    print("aligning reads")
+    fun.print_with_runtime("aligning reads")
     fun.run_bwa_mem(r1, r2, ref_genome, outdir, bamfile, sorted_bam, index_bam, name_sample, threads=threads, replace=False, MarkDuplicates=True)
 
     return sorted_bam
@@ -197,7 +197,7 @@ def test_processing_varcalling(smallVars_input_outdir, reference_genome, outdir,
 
         fun.run_cmd(cmd)
 
-    print("you can run successfully the variant processing")
+    fun.print_with_runtime("you can run successfully the variant processing")
 
 
 def test_smallVarCall_CNV_running(sorted_bam, outdir, ref_genome, gff, threads=threads, mitochondrial_chromosome="mito_C_glabrata_CBS138", replace=False):
@@ -222,7 +222,7 @@ def test_smallVarCall_CNV_running(sorted_bam, outdir, ref_genome, gff, threads=t
         final_file = "%s/variant_annotation_ploidy2.tab"%outdir_varCall
 
         if fun.file_is_empty(final_file) or replace is True:
-            print("running on pooled_seq=%s. If pooled_seq is True, this may take a bit because a lot of variants will be considered"%pooled_seq)
+            fun.print_with_runtime("running on pooled_seq=%s. If pooled_seq is True, this may take a bit because a lot of variants will be considered"%pooled_seq)
 
             # define the cmd
             cmd = "%s -r %s -o %s -p 2 -sbam %s -caller all -c 5 -mchr %s -mcode 3 -gcode 1 --repeats_table %s --remove_smallVarsCNV_nonEssentialFiles -gff %s -thr %i"%(varcall_cnv_pipeline, ref_genome, outdir_varCall, sorted_bam, mitochondrial_chromosome, repeats_table, gff, threads) 
@@ -232,7 +232,7 @@ def test_smallVarCall_CNV_running(sorted_bam, outdir, ref_genome, gff, threads=t
 
             fun.run_cmd(cmd)
 
-    print("small variant calling and CNV of genes works")
+    fun.print_with_runtime("small variant calling and CNV of genes works")
 
 def test_SRAdb_query_downloading_and_readTrimming(outdir, reference_genome, target_taxID, replace=False, threads=threads):
 
@@ -258,18 +258,18 @@ def test_SRAdb_query_downloading_and_readTrimming(outdir, reference_genome, targ
 
         if set(df_close_shortReads_table.keys())!={'short_reads2', 'short_reads1', 'runID', 'sampleID'} or len(df_close_shortReads_table)!=1: raise ValueError("The close_shortReads_table %s was not created as expected"%close_shortReads_table)
 
-        print("The system to query the SRA database, dowload and trim reads works")
+        fun.print_with_runtime("The system to query the SRA database, dowload and trim reads works")
 
     except Exception as err:
 
 
-        print("\n\n---\nWARNING: The connection to SRA did not work. This means that the automated obtention of reads of close species for benchmarking (involving the arguments --target_taxID, --n_close_samples, --nruns_per_sample or --goldenSet_dir) may fail. You can download the reads on your own and provide them with --close_shortReads_table. This can be also due to network problems at this moment. \n---\n\n")
+        fun.print_with_runtime("\n\n---\nWARNING: The connection to SRA did not work. This means that the automated obtention of reads of close species for benchmarking (involving the arguments --target_taxID, --n_close_samples, --nruns_per_sample or --goldenSet_dir) may fail. You can download the reads on your own and provide them with --close_shortReads_table. This can be also due to network problems at this moment. \n---\n\n")
 
-        print("---\nThis is the error:")
+        fun.print_with_runtime("---\nThis is the error:")
 
         traceback.print_tb(err.__traceback__)
-        print(err)
-        print("---\n")
+        fun.print_with_runtime(err)
+        fun.print_with_runtime("---\n")
 
 def test_rearranging_genome_random(ref_genome, replace=False, threads=threads, mitochondrial_chromosome="mito_C_glabrata_CBS138", nvars=5):
 
@@ -282,7 +282,7 @@ def test_rearranging_genome_random(ref_genome, replace=False, threads=threads, m
 
     sim_svtype_to_svfile, rearranged_genome = fun.simulate_SVs_in_genome(ref_genome, mitochondrial_chromosome, outdir, nvars=nvars, bedpe_breakpoints=None, replace=replace)
 
-    print("The generation of a genome with randomly-inserted SVs works")
+    fun.print_with_runtime("The generation of a genome with randomly-inserted SVs works")
 
     return rearranged_genome
 
@@ -296,11 +296,11 @@ def test_gridss_clove_pipeline(sorted_bam, reference_genome, outdir, threads=thr
     # define the median coverage (to be recalculated)
     median_coverage = -1
 
-    print("running gridss+clove pipeline on %i threads"%threads)
+    fun.print_with_runtime("running gridss+clove pipeline on %i threads"%threads)
     
     SV_dict, df_gridss = fun.run_gridssClove_given_filters(sorted_bam, reference_genome, outdir, median_coverage, replace=replace, threads=threads, gridss_blacklisted_regions="", gridss_VCFoutput="", gridss_maxcoverage=50000, median_insert_size=250, median_insert_size_sd=25, gridss_filters_dict=fun.default_filtersDict_gridss, run_in_parallel=True, max_rel_coverage_to_consider_del=0.2, min_rel_coverage_to_consider_dup=1.8, replace_FromGridssRun=replace)
 
-    print("you could run the gridss + clove pipeline succesfully")
+    fun.print_with_runtime("you could run the gridss + clove pipeline succesfully")
 
 
 
@@ -320,7 +320,7 @@ def test_parameter_optimisation_perSVade(sorted_bam, reference_genome, outdir, t
 
         fun.run_cmd(cmd)
 
-    print("parameter optimisation worked successfully")
+    fun.print_with_runtime("parameter optimisation worked successfully")
 
 
 def test_realSVgeneration(reads_dir, outdir, repeats, reference_genome, relaxed_parms, replace=False, threads=threads):
@@ -350,7 +350,7 @@ def test_realSVgeneration(reads_dir, outdir, repeats, reference_genome, relaxed_
         if fun.printing_verbose_mode is True: cmd += " --verbose"
         fun.run_cmd(cmd)
 
-    print("generation of real SVs worked. This also validates that the parameter json loading did work")
+    fun.print_with_runtime("generation of real SVs worked. This also validates that the parameter json loading did work")
 
     return real_bedpe_breakpoints
 
@@ -359,7 +359,7 @@ def test_parameter_optimisation_perSVade_real(reads_dir, outdir, repeats, refere
 
     """This function runs perSVade optimisation based on real SVs defined by real_bedpe_breakpoints."""
 
-    print("testing parameter optimisation based on real SVs")
+    fun.print_with_runtime("testing parameter optimisation based on real SVs")
 
     if fun.file_is_empty("%s/perSVade_finished_file.txt"%outdir) or replace is True:
 
@@ -374,7 +374,7 @@ def test_parameter_optimisation_perSVade_real(reads_dir, outdir, repeats, refere
         if fun.printing_verbose_mode is True: cmd += " --verbose"
         fun.run_cmd(cmd)
 
-    print("the parameter optimisation based on real SVs worked")
+    fun.print_with_runtime("the parameter optimisation based on real SVs worked")
 
 def test_greasy():
 
@@ -383,25 +383,25 @@ def test_greasy():
     try:
 
         fun.run_cmd("module load greasy")
-        print("greasy module can be loaded")
+        fun.print_with_runtime("greasy module can be loaded")
 
         fun.run_cmd("module load greasy && which greasy")
-        print("greasy is in the path")
+        fun.print_with_runtime("greasy is in the path")
 
         fun.run_cmd("which sbatch")
-        print("sbatch is in the path")
+        fun.print_with_runtime("sbatch is in the path")
 
-        print("greasy can be used for running parallel perSVade jobs")
+        fun.print_with_runtime("greasy can be used for running parallel perSVade jobs")
 
     except Exception as err:
 
-        print("\n\n---\nWARNING: greasy is not installed properly in your system. This means that setting '--job_array_mode greasy' will fail. You can set '--job_array_mode local' and run jobs sequentially and not in parallel. '--job_array_mode greasy' will only work on machines that use SLURM for managing jobs and greasy installed (and callable with a command like 'module load greasy && greasy <jobs_file>', and '<jobs_file>' is a file where each line corresponds to a command to be executed in a sepparate SLURM job). If you have a cluster environment without greasy, you can run in '--job_array_mode greasy' and manage the jobs on your own. \n---\n\n")
+        fun.print_with_runtime("\n\n---\nWARNING: greasy is not installed properly in your system. This means that setting '--job_array_mode greasy' will fail. You can set '--job_array_mode local' and run jobs sequentially and not in parallel. '--job_array_mode greasy' will only work on machines that use SLURM for managing jobs and greasy installed (and callable with a command like 'module load greasy && greasy <jobs_file>', and '<jobs_file>' is a file where each line corresponds to a command to be executed in a sepparate SLURM job). If you have a cluster environment without greasy, you can run in '--job_array_mode greasy' and manage the jobs on your own. \n---\n\n")
 
 
-        print("---\nThis is the error:")
+        fun.print_with_runtime("---\nThis is the error:")
 
         traceback.print_tb(err.__traceback__)
-        print(err)
-        print("---\n")
+        fun.print_with_runtime(err)
+        fun.print_with_runtime("---\n")
 
 

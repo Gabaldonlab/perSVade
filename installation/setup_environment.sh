@@ -71,7 +71,7 @@ conda config --add channels bioconda
 # create a subenvitonment to run repeat modeller. This needs a specific GLIBC version
 repeatMasker_env_name="$env_name"_RepeatMasker_env
 echo "creating conda env $repeatMasker_env_name"
-conda create -y --name $repeatMasker_env_name -c bioconda repeatmasker=4.0.9_p2 repeatmodeler=2.0.1
+mamba create -y --name $repeatMasker_env_name -c bioconda repeatmasker=4.0.9_p2 repeatmodeler=2.0.1
 
 # activate this environment
 source $conda_dir/etc/profile.d/conda.sh && conda activate $repeatMasker_env_name
@@ -139,7 +139,7 @@ test_Ninja_installation $previously_installed_Ninja "previously_installed"  || {
 	echo "Ninja was not previously installed. Installing through several options"
 
 	# install g++ with conda, if not installed
-	test_gxx_installation || conda install -y gxx_linux-64 # this will install gcc and gxx
+	test_gxx_installation || mamba install -y gxx_linux-64 # this will install gcc and gxx
 	test_gxx_installation || ln -s $repeatMasker_env_path/bin/x86_64-conda_cos6-linux-gnu-g++ $repeatMasker_env_path/bin/g++
 	test_gxx_installation || chmod 755 $repeatMasker_env_path/bin/g++
 
@@ -204,15 +204,15 @@ source $conda_dir/etc/profile.d/conda.sh && conda activate $env_name
 # create a subenvironment that has bctools=1.10.2
 bcftools_env_name="$env_name"_bcftools_1.10.2_env
 echo "creating conda env $bcftools_env_name"
-conda create -y --name $bcftools_env_name -c bioconda bcftools=1.10.2;
+mamba create -y --name $bcftools_env_name -c bioconda bcftools=1.10.2;
 
 # create a submenvironment that has ete3=3.0.0
 ete3_env_name="$env_name"_ete3_3.0.0_env
 echo "creating conda env $ete3_env_name"
 conda config --add channels conda-forge
 rm -rf $conda_dir/envs/$ete3_env_name || echo 'ete3 was not created'
-conda create -y --name $ete3_env_name python=3.6
-conda install -n $ete3_env_name -c etetoolkit -y ete3=3.1.2; # note that this was updated because 3.3.0 did not work
+mamba create -y --name $ete3_env_name python=3.6
+mamba install -n $ete3_env_name -c etetoolkit -y ete3=3.1.2; # note that this was updated because 3.3.0 did not work
 
 
 # old
@@ -226,15 +226,15 @@ conda install -n $ete3_env_name -c etetoolkit -y ete3=3.1.2; # note that this wa
 # create a subenvironment with all the R dependencies
 R_env_name="$env_name"_R_env
 echo "creating conda env $R_env_name"
-conda create -y --name $R_env_name;
+mamba create -y --name $R_env_name;
 
-conda install -n $R_env_name -c conda-forge -y r-base=4.0.2;
-conda install -n $R_env_name -c conda-forge -y r-argparser=0.6;
-conda install -n $R_env_name -c bioconda -y bioconductor-rsvsim=1.28;
-conda install -n $R_env_name -c conda-forge -y r-emdbook=1.3.12;
-conda install -n $R_env_name -c bioconda -y bioconductor-rtracklayer=1.48.0;
-conda install -n $R_env_name -c conda-forge -y r-r.utils=2.9.2;
-conda install -n $R_env_name -c bioconda -y bioconductor-structuralvariantannotation=1.4.0;
+mamba install -n $R_env_name -c conda-forge -y r-base=4.0.2;
+mamba install -n $R_env_name -c conda-forge -y r-argparser=0.6;
+mamba install -n $R_env_name -c bioconda -y bioconductor-rsvsim=1.28;
+mamba install -n $R_env_name -c conda-forge -y r-emdbook=1.3.12;
+mamba install -n $R_env_name -c bioconda -y bioconductor-rtracklayer=1.48.0;
+mamba install -n $R_env_name -c conda-forge -y r-r.utils=2.9.2;
+mamba install -n $R_env_name -c bioconda -y bioconductor-structuralvariantannotation=1.4.0;
 
 
 # create a subenvironment for running CONY. The last commit of CONY was the 12/06/2017. This is 3 years and 4 months ago., so that I have to install software from a similar age
@@ -252,37 +252,37 @@ conda install -n $R_env_name -c bioconda -y bioconductor-structuralvariantannota
 
 CONY_env_name="$env_name"_CONY_env
 echo "creating conda env $CONY_env_name"
-conda create -y --name $CONY_env_name -c bioconda bioconductor-iranges=2.8.2 bioconductor-exomecopy=1.22.0 r-snow=0.4; # this should install r-base=3.3.2, which fits all the dependencies
-conda install -y -n $CONY_env_name -c conda-forge r-argparser=0.4;
+mamba create -y --name $CONY_env_name -c bioconda bioconductor-iranges=2.8.2 bioconductor-exomecopy=1.22.0 r-snow=0.4; # this should install r-base=3.3.2, which fits all the dependencies
+mamba install -y -n $CONY_env_name -c conda-forge r-argparser=0.4;
 
 # create an environment to run AneuFinder
 AneuFinder_env_name="$env_name"_AneuFinder_env
 echo "creating conda env $AneuFinder_env_name"
-conda create -y --name $AneuFinder_env_name -c bioconda bioconductor-aneufinder=1.18.0;
-conda install -y -n $AneuFinder_env_name -c conda-forge r-argparser=0.6;
+mamba create -y --name $AneuFinder_env_name -c bioconda bioconductor-aneufinder=1.18.0;
+mamba install -y -n $AneuFinder_env_name -c conda-forge r-argparser=0.6;
 
 # create a subenvironment to run HMMCOPY
 HMMcopy_env_name="$env_name"_HMMcopy_env
 echo "creating conda env $HMMcopy_env_name"
-conda create -y --name $HMMcopy_env_name
+mamba create -y --name $HMMcopy_env_name
 conda config --add channels conda-forge
-conda install -y -n $HMMcopy_env_name -c bioconda bioconductor-hmmcopy=1.32.0; # this should install r-base=3.3.2, which fits all the dependencies
-conda install -y -n $HMMcopy_env_name -c conda-forge r-argparser=0.6;
-conda install -y -n $HMMcopy_env_name -c conda-forge r-kernsmooth=2.23;
+mamba install -y -n $HMMcopy_env_name -c bioconda bioconductor-hmmcopy=1.32.0; # this should install r-base=3.3.2, which fits all the dependencies
+mamba install -y -n $HMMcopy_env_name -c conda-forge r-argparser=0.6;
+mamba install -y -n $HMMcopy_env_name -c conda-forge r-kernsmooth=2.23;
 
 # create a subenvironment to run gridss
 gridss_env_name="$env_name"_gridss_env
 echo "creating conda env $gridss_env_name"
-conda create -y --name $gridss_env_name -c conda-forge r-base=4.0.2
-conda install -n $gridss_env_name -c bioconda -y samtools=1.10
-conda install -n $gridss_env_name -c bioconda -y bwa=0.7.17
-conda install -n $gridss_env_name -c anaconda -y openjdk=8.0.152
+mamba create -y --name $gridss_env_name -c conda-forge r-base=4.0.2
+mamba install -n $gridss_env_name -c bioconda -y samtools=1.10
+mamba install -n $gridss_env_name -c bioconda -y bwa=0.7.17
+mamba install -n $gridss_env_name -c anaconda -y openjdk=8.0.152
 
 # create a subenvironment to run picard
 picard_env_name="$env_name"_picard_env
 echo "creating conda env $picard_env_name"
-conda create -y --name $picard_env_name -c conda-forge r-base=4.0.2
-conda install -n $picard_env_name -c bioconda -y picard=2.18.26
+mamba create -y --name $picard_env_name -c conda-forge r-base=4.0.2
+mamba install -n $picard_env_name -c bioconda -y picard=2.18.26
 
 ####################################
 
