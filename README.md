@@ -25,18 +25,57 @@ These are the steps to install perSVade. If you are running it in the BSC (inter
 
 ### Option 1: Docker image
 
-We created a docker image (see https://www.docker.com) which can generate a container with perSVade installed. You can install the image from https://hub.docker.com/ with:
+We created a docker image (see https://www.docker.com) which can generate a container with perSVade installed. You can install the image from https://hub.docker.com/r/mikischikora/persvade with:
 
-`docker pull mikischikora/persvade:<tag>`
+`docker pull mikischikora/persvade:v1`
 
-This will generate an image called `mikischikora/persvade:<tag>`, which you can see with `docker images`. By running this image (i.e. `docker run -i mikischikora/persvade:<tag> <commands>`) you create a container (like a virtual machine inside your computer) that contains the content of this github repository (under `/perSVade/`, which is the working directory) and all the environment ready to use perSVade. For example, if you type `docker run -i mikischikora/persvade:<tag> ls` you'll see how the container's working directory has the same structure as this github repository.
+This will generate an image called `mikischikora/persvade:v1`, which you can see with `docker images`. By running this image (i.e. `docker run -i mikischikora/persvade:v1 <commands>`) you create a container (like a virtual machine inside your computer) that contains the content of this github repository (under `/perSVade/`, which is the working directory) and all the environment ready to use perSVade. For example, if you type `docker run -i mikischikora/persvade:v1 ls` you'll see how the container's working directory has the same structure as this github repository. Note that you can change the `v1` by any other available 'tag' that may be found in the dockerhub website.
 
 As an example, the command below would output all the options of perSVade:
 
-`docker run -i mikischikora/persvade:<version> scripts/perSVade.py --help`
+`docker run -i mikischikora/persvade:v1 scripts/perSVade.py --help`
 
+NOTE: The image of perSVade takes around 19Gb of disk. This may be a problem if your docker writes files in a disk with low storage capacity (which can happen in some Linux systems). You can check this solution to solve it: https://stackoverflow.com/a/56126715. 
 
-### Option 2: Traditional installation
+PROS: 
+
+- Docker images can be run in any OS in a reproducible way.
+
+CAVEATS: 
+
+- Running docker requires root permissions, so that some users may have problems running perSVade with the docker image in the HPC clusters. 
+
+- The sharing of data between the container and the host machine is not automatic (you need to specify mounting points with the -v option).
+
+### Option 2: Singularity image
+
+You can use singularity to run the docker image without root permissions (more info in https://sylabs.io/guides/3.2/user-guide/quick_start.html). Install singularity with:
+
+`conda install -c conda-forge singularity`
+
+Build singularity image (stored in a file called `mikischikora_persvade_v1.sif`) obtained from Dockerhub (it is writable):
+
+`singularity build ./mikischikora_persvade_v1.sif docker://mikischikora/persvade:v1`
+
+NOTE: This command writes files into a cachedir (`$HOME/.singularity/cache` by default) and a temporary dir (`/tmp` by default). As perSVade's is a large image, you may get into storage problems if `$HOME` or `/tmp` do not have enough disk quota. You can change these directories through environmental variables before running singularity (i.e. with `export SINGULARITY_CACHEDIR=<cachedir>` and `export SINGULARITY_TMPDIR=<tmpdir>`). `<cachedir>` and `<tmpdir>` should be the redefined paths with enough disk. You can find more information in https://sylabs.io/guides/3.6/user-guide/build_env.html. Note that `<tmpdir>` should have full permissions (given with `sudo chmod 777 <tmpdir>`).
+
+Once the image file is created, run it with the following command (note that it is equivalent to the `docker run` commands mentioned above):
+
+`singularity exec -e mikischikora_persvade_v1.sif ./scripts/perSVade.py --help`
+
+Note that the file `mikischikora_persvade_v1.sif` can be moved to other machines to run perSVade on them. 
+
+PROS:
+
+- The reading and writing of files into the actual filesystem of singularity is better than docker.
+- Singularity images can be run on any Linux system without root permission.
+- The singularity image is a file that can be transfered between machines.
+
+CAVEATS: 
+
+- Singularity images do not have optimal reproducibility in Windows systems.
+
+### Option 3: Traditional installation
 
 You can also install all the dependencies of perSVade on your own, which is a more tedious and error-prone process (as the process may not be reproducible across all machines). To do so, download the perSVade source code from one of the releases and decompress:
 
@@ -88,7 +127,7 @@ We recommend to test that all dependencies were properly installed (particularly
 
 - If you used Option 1 (docker), you can type:
 
-    `docker run -v <full_path_testing_outputs>:/perSVade/installation/test_installation/testing_outputs -i mikischikora/persvade:<tag> ./installation/test_installation/test_installation.py` 
+    `docker run -v <full_path_testing_outputs>:/perSVade/installation/test_installation/testing_outputs mikischikora/persvade:v1 python -u ./installation/test_installation/test_installation.py` 
 
     Note that the script `test_installation.py` writes data into `/perSVade/installation/test_installation/testing_outputs` inside the container. Without the -v option, this data would be lost once the `docker run` command was finished, as the container is destroyed. The argument `-v <full_path_testing_outputs>:/perSVade/installation/test_installation/testing_outputs` (with the format `-v <path in host>:<path in container>`) allows the data to persist in the `<full_path_testing_outputs>` of the host machine. `full_path_testing_outputs` should be the full path to a directory where this data should be written.
 
@@ -122,7 +161,7 @@ You can run the perSVade pipeline with:
 
 - If you used the Docker installation:
 
-    `docker run -v <full_path_to_reference_genome>:/reference_genome_dir -v <full_path_to_output_directory>:/output_directory -v <full_path_to_readsDir>:/reads  -i mikischikora/persvade:<tag> ./scripts/perSVade.py -r /output_directory/reference_genome.fasta -o /output_directory -p <ploidy, 1 or 2> -f1 /reads/reads1.fastq.gz -f2 /reads/reads2.fastq.gz`
+    `docker run -v <full_path_to_reference_genome>:/reference_genome_dir -v <full_path_to_output_directory>:/output_directory -v <full_path_to_readsDir>:/reads  mikischikora/persvade:v1 python -u ./scripts/perSVade.py -r /output_directory/reference_genome.fasta -o /output_directory -p <ploidy, 1 or 2> -f1 /reads/reads1.fastq.gz -f2 /reads/reads2.fastq.gz`
 
     Note that `<full_path_to_reference_genome>`, `<full_path_to_output_directory>` and `<full_path_to_readsDir>` should be the full paths to the directories in the host machine that contain the reference genome (called reference_genome.fasta), the desired output directory of perSVade and the raw reads (called reads1.fastq.gz and reads2.fastq.gz). Note that the arguments -r, -o, -r1 and -r2 of perSVade refer to paths inside the container, and the -v commmands define mounting points between the container and the host machine. These mounting points are thus essential to allow the input of files to perSVade and the persistence of the data generated. 
 
@@ -458,4 +497,5 @@ df_vars_R = df[(df_vars.sampleID=="R") & ~(df_vars.apply(get_df_vars_r_in_bgSamp
 print(set(df_vars_R.variantID_across_samples))
 
 ```
+
 ## Resource consumption
