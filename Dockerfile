@@ -152,15 +152,23 @@ ENTRYPOINT ["conda", "run", "--no-capture-output", "--live-stream", "-n", "perSV
 
 ####### GENERAL COMMENTS ########
 
-# We tested perSVade on version 4.8.0, but this was not available on dockerhub. 
-# This image contains the perSVade environment, and it can be used through 'docker run -i mikischikora/persvade:v1 <commands> '
 # this image can be built with 'docker build -t mikischikora/persvade:v1 .'
+
+# This image contains the perSVade environment, and it can be used through 'docker run -i mikischikora/persvade:v1 <commands> '
+
 # we created a .dockerignore file with some folders not to consider
+
+
+# We tested perSVade on version 4.8.0, but this was not available on dockerhub. 
+
 # we can pass arguments like -v <host_path>:<docker_path>
-# 'FROM continuumio/miniconda3:4.8.2' would be to have the directly installed conda, closest to reality. 4.10.3 is the latest
+
+# 'FROM continuumio/miniconda3:4.8.2' would be to have the directly installed conda, closest to reality.
+
 # run a terminal with 'docker run -it mikischikora/persvade:v1 bash'
 
 # publish the image with 'docker push mikischikora/persvade:v1'
+
 # you can save this image with 'docker save mikischikora/persvade:v1 | gzip > ./perSVade_docker_image.tar.gz'
 
 # and load with 'docker load -i ./perSVade_docker_image.tar'
@@ -169,6 +177,6 @@ ENTRYPOINT ["conda", "run", "--no-capture-output", "--live-stream", "-n", "perSV
 # docker run --memory "20g" -v /home/mschikora/samba/scripts/perSVade/perSVade_repository/scripts:/perSVade/scripts -v /home/mschikora/samba/scripts/perSVade/perSVade_repository/installation/test_installation:/perSVade/installation/test_installation mikischikora/persvade:v1 python -u ./installation/test_installation/test_installation.py
 
 # testing installation with the actual scripts inside the container
-# docker run --memory "28g" -v /home/mschikora/samba/scripts/perSVade/perSVade_repository/installation/test_installation/testing_outputs:/perSVade/installation/test_installation/testing_outputs mikischikora/persvade:v1 python -u ./installation/test_installation/test_installation.py
+# docker run --memory "4g" -v /home/mschikora/samba/scripts/perSVade/perSVade_repository/installation/test_installation/testing_outputs:/perSVade/installation/test_installation/testing_outputs mikischikora/persvade:v1 python -u ./installation/test_installation/test_installation.py
 
 #################################

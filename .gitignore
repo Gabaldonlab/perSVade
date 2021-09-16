@@ -27,3 +27,5 @@ installation/Ninja_data/NINJA-0.95-cluster_only
 installation/Ninja_data/NINJA_repo_05112020
 installation/Ninja_data/ninja_test.out
 scripts/__pycache__
+singularity_cache
+mikischikora_persvade_v1.sif
