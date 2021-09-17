@@ -1,6 +1,7 @@
 testing/misc_testing
 testing/Cglabrata
 testing/plots
+testing/docker_testing
 testing/cross_accuracy_calculations_realSVs
 testing/testing_perSVade_benchmark_stderr.txt
 testing/testing_perSVade_benchmark_stdout.txt
@@ -29,3 +30,4 @@ installation/Ninja_data/ninja_test.out
 scripts/__pycache__
 singularity_cache
 mikischikora_persvade_v1.sif
+perSVade_testing_outputs

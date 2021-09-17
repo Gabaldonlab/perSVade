@@ -21,11 +21,11 @@ perSVade runs `bwa mem` to align the short reads, generating a sorted .bam file 
 
 ## Installation
 
-These are the steps to install perSVade. If you are running it in the BSC (internal use) you can skip this (see **Running in BSC clusters**).
+These are the options to install perSVade, which should be possible in any Linux, Mac or Windows OS (depending on the installation option). If you are running it in the BSC (internal use) you can skip this (see **Running in BSC clusters**).
 
 ### Option 1: Docker image
 
-We created a docker image (see https://www.docker.com) which can generate a container with perSVade installed. You can install the image from https://hub.docker.com/r/mikischikora/persvade with:
+We created a docker image (see https://www.docker.com for installing docker) which can generate a container with perSVade installed. Once you have docker running in your computer you can install the image from https://hub.docker.com/r/mikischikora/persvade with:
 
 `docker pull mikischikora/persvade:v1`
 
@@ -44,8 +44,8 @@ PROS:
 CAVEATS: 
 
 - Running docker requires root permissions, so that some users may have problems running perSVade with the docker image in the HPC clusters. 
-
-- The sharing of data between the container and the host machine is not automatic (you need to specify mounting points with the -v option).
+- The sharing of data between the container and the host machine is not automatic, and you'll need to specify mounting points with (the -v option) for defining inputs of the pipeline and storing the outputs.
+- You need to know a bit of docker to view the logs of the pipeline.
 
 ### Option 2: Singularity image
 
@@ -53,20 +53,21 @@ You can use singularity to run the docker image without root permissions (more i
 
 `conda install -c conda-forge singularity`
 
-Build singularity image (stored in a file called `mikischikora_persvade_v1.sif`) obtained from Dockerhub (it is writable):
+Build a singularity image (stored in a file called `mikischikora_persvade_v1.sif`) obtained from Dockerhub (it is writable):
 
 `singularity build ./mikischikora_persvade_v1.sif docker://mikischikora/persvade:v1`
 
-NOTE: This command writes files into a cachedir (`$HOME/.singularity/cache` by default) and a temporary dir (`/tmp` by default). As perSVade's is a large image, you may get into storage problems if `$HOME` or `/tmp` do not have enough disk quota. You can change these directories through environmental variables before running singularity (i.e. with `export SINGULARITY_CACHEDIR=<cachedir>` and `export SINGULARITY_TMPDIR=<tmpdir>`). `<cachedir>` and `<tmpdir>` should be the redefined paths with enough disk. You can find more information in https://sylabs.io/guides/3.6/user-guide/build_env.html. Note that `<tmpdir>` should have full permissions (given with `sudo chmod 777 <tmpdir>`).
+Once the image file is created it can be moved to other direcories or systems (i.e. HPC clusters). You can use `singularity exec` to execute commands inside a container that has perSVade and it's dependencies installed in the path `/perSVade` of the container (with the same structure as this repository). For example, you can run a command to print the arguments of perSVade with:
 
-Once the image file is created, run it with the following command (note that it is equivalent to the `docker run` commands mentioned above):
+`singularity exec -e mikischikora_persvade_v1.sif bash -c 'source /opt/conda/etc/profile.d/conda.sh && conda activate perSVade_env && python /perSVade/scripts/perSVade.py --help'`
 
-`singularity exec -e mikischikora_persvade_v1.sif ./scripts/perSVade.py --help`
+Note that the `source /opt/conda/etc/profile.d/conda.sh && conda activate perSVade_env` is necessary to activate the environment in which `perSVade.py` runs.
 
-Note that the file `mikischikora_persvade_v1.sif` can be moved to other machines to run perSVade on them. 
+You may also enter the container interactively with `singularity shell ./mikischikora_persvade_v1.sif` for testing purposes.
 
 PROS:
 
+- Singularity images can be run in any Linux or Mac OS in a reproducible way.
 - The reading and writing of files into the actual filesystem of singularity is better than docker.
 - Singularity images can be run on any Linux system without root permission.
 - The singularity image is a file that can be transfered between machines.
@@ -121,19 +122,39 @@ As an example, the command below would output all the options of perSVade:
 
 `conda activate <env_name> && ./scripts/perSVade.py --help`
 
+PROS:
+
+- You don't need to know singularity or docker
+
+CAVEATS: 
+
+- The installation may not be easy on your machine, since different conda versions may not be able to generate the perSVade_env. In addition, the installation of extra dependencies may be difficult.
+- It won't work on Mac and windows.
+- The reproducibility cannot be guaranteed 100%, since conda relies on system libraries that may be different across machines.
+
 ### Test installation
 
-We recommend to test that all dependencies were properly installed (particularly if you used Option 2). 
+We recommend to test that all dependencies were properly installed (particularly if you used Option 3). 
 
 - If you used Option 1 (docker), you can type:
 
-    `docker run -v <full_path_testing_outputs>:/perSVade/installation/test_installation/testing_outputs mikischikora/persvade:v1 python -u ./installation/test_installation/test_installation.py` 
+	`mkdir perSVade_testing_outputs`
 
-    Note that the script `test_installation.py` writes data into `/perSVade/installation/test_installation/testing_outputs` inside the container. Without the -v option, this data would be lost once the `docker run` command was finished, as the container is destroyed. The argument `-v <full_path_testing_outputs>:/perSVade/installation/test_installation/testing_outputs` (with the format `-v <path in host>:<path in container>`) allows the data to persist in the `<full_path_testing_outputs>` of the host machine. `full_path_testing_outputs` should be the full path to a directory where this data should be written.
+    `docker run -v $PWD/perSVade_testing_outputs:/perSVade/installation/test_installation/testing_outputs mikischikora/persvade:v1 python -u ./installation/test_installation/test_installation.py` 
 
-- If you used Option 2 (traditional), you can use `conda activate <env_name> && ./installation/test_installation/test_installation.py`
+    Note that the script `test_installation.py` writes data into `/perSVade/installation/test_installation/testing_outputs` inside the container. Without the -v option, this data would be lost once the `docker run` command was finished, as the container is destroyed. The argument `-v $PWD/perSVade_testing_outputs:/perSVade/installation/test_installation/testing_outputs` (with the format `-v <path in host>:<path in container>` and full paths) allows the data to persist in the `./perSVade_testing_outputs` of the host machine.
 
-This process should take arround 45 minutes on 4 cores. Verify that it finishes with the following message:
+- If you used Option 2 (singularity), you can type:
+	
+	`mkdir perSVade_testing_outputs`
+
+	`singularity exec -B ./perSVade_testing_outputs:/perSVade/installation/test_installation/testing_outputs -e mikischikora_persvade_v1.sif bash -c 'source /opt/conda/etc/profile.d/conda.sh && conda activate perSVade_env && /perSVade/installation/test_installation/test_installation.py'`
+
+    Note that the script `test_installation.py` would write data into `/perSVade/installation/test_installation/testing_outputs` inside the container by default. However, we cannot write files inside the singularity container in the way that we built it (for reproducibility reasons). Using -B is a solution for this: it specifies a mounting of the `/perSVade/installation/test_installation/testing_outputs`  of the container into `./perSVade_testing_outputs` of the host machine (where the data will be written in a persistent way).
+
+- If you used Option 3 (traditional), you can use `conda activate <env_name> && ./installation/test_installation/test_installation.py`
+
+This process should take arround 45 minutes on 4 cores. The docker and singularity runs on Mac or Winows OS may be slower. Verify that it finishes with the following message:
 
 `SUCCESS: perSVade was properly installed`
 
@@ -155,6 +176,8 @@ OTHER NOTES:
 
 - All perSVade modules work in MareNostrum, and most of them in Nord3. The generation of "repeat files" and finding of "homologous regions" does not work in Nord3 because the GCLIB versions are old. You can use the Docker image in Nord3 as well.
 
+- You can also run the singularity images on these HPC systems, although the Nord3 kernel is too old to execute the perSVade image.
+
 ## Quick start
 
 You can run the perSVade pipeline with:
@@ -165,13 +188,20 @@ You can run the perSVade pipeline with:
 
     Note that `<full_path_to_reference_genome>`, `<full_path_to_output_directory>` and `<full_path_to_readsDir>` should be the full paths to the directories in the host machine that contain the reference genome (called reference_genome.fasta), the desired output directory of perSVade and the raw reads (called reads1.fastq.gz and reads2.fastq.gz). Note that the arguments -r, -o, -r1 and -r2 of perSVade refer to paths inside the container, and the -v commmands define mounting points between the container and the host machine. These mounting points are thus essential to allow the input of files to perSVade and the persistence of the data generated. 
 
+    Note that the docker container runs the commands with the `perSVade_env` activated.
+
+- If you used the Singularity installation:
+
+	`singularity exec -e ./mikischikora_persvade_v1.sif bash -c 'source /opt/conda/etc/profile.d/conda.sh && conda activate perSVade_env && python /perSVade/scripts/perSVade.py -r <path to the reference genome (fasta)> -o <output_directory> -p <ploidy, 1 or 2> -f1 <forward_reads.fastq.gz> -f2 <reverse_reads.fastq.gz>'`
+
+	NOTE: Here the `<path to the reference genome (fasta)>`, `<output_directory>`, `<forward_reads.fastq.gz>` and `<reverse_reads.fastq.gz>` are the actual files in the host machine. 
+
 - If you used the traditional installation:
 
 	`conda activate perSVade_env`
 
 	`python ./scripts/perSVade.py -r <path to the reference genome (fasta)> -o <output_directory> -p <ploidy, 1 or 2> -f1 <forward_reads.fastq.gz> -f2 <reverse_reads.fastq.gz>`
 
-Note that the docker container runs the commands with the `perSVade_env` activated.
 
 By default, perSVade runs SV calling optimised on random simulations, read depth-based CNV calling with AneuFinder/HMMcopy and integration of SVs and CNVs into a single vcf.
 
@@ -185,9 +215,11 @@ In addition, you can import the file `./scripts/sv_functions.py` as a python mod
 
 You can run a python script inside the Docker container that imports `sv_functions`, by using the -v option of `docker run` to share data between the host machine and the container (see above for more detailed examples on how to use the -v option). 
 
+Regarding running this in singularity, you can create a script that imports the functions from `/perSVade/scripts/sv_functions.py` and run it with `singularity exec`. Singularity has access to all the host machine files, so that you don't need to specify mounting points as with the docker image.
+
 ## Examples
 
-Below are some examples of different analyses that can be done with perSVade. We STRONGLY ADVICE that you check the meaning of each of the indicated arguments. We note that these commands are related to the traditional installation. If you want to use the docker run you need to specify connections between the host and the container (see the section **Quick start** for examples). In addition, the section **FAQs** will also help why some arguments are specified.
+Below are some examples of different analyses that can be done with perSVade. We STRONGLY ADVICE that you check the meaning of each of the indicated arguments. We note that these commands are related to the traditional installation. If you want to use the docker or singularity run you need to do it as in the section **Quick start**. In addition, the section **FAQs** will also help why some arguments are specified.
 
 - Traditional variant calling pipeline (small variants and coverage per gene, without SV or CNV calling):
 
@@ -497,5 +529,13 @@ df_vars_R = df[(df_vars.sampleID=="R") & ~(df_vars.apply(get_df_vars_r_in_bgSamp
 print(set(df_vars_R.variantID_across_samples))
 
 ```
+
+### Running singularity build takes too much memory
+
+The `singularity build` command writes files into a cachedir (`$HOME/.singularity/cache` by default) and a temporary dir (`/tmp` by default). As perSVade's is a large image, you may get into storage problems if `$HOME` or `/tmp` do not have enough disk quota. You can change these directories through environmental variables before running singularity (i.e. with `export SINGULARITY_CACHEDIR=<cachedir>` and `export SINGULARITY_TMPDIR=<tmpdir>`). `<cachedir>` and `<tmpdir>` should be the redefined paths with enough disk. You can find more information in https://sylabs.io/guides/3.6/user-guide/build_env.html. Note that `<tmpdir>` should have full permissions (given with `sudo chmod 777 <tmpdir>`).
+
+### Where does perSVade write temporary files
+
+Most of them are written under the provided `--outdir`, but there are also some written under `$HOME/.perSVade_dir` (which can be removed any time). You can specify a `PERSVADE_TMPDIR` environmental varibale to not write under `$HOME/.perSVade_dir` (i.e. with `export PERSVADE_TMPDIR=/tmp/perSVade_tmpdir`)
 
 ## Resource consumption
