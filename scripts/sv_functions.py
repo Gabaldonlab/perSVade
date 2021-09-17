@@ -644,10 +644,15 @@ def run_cmd(cmd, env=EnvName):
     # define the cmd
     cmd_to_run = "%s %s"%(cmd_prefix, cmd) # old, tested on local machine
 
+    # define a tmpdir to write the bash scripts
+    if "PERSVADE_TMPDIR" in os.environ: tmpdir = os.environ["PERSVADE_TMPDIR"]
+    else: tmpdir = "%s/.perSVade_tmp"%(os.environ["HOME"])
+    make_folder(tmpdir)
+
     # define a bash script to print the cmd and run
     nchars = 15
-    already_existing_ids = {f.split(".sh")[0] for f in os.listdir(".") if len(f)==(nchars+3) and f.endswith(".sh")} # +3 for the ".sh"
-    bash_script = "./%s.sh"%(id_generator(size=nchars, already_existing_ids=already_existing_ids, chars=string.ascii_uppercase))
+    already_existing_ids = {f.split(".sh")[0] for f in os.listdir(tmpdir) if len(f)==(nchars+3) and f.endswith(".sh")} # +3 for the ".sh"
+    bash_script = "%s/%s.sh"%(tmpdir, id_generator(size=nchars, already_existing_ids=already_existing_ids, chars=string.ascii_uppercase))
 
     # write the bash script
     open(bash_script, "w").write(cmd_to_run+"\n")

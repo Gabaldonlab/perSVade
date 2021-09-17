@@ -12,6 +12,11 @@ COPY . .
 #RUN rm -r /perSVade/scripts/*
 #RUN rm -r /perSVade/installation/test_installation/*
 
+# give permissions to necessary files
+RUN chmod 755 /perSVade/scripts/*
+RUN chmod 755 /perSVade/installation/*
+RUN chmod -R 777 /perSVade/installation/test_installation/
+
 # install mamba
 RUN conda install -y -c conda-forge mamba=0.15.3
 
@@ -70,7 +75,7 @@ RUN cd $external_software_dir && wget https://github.com/PapenfussLab/clove/rele
 RUN cd $external_software_dir && wget https://raw.githubusercontent.com/weiyuchung/CONY/master/CONY.R
 
 # give permissions to all
-RUN cd $external_software_dir && chmod u+x *
+RUN cd $external_software_dir && chmod 755 *
 
 # add conda channels
 RUN conda config --add channels conda-forge
@@ -157,7 +162,6 @@ ENTRYPOINT ["conda", "run", "--no-capture-output", "--live-stream", "-n", "perSV
 # This image contains the perSVade environment, and it can be used through 'docker run -i mikischikora/persvade:v1 <commands> '
 
 # we created a .dockerignore file with some folders not to consider
-
 
 # We tested perSVade on version 4.8.0, but this was not available on dockerhub. 
 
