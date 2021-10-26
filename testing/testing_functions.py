@@ -2595,6 +2595,9 @@ def plot_used_resources_testing_on_simulations(CurDir, ProcessedDataDir, PlotsDi
     # sort for plotting 
     df_resources = df_resources.sort_values(by=["species", "type_simulation"])
 
+    print(df_resources[["species", "genome size (Mb)"]].drop_duplicates())
+    print(df_resources[["species", "mapped pairs"]].drop_duplicates().sort_values(by=["mapped pairs"]))
+
 
     # init figure
     fig = plt.figure(figsize=(6,6))
@@ -2637,5 +2640,3 @@ def plot_used_resources_testing_on_simulations(CurDir, ProcessedDataDir, PlotsDi
 
     ##################################################################
 
-
-                                                                                
