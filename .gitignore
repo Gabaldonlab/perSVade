@@ -31,6 +31,6 @@ scripts/__pycache__
 singularity_cache
 mikischikora_persvade_v1.sif
 perSVade_testing_outputs
-._.DS_Store
-.DS_Store
-._perSVade_pipeline_cartoon.pdf
+./._.DS_Store
+./.DS_Store
+./._perSVade_pipeline_cartoon.pdf
