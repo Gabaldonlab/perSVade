@@ -402,6 +402,9 @@ g_filterName_to_filterValue_to_Number = {filterName : dict(zip(filtersList, rang
 # define the default window_l
 window_l = 10000
 
+# define a default file for the cmds used in perSVade
+log_file_all_cmds = None
+
 # define the verbosity. If False, none of the print statements will have an effect.
 printing_verbose_mode = True
 
@@ -632,10 +635,12 @@ def run_cmd_simple(cmd):
     out_stat = os.system(cmd) 
     if out_stat!=0: raise ValueError("\n%s\n did not finish correctly. Out status: %i"%(cmd, out_stat))
 
-
 def run_cmd(cmd, env=EnvName):
 
     """This function runs a cmd with a given env"""
+
+    # append the command to log_file_all_cmds
+    if log_file_all_cmds is not None: open(log_file_all_cmds, "a").write("environment: %s; cmd: %s\n"%(env, cmd))
 
     # define the cmds
     SOURCE_CONDA_CMD = "source %s/etc/profile.d/conda.sh"%CondaDir
@@ -712,7 +717,7 @@ def get_median_coverage(coverage_df, mitochondrial_chromosome, coverage_field="m
     mitochondrial_chromosomes = set(mitochondrial_chromosome.split(","))
 
     # get the nuclear and not 0 idx
-    if set(coverage_df[chrom_f])==mitochondrial_chromosomes: idx = (coverage_df[coverage_field]>0)
+    if all([c in mitochondrial_chromosomes for c in set(coverage_df[chrom_f])]): idx = (coverage_df[coverage_field]>0)
     else: idx = (~coverage_df[chrom_f].isin(mitochondrial_chromosomes)) & (coverage_df[coverage_field]>0)
 
     df = coverage_df[idx]
@@ -4651,7 +4656,9 @@ def run_trimmomatic(reads1, reads2, replace=False, threads=1):
 
             std_trimmomatic = "%s.trimmomatic_std.txt"%trimmed_reads1
             print_if_verbose("running trimmomatic. The std is in %s"%std_trimmomatic)
-            trim_cmd = "%s --number_threads %i -rr1 %s -rr2 %s -tr1 %s -tr2 %s -ad %s > %s 2>&1"%(TRIMMOMATIC, threads, reads1, reads2, trimmed_reads1, trimmed_reads2, adapters_filename, std_trimmomatic)
+            trim_cmd = "%s --number_threads %i -rr1 %s -rr2 %s -tr1 %s -tr2 %s -ad %s"%(TRIMMOMATIC, threads, reads1, reads2, trimmed_reads1, trimmed_reads2, adapters_filename)
+            if log_file_all_cmds is not None: trim_cmd += " --log_file_all_cmds %s"%log_file_all_cmds
+            trim_cmd += " > %s 2>&1"%std_trimmomatic
 
             run_cmd(trim_cmd)
             remove_file(std_trimmomatic)
@@ -5839,6 +5846,7 @@ def get_close_shortReads_table_close_to_taxID(target_taxID, reference_genome, ou
                 # define the cmd and add it
                 cmd = "%s --srr %s --outdir %s --threads %i"%(get_trimmed_reads_for_srr_py, srr, outdir_srr, threads)
                 if StopAfterPrefecth_of_reads is True: cmd += " --stop_after_prefetch"
+                if log_file_all_cmds is not None: cmd += " --log_file_all_cmds %s"%log_file_all_cmds
 
                 all_cmds.append(cmd)
                 continue
@@ -11121,7 +11129,11 @@ def get_goldenSet_table_fromSRA(target_taxID, reference_genome, outdir, min_cove
             for type_data, srr in type_data_to_srr.items():
 
                 final_file = "%s/%s.srr"%(reads_dir, srr)
-                if file_is_empty(final_file): all_cmds.append("%s --srr %s --outdir %s --threads %i --stop_after_prefetch --type_data %s"%(get_trimmed_reads_for_srr_py, srr, reads_dir, 1, type_data)) # append job
+
+                cmd = "%s --srr %s --outdir %s --threads %i --stop_after_prefetch --type_data %s"%(get_trimmed_reads_for_srr_py, srr, reads_dir, 1, type_data)
+                if log_file_all_cmds is not None: cmd += " --log_file_all_cmds %s"%log_file_all_cmds
+                if file_is_empty(final_file): all_cmds.append(cmd) # append job
+
 
         # download prefetched files
         if len(all_cmds)>0:
@@ -15737,7 +15749,12 @@ def get_vep_df_for_vcf_df(vcf_df, outdir, reference_genome, gff_with_biotype, mi
 
         # run vep for this vcf
         vep_std = "%s_annotating_vep.std"%prefix
-        run_cmd("%s --input_vcf %s --outfile %s --ref %s --gff %s --mitochondrial_chromosome %s --mito_code %i --gDNA_code %i > %s 2>&1"%(run_vep, vcf_file, annotated_vcf_tmp, reference_genome, gff_with_biotype, mitochondrial_chromosome, mitochondrial_code, gDNA_code, vep_std))
+        vep_cmd = "%s --input_vcf %s --outfile %s --ref %s --gff %s --mitochondrial_chromosome %s --mito_code %i --gDNA_code %i"%(run_vep, vcf_file, annotated_vcf_tmp, reference_genome, gff_with_biotype, mitochondrial_chromosome, mitochondrial_code, gDNA_code)
+        
+        if log_file_all_cmds is not None: vep_cmd += " --log_file_all_cmds %s"%log_file_all_cmds
+        vep_cmd += " > %s 2>&1"%vep_std
+
+        run_cmd(vep_cmd)
 
         # check that the std contains no signs of compressing the gff
         if any(["compressing gff before running vep" in l for l in open(vep_std, "r").readlines()]): raise ValueError("There was a compression of the gff before running vep. This is not acceptable when running in parallel")   
@@ -17822,8 +17839,13 @@ def annotate_SVs_inHouse(vcf_SVcalling, gff, reference_genome, replace=False, th
         # clea
         clean_vep_output_files(annotated_vcf_tmp)
 
+
+
         # run vep
-        run_cmd("%s --input_vcf %s --outfile %s --ref %s --gff %s --mitochondrial_chromosome %s --mito_code %i --gDNA_code %i"%(run_vep, vcf_SVcalling, annotated_vcf_tmp, reference_genome, gff, mitochondrial_chromosome, mito_code, gDNA_code))
+        vep_cmd = "%s --input_vcf %s --outfile %s --ref %s --gff %s --mitochondrial_chromosome %s --mito_code %i --gDNA_code %i"%(run_vep, vcf_SVcalling, annotated_vcf_tmp, reference_genome, gff, mitochondrial_chromosome, mito_code, gDNA_code)
+        if log_file_all_cmds is not None: vep_cmd += " --log_file_all_cmds %s"%log_file_all_cmds
+
+        run_cmd(vep_cmd)
 
         # rename the files (also the warnings and summary)
         os.rename("%s.raw.tbl.tmp_summary.html"%annotated_vcf_tmp, "%s.raw.tbl.tmp_summary.html"%annotated_vcf)
