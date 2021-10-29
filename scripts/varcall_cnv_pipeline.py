@@ -65,6 +65,8 @@ parser.add_argument("-o", "--outdir", dest="outdir", action="store", required=Tr
 parser.add_argument("--replace", dest="replace", action="store_true", help="Replace existing files")
 parser.add_argument("--replace_var_integration", dest="replace_var_integration", action="store_true", help="Replace all the variant integration steps")
 parser.add_argument("-p", "--ploidy", dest="ploidy", default=1, type=int, help="Ploidy, can be 1 or 2")
+parser.add_argument("--log_file_all_cmds", dest="log_file_all_cmds", default=None, help="An existing log_file_all_cmds to store the cmds")
+
 
 # alignment args
 parser.add_argument("-sbam", "--sortedbam", dest="sortedbam", required=True, type=str, help="The path to the sorted bam file, which should have a bam.bai file in the same dir. This is mutually exclusive with providing reads")
@@ -102,6 +104,10 @@ opt = parser.parse_args()
 ######################################################
 ######################################################
 ######################################################
+
+# add the cmds file
+fun.log_file_all_cmds = opt.log_file_all_cmds
+if fun.log_file_all_cmds is not None and fun.file_is_empty(fun.log_file_all_cmds): raise ValueError("The provided --log_file_all_cmds %s should exist"%fun.log_file_all_cmds)
 
 # debug commands
 if opt.replace is True: fun.delete_folder(opt.outdir)

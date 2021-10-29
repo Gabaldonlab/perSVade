@@ -49,10 +49,17 @@ parser.add_argument("--stop_after_fastqdump", dest="stop_after_fastqdump", actio
 parser.add_argument("--threads", dest="threads", default=16, type=int, help="Number of threads, Default: 16")
 parser.add_argument("--type_data", dest="type_data", default="illumina_paired", type=str, help="The type of data. By default it is illumina paired-end seq (illumina_paired). It can also be 'nanopore'")
 parser.add_argument("--replace", dest="replace", action="store_true", default=False, help="Replace existing files")
+parser.add_argument("--log_file_all_cmds", dest="log_file_all_cmds", default=None, help="An existing log_file_all_cmds to store the cmds")
 
 opt = parser.parse_args()
 
 ####################
+
+# define the log_file_all_cmds
+fun.log_file_all_cmds = opt.log_file_all_cmds
+
+# check that log_file_all_cmds exists
+if fun.log_file_all_cmds is not None and fun.file_is_empty(fun.log_file_all_cmds): raise ValueError("The provided --log_file_all_cmds %s should exist"%fun.log_file_all_cmds)
 
 # define the final reads
 if opt.type_data=="illumina_paired": 

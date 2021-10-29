@@ -53,6 +53,7 @@ mandatory_args = parser.add_argument_group("MANDATORY ARGUMENTS")
 
 mandatory_args.add_argument("-r", "--ref", dest="ref", required=True, help="Reference genome. Has to end with .fasta.")
 mandatory_args.add_argument("-o", "--outdir", dest="outdir", action="store", required=True, help="Directory where the data will be stored")
+mandatory_args.add_argument("-mchr", "--mitochondrial_chromosome", dest="mitochondrial_chromosome", required=True, type=str, help="The name of the mitochondrial chromosome. This is important if you have mitochondrial proteins for which to annotate the impact of nonsynonymous variants, as the mitochondrial genetic code is different. This should be the same as in the gff. If there is no mitochondria just put 'no_mitochondria'. If there is more than one mitochindrial scaffold, provide them as comma-sepparated IDs.")
 
 #################################
 
@@ -101,7 +102,6 @@ general_optional_args.add_argument("-mcode", "--mitochondrial_code", dest="mitoc
 
 general_optional_args.add_argument("-gcode", "--gDNA_code", dest="gDNA_code", default=1, type=int, help="The code of the NCBI gDNA genetic code. You can find the numbers for your species here https://www.ncbi.nlm.nih.gov/Taxonomy/Utils/wprintgc.cgi . For C. albicans it is 12. The information of this website may be wrong, so you may want to double check with the literature.")
 
-general_optional_args.add_argument("-mchr", "--mitochondrial_chromosome", dest="mitochondrial_chromosome", default="mito_C_glabrata_CBS138", type=str, help="The name of the mitochondrial chromosome. This is important if you have mitochondrial proteins for which to annotate the impact of nonsynonymous variants, as the mitochondrial genetic code is different. This should be the same as in the gff. If there is no mitochondria just put 'no_mitochondria'. If there is more than one mitochindrial scaffold, provide them as comma-sepparated IDs.")
 
 general_optional_args.add_argument("--QC_and_trimming_reads", dest="QC_and_trimming_reads", action="store_true", default=False, help="Will run fastq and trimmomatic of reads, and use the trimmed reads for downstream analysis. This option will generate files under the same dir as f1 and f2, so be aware of it.")
 
@@ -398,6 +398,10 @@ if opt.previous_repeats_table is not None:
 if opt.other_perSVade_outdirs_sameReadsANDalignment is not None: fun.link_files_from_other_perSVade_outdirs_reads_and_alignment(opt.outdir, opt.other_perSVade_outdirs_sameReadsANDalignment)
 
 #### define misc args ####
+
+# define a log file for perSVade
+fun.log_file_all_cmds = "%s/all_cmds_ran.txt"%opt.outdir
+if fun.file_is_empty(fun.log_file_all_cmds): open(fun.log_file_all_cmds, "w").write("# These are all the cmds:\n")
 
 # get the simulation ploidies
 if opt.simulation_ploidies!="auto": simulation_ploidies = opt.simulation_ploidies.split(",")
@@ -861,7 +865,7 @@ if opt.run_smallVarsCNV:
     outdir_varcall = "%s/smallVars_CNV_output"%opt.outdir
 
     # define the basic cmd
-    varcall_cmd = "%s -r %s --threads %i --outdir %s -sbam %s --caller %s --coverage %i --mitochondrial_chromosome %s --mitochondrial_code %i --gDNA_code %i --minAF_smallVars %s --window_freebayes_bp %i"%(varcall_cnv_pipeline, opt.ref, opt.threads, outdir_varcall, sorted_bam, opt.caller, opt.coverage, opt.mitochondrial_chromosome, opt.mitochondrial_code, opt.gDNA_code, opt.minAF_smallVars, opt.window_freebayes_bp)
+    varcall_cmd = "%s -r %s --threads %i --outdir %s -sbam %s --caller %s --coverage %i --mitochondrial_chromosome %s --mitochondrial_code %i --gDNA_code %i --minAF_smallVars %s --window_freebayes_bp %i --log_file_all_cmds %s"%(varcall_cnv_pipeline, opt.ref, opt.threads, outdir_varcall, sorted_bam, opt.caller, opt.coverage, opt.mitochondrial_chromosome, opt.mitochondrial_code, opt.gDNA_code, opt.minAF_smallVars, opt.window_freebayes_bp, log_file_all_cmds)
 
     # add options
     if opt.replace is True: varcall_cmd += " --replace"

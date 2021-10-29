@@ -42,8 +42,13 @@ parser.add_argument("-f1", "--fastq1", dest="fastq1", default=None, help="fastq_
 parser.add_argument("-f2", "--fastq2", dest="fastq2", default=None, help="fastq_2 file. Option required to obtain bam files. It can be 'auto', in which case a set of 10M reads will be generated.")
 parser.add_argument("-thr", "--threads", dest="threads", default=16, type=int, help="Number of threads, Default: 16")
 parser.add_argument("--replace", dest="replace", action="store_true", default=False, help="Replace existing files")
+parser.add_argument("--log_file_all_cmds", dest="log_file_all_cmds", default=None, help="An existing log_file_all_cmds to store the cmds")
 
 opt = parser.parse_args()
+
+# add the log_file_all_cmds
+fun.log_file_all_cmds = opt.log_file_all_cmds
+if fun.log_file_all_cmds is not None and fun.file_is_empty(fun.log_file_all_cmds): raise ValueError("The provided --log_file_all_cmds %s should exist"%fun.log_file_all_cmds)
 
 print("running trimmomatic")
 

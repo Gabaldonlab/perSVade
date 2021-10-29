@@ -17,6 +17,7 @@ parser.add_argument("-ad", "--adapters_filename", dest="adapters_filename", requ
 # OPTIONAL
 parser.add_argument("--repeat", dest="repeat", action="store_true", default=False, help="Replace existing files")
 parser.add_argument("--number_threads", dest="number_threads", default=2,  type=int, help="number threads")
+parser.add_argument("--log_file_all_cmds", dest="log_file_all_cmds", default=None, help="An existing log_file_all_cmds to store the cmds")
 
 # clipping options
 parser.add_argument("--seed_mismatches", dest="seed_mismatches", default=2,  type=int, help="ILLUMINACLIP seed mismatches")
@@ -61,6 +62,10 @@ CWD = "/".join(__file__.split("/")[0:-1]); sys.path.insert(0, CWD)
 
 # import functions
 import sv_functions as fun
+
+# add the cmds file
+fun.log_file_all_cmds = opt.log_file_all_cmds
+if fun.log_file_all_cmds is not None and fun.file_is_empty(fun.log_file_all_cmds): raise ValueError("The provided --log_file_all_cmds %s should exist"%fun.log_file_all_cmds)
 
 # paths 
 JAVA = "%s/bin/java"%EnvDir
