@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-# This is a script that runs the testing of perSVade on several species. THere are functions and more info in testing_functions.py
+# This is a script that runs the testing of perSVade on several species. THere are functions and more info in testing_functions.py. Note that this was run on perSVade 1.0, which has a type (arround). We changed all the arround to around from v1.02 on, but we did not re-run all the testing. This means that it may cause some problems with these scripts.
 
 ##### DEFINE ENVIRONMENT #######
 

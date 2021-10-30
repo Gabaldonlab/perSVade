@@ -57,12 +57,18 @@ mandatory_args.add_argument("-mchr", "--mitochondrial_chromosome", dest="mitocho
 
 #################################
 
+#### modularity of the pipeline ####
+module_inputs = parser.add_argument_group("PIPELINE MODULES")
+module_inputs.add_argument("--type_variant_calling", dest="type_variant_calling", default=None, help="Specify which modules to execute. By default, perSVade runs only coverage-based CNV and SV calling (with random-based parameter optimisation). This command can be any combination of 'SV', 'coverageCNV' and 'small_vars' in a comma comma-sepparated manner. For example, if you want to execute SV and small variant calling you can specify --type_variant_calling SV,small_vars. Note that this command overrides the effect of --run_smallVarsCNV, --remove_smallVarsCNV_nonEssentialFiles, --skip_SVcalling, --skip_CNV_calling. If you want to execute this argument you need to specify some sequence input (either reads or bam file).")
+
+####################################
+
 ###### inputs #######
 
 seq_inputs = parser.add_argument_group("SEQUENCE INPUTS")
 
-seq_inputs.add_argument("-f1", "--fastq1", dest="fastq1", default=None, help="fastq_1 file. Option required to obtain bam files. It can be 'skip'")
-seq_inputs.add_argument("-f2", "--fastq2", dest="fastq2", default=None, help="fastq_2 file. Option required to obtain bam files. It can be 'skip'")
+seq_inputs.add_argument("-f1", "--fastq1", dest="fastq1", default=None, help="fastq_1 file. Option required to obtain bam files. It can be 'skip', which will tell the pipeline to not use any fastq or bam input.")
+seq_inputs.add_argument("-f2", "--fastq2", dest="fastq2", default=None, help="fastq_2 file. Option required to obtain bam files. It can be 'skip', which will tell the pipeline to not use any fastq or bam input.")
 
 seq_inputs.add_argument("--input_SRRfile", dest="input_SRRfile", default=None, help="An input srr file that can be provided instead of the fastq files. If this is provided the pipeline will run fastqdump on the reads.")
 
@@ -131,17 +137,17 @@ SVcalling_args.add_argument("--simulation_ploidies", dest="simulation_ploidies",
 
 SVcalling_args.add_argument("--range_filtering_benchmark", dest="range_filtering_benchmark", type=str, default="theoretically_meaningful", help='The range of parameters that should be tested in the SV optimisation pipeline. It can be any of large, medium, small, theoretically_meaningful, theoretically_meaningful_NoFilterRepeats or single. ')
 
-SVcalling_args.add_argument("--simulate_SVs_arround_repeats", dest="simulate_SVs_arround_repeats", action="store_true", default=False, help="Simulate SVs arround repeats. This requires that there are some repeats inferred. This option will generate a simulated set of breakpoints arround repeats, if possible of the same family, and with random orientations.")
+SVcalling_args.add_argument("--simulate_SVs_around_repeats", dest="simulate_SVs_around_repeats", action="store_true", default=False, help="Simulate SVs around repeats. This requires that there are some repeats inferred. This option will generate a simulated set of breakpoints around repeats, if possible of the same family, and with random orientations.")
 
-SVcalling_args.add_argument("--simulate_SVs_arround_HomologousRegions", dest="simulate_SVs_arround_HomologousRegions", action="store_true", default=False, help="Simulate SVs arround regions that have high similarity.")
+SVcalling_args.add_argument("--simulate_SVs_around_HomologousRegions", dest="simulate_SVs_around_HomologousRegions", action="store_true", default=False, help="Simulate SVs around regions that have high similarity.")
 
-SVcalling_args.add_argument("--simulate_SVs_arround_HomologousRegions_queryWindowSize", dest="simulate_SVs_arround_HomologousRegions_queryWindowSize",  default=500, type=int, help="The window size used for finding regions with high similarity. This only works if --simulate_SVs_arround_HomologousRegions is specified.")
+SVcalling_args.add_argument("--simulate_SVs_around_HomologousRegions_queryWindowSize", dest="simulate_SVs_around_HomologousRegions_queryWindowSize",  default=500, type=int, help="The window size used for finding regions with high similarity. This only works if --simulate_SVs_around_HomologousRegions is specified.")
 
-SVcalling_args.add_argument("--simulate_SVs_arround_HomologousRegions_maxEvalue", dest="simulate_SVs_arround_HomologousRegions_maxEvalue",  default=1e-5, type=float, help="The maximum evalue by which two regions will be said to have high similarity. This only works if --simulate_SVs_arround_HomologousRegions is specified.")
+SVcalling_args.add_argument("--simulate_SVs_around_HomologousRegions_maxEvalue", dest="simulate_SVs_around_HomologousRegions_maxEvalue",  default=1e-5, type=float, help="The maximum evalue by which two regions will be said to have high similarity. This only works if --simulate_SVs_around_HomologousRegions is specified.")
 
-SVcalling_args.add_argument("--simulate_SVs_arround_HomologousRegions_minPctOverlap", dest="simulate_SVs_arround_HomologousRegions_minPctOverlap",  default=50, type=int, help="The minimum percentage of overlap between two homologous regions so that there can be a brèkpoint drawn in between. This only works if --simulate_SVs_arround_HomologousRegions is specified.")
+SVcalling_args.add_argument("--simulate_SVs_around_HomologousRegions_minPctOverlap", dest="simulate_SVs_around_HomologousRegions_minPctOverlap",  default=50, type=int, help="The minimum percentage of overlap between two homologous regions so that there can be a brèkpoint drawn in between. This only works if --simulate_SVs_around_HomologousRegions is specified.")
 
-SVcalling_args.add_argument("--simulate_SVs_arround_HomologousRegions_previousBlastnFile", dest="simulate_SVs_arround_HomologousRegions_previousBlastnFile",  default=None, help="A file that contains the output of blastn of regions of the genome against itself. It will be put under refetence genome dir")
+SVcalling_args.add_argument("--simulate_SVs_around_HomologousRegions_previousBlastnFile", dest="simulate_SVs_around_HomologousRegions_previousBlastnFile",  default=None, help="A file that contains the output of blastn of regions of the genome against itself. It will be put under refetence genome dir")
 
 ########################################################
 
@@ -151,7 +157,7 @@ realSVs_args = parser.add_argument_group("SV CALLING. FINDING REAL SVs")
 
 realSVs_args.add_argument("--close_shortReads_table", dest="close_shortReads_table", type=str, default=None, help="This is the path to a table that has 4 fields: sampleID,runID,short_reads1,short_reads2. These should be WGS runs of samples that are close to the reference genome and some expected SV. Whenever this argument is provided, the pipeline will find SVs in these samples and generate a folder <outdir>/findingRealSVs<>/SVs_compatible_to_insert that will contain one file for each SV, so that they are compatible and ready to insert in a simulated genome. This table will be used if --testAccuracy is specified, which will require at least 3 runs for each sample. It can be 'auto', in which case it will be inferred from the taxID provided by --target_taxID.")
 
-realSVs_args.add_argument("--real_bedpe_breakpoints", dest="real_bedpe_breakpoints", type=str, default=None, help="A file with the list of 'real' breakpoints arround which to insert the SVs in simulations. It may be created with --close_shortReads_table. If both --real_bedpe_breakpoints and --close_shortReads_table are provided, --real_bedpe_breakpoints will be used, and --close_shortReads_table will have no effect. If none of them are provided, this pipeline will base the parameter optimization on randomly inserted SVs (the default behavior). The coordinates have to be 1-based, as they are ready to insert into RSVsim.")
+realSVs_args.add_argument("--real_bedpe_breakpoints", dest="real_bedpe_breakpoints", type=str, default=None, help="A file with the list of 'real' breakpoints around which to insert the SVs in simulations. It may be created with --close_shortReads_table. If both --real_bedpe_breakpoints and --close_shortReads_table are provided, --real_bedpe_breakpoints will be used, and --close_shortReads_table will have no effect. If none of them are provided, this pipeline will base the parameter optimization on randomly inserted SVs (the default behavior). The coordinates have to be 1-based, as they are ready to insert into RSVsim.")
 
 realSVs_args.add_argument("--job_array_mode", dest="job_array_mode", type=str, default="local", help="It specifies in how to run the job arrays for,  --testAccuracy, the downloading of reads if  --close_shortReads_table is auto, and the SV calling for the table in --close_shortReads_table. It can be 'local' (runs one job after the other or 'job_array'. If 'job_array' is specified, this pipeline will generate a file with all the jobs to run, and stop. You will have to run these jobs before stepping into downstream analyses.")
 
@@ -183,7 +189,7 @@ smallVars_args.add_argument("-c", "--coverage", dest="coverage", default=20, typ
 
 smallVars_args.add_argument("--minAF_smallVars", dest="minAF_smallVars", default="infer", help="The minimum fraction of reads covering a variant to be called. The default is 'infer', which will set a threshold based on the ploidy. This is only relevant for the final vcfs, where only PASS vars are considered. It can be a number between 0 and 1.")
 
-smallVars_args.add_argument("--window_freebayes_bp", dest="window_freebayes_bp", default=10000, type=int, help="The window (in bp) in which freebayes regions are split to. If you increase this number the splitting will be in larger chunks of the genome.")
+smallVars_args.add_argument("--window_freebayes_bp", dest="window_freebayes_bp", default=10000, type=int, help="freebayes is run in parallel by chunks of the genome. This cmd specifies the window (in bp) in which freebayes regions are split to. If you increase this number the splitting will be in larger chunks of the genome.")
 
 smallVars_args.add_argument("--pooled_sequencing", dest="pooled_sequencing", action="store_true", default=False, help="It is a pooled sequencing run, which means that the small variant calling is not done based on ploidy. If you are also running SV calling, you will run parameters optimisation on a sample that has 1-10 pooling.")
 
@@ -203,7 +209,7 @@ skipping_args.add_argument("--skip_repeat_analysis", dest="skip_repeat_analysis"
 
 skipping_args.add_argument("--skip_SVcalling", dest="skip_SVcalling", action="store_true", default=False, help="Do not run SV calling.")
 
-skipping_args.add_argument("--skip_SV_CNV_calling", dest="skip_SV_CNV_calling", action="store_true", default=False, help="Do not run the integration of SV and CNV calling into a final vcf")
+skipping_args.add_argument("--skip_SV_CNV_calling", dest="skip_SV_CNV_calling", action="store_true", default=False, help="Do not run the integration of SV and CNV calling into a final vcf. Note that this integration will only take place if SV calling is performed.")
 
 skipping_args.add_argument("--skip_CNV_calling", dest="skip_CNV_calling", action="store_true", default=False, help="Do not run the calling of CNV based on coverage. This is reccommended if you have samples with smiley face in coverage in a fragmented genome, which does not allow for a proper normalisation of coverage.")
 
@@ -244,10 +250,7 @@ replacing_args.add_argument("--replace_var_integration", dest="replace_var_integ
 
 replacing_args.add_argument("--replace_var_annotation", dest="replace_var_annotation", action="store_true", help="Replace all the variant annotation steps for smallVariantCalling, SV and CNV calling.")
 
-
-
 ###########################
-
 
 #### debugging options. For testing only ####
 
@@ -304,6 +307,30 @@ opt = parser.parse_args()
 ########################################
 ##### GENERAL PROCESSING OF INPUTS #####
 ########################################
+
+# define the modules
+if opt.type_variant_calling is not None:
+
+    # get the modules and debug
+    modules_set = set(opt.type_variant_calling.split(","))
+    strange_modules = modules_set.difference({"SV", "coverageCNV", "small_vars"})
+    if len(strange_modules)>0: raise ValueError("There are some strange modules: %s. Provide a valid --type_variant_calling."%strange_modules)
+
+    # check that there is some sequence input
+    if any([x=="skip" for x in {opt.fastq1, opt.fastq2}]): raise ValueError("If you want to execute some modules with --type_variant_calling you have to provide reads (-f1 and -f2) or a bam file (-sbam). If you specified '-f1 skip' and/or '-f2 skip' you are telling perSVade to not use any sequence input, which is incomaptible with --type_variant_calling. ")
+
+    # override arguments depending on the combinations
+    if "SV" in modules_set: opt.skip_SVcalling = False
+    else: opt.skip_SVcalling = True
+
+    if "coverageCNV" in modules_set: opt.skip_CNV_calling = False
+    else: opt.skip_CNV_calling = True
+
+    if "small_vars" in modules_set: opt.run_smallVarsCNV = True
+    else: opt.run_smallVarsCNV = False 
+
+    # redefine some args
+    if opt.run_smallVarsCNV is True: opt.remove_smallVarsCNV_nonEssentialFiles = True
 
 # start time of processing
 start_time_GeneralProcessing =  time.time()
@@ -457,9 +484,6 @@ if opt.parameters_json_file is not None:
     fun.default_max_rel_coverage_to_consider_del = max_rel_coverage_to_consider_del
     fun.default_min_rel_coverage_to_consider_dup = min_rel_coverage_to_consider_dup
 
-
-
-
 # get the gff info
 if opt.gff is not None: correct_gff, gff_with_biotype = fun.get_correct_gff_and_gff_with_biotype(opt.gff, replace=opt.replace)
 
@@ -483,40 +507,40 @@ if opt.StopAfter_repeatsObtention is True:
     print("Stopping after the obtention of repeats. They can be found in %s"%repeats_table_file)
     sys.exit(0)
 
-####### GENERATE A real_bedpe_breakpoints ARROUND REPEATS IF NECESSARY ##########
+####### GENERATE A real_bedpe_breakpoints AROUND REPEATS IF NECESSARY ##########
 
-if opt.simulate_SVs_arround_repeats is True:
-    print("simulating arround repeats")
+if opt.simulate_SVs_around_repeats is True:
+    print("simulating around repeats")
     
     # debug
-    if opt.real_bedpe_breakpoints is not None: raise ValueError("You can not specify --simulate_SVs_arround_repeats and --real_bedpe_breakpoints. You may definir either of both.")
-    if opt.skip_repeat_analysis is True: raise ValueError("You should not skip the repeats analysis (with --skip_repeat_analysis) if you want to simulate SVs arround repeats.")
-    if opt.simulate_SVs_arround_HomologousRegions is True: raise ValueError("You can not specify --simulate_SVs_arround_repeats and --simulate_SVs_arround_HomologousRegions.")
+    if opt.real_bedpe_breakpoints is not None: raise ValueError("You can not specify --simulate_SVs_around_repeats and --real_bedpe_breakpoints. You may definir either of both.")
+    if opt.skip_repeat_analysis is True: raise ValueError("You should not skip the repeats analysis (with --skip_repeat_analysis) if you want to simulate SVs around repeats.")
+    if opt.simulate_SVs_around_HomologousRegions is True: raise ValueError("You can not specify --simulate_SVs_around_repeats and --simulate_SVs_around_HomologousRegions.")
 
 
     # override the real_bedpe_breakpoints with the bedpe comming from repeats
-    opt.real_bedpe_breakpoints = fun.get_bedpe_breakpoints_arround_repeats(repeats_table_file, replace=opt.replace, max_breakpoints=(opt.nvars*5*10000), max_breakpoints_per_repeat=1, threads=opt.threads, max_repeats=(opt.nvars*5*2500))
+    opt.real_bedpe_breakpoints = fun.get_bedpe_breakpoints_around_repeats(repeats_table_file, replace=opt.replace, max_breakpoints=(opt.nvars*5*10000), max_breakpoints_per_repeat=1, threads=opt.threads, max_repeats=(opt.nvars*5*2500))
 
 ################################################################################
 
-####### GENERATE real_bedpe_breakpoints ARROUND HOMOLOGOUS REGIONS #########
+####### GENERATE real_bedpe_breakpoints AROUND HOMOLOGOUS REGIONS #########
 
-if opt.simulate_SVs_arround_HomologousRegions is True:
-    print("simulating arround Homologous regions")
+if opt.simulate_SVs_around_HomologousRegions is True:
+    print("simulating around Homologous regions")
 
     # debug
-    if opt.real_bedpe_breakpoints is not None: raise ValueError("You can not specify --simulate_SVs_arround_repeats and --real_bedpe_breakpoints. You may definie either of both.") 
-    if opt.simulate_SVs_arround_repeats is True: raise ValueError("You can not specify --simulate_SVs_arround_repeats and --simulate_SVs_arround_HomologousRegions.")
+    if opt.real_bedpe_breakpoints is not None: raise ValueError("You can not specify --simulate_SVs_around_repeats and --real_bedpe_breakpoints. You may definie either of both.") 
+    if opt.simulate_SVs_around_repeats is True: raise ValueError("You can not specify --simulate_SVs_around_repeats and --simulate_SVs_around_HomologousRegions.")
 
     # get a file that contains the blastn of some regions of the genome
-    if opt.simulate_SVs_arround_HomologousRegions_previousBlastnFile is None: blastn_file = fun.get_blastn_regions_genome_against_itself(opt.ref, opt.simulate_SVs_arround_HomologousRegions_maxEvalue, opt.simulate_SVs_arround_HomologousRegions_queryWindowSize, opt.replace, opt.threads)
+    if opt.simulate_SVs_around_HomologousRegions_previousBlastnFile is None: blastn_file = fun.get_blastn_regions_genome_against_itself(opt.ref, opt.simulate_SVs_around_HomologousRegions_maxEvalue, opt.simulate_SVs_around_HomologousRegions_queryWindowSize, opt.replace, opt.threads)
 
-    else: blastn_file = opt.simulate_SVs_arround_HomologousRegions_previousBlastnFile
+    else: blastn_file = opt.simulate_SVs_around_HomologousRegions_previousBlastnFile
 
-    # define the bedpe breakpoints arround the homologous regions
-    bedpe_breakpoints = "%s/breakpoints_arrounHomRegions_wsize=%ibp_maxEval=%s_minQcovS=%i.bedpe"%(opt.outdir, opt.simulate_SVs_arround_HomologousRegions_queryWindowSize, opt.simulate_SVs_arround_HomologousRegions_maxEvalue, opt.simulate_SVs_arround_HomologousRegions_minPctOverlap)
+    # define the bedpe breakpoints around the homologous regions
+    bedpe_breakpoints = "%s/breakpoints_aroundHomRegions_wsize=%ibp_maxEval=%s_minQcovS=%i.bedpe"%(opt.outdir, opt.simulate_SVs_around_HomologousRegions_queryWindowSize, opt.simulate_SVs_around_HomologousRegions_maxEvalue, opt.simulate_SVs_around_HomologousRegions_minPctOverlap)
 
-    opt.real_bedpe_breakpoints = fun.get_bedpe_breakpoints_arround_homologousRegions(blastn_file, bedpe_breakpoints, replace=opt.replace, threads=opt.threads, max_eval=opt.simulate_SVs_arround_HomologousRegions_maxEvalue, query_window_size=opt.simulate_SVs_arround_HomologousRegions_queryWindowSize, min_qcovs=opt.simulate_SVs_arround_HomologousRegions_minPctOverlap, max_n_hits=(opt.nvars*5*2500))
+    opt.real_bedpe_breakpoints = fun.get_bedpe_breakpoints_around_homologousRegions(blastn_file, bedpe_breakpoints, replace=opt.replace, threads=opt.threads, max_eval=opt.simulate_SVs_around_HomologousRegions_maxEvalue, query_window_size=opt.simulate_SVs_around_HomologousRegions_queryWindowSize, min_qcovs=opt.simulate_SVs_around_HomologousRegions_minPctOverlap, max_n_hits=(opt.nvars*5*2500))
 
 ############################################################################
 
@@ -727,7 +751,7 @@ if opt.testAccuracy is True:
     ### RUN PERSVADE ###
     print("testing perSVade on several samples. --tmpdir is %s"%opt.tmpdir)
 
-    dict_perSVade_outdirs = fun.report_accuracy_realSVs_perSVadeRuns(opt.close_shortReads_table, opt.ref, "%s/testing_Accuracy"%opt.outdir, real_bedpe_breakpoints, threads=opt.threads, replace=opt.replace, n_simulated_genomes=opt.nsimulations, mitochondrial_chromosome=opt.mitochondrial_chromosome, simulation_ploidies=simulation_ploidies, range_filtering_benchmark=opt.range_filtering_benchmark, nvars=opt.nvars, job_array_mode=opt.job_array_mode, parameters_json_file=opt.parameters_json_file, gff=opt.gff, replace_FromGridssRun_final_perSVade_run=opt.replace_FromGridssRun_final_perSVade_run, fraction_available_mem=opt.fraction_available_mem, replace_SV_CNVcalling=opt.replace_SV_CNVcalling, skip_CNV_calling=opt.skip_CNV_calling, outdir_finding_realVars=outdir_finding_realVars, simulate_SVs_arround_HomologousRegions_previousBlastnFile=opt.simulate_SVs_arround_HomologousRegions_previousBlastnFile, simulate_SVs_arround_HomologousRegions_maxEvalue=opt.simulate_SVs_arround_HomologousRegions_maxEvalue, simulate_SVs_arround_HomologousRegions_queryWindowSize=opt.simulate_SVs_arround_HomologousRegions_queryWindowSize, skip_SV_CNV_calling=opt.skip_SV_CNV_calling, tmpdir=opt.tmpdir, simulation_chromosomes=opt.simulation_chromosomes, testAccuracy_skipHomRegionsSimulation=opt.testAccuracy_skipHomRegionsSimulation)
+    dict_perSVade_outdirs = fun.report_accuracy_realSVs_perSVadeRuns(opt.close_shortReads_table, opt.ref, "%s/testing_Accuracy"%opt.outdir, real_bedpe_breakpoints, threads=opt.threads, replace=opt.replace, n_simulated_genomes=opt.nsimulations, mitochondrial_chromosome=opt.mitochondrial_chromosome, simulation_ploidies=simulation_ploidies, range_filtering_benchmark=opt.range_filtering_benchmark, nvars=opt.nvars, job_array_mode=opt.job_array_mode, parameters_json_file=opt.parameters_json_file, gff=opt.gff, replace_FromGridssRun_final_perSVade_run=opt.replace_FromGridssRun_final_perSVade_run, fraction_available_mem=opt.fraction_available_mem, replace_SV_CNVcalling=opt.replace_SV_CNVcalling, skip_CNV_calling=opt.skip_CNV_calling, outdir_finding_realVars=outdir_finding_realVars, simulate_SVs_around_HomologousRegions_previousBlastnFile=opt.simulate_SVs_around_HomologousRegions_previousBlastnFile, simulate_SVs_around_HomologousRegions_maxEvalue=opt.simulate_SVs_around_HomologousRegions_maxEvalue, simulate_SVs_around_HomologousRegions_queryWindowSize=opt.simulate_SVs_around_HomologousRegions_queryWindowSize, skip_SV_CNV_calling=opt.skip_SV_CNV_calling, tmpdir=opt.tmpdir, simulation_chromosomes=opt.simulation_chromosomes, testAccuracy_skipHomRegionsSimulation=opt.testAccuracy_skipHomRegionsSimulation)
 
     if opt.StopAfter_testAccuracy_perSVadeRunning is True: 
         print("You already ran all the configurations of perSVade. Stopping after the running of perSVade on testAccuracy")
@@ -751,7 +775,7 @@ if opt.goldenSet_table is not None:
 
     # run jobs golden set testing
     outdir_goldenSet = "%s/testing_goldenSetAccuracy"%opt.outdir
-    dict_paths_goldenSetAnalysis = fun.report_accuracy_golden_set_runJobs(opt.goldenSet_table, outdir_goldenSet, opt.ref, real_bedpe_breakpoints, threads=opt.threads, replace=opt.replace, n_simulated_genomes=opt.nsimulations, mitochondrial_chromosome=opt.mitochondrial_chromosome, simulation_ploidies=simulation_ploidies, range_filtering_benchmark=opt.range_filtering_benchmark, nvars=opt.nvars, job_array_mode=opt.job_array_mode, StopAfterPrefecth_of_reads=opt.StopAfterPrefecth_of_reads_goldenSet, target_taxID=opt.target_taxID, parameters_json_file=opt.parameters_json_file, fraction_available_mem=opt.fraction_available_mem, verbose=opt.verbose, simulate_SVs_arround_HomologousRegions_previousBlastnFile=opt.simulate_SVs_arround_HomologousRegions_previousBlastnFile, simulate_SVs_arround_HomologousRegions_maxEvalue=opt.simulate_SVs_arround_HomologousRegions_maxEvalue, simulate_SVs_arround_HomologousRegions_queryWindowSize=opt.simulate_SVs_arround_HomologousRegions_queryWindowSize, max_n_samples=opt.goldenSet_max_n_samples)
+    dict_paths_goldenSetAnalysis = fun.report_accuracy_golden_set_runJobs(opt.goldenSet_table, outdir_goldenSet, opt.ref, real_bedpe_breakpoints, threads=opt.threads, replace=opt.replace, n_simulated_genomes=opt.nsimulations, mitochondrial_chromosome=opt.mitochondrial_chromosome, simulation_ploidies=simulation_ploidies, range_filtering_benchmark=opt.range_filtering_benchmark, nvars=opt.nvars, job_array_mode=opt.job_array_mode, StopAfterPrefecth_of_reads=opt.StopAfterPrefecth_of_reads_goldenSet, target_taxID=opt.target_taxID, parameters_json_file=opt.parameters_json_file, fraction_available_mem=opt.fraction_available_mem, verbose=opt.verbose, simulate_SVs_around_HomologousRegions_previousBlastnFile=opt.simulate_SVs_around_HomologousRegions_previousBlastnFile, simulate_SVs_around_HomologousRegions_maxEvalue=opt.simulate_SVs_around_HomologousRegions_maxEvalue, simulate_SVs_around_HomologousRegions_queryWindowSize=opt.simulate_SVs_around_HomologousRegions_queryWindowSize, max_n_samples=opt.goldenSet_max_n_samples)
 
     # plot the accurac
     fun.report_accuracy_golden_set_reportAccuracy(dict_paths_goldenSetAnalysis, outdir_goldenSet, opt.ref, threads=opt.threads, replace=opt.replace)
