@@ -4885,6 +4885,64 @@ def downsample_bamfile_keeping_pairs(bamfile, fraction_reads=0.1, replace=True, 
 
     return sampled_bamfile
 
+def get_downsampled_bam_to_specified_coverage(outdir, sorted_bam, downsampled_coverage, reference_genome, threads=4, replace=False):
+
+    """This function gets a sorted_bam that has a fraction of the coverage of the sorted bam"""
+
+    # define the final file and tmpdir
+    downsampled_bam = "%s/aligned_reads.sorted.downsampled_%.3fx.bam"%(outdir, downsampled_coverage)
+    tmpdir = "%s.generating"%downsampled_bam
+
+    if file_is_empty(downsampled_bam) or replace is True:
+        print_if_verbose("getting downsampled bam")
+
+        # define a tmpdir
+        make_folder(tmpdir)
+
+        # get into tmp
+        sorted_bam_tmp = "%s/aligned_reads.sorted.bam"%tmpdir
+        soft_link_files(sorted_bam, sorted_bam_tmp)
+
+        # calculate the genome size
+        genome_length = sum(get_chr_to_len(reference_genome).values())
+
+        # get the read length
+        read_length = get_read_length(sorted_bam_tmp, threads=threads, replace=replace)
+
+        # get the number of pairs
+        npairs = count_number_read_pairs(sorted_bam_tmp, replace=replace, threads=threads)
+
+        # calculate the expected coverage
+        expected_coverage = (npairs*read_length)/genome_length
+        print_if_verbose("The expected coverage is %.3fx"%expected_coverage)
+
+        # define the maximum number of read pairs and the fraction to downsample
+        max_npairs = (downsampled_coverage*genome_length)/read_length
+        fraction_downsample = max_npairs/npairs
+        print_if_verbose("downsample a fraction of %.6f"%fraction_downsample)
+
+        # downasmple the bam
+        if fraction_downsample<1: 
+
+            # downsample
+            downsampled_bam_tmp = "%s.tmp"%downsampled_bam
+            downsample_bamfile_keeping_pairs(sorted_bam_tmp, fraction_reads=fraction_downsample, threads=threads, name="sampleX", sampled_bamfile=downsampled_bam_tmp)
+
+            # index
+            index_bam(downsampled_bam_tmp, threads=threads)
+
+            # renames
+            os.rename(downsampled_bam_tmp+".bai", downsampled_bam+".bai")
+            os.rename(downsampled_bam_tmp, downsampled_bam)
+
+        else: raise ValueError("The median coverage of your bam is %.3f. It can't be downsampled. Reduce the value of --downsampled_coverage"%median_coverage) 
+
+    # clean and return
+    delete_folder(tmpdir)
+    return downsampled_bam
+
+
+
 
 def download_srr_with_prefetch(srr, SRRfile, replace=False):
 
@@ -5022,12 +5080,15 @@ def get_approx_n_pairs_in_fastqgz(file, nlines=10000):
         partial_file_tmp = "%s.tmp"%partial_file
         partial_file_stderr = "%s.generating.stderr"%partial_file
 
+        # define stderr
         print_if_verbose("getting partial file. The stderr is in %s"%partial_file_stderr)
-        run_cmd("zcat %s | head -n %i | gzip > %s 2>%s"%(file, nlines, partial_file_tmp, partial_file_stderr))
+
+        # depending on the actual type of file, do one or another thing
+        if file_is_gzipped(file) is True: run_cmd("zcat %s | head -n %i | gzip > %s 2>%s"%(file, nlines, partial_file_tmp, partial_file_stderr))
+        else: run_cmd("cat %s | head -n %i > %s 2>%s"%(file, nlines, partial_file_tmp, partial_file_stderr))
 
         remove_file(partial_file_stderr)
         os.rename(partial_file_tmp, partial_file)
-
 
     # calculate the size of the partial
     partial_gb = os.path.getsize(partial_file)/1e9
@@ -5641,9 +5702,27 @@ def close_shortReads_table_is_correct(close_shortReads_table):
     else: return True
 
 
+def file_is_gzipped(file):
+
+    """Asks whether a file is gzipped"""
+
+    # import
+    import gzip
+
+    # open
+    with gzip.open(file, 'r') as fh:
+        try:
+            fh.read(1)
+            return True
+        except OSError:
+            return False
+
 def get_median_readLength_fastqgz(fastqgz, nlines=1000, replace=False):
 
     """Takes a fastqgz file and returns the median read length"""
+
+    # define a function that returns the median read len from the file
+    def get_readLen_from_read_len_file(read_len_file): return int(np.median([len(l.strip()) for l in open(read_len_file, "r").readlines()]))
 
     # define the file
     read_len_file = "%s.readLengths"%fastqgz
@@ -5651,14 +5730,25 @@ def get_median_readLength_fastqgz(fastqgz, nlines=1000, replace=False):
 
     if file_is_empty(read_len_file) or replace is True:
 
+        # define the stderr
         read_len_file_stderr = "%s.getting.stderr"%read_len_file
-        print_if_verbose("getting median read lengths. The stderr is in %s"%read_len_file_stderr)
-        run_cmd("zcat %s | head -n %i | sed -n '2~4p' > %s 2>%s"%(fastqgz, nlines, read_len_file_tmp, read_len_file_stderr))
 
+        # define the function
+        if file_is_gzipped is True: cat_fn = "zcat"
+        else: cat_fn = "cat"
+
+        # try different functions
+        print_if_verbose("getting median read lengths. The stderr is in %s"%read_len_file_stderr)
+        run_cmd("%s %s | head -n %i | sed -n '2~4p' > %s 2>%s"%(cat_fn, fastqgz, nlines, read_len_file_tmp, read_len_file_stderr))
+
+        # make sure that the read len can be calculated
+        get_readLen_from_read_len_file(read_len_file_tmp)
+
+        # clean
         remove_file(read_len_file_stderr)
         os.rename(read_len_file_tmp, read_len_file)
 
-    return int(np.median([len(l.strip()) for l in open(read_len_file, "r").readlines()]))
+    return get_readLen_from_read_len_file(read_len_file)
 
 def generate_downsampledReads(fastqgz, downsampled_fastqgz, fraction_downsample, replace=False):
 
@@ -5677,6 +5767,75 @@ def generate_downsampledReads(fastqgz, downsampled_fastqgz, fraction_downsample,
 
         remove_file(downsampled_fastqgz_stderr)
         os.rename(downsampled_fastqgz_tmp, downsampled_fastqgz)
+
+def get_paired_downsampled_reads(reads1, reads2, outdir, downsampled_coverage, reference_genome, replace=False, threads=4):
+
+    """Creates an outdir with the downsampled reads"""
+
+    # define the final reads
+    dest_reads1 = "%s/reads_downsampled_%.3fx_1.fq.gz"%(outdir, downsampled_coverage)
+    dest_reads2 = "%s/reads_downsampled_%.3fx_2.fq.gz"%(outdir, downsampled_coverage)
+
+    if file_is_empty(dest_reads1) or file_is_empty(dest_reads2) or replace is True:
+        print_if_verbose("downsampling reads")
+
+        # make the folder
+        delete_folder(outdir)
+        make_folder(outdir)
+
+        # define tmp files
+        dest_reads1_tmp = "%s.tmp.fq.gz"%(dest_reads1)
+        dest_reads2_tmp = "%s.tmp.fq.gz"%(dest_reads2)
+        origin_reads1 = "%s/reads_1.fq.gz"%outdir
+        origin_reads2 = "%s/reads_2.fq.gz"%outdir
+
+        # get the softlinked files
+        soft_link_files(reads1, origin_reads1)
+        soft_link_files(reads2, origin_reads2)
+
+        # calculate the genome size
+        genome_length = sum(get_chr_to_len(reference_genome).values())
+
+        # get the read length
+        read_len = get_median_readLength_fastqgz(origin_reads1, replace=replace)
+
+        # calculate the number of reads
+        npairs = get_approx_n_pairs_in_fastqgz(origin_reads1) # approximate, faster way
+
+        # calculate the expected coverage
+        expected_coverage = (npairs*read_len)/genome_length
+        print_if_verbose("The expected coverage is %.3fx"%expected_coverage)
+
+        # define the maximum number of read pairs and the fraction to downsample
+        max_npairs = (downsampled_coverage*genome_length)/read_len
+        fraction_downsample = max_npairs/npairs
+
+        if fraction_downsample < 1:
+
+            # get the downsampled reads
+            generate_downsampledReads(origin_reads1, dest_reads1_tmp, fraction_downsample, replace=replace)
+            generate_downsampledReads(origin_reads2, dest_reads2_tmp, fraction_downsample, replace=replace)
+
+            # check that the reads are correct
+            check_that_paired_reads_are_correct(dest_reads1_tmp, dest_reads2_tmp)
+
+            # rename
+            os.rename(dest_reads1_tmp, dest_reads1)
+            os.rename(dest_reads2_tmp, dest_reads2)
+
+        else:
+
+            os.rename(origin_reads1, dest_reads1)
+            os.rename(origin_reads2, dest_reads2)
+
+
+    # clean all the non-dest files
+    for f in os.listdir(outdir):
+        if f not in {get_file(dest_reads1), get_file(dest_reads2)}: remove_file("%s/%s"%(outdir, f))
+
+    return dest_reads1, dest_reads2
+
+
 
 def downsample_close_shortReads_table(close_shortReads_table, close_shortReads_table_df, max_coverage_sra_reads, reference_genome, replace=False, threads=4):
 

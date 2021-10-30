@@ -70,11 +70,14 @@ seq_inputs = parser.add_argument_group("SEQUENCE INPUTS")
 seq_inputs.add_argument("-f1", "--fastq1", dest="fastq1", default=None, help="fastq_1 file. Option required to obtain bam files. It can be 'skip', which will tell the pipeline to not use any fastq or bam input.")
 seq_inputs.add_argument("-f2", "--fastq2", dest="fastq2", default=None, help="fastq_2 file. Option required to obtain bam files. It can be 'skip', which will tell the pipeline to not use any fastq or bam input.")
 
-seq_inputs.add_argument("--input_SRRfile", dest="input_SRRfile", default=None, help="An input srr file that can be provided instead of the fastq files. If this is provided the pipeline will run fastqdump on the reads.")
+seq_inputs.add_argument("--input_SRRfile", dest="input_SRRfile", default=None, help="An input srr file that can be provided instead of the fastq files. If this is provided the pipeline will run fastqdump on the reads, and also run fastqc and trimmomatic on them. This may be dangerous, since you may supervise the downloading and quality control of the reads.")
 
 seq_inputs.add_argument("-sbam", "--sortedbam", dest="sortedbam", default=None, help="The path to the sorted bam file, which should have a bam.bai file in the same dir. For example, if your bam file is called 'aligned_reads.bam', there should be an 'aligned_reads.bam.bai' as well. This is mutually exclusive with providing reads. By default, it is assumed that this bam has marked duplicates.")
 
+seq_inputs.add_argument("--downsampled_coverage", dest="downsampled_coverage", default=None, type=float, help="A float indicating whether to downsample to a specific coverage for faster running. This can be useful for testing some argument. For example, '--downsampled_coverage 5.0' would downsample randomly your input reads or bam to an average coverage of 5x.")
+
 seq_inputs.add_argument("--other_perSVade_outdirs_sameReadsANDalignment", dest="other_perSVade_outdirs_sameReadsANDalignment",  default=None, help="A comma-sepparated set of full paths to perSVade outdirs that can be used to replace the sorted bam and reads dir.")
+
 
 #####################
 
@@ -109,7 +112,7 @@ general_optional_args.add_argument("-mcode", "--mitochondrial_code", dest="mitoc
 general_optional_args.add_argument("-gcode", "--gDNA_code", dest="gDNA_code", default=1, type=int, help="The code of the NCBI gDNA genetic code. You can find the numbers for your species here https://www.ncbi.nlm.nih.gov/Taxonomy/Utils/wprintgc.cgi . For C. albicans it is 12. The information of this website may be wrong, so you may want to double check with the literature.")
 
 
-general_optional_args.add_argument("--QC_and_trimming_reads", dest="QC_and_trimming_reads", action="store_true", default=False, help="Will run fastq and trimmomatic of reads, and use the trimmed reads for downstream analysis. This option will generate files under the same dir as f1 and f2, so be aware of it.")
+general_optional_args.add_argument("--QC_and_trimming_reads", dest="QC_and_trimming_reads", action="store_true", default=False, help="Will run fastq and trimmomatic of reads, and use the trimmed reads for downstream analysis. This option will generate files under the same dir as f1 and f2, so be aware of it. This is a rather dangerous option, sinc you may want to do the quality control of the reads before running perSVade.")
 
 general_optional_args.add_argument("--min_chromosome_len", dest="min_chromosome_len", default=100000, type=int, help="The minimum length to consider chromosomes from the provided fasta for calculating the window length. Any chromosomes that shorter than the window length will not be considered in the random SV simulations.")
 
@@ -381,6 +384,9 @@ if opt.simulation_chromosomes is not None:
 genome_length = sum(fun.get_chr_to_len(opt.ref).values())
 print("The genome has %.2f Mb"%(genome_length/1000000 ))
 
+# Index the reference
+fun.index_genome(opt.ref, replace=opt.replace)
+
 ##################################
 
 #### REPLACE THE GFF ####
@@ -564,26 +570,37 @@ if not any([x=="skip" for x in {opt.fastq1, opt.fastq2}]):
 
     ##### DEFINE THE SORTED BAM #####
 
-    # define files that may be used in many steps of the pipeline
-    if opt.sortedbam is None:
+    # define the dest bam files
+    bamfile = "%s/aligned_reads.bam"%opt.outdir
+    sorted_bam = "%s.sorted"%bamfile
+    index_bam = "%s.bai"%sorted_bam
 
-        bamfile = "%s/aligned_reads.bam"%opt.outdir
-        sorted_bam = "%s.sorted"%bamfile
-        index_bam = "%s.bai"%sorted_bam
-
-    else:
+    # if you provided a sorted bam it should be placed into sorted_bam
+    if opt.sortedbam is not None:
 
         # debug the fact that you prvided reads and bam. You should just provide one
         if any([not x is None for x in {opt.fastq1, opt.fastq2}]): raise ValueError("You have provided reads and a bam, you should only provide one")
 
-        # get the files
-        sorted_bam = opt.sortedbam
-        index_bam = "%s.bai"%sorted_bam
+        # downsample the bam for testing if speciefied
+        if opt.downsampled_coverage is not None: 
+            print("WARNING: You are running perSVade on a downsampled bam (to %.3fx)."%opt.downsampled_coverage)
+            opt.sortedbam = fun.get_downsampled_bam_to_specified_coverage(opt.outdir, opt.sortedbam, opt.downsampled_coverage, opt.ref, replace=opt.replace, threads=opt.threads) 
 
+        # get the linked bam files
+        fun.soft_link_files(fun.get_fullpath(opt.sortedbam), sorted_bam)
+        fun.soft_link_files(fun.get_fullpath(opt.sortedbam)+".bai", sorted_bam+".bai")
+        
     ###################################
 
     # normal alignment of provided reads
     if all([not x is None for x in {opt.fastq1, opt.fastq2}]) or opt.input_SRRfile is not None:
+
+        # if you have reads, you may want to downsample them
+        if all([not x is None for x in {opt.fastq1, opt.fastq2}]) and opt.downsampled_coverage is not None:
+
+            # downsample the reads
+            print("WARNING: You are running perSVade on downsampled reads (to %.3fx)."%opt.downsampled_coverage)
+            opt.fastq1, opt.fastq2 = fun.get_paired_downsampled_reads(opt.fastq1, opt.fastq2, "%s/downsampled_reads"%opt.outdir, opt.downsampled_coverage, opt.ref, replace=opt.replace, threads=opt.threads)
 
         # if the reads have to be QC and trimmed:
         if opt.QC_and_trimming_reads is True or opt.input_SRRfile is not None: 
@@ -621,6 +638,7 @@ if not any([x=="skip" for x in {opt.fastq1, opt.fastq2}]):
             for f in os.listdir(reads_dir): 
                 if f not in {fun.get_file(opt.fastq1), fun.get_file(opt.fastq2)}: fun.delete_file_or_folder("%s/%s"%(reads_dir, f))
 
+
         # deifine if marking duplicates (default yes)
         if opt.skip_marking_duplicates is True: bwa_mem_MarkDuplicates = False
         else: bwa_mem_MarkDuplicates = True
@@ -633,7 +651,6 @@ if not any([x=="skip" for x in {opt.fastq1, opt.fastq2}]):
 
     # check that all the important files exist
     if any([fun.file_is_empty(x) for x in {sorted_bam, index_bam}]): raise ValueError("You need the sorted and indexed bam files in ")
-
 
 end_time_alignment =  time.time()
 
@@ -649,9 +666,6 @@ end_time_alignment =  time.time()
 
 # Create a reference dictionary
 fun.create_sequence_dict(opt.ref, replace=opt.replace)
-
-# Index the reference
-fun.index_genome(opt.ref, replace=opt.replace)
 
 #### calculate coverage per windows of window_l ####
 
