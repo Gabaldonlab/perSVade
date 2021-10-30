@@ -1320,13 +1320,13 @@ def clean_reference_genome_windows_files(reference_genome):
 
 def get_affected_region_bed_for_SVdf(svDF, svtype, interesting_chromosomes, add_interval_bp=1000, first_position_idx=0, translocations_type="breakpoint_pos", chr_to_len={}, insertions_type="only_one_chrB_breakpoint"):
 
-    """This function takes a df with SVs and returns the regions that are affected in bed format, which depends on the svtype. It adds an interval arround this values. It also returns the number 
+    """This function takes a df with SVs and returns the regions that are affected in bed format, which depends on the svtype. It adds an interval around this values. It also returns the number 
 
     only consider svs were ANY of the chroms are in interesting_chromosomes.
 
     The bed for the translocations includes the left and right regions of all positions.
 
-    translocations_type can be 'start_and_end_pos' or 'whole_arms' or 'whole_chromosomes', which will imply that only the regions arround breakpoints or the whole arms will be returned. chr_to_len is only needed when you have whole_arms_2orientations
+    translocations_type can be 'start_and_end_pos' or 'whole_arms' or 'whole_chromosomes', which will imply that only the regions around breakpoints or the whole arms will be returned. chr_to_len is only needed when you have whole_arms_2orientations
 
     
     insertions_type defines how to define the bed for insertions
@@ -1433,7 +1433,7 @@ def get_affected_region_bed_for_SVdf(svDF, svtype, interesting_chromosomes, add_
         else: raise ValueError("%s is not valid"%(svtype))
 
 
-        # add the confidence arround each region
+        # add the confidence around each region
         affected_region_bed_df["start"] = (affected_region_bed_df.start - add_interval_bp).apply(lambda x: max([first_position_idx,x]))
         affected_region_bed_df["end"] = affected_region_bed_df.apply(lambda r: min([r["end"]+add_interval_bp, chr_to_len[r["chromosome"]]]), axis=1)
 
@@ -1825,7 +1825,7 @@ def get_svDF_in_coords_of_rearranged_genome(svDF, reference_genome, rearranged_g
         svDF["ChrA_bp_pos"] = svDF["EndA"]
         svDF["ChrB_bp_pos"] = svDF.apply(lambda r: get_ChrB_bp_pos_translocations(r, chr_to_ref_lenSeq), axis=1)
 
-        # at the positions of the closest breakpoints and the corresponding sequences arround the breakpoints
+        # at the positions of the closest breakpoints and the corresponding sequences around the breakpoints
         for chrom in ["ChrA", "ChrB"]:
 
             # define the breakpoint position field and the sequences
@@ -2157,7 +2157,7 @@ def get_length_bedpe_r(r):
 
 def get_df_bedpe_with_nonOverlappingBreakpoints(df_bedpe):
 
-    """Gets a df_bedpe that has affected_positions_arroundBp and returns the set of breakpoints that are not overlapping"""
+    """Gets a df_bedpe that has affected_positions_aroundBp and returns the set of breakpoints that are not overlapping"""
 
     # check that the indices are unique
     if len(df_bedpe)!=len(set(df_bedpe.index)): raise ValueError("indices should be unique")
@@ -2171,7 +2171,7 @@ def get_df_bedpe_with_nonOverlappingBreakpoints(df_bedpe):
     # go through each breakpoint
     for I in df_bedpe.index:
 
-        positons = df_bedpe.loc[I, "affected_positions_arroundBp"]
+        positons = df_bedpe.loc[I, "affected_positions_aroundBp"]
 
         # if the positions overlap with previous breakpoints, skip
         if positons.intersection(already_affected_positions)!=set(): continue
@@ -2184,9 +2184,9 @@ def get_df_bedpe_with_nonOverlappingBreakpoints(df_bedpe):
 
     return df_bedpe
 
-def get_SVs_arround_breakpoints(genome_file, df_bedpe, nvars, outdir, svtypes, replace=False, max_ninsertions=100):
+def get_SVs_around_breakpoints(genome_file, df_bedpe, nvars, outdir, svtypes, replace=False, max_ninsertions=100):
 
-    """This function takes a df bedpe and defines svtypes arround these breakpoints. """
+    """This function takes a df bedpe and defines svtypes around these breakpoints. """
 
     # get the dir
     make_folder(outdir)
@@ -2237,8 +2237,8 @@ def get_SVs_arround_breakpoints(genome_file, df_bedpe, nvars, outdir, svtypes, r
             add_interval_bp = 100
 
             # add things
-            print_if_verbose("getting affected positions arround Bps for %i breakpoints"%len(df_bedpe))
-            df_bedpe["affected_positions_arroundBp"] = df_bedpe.apply(get_affected_positions_from_bedpe_r, extra_bp=add_interval_bp, axis=1)
+            print_if_verbose("getting affected positions around Bps for %i breakpoints"%len(df_bedpe))
+            df_bedpe["affected_positions_aroundBp"] = df_bedpe.apply(get_affected_positions_from_bedpe_r, extra_bp=add_interval_bp, axis=1)
             df_bedpe["medium1"] = (df_bedpe.start1 + (df_bedpe.end1 - df_bedpe.start1)/2).apply(int)
             df_bedpe["medium2"] = (df_bedpe.start2 + (df_bedpe.end2 - df_bedpe.start2)/2).apply(int)
             df_bedpe["length"] = df_bedpe.apply(get_length_bedpe_r, axis=1)
@@ -2314,7 +2314,7 @@ def get_SVs_arround_breakpoints(genome_file, df_bedpe, nvars, outdir, svtypes, r
 
                     # get only bedpe rows that are not overlapping the current positions, in terms of breakpoints
                     def get_positions_intersecting_already_affected_positions(positions): return positions.intersection(already_affected_positions)
-                    df_bedpe = df_bedpe[(df_bedpe.affected_positions_arroundBp.apply(get_positions_intersecting_already_affected_positions).apply(len))==0]
+                    df_bedpe = df_bedpe[(df_bedpe.affected_positions_aroundBp.apply(get_positions_intersecting_already_affected_positions).apply(len))==0]
 
                     # if empty, continue
                     if len(df_bedpe)==0: break
@@ -2560,7 +2560,7 @@ def simulate_SVs_in_genome(reference_genome, mitochondrial_chromosome, outdir, n
 
             ########################################
 
-        ##### GET THE RANDOM TAN,DEL,INV,INS,TRA ARROUND PROVIDED BREAKPOINTS #####
+        ##### GET THE RANDOM TAN,DEL,INV,INS,TRA AROUND PROVIDED BREAKPOINTS #####
         else:
 
             # load the bedpe
@@ -2568,7 +2568,7 @@ def simulate_SVs_in_genome(reference_genome, mitochondrial_chromosome, outdir, n
             df_bedpe = pd.read_csv(bedpe_breakpoints, sep="\t", header=-1, names=bedpe_fields)
 
             # define the translocations 
-            get_SVs_arround_breakpoints(genome_file, df_bedpe, vars_to_simulate, random_sim_dir, svtypes, replace=replace)
+            get_SVs_around_breakpoints(genome_file, df_bedpe, vars_to_simulate, random_sim_dir, svtypes, replace=replace)
 
         #######################################################################
 
@@ -5492,7 +5492,7 @@ def get_SRA_runInfo_df(target_taxID, n_close_samples, nruns_per_sample, outdir, 
         df_division_tested = pd.DataFrame()
 
         # create a folder for this number of ancestors
-        outdir_ancestors = "%s/all_runsWithWGS_arround_target_taxID_%i_considering%iAncestors"%(outdir, target_taxID, nancestorNodes); make_folder(outdir_ancestors)
+        outdir_ancestors = "%s/all_runsWithWGS_around_target_taxID_%i_considering%iAncestors"%(outdir, target_taxID, nancestorNodes); make_folder(outdir_ancestors)
 
         # get the ancestor taxID
         ancestor_taxID = get_ancestor_taxID(target_taxID, nancestorNodes, outdir_ancestors)
@@ -7194,7 +7194,7 @@ def clean_perSVade_outdir(outdir):
 
 def get_compatible_real_bedpe_breakpoints(close_shortReads_table, reference_genome, outdir, replace=False, threads=4, mitochondrial_chromosome="mito_C_glabrata_CBS138", job_array_mode="local", max_nvars=100, parameters_json_file=None,  tmpdir=None, skip_marking_duplicates=False):
 
-    """Generates a file under outdir that has the stacked breakpoints arround which to generate SV calls
+    """Generates a file under outdir that has the stacked breakpoints around which to generate SV calls
     realSV_calling_on can be reads or assembly"""
 
     # load the df
@@ -7502,11 +7502,11 @@ def get_read_length(bamfile, threads=4, nreads=5000, replace=False):
 
         samtools_read_len_stderr = "%s.generating.stderr"%readlen_dist_file_tmp
 
-        print_if_verbose("Running samtools view. The following command will throw a warning stating that 'samtools view: writing to standard output failed: Broken pipe'. This is because the output of samtools view is piped, which is expected. The stderr is in %s"%samtools_read_len_stderr)
-        cmd = "%s view --threads %i %s | head -n %i | cut -f10 | perl -ne 'chomp;print length($_) . \"\n\"' | sort > %s 2>%s"%(samtools, threads, bamfile, nreads, readlen_dist_file_tmp, samtools_read_len_stderr)
+        print_if_verbose("Running samtools view. The stderr is in %s"%samtools_read_len_stderr)
+        cmd = "%s view --threads %i %s 2>%s | head -n %i | cut -f10 | perl -ne 'chomp;print length($_) . \"\n\"' | sort > %s 2>>%s"%(samtools, threads, bamfile, samtools_read_len_stderr, nreads, readlen_dist_file_tmp, samtools_read_len_stderr)
         run_cmd(cmd)
-        remove_file(samtools_read_len_stderr)
 
+        remove_file(samtools_read_len_stderr)
         os.rename(readlen_dist_file_tmp, readlen_dist_file)
 
     return int(np.median([int(l.strip()) for l in open(readlen_dist_file, "r").readlines()]))
@@ -8405,7 +8405,7 @@ def write_breakpoints_for_parameter_combinations_and_get_filterIDtoBpoints_grids
         # first try for some combinations, which will give you the timing 
         times = [get_tupleBreakpoints_for_filters_GRIDSS(df_gridss_twoBreakEnds, filters_dict, reference_genome, return_timing=True) for filters_dict in random.sample(filters_dict_list, min(10, len(filters_dict_list)))]
         ncores = threads
-        print_if_verbose("Obtaining the list of tuples of breakpoints will take arround %.2f minutes on %i cores"%(((np.mean(times)*I)/ncores)/60, ncores))
+        print_if_verbose("Obtaining the list of tuples of breakpoints will take around %.2f minutes on %i cores"%(((np.mean(times)*I)/ncores)/60, ncores))
 
 
         # obtain the list of tuples for each parameter combintaion
@@ -10002,7 +10002,7 @@ def run_GridssClove_optimising_parameters(sorted_bam, reference_genome, outdir, 
     - expected_ploidy is a number that states the expected ploidy. 
     - nvars deteremines the number of SVs to simulate in each simulation of each type. The mtDNA will get 5% of these. There will be as maximum len(gDNA chromosomes)-1 balanced translocations, so that each chromosomal arm is only implicated once.
     - fast_SVcalling runs the SV on a predefined set of parameters, without optimisation
-    - real_bedpe_breakpoints is a bedpe file with the real breakpoints. We will simulate SVs arround them
+    - real_bedpe_breakpoints is a bedpe file with the real breakpoints. We will simulate SVs around them
     - gridss_VCFoutput is passed to run_gridssClove_given_filters. It can be useful if you don't want to rerun gridss, which is very expensive.
 
     """
@@ -10317,7 +10317,7 @@ def get_sampleID_and_runID_to_color(df):
         if start_runID_colorI<min_start_runID_colorI: start_runID_colorI = min_start_runID_colorI
         elif start_runID_colorI>max_start_runID_colorI: start_runID_colorI = max_start_runID_colorI
 
-        # go through each run, so that you get colors arround the sample color
+        # go through each run, so that you get colors around the sample color
         for Irun, runID in enumerate(runIDs):
 
             # define the colorI of the run
@@ -10524,9 +10524,9 @@ def get_blastn_regions_genome_against_itself(reference_genome, max_eval, query_w
     return blast_final_outfile
 
 
-def get_bedpe_breakpoints_arround_homologousRegions(blastn_file, bedpe_breakpoints, replace=False, threads=4, max_eval=1e-5, query_window_size=500, min_qcovs=50, min_sv_size=50, max_n_hits=10000000000):
+def get_bedpe_breakpoints_around_homologousRegions(blastn_file, bedpe_breakpoints, replace=False, threads=4, max_eval=1e-5, query_window_size=500, min_qcovs=50, min_sv_size=50, max_n_hits=10000000000):
 
-    """This function generates a bedpe (like get_bedpe_breakpoints_arround_repeats) arround regions with some homology according to max_eval. It subdivides the genome into windows of  query_window_size bp and blasts them against the genome. It defines as 'homologous regions' those that have an eval < max_eval and are not the same region. It returns some real_bedpe_breakpoints. It takes the blastn_file produced by get_blastn_regions_genome_against_itself. """
+    """This function generates a bedpe (like get_bedpe_breakpoints_around_repeats) around regions with some homology according to max_eval. It subdivides the genome into windows of  query_window_size bp and blasts them against the genome. It defines as 'homologous regions' those that have an eval < max_eval and are not the same region. It returns some real_bedpe_breakpoints. It takes the blastn_file produced by get_blastn_regions_genome_against_itself. """
 
     # run if empty
     if file_is_empty(bedpe_breakpoints) or replace is True:
@@ -10602,9 +10602,9 @@ def get_bedpe_breakpoints_arround_homologousRegions(blastn_file, bedpe_breakpoin
 
 
 
-def get_bedpe_breakpoints_arround_repeats(repeats_table_file, replace=False, min_sv_size=50, max_breakpoints=10000, max_breakpoints_per_repeat=1, threads=4, max_repeats=10000):
+def get_bedpe_breakpoints_around_repeats(repeats_table_file, replace=False, min_sv_size=50, max_breakpoints=10000, max_breakpoints_per_repeat=1, threads=4, max_repeats=10000):
 
-    """ Takes a repeats file and returns a bedpe with breakpoints arround the repeats. There will be one breakpoint for each repeat against another one (each breakpoint used only once) with random orientations and at least min_sv_size if they are equal. If the repeat has another repeat of the same "repeat" name, it will be picked first. 
+    """ Takes a repeats file and returns a bedpe with breakpoints around the repeats. There will be one breakpoint for each repeat against another one (each breakpoint used only once) with random orientations and at least min_sv_size if they are equal. If the repeat has another repeat of the same "repeat" name, it will be picked first. 
 
     This should be 1, because all the regions with more than 1 will fail"""
 
@@ -10670,7 +10670,7 @@ def get_bedpe_breakpoints_arround_repeats(repeats_table_file, replace=False, min
             pct_breakpoints_generated = "%.1f"%((len(all_repeat_pairs)/max_possible_breakpoints)*100)
                 
             if pct_breakpoints_generated!=previous_pct_breakpoints_generated:
-                print_if_verbose("%s%s of breakpoints arround repeats generated from max"%(pct_breakpoints_generated, "%"))
+                print_if_verbose("%s%s of breakpoints around repeats generated from max"%(pct_breakpoints_generated, "%"))
                 previous_pct_breakpoints_generated = pct_breakpoints_generated
 
             # init the number of repeats on Ifrom
@@ -10708,7 +10708,7 @@ def get_bedpe_breakpoints_arround_repeats(repeats_table_file, replace=False, min
 
             if len(all_repeat_pairs)>=max_breakpoints: break
 
-        print_if_verbose("There are %i breakpoints arround repeats"%(len(all_repeat_pairs)))
+        print_if_verbose("There are %i breakpoints around repeats"%(len(all_repeat_pairs)))
 
         ##################################################
 
@@ -10765,7 +10765,7 @@ def get_bedpe_breakpoints_arround_repeats(repeats_table_file, replace=False, min
 
 
 
-def report_accuracy_realSVs_perSVadeRuns(close_shortReads_table, reference_genome, outdir, real_bedpe_breakpoints, threads=4, replace=False, n_simulated_genomes=2, mitochondrial_chromosome="mito_C_glabrata_CBS138", simulation_ploidies=["haploid", "diploid_homo", "diploid_hetero", "ref:2_var:1", "ref:3_var:1", "ref:4_var:1", "ref:5_var:1", "ref:9_var:1", "ref:19_var:1", "ref:99_var:1"], range_filtering_benchmark="theoretically_meaningful", nvars=100, job_array_mode="local", skip_cleaning_simulations_files_and_parameters=False, skip_cleaning_outdir=False, parameters_json_file=None, gff=None, replace_FromGridssRun_final_perSVade_run=False, fraction_available_mem=None, skip_CNV_calling=False, outdir_finding_realVars=None, replace_SV_CNVcalling=False, simulate_SVs_arround_HomologousRegions_previousBlastnFile=None, simulate_SVs_arround_HomologousRegions_maxEvalue=1e-5, simulate_SVs_arround_HomologousRegions_queryWindowSize=500, skip_SV_CNV_calling=False, tmpdir=None, simulation_chromosomes=None, testAccuracy_skipHomRegionsSimulation=False):
+def report_accuracy_realSVs_perSVadeRuns(close_shortReads_table, reference_genome, outdir, real_bedpe_breakpoints, threads=4, replace=False, n_simulated_genomes=2, mitochondrial_chromosome="mito_C_glabrata_CBS138", simulation_ploidies=["haploid", "diploid_homo", "diploid_hetero", "ref:2_var:1", "ref:3_var:1", "ref:4_var:1", "ref:5_var:1", "ref:9_var:1", "ref:19_var:1", "ref:99_var:1"], range_filtering_benchmark="theoretically_meaningful", nvars=100, job_array_mode="local", skip_cleaning_simulations_files_and_parameters=False, skip_cleaning_outdir=False, parameters_json_file=None, gff=None, replace_FromGridssRun_final_perSVade_run=False, fraction_available_mem=None, skip_CNV_calling=False, outdir_finding_realVars=None, replace_SV_CNVcalling=False, simulate_SVs_around_HomologousRegions_previousBlastnFile=None, simulate_SVs_around_HomologousRegions_maxEvalue=1e-5, simulate_SVs_around_HomologousRegions_queryWindowSize=500, skip_SV_CNV_calling=False, tmpdir=None, simulation_chromosomes=None, testAccuracy_skipHomRegionsSimulation=False):
 
 
     """This function runs the SV pipeline for all the datasets in close_shortReads_table with the fastSV, optimisation based on uniform parameters and optimisation based on realSVs (specified in real_svtype_to_file). The latter is skipped if real_svtype_to_file is empty.
@@ -10818,7 +10818,7 @@ def report_accuracy_realSVs_perSVadeRuns(close_shortReads_table, reference_genom
     all_cmds = []
 
     # define the configuraion 
-    if testAccuracy_skipHomRegionsSimulation is False: types_simulations = ["arroundHomRegions", "uniform", "fast", "realSVs"]
+    if testAccuracy_skipHomRegionsSimulation is False: types_simulations = ["aroundHomRegions", "uniform", "fast", "realSVs"]
     else: types_simulations = ["uniform", "fast", "realSVs"]
     
     # predefine if some jobs need to be ran
@@ -10826,10 +10826,10 @@ def report_accuracy_realSVs_perSVadeRuns(close_shortReads_table, reference_genom
     print_if_verbose("There are %i remaining jobs"%n_remaining_jobs)
 
     # go through each run and configuration
-    for typeSimulations, bedpe_breakpoints, fast_SVcalling, simulate_SVs_arround_repeats, simulate_SVs_arround_HomologousRegions in [("arroundHomRegions", None, False, False, True), ("uniform", None, False, False, False), ("realSVs", real_bedpe_breakpoints, False, False, False), ("fast", None, True, False, False)]:
+    for typeSimulations, bedpe_breakpoints, fast_SVcalling, simulate_SVs_around_repeats, simulate_SVs_around_HomologousRegions in [("aroundHomRegions", None, False, False, True), ("uniform", None, False, False, False), ("realSVs", real_bedpe_breakpoints, False, False, False), ("fast", None, True, False, False)]:
 
         # skip the homRegions if specified
-        if testAccuracy_skipHomRegionsSimulation is True and typeSimulations=="arroundHomRegions": continue
+        if testAccuracy_skipHomRegionsSimulation is True and typeSimulations=="aroundHomRegions": continue
 
         # define an outdir for this type of simulations
         outdir_typeSimulations = "%s/%s"%(outdir, typeSimulations); make_folder(outdir_typeSimulations)
@@ -10871,7 +10871,7 @@ def report_accuracy_realSVs_perSVadeRuns(close_shortReads_table, reference_genom
             if file_is_empty(final_file) or replace is True:# or file_is_empty(parameters_file):
 
                 # define the cmd. This is a normal perSvade.py run with the vars of the previous dir  
-                cmd = "python %s -r %s --threads %i --outdir %s --nvars %i --nsimulations %i --simulation_ploidies %s --range_filtering_benchmark %s --mitochondrial_chromosome %s -f1 %s -f2 %s --previous_repeats_table %s --min_CNVsize_coverageBased %i --keep_simulation_files --simulate_SVs_arround_HomologousRegions_maxEvalue %.10f --simulate_SVs_arround_HomologousRegions_queryWindowSize %i --fractionRAM_to_dedicate %.2f"%(perSVade_py, reference_genome, threads, outdir_runID, nvars, n_simulated_genomes, ",".join(simulation_ploidies), range_filtering_benchmark, mitochondrial_chromosome, r1, r2, previous_repeats_table, min_CNVsize_coverageBased, simulate_SVs_arround_HomologousRegions_maxEvalue, simulate_SVs_arround_HomologousRegions_queryWindowSize, fractionRAM_to_dedicate)
+                cmd = "python %s -r %s --threads %i --outdir %s --nvars %i --nsimulations %i --simulation_ploidies %s --range_filtering_benchmark %s --mitochondrial_chromosome %s -f1 %s -f2 %s --previous_repeats_table %s --min_CNVsize_coverageBased %i --keep_simulation_files --simulate_SVs_around_HomologousRegions_maxEvalue %.10f --simulate_SVs_around_HomologousRegions_queryWindowSize %i --fractionRAM_to_dedicate %.2f"%(perSVade_py, reference_genome, threads, outdir_runID, nvars, n_simulated_genomes, ",".join(simulation_ploidies), range_filtering_benchmark, mitochondrial_chromosome, r1, r2, previous_repeats_table, min_CNVsize_coverageBased, simulate_SVs_around_HomologousRegions_maxEvalue, simulate_SVs_around_HomologousRegions_queryWindowSize, fractionRAM_to_dedicate)
 
                 # add arguments depending on the pipeline
                 if replace is True: cmd += " --replace"
@@ -10885,9 +10885,9 @@ def report_accuracy_realSVs_perSVadeRuns(close_shortReads_table, reference_genom
                 if replace_SV_CNVcalling is True: cmd += " --replace_SV_CNVcalling"
                 if skip_CNV_calling is True: cmd += " --skip_CNV_calling"
                 if skip_SV_CNV_calling is True: cmd += " --skip_SV_CNV_calling"
-                if simulate_SVs_arround_repeats is True: cmd += " --simulate_SVs_arround_repeats"
-                if simulate_SVs_arround_HomologousRegions is True: cmd += " --simulate_SVs_arround_HomologousRegions"
-                if simulate_SVs_arround_HomologousRegions_previousBlastnFile is not None: cmd += " --simulate_SVs_arround_HomologousRegions_previousBlastnFile %s"%simulate_SVs_arround_HomologousRegions_previousBlastnFile
+                if simulate_SVs_around_repeats is True: cmd += " --simulate_SVs_around_repeats"
+                if simulate_SVs_around_HomologousRegions is True: cmd += " --simulate_SVs_around_HomologousRegions"
+                if simulate_SVs_around_HomologousRegions_previousBlastnFile is not None: cmd += " --simulate_SVs_around_HomologousRegions_previousBlastnFile %s"%simulate_SVs_around_HomologousRegions_previousBlastnFile
                 if tmpdir is not None: cmd += " --tmpdir %s"%tmpdir
                 if simulation_chromosomes is not None: cmd += " --simulation_chromosomes %s"%simulation_chromosomes
 
@@ -11209,7 +11209,7 @@ def get_goldenSet_table_softlinked_under_outdir(goldenSet_table, outdir):
     return final_goldenSet_table
 
 
-def report_accuracy_golden_set_runJobs(goldenSet_table, outdir, reference_genome, real_bedpe_breakpoints, threads=4, replace=False, n_simulated_genomes=2, mitochondrial_chromosome="mito_C_glabrata_CBS138", simulation_ploidies=["haploid", "diploid_homo", "diploid_hetero", "ref:2_var:1", "ref:3_var:1", "ref:4_var:1", "ref:5_var:1", "ref:9_var:1", "ref:19_var:1", "ref:99_var:1"], range_filtering_benchmark="theoretically_meaningful", nvars=100, job_array_mode="local", StopAfter_sampleIndexingFromSRA=False, StopAfterPrefecth_of_reads=False, target_taxID=None, parameters_json_file=None, fraction_available_mem=None, verbose=False, min_coverage=30, simulate_SVs_arround_HomologousRegions_previousBlastnFile=None, simulate_SVs_arround_HomologousRegions_maxEvalue=1e-5, simulate_SVs_arround_HomologousRegions_queryWindowSize=500, max_n_samples=6):
+def report_accuracy_golden_set_runJobs(goldenSet_table, outdir, reference_genome, real_bedpe_breakpoints, threads=4, replace=False, n_simulated_genomes=2, mitochondrial_chromosome="mito_C_glabrata_CBS138", simulation_ploidies=["haploid", "diploid_homo", "diploid_hetero", "ref:2_var:1", "ref:3_var:1", "ref:4_var:1", "ref:5_var:1", "ref:9_var:1", "ref:19_var:1", "ref:99_var:1"], range_filtering_benchmark="theoretically_meaningful", nvars=100, job_array_mode="local", StopAfter_sampleIndexingFromSRA=False, StopAfterPrefecth_of_reads=False, target_taxID=None, parameters_json_file=None, fraction_available_mem=None, verbose=False, min_coverage=30, simulate_SVs_around_HomologousRegions_previousBlastnFile=None, simulate_SVs_around_HomologousRegions_maxEvalue=1e-5, simulate_SVs_around_HomologousRegions_queryWindowSize=500, max_n_samples=6):
 
 
     """Takes a table that has sampleID, short_reads_1, short_reads_2, long_reads. Each row has one sample. This function runs perSVade with different options for each of the samples in the goldenSet_table. It will run the first max_n_samples.  """
@@ -11317,9 +11317,9 @@ def report_accuracy_golden_set_runJobs(goldenSet_table, outdir, reference_genome
     
 
     # go through each run and configuration
-    for typeSimulations, bedpe_breakpoints, fast_SVcalling, simulate_SVs_arround_repeats, simulate_SVs_arround_HomologousRegions in [("fast", None, True, False, False), ("arroundHomRegions", None, False, False, True), ("uniform", None, False, False, False), ("realSVs", real_bedpe_breakpoints, False, False, False)]:
+    for typeSimulations, bedpe_breakpoints, fast_SVcalling, simulate_SVs_around_repeats, simulate_SVs_around_HomologousRegions in [("fast", None, True, False, False), ("aroundHomRegions", None, False, False, True), ("uniform", None, False, False, False), ("realSVs", real_bedpe_breakpoints, False, False, False)]:
 
-        #if typeSimulations=="arroundHomRegions": continue # debug
+        #if typeSimulations=="aroundHomRegions": continue # debug
 
         # go through each sampleID
         for Isample, r in goldenSet_df.iterrows():
@@ -11328,7 +11328,7 @@ def report_accuracy_golden_set_runJobs(goldenSet_table, outdir, reference_genome
             outdir_sample = "%s/perSVade_calling_%s_%s"%(outdir_perSVade_calling, typeSimulations, r.sampleID); make_folder(outdir_sample)
 
             # define the other_perSVade_outdirs_sameReadsANDalignment from all the outdirs of this same sample and different typeSimulations
-            types_simulations = ["arroundHomRegions", "arroundRepeats", "uniform", "fast", "realSVs"]
+            types_simulations = ["aroundHomRegions", "aroundRepeats", "uniform", "fast", "realSVs"]
             other_perSVade_outdirs_sameReadsANDalignment = ",".join(["%s/perSVade_calling_%s_%s"%(outdir_perSVade_calling, x, r.sampleID) for x in types_simulations])
 
             # keep 
@@ -11345,7 +11345,7 @@ def report_accuracy_golden_set_runJobs(goldenSet_table, outdir, reference_genome
             if file_is_empty(final_file) or replace is True:
 
                 # define the cmd. This is a normal perSvade.py run with the vars of the previous dir  
-                cmd = "python %s -r %s --threads %i --outdir %s --nvars %i --nsimulations %i --simulation_ploidies %s --range_filtering_benchmark %s --mitochondrial_chromosome %s --previous_repeats_table %s --skip_SV_CNV_calling --skip_CNV_calling --QC_and_trimming_reads --other_perSVade_outdirs_sameReadsANDalignment %s --simulate_SVs_arround_HomologousRegions_maxEvalue %.10f --simulate_SVs_arround_HomologousRegions_queryWindowSize %i --keep_simulation_files %s --fractionRAM_to_dedicate %.2f"%(perSVade_py, reference_genome, threads, outdir_sample, nvars, n_simulated_genomes, ",".join(simulation_ploidies), range_filtering_benchmark, mitochondrial_chromosome, previous_repeats_table, other_perSVade_outdirs_sameReadsANDalignment, simulate_SVs_arround_HomologousRegions_maxEvalue, simulate_SVs_arround_HomologousRegions_queryWindowSize, r.input_short_reads_str, fractionRAM_to_dedicate)
+                cmd = "python %s -r %s --threads %i --outdir %s --nvars %i --nsimulations %i --simulation_ploidies %s --range_filtering_benchmark %s --mitochondrial_chromosome %s --previous_repeats_table %s --skip_SV_CNV_calling --skip_CNV_calling --QC_and_trimming_reads --other_perSVade_outdirs_sameReadsANDalignment %s --simulate_SVs_around_HomologousRegions_maxEvalue %.10f --simulate_SVs_around_HomologousRegions_queryWindowSize %i --keep_simulation_files %s --fractionRAM_to_dedicate %.2f"%(perSVade_py, reference_genome, threads, outdir_sample, nvars, n_simulated_genomes, ",".join(simulation_ploidies), range_filtering_benchmark, mitochondrial_chromosome, previous_repeats_table, other_perSVade_outdirs_sameReadsANDalignment, simulate_SVs_around_HomologousRegions_maxEvalue, simulate_SVs_around_HomologousRegions_queryWindowSize, r.input_short_reads_str, fractionRAM_to_dedicate)
 
                 # add arguments depending on the pipeline
                 if replace is True: cmd += " --replace"
@@ -11354,9 +11354,9 @@ def report_accuracy_golden_set_runJobs(goldenSet_table, outdir, reference_genome
                 if printing_verbose_mode is True: cmd += " --verbose"
                 if parameters_json_file is not None: cmd += " --parameters_json_file %s"%parameters_json_file
                 if fraction_available_mem is not None: cmd += " --fraction_available_mem %.3f"%(float(fraction_available_mem))
-                if simulate_SVs_arround_repeats is True: cmd += " --simulate_SVs_arround_repeats"
-                if simulate_SVs_arround_HomologousRegions is True: cmd += " --simulate_SVs_arround_HomologousRegions"
-                if simulate_SVs_arround_HomologousRegions_previousBlastnFile is not None: cmd += " --simulate_SVs_arround_HomologousRegions_previousBlastnFile %s"%simulate_SVs_arround_HomologousRegions_previousBlastnFile
+                if simulate_SVs_around_repeats is True: cmd += " --simulate_SVs_around_repeats"
+                if simulate_SVs_around_HomologousRegions is True: cmd += " --simulate_SVs_around_HomologousRegions"
+                if simulate_SVs_around_HomologousRegions_previousBlastnFile is not None: cmd += " --simulate_SVs_around_HomologousRegions_previousBlastnFile %s"%simulate_SVs_around_HomologousRegions_previousBlastnFile
 
 
                 all_cmds.append(cmd)
@@ -11895,7 +11895,7 @@ def get_df_accuracy_perSVade_vs_longReads_one_sample(sampleID, outdir_shortVsLon
         sniffles_df = get_sniffles_as_df(dict_paths["sniffles_outdir"], reference_genome)
 
         # define all the interesting simulations
-        all_types_simulations =  ["fast", "uniform", "realSVs", "arroundHomRegions"]
+        all_types_simulations =  ["fast", "uniform", "realSVs", "aroundHomRegions"]
 
         # define SVIM and SNIFFLES filters (same number each)
         all_min_QUAL_svim = [3, 5, 7, 10, 12, 15, 20, 30, 40, 50] # max of 100
@@ -12092,9 +12092,9 @@ def plot_accuracy_perSVade_vs_longReads_precision_and_recall(df_accuracy_all, Pl
                                 df_plot = df_plot_fig[(df_plot_fig.sampleID==sampleID)].sort_values(by=["threshold_fractionParms"])
 
                                 # plot main line
-                                typeRun_to_color = {"perSVade-uniform":"blue", "perSVade-fast":"gray", "perSVade-realSVs":"red", 'perSVade-arroundHomRegions':"black", 'perSVade-arroundRepeats':"black"}
+                                typeRun_to_color = {"perSVade-uniform":"blue", "perSVade-fast":"gray", "perSVade-realSVs":"red", 'perSVade-aroundHomRegions':"black", 'perSVade-aroundRepeats':"black"}
 
-                                typeRun_to_marker = {"perSVade-uniform":"^", "perSVade-fast":"s", "perSVade-realSVs":"o", 'perSVade-arroundHomRegions':"v", 'perSVade-arroundRepeats':"*"}
+                                typeRun_to_marker = {"perSVade-uniform":"^", "perSVade-fast":"s", "perSVade-realSVs":"o", 'perSVade-aroundHomRegions':"v", 'perSVade-aroundRepeats':"*"}
 
                                 ax = sns.lineplot(data=df_plot, x="threshold_fractionParms", y=accuracy_f, hue="perSVade_parameters", style="perSVade_parameters", palette=typeRun_to_color,  markers=typeRun_to_marker, dashes=False, ci="sd", markeredgecolor=None, linewidth=1.8, markersize=4, alpha=.7, markeredgewidth=0)
 
@@ -12211,9 +12211,9 @@ def plot_accuracy_perSVade_vs_longReads(df_accuracy_all, PlotsDir, min_nvars=10,
                             df_plot = df_plot_fig[(df_plot_fig.svtype==svtype) & (df_plot_fig.sampleID==sampleID)].sort_values(by=[xfield])
 
                             # plot main line
-                            typeRun_to_color = {"perSVade-uniform":"blue", "perSVade-fast":"gray", "perSVade-realSVs":"red", 'perSVade-arroundHomRegions':"black", 'perSVade-arroundRepeats':"black"}
+                            typeRun_to_color = {"perSVade-uniform":"blue", "perSVade-fast":"gray", "perSVade-realSVs":"red", 'perSVade-aroundHomRegions':"black", 'perSVade-aroundRepeats':"black"}
 
-                            typeRun_to_marker = {"perSVade-uniform":"^", "perSVade-fast":"s", "perSVade-realSVs":"o", 'perSVade-arroundHomRegions':"v", 'perSVade-arroundRepeats':"*"}
+                            typeRun_to_marker = {"perSVade-uniform":"^", "perSVade-fast":"s", "perSVade-realSVs":"o", 'perSVade-aroundHomRegions':"v", 'perSVade-aroundRepeats':"*"}
 
                             ax = sns.lineplot(data=df_plot, x=xfield, y=yfield, hue="perSVade_parameters", style="perSVade_parameters", palette=typeRun_to_color,  markers=typeRun_to_marker, dashes=False, ci="sd", markeredgecolor=None, linewidth=1.8, markersize=4, alpha=.7, markeredgewidth=0)
 
@@ -12271,7 +12271,7 @@ def report_accuracy_golden_set_reportAccuracy(dict_paths_all_samples, outdir, re
 
     # define all the types of optimisations
     
-    #all_types_simulations =  ["fast", "uniform", "realSVs", "arroundRepeats"]
+    #all_types_simulations =  ["fast", "uniform", "realSVs", "aroundRepeats"]
 
     # init df
     df_accuracy_perSVade_vs_longReads_all = pd.DataFrame()
@@ -13921,7 +13921,7 @@ def verify_no_NaNs(series):
 
 def get_df_coverage_with_corrected_coverage(df_coverage, reference_genome, outdir, replace, threads, mitochondrial_chromosome, initial_predictor_fields=["GCcontent", "median_mappability"], fill_value_interpolation_finalFitting="extrapolate"):
 
-    """This function will take a df_coverage that has coverage_field as a proxy for coverage. It will add <coverage_field> which is a value that will be a ratio between the coverage_field and the coverage_field predicted from a loess regression taking into account mappability, GC content and distance to the telomere across the windows. The resulting value will be centered arround 1.  
+    """This function will take a df_coverage that has coverage_field as a proxy for coverage. It will add <coverage_field> which is a value that will be a ratio between the coverage_field and the coverage_field predicted from a loess regression taking into account mappability, GC content and distance to the telomere across the windows. The resulting value will be centered around 1.  
 
     initial_predictor_fields indicates which fields will be used for the correction """
 
@@ -17054,7 +17054,7 @@ def get_df_gridss_chrom_to_positions(df_gridss, chrom_to_len):
     return chrom_to_bpPositions
 
 
-def get_df_windows_arround_pos_r(r, chrom_to_len, min_sv_size):
+def get_df_windows_around_pos_r(r, chrom_to_len, min_sv_size):
 
     """This function returns a df with chromosome, start, end for the provided r. It checks to not be outside of the boundaries """
 
@@ -17106,7 +17106,7 @@ def get_df_gridss_low_confidence_reasonable_breakpoints(df_gridss, ploidy, min_c
     df_gridss = df_gridss[(df_gridss.POS!=0) & (df_gridss.POS!=1) & (df_gridss.POS!=df_gridss.chromosome_end)]
 
     # get windows of +-min_sv_size
-    df_windows = pd.concat([df for df in df_gridss[["#CHROM", "POS", "ID"]].apply(lambda r: get_df_windows_arround_pos_r(r, chrom_to_len, min_sv_size), axis=1)])
+    df_windows = pd.concat([df for df in df_gridss[["#CHROM", "POS", "ID"]].apply(lambda r: get_df_windows_around_pos_r(r, chrom_to_len, min_sv_size), axis=1)])
 
     # get the coverage of these windows
     windows_file = "%s/df_gridss_lowConf_surrounding.bed"%outdir
@@ -17838,8 +17838,6 @@ def annotate_SVs_inHouse(vcf_SVcalling, gff, reference_genome, replace=False, th
 
         # clea
         clean_vep_output_files(annotated_vcf_tmp)
-
-
 
         # run vep
         vep_cmd = "%s --input_vcf %s --outfile %s --ref %s --gff %s --mitochondrial_chromosome %s --mito_code %i --gDNA_code %i"%(run_vep, vcf_SVcalling, annotated_vcf_tmp, reference_genome, gff, mitochondrial_chromosome, mito_code, gDNA_code)
