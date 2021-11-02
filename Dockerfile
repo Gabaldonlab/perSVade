@@ -51,6 +51,20 @@ ARG picard_env_name="$env_name"_picard_env
 # Make below RUN commands use the perSVade_env:
 SHELL ["conda", "run", "-n", "perSVade_env", "/bin/bash", "-e", "-c"]
 
+# add conda channels
+RUN conda config --add channels conda-forge
+RUN conda config --add channels anaconda
+RUN conda config --add channels bioconda
+
+# create a subenvironment to run gridss
+RUN mamba create -y --name $gridss_env_name -c conda-forge r-base=4.0.2
+RUN mamba install -n $gridss_env_name --force-reinstall -c bioconda -y samtools=1.10 # --force-reinstall to uninstall and reinstall
+RUN mamba install -n $gridss_env_name -c bioconda -y bwa=0.7.17
+RUN mamba install -n $gridss_env_name -c anaconda -y openjdk=8.0.152
+
+# test gridss env
+RUN source $conda_dir/etc/profile.d/conda.sh && conda activate $gridss_env_name && samtools --help # check that samtools is properly installed
+
 # make dirs
 RUN mkdir $external_software_dir
 RUN mkdir $lowess_dir
@@ -77,10 +91,6 @@ RUN cd $external_software_dir && wget https://raw.githubusercontent.com/weiyuchu
 # give permissions to all
 RUN cd $external_software_dir && chmod 755 *
 
-# add conda channels
-RUN conda config --add channels conda-forge
-RUN conda config --add channels anaconda
-RUN conda config --add channels bioconda
 
 # create an environment to run repeat masker and modeller
 RUN mamba create -y --name $repeatMasker_env_name -c bioconda repeatmasker=4.0.9_p2 repeatmodeler=2.0.1 
@@ -140,12 +150,6 @@ RUN mamba install -y -n $HMMcopy_env_name -c bioconda bioconductor-hmmcopy=1.32.
 RUN mamba install -y -n $HMMcopy_env_name -c conda-forge r-argparser=0.6
 RUN mamba install -y -n $HMMcopy_env_name -c conda-forge r-kernsmooth=2.23
 
-# create a subenvironment to run gridss
-RUN mamba create -y --name $gridss_env_name -c conda-forge r-base=4.0.2
-RUN mamba install -n $gridss_env_name -c bioconda -y samtools=1.10
-RUN mamba install -n $gridss_env_name -c bioconda -y bwa=0.7.17
-RUN mamba install -n $gridss_env_name -c anaconda -y openjdk=8.0.152
-
 # create a subenvironment to run picard
 RUN mamba create -y --name $picard_env_name -c conda-forge r-base=4.0.2
 RUN mamba install -n $picard_env_name -c bioconda -y picard=2.18.26
@@ -157,25 +161,14 @@ ENTRYPOINT ["conda", "run", "--no-capture-output", "--live-stream", "-n", "perSV
 
 ####### GENERAL COMMENTS ########
 
-# this image can be built with 'docker build -t mikischikora/persvade:v1 .'
+# this image can be built with 'docker build -t mikischikora/persvade:<tag> .'
+# Publish the image with 'docker push mikischikora/persvade:<tag>'
 
-# This image contains the perSVade environment, and it can be used through 'docker run -i mikischikora/persvade:v1 <commands> '
+# This image contains the perSVade environment, and it can be used through 'docker run -i mikischikora/persvade:v1 <commands> '. We created a .dockerignore file with some folders not to consider. We tested perSVade on version 4.8.0, but this was not available on dockerhub. 'FROM continuumio/miniconda3:4.8.2' would be to have the directly installed conda, closest to reality. 
 
-# we created a .dockerignore file with some folders not to consider
 
-# We tested perSVade on version 4.8.0, but this was not available on dockerhub. 
+# Docker cmds: run a terminal with 'docker run -it mikischikora/persvade:v1 bash'. You can save this image with 'docker save mikischikora/persvade:v1 | gzip > ./perSVade_docker_image.tar.gz' and load with 'docker load -i ./perSVade_docker_image.tar'.
 
-# we can pass arguments like -v <host_path>:<docker_path>
-
-# 'FROM continuumio/miniconda3:4.8.2' would be to have the directly installed conda, closest to reality.
-
-# run a terminal with 'docker run -it mikischikora/persvade:v1 bash'
-
-# publish the image with 'docker push mikischikora/persvade:v1'
-
-# you can save this image with 'docker save mikischikora/persvade:v1 | gzip > ./perSVade_docker_image.tar.gz'
-
-# and load with 'docker load -i ./perSVade_docker_image.tar'
 
 # testing docker with linked data in /home/mschikora (debug mode):
 # docker run --memory "20g" -v /home/mschikora/samba/scripts/perSVade/perSVade_repository/scripts:/perSVade/scripts -v /home/mschikora/samba/scripts/perSVade/perSVade_repository/installation/test_installation:/perSVade/installation/test_installation mikischikora/persvade:v1 python -u ./installation/test_installation/test_installation.py
