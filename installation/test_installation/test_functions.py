@@ -405,6 +405,7 @@ def test_greasy():
         fun.print_with_runtime("---\n")
 
 
+<<<<<<< HEAD
 def test_picard_env(testing_inputs_dir, testing_outputs_dir):
 
     """Makes sure that the picard environment was properly generated"""
@@ -423,3 +424,5 @@ def test_picard_env(testing_inputs_dir, testing_outputs_dir):
     fun.create_sequence_dict(ref_genome, replace=False)
 
     fun.print_with_runtime("picard_env was properly generated")
+=======
+>>>>>>> aa6ac893d942c3018f9ddc93a6c180e92d153b6c

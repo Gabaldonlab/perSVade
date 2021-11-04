@@ -72,8 +72,11 @@ SeqIO.write(all_records_mutated, "%s/reduced_genome_mutated.fasta"%testing_input
 Calbicans_genome = "%s/Candida_albicans.fasta"%testing_inputs_dir
 SeqIO.write([s for s in SeqIO.parse(Calbicans_genome, "fasta") if s.id in {"Ca22chr1A_C_albicans_SC5314", "Ca22chr6A_C_albicans_SC5314", "Ca22chr2A_C_albicans_SC5314"}], "%s/Candida_albicans_chr1_2_6.fasta"%testing_inputs_dir, "fasta")
 
+<<<<<<< HEAD
 # Manually added files (only for some very specific things)
 
 # rsync ~/samba/scripts/perSVade/releases/perSVade-1.02/perSVade_testing_outputs_singularity/reduced_genome.fasta.testing_rearranged_genome_generation/final_simulated_SVs/rearranged_genome.fasta_simulating_reads/getting_reads/aligning_reads_against_reduced_genome.fasta/aligned_reads.bam.sorted readsWithSVs_against_reducedGenome.sorted.bam
+=======
+>>>>>>> aa6ac893d942c3018f9ddc93a6c180e92d153b6c
 
 
