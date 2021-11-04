@@ -853,6 +853,9 @@ def extract_BEDofGENES_of_gff3(gff, bed, replace=False, reference=""):
         # get the ID
         IDlist = [x.lstrip("ID=") for x in attributes.split(";") if x.startswith("ID=")]
 
+        print(IDlist)
+        
+
         # check that the ID is correct
         if len(IDlist)!=1: 
             print_if_verbose(IDlist, attributes)
