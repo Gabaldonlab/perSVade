@@ -4,7 +4,7 @@ set -e
 # This script adds external software so that perSVade.py can run. It does not create any environmental changes
 
 # define installation dir
-installation_dir=$(readlink -f $0 | sed 's/\/setup_environment.sh//g')
+installation_dir=$(readlink -f $0 | sed 's/\/install_standalone_packages.sh//g')
 
 # go to the installation dir and make the external software one
 cd $installation_dir
