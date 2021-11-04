@@ -1,0 +1,48 @@
+ARG tag=$tag
+FROM persvade_with_external_software:$tag
+
+# This image adds all the repeats dependencies
+
+# define the working directory
+WORKDIR /perSVade
+
+# define args
+ARG env_name=perSVade_env
+ARG conda_envs_dir=/opt/conda/envs
+ARG installation_dir=/perSVade/installation
+ARG repeatMasker_env_name="$env_name"_RepeatMasker_env
+ARG repeatMasker_env_path=$conda_envs_dir/$repeatMasker_env_name
+ARG ninja_binary=$installation_dir/NINJA_repo_05112020/NINJA/Ninja
+ARG new_ninja_binary=$repeatMasker_env_path/bin/Ninja
+
+# make the following commands to run from the base environment
+SHELL ["conda", "run", "-n", "base", "/bin/bash", "-e", "-c"]
+
+# add conda channels
+RUN conda config --add channels conda-forge
+RUN conda config --add channels anaconda
+RUN conda config --add channels bioconda
+
+# create an environment to run repeat masker and modeller
+RUN mamba create -y --name $repeatMasker_env_name -c bioconda repeatmasker=4.0.9_p2 repeatmodeler=2.0.1 
+RUN mamba install --name $repeatMasker_env_name -c anaconda make=4.2.1
+
+# run the commands below on $repeatMasker_env_name
+SHELL ["conda", "run", "-n", "perSVade_env_RepeatMasker_env", "/bin/bash", "-e", "-c"]
+
+# configure the Repeat Libraries
+RUN bash $installation_dir/configure_repeat_libraries.sh
+
+# install Ninja and important dependencies
+RUN mamba install -y -n $repeatMasker_env_name gxx_linux-64
+RUN ln -s $repeatMasker_env_path/bin/x86_64-conda_cos6-linux-gnu-g++ $repeatMasker_env_path/bin/g++
+RUN chmod 755 $repeatMasker_env_path/bin/g++
+RUN tar -xvf $installation_dir/Ninja_data/NINJA_repo_05112020.tar.gz && mv NINJA $installation_dir/NINJA_repo_05112020
+RUN cd $installation_dir/NINJA_repo_05112020 && make build
+RUN cp $ninja_binary $new_ninja_binary
+
+# test that NINJA was properly installed (skip in debug mode)
+RUN $new_ninja_binary --in $installation_dir/test_installation/testing_inputs/MERS_CoV_genome.fasta --out $installation_dir/Ninja_data/ninja_test.out && echo "Ninja installation worked!!!"
+
+# Reactivate the perSVade_env:
+SHELL ["conda", "run", "-n", "perSVade_env", "/bin/bash", "-e", "-c"]

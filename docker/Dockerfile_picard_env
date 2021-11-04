@@ -1,0 +1,31 @@
+ARG tag=$tag
+FROM persvade_with_gridss_env:$tag
+
+# installs the picard env
+
+# define the working directory (creates the folder /perSVade inside the virtual machine)
+WORKDIR /perSVade
+
+# actuallize the testing scripts
+COPY ./installation/test_installation /perSVade/installation/test_installation/
+RUN chmod -R 777 /perSVade/installation/test_installation/
+
+# make the following commands to run from the base environment
+SHELL ["conda", "run", "-n", "base", "/bin/bash", "-e", "-c"]
+
+# add conda channels
+RUN conda config --add channels conda-forge
+RUN conda config --add channels anaconda
+RUN conda config --add channels bioconda
+
+# define vars
+ARG conda_dir=/opt/conda
+ARG env_name=perSVade_env
+ARG picard_env_name="$env_name"_picard_env
+
+# create a subenvironment to run picard
+RUN mamba create -y --name $picard_env_name -c conda-forge r-base=4.0.2
+RUN mamba install -n $picard_env_name --force-reinstall -c bioconda -y picard=2.18.26
+
+# test that the picart installation
+RUN source $conda_dir/etc/profile.d/conda.sh && conda activate perSVade_env && /perSVade/installation/test_installation/test_installation.py picard_env

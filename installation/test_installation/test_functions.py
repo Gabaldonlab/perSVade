@@ -405,3 +405,21 @@ def test_greasy():
         fun.print_with_runtime("---\n")
 
 
+def test_picard_env(testing_inputs_dir, testing_outputs_dir):
+
+    """Makes sure that the picard environment was properly generated"""
+
+    # define inputs
+    sorted_bam = "%s/readsWithSVs_against_reducedGenome.sorted.bam"%testing_outputs_dir 
+    fun.soft_link_files("%s/readsWithSVs_against_reducedGenome.sorted.bam"%testing_inputs_dir , sorted_bam)
+
+    ref_genome = "%s/reduced_genome.fasta"%testing_outputs_dir
+    fun.soft_link_files("%s/reduced_genome.fasta"%testing_inputs_dir , ref_genome)
+
+    # get the insert size distribution, which relies on picard
+    fun.get_insert_size_distribution(sorted_bam, replace=False, threads=threads)
+
+    # get the sequence dict
+    fun.create_sequence_dict(ref_genome, replace=False)
+
+    fun.print_with_runtime("picard_env was properly generated")

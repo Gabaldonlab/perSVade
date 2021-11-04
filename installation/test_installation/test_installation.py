@@ -85,6 +85,24 @@ fun.soft_link_files(inputs_Calbicans_chr1_2_6, Calbicans_chr1_2_6)
 
 ########################################
 
+######## TEST SPECIFIC PARTS ##########
+
+if len(sys.argv)>1:
+	part_test = sys.argv[1]
+
+	# check that the picard environment is fine
+	if part_test=="picard_env": test_fun.test_picard_env(testing_inputs_dir, testing_outputs_dir)
+
+	else: raise ValueError("%s is not valid"%part_test)
+
+	# exit
+	print("testing %s worked well"%part_test)
+	sys.exit(0)
+
+#######################################
+
+###### GENERAL TESTING ########
+
 # calculate the memory that is available
 #fun.print_with_runtime("running testings on %s Gb of RAM"%(fun.get_availableGbRAM(testing_outputs_dir)))
 
@@ -148,11 +166,10 @@ real_bedpe_breakpoints = test_fun.test_realSVgeneration(Cglabrata_subsampled_rea
 # test the repeat masker obtention for a long chromosome 1, 2 and 6
 #test_fun.test_get_repeat_maskerDF(Calbicans_chr1_2_6, replace=False)
 
-############################################
 
 fun.print_with_runtime("\n\n---\nSUCCESS: perSVade was properly installed\n---\n\n")
 
-
+###############################
 
 
 

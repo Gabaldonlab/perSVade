@@ -1,0 +1,3 @@
+image	note
+mikischikora/persvade:v1	Created from scratch with create_docker_image.sh
+mikischikora/persvade:v1.02	Created from scratch with create_docker_image.sh

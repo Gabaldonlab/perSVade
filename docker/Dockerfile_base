@@ -1,0 +1,44 @@
+FROM continuumio/miniconda3:4.8.2
+
+# define the working directory (creates the folder /perSVade inside the virtual machine)
+WORKDIR /perSVade
+
+# copy all the necessary files into /perSVade. This is everything from the github repository.
+COPY . .
+
+# give permissions to necessary files
+RUN chmod 755 /perSVade/scripts/*
+RUN chmod 755 /perSVade/installation/*
+RUN chmod -R 777 /perSVade/installation/test_installation/
+
+# install mamba
+RUN conda install -y -c conda-forge mamba=0.15.3
+
+# create the perSVade environment from the .yml file. mamba is way faster than conda
+RUN mamba env create --file ./installation/perSVade_env.yml --name perSVade_env
+
+# make the following commands to run from the environment perSVade_env
+SHELL ["conda", "run", "-n", "perSVade_env", "/bin/bash", "-e", "-c"]
+
+# define variables
+ARG external_software_dir=/perSVade/installation/external_software
+ARG lowess_dir=$external_software_dir/lowess-work-carljv
+
+# make dirs
+RUN mkdir $external_software_dir
+RUN mkdir $lowess_dir
+
+# install the lowess package (and necessary conda dependencies) 
+RUN mamba install -y -n perSVade_env -c conda-forge gcc_linux-64=11.1.0
+RUN mamba install -y -n perSVade_env -c anaconda lxml=4.5.1
+RUN git clone https://github.com/histed/lowess-work-carljv $lowess_dir/
+RUN cd $lowess_dir && python setup.py install
+
+# test that cylowess works
+RUN python -c 'import cylowess'
+
+# test that the base is properly created
+RUN /perSVade/scripts/perSVade.py --help
+
+# activate perSVade's environment on running. "conda run --no-capture-output" would be to skip the generation of STDs
+ENTRYPOINT ["conda", "run", "--no-capture-output", "--live-stream", "-n", "perSVade_env"] 

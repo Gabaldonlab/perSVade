@@ -1,0 +1,26 @@
+ARG tag=$tag
+FROM persvade_base:$tag
+
+# This image adds all the external software dependencies
+
+# define the working directory
+WORKDIR /perSVade
+
+# Make below RUN commands use the perSVade_env:
+SHELL ["conda", "run", "-n", "perSVade_env", "/bin/bash", "-e", "-c"]
+
+# define args
+ARG external_software_dir=/perSVade/installation/external_software
+
+# download gztool
+RUN wget https://github.com/circulosmeos/gztool/releases/download/v0.11.5/gztool-linux.x86_64
+RUN mv gztool-linux.x86_64 $external_software_dir/gztool
+
+# download other platform-independent dependencies
+RUN cd $external_software_dir && wget https://github.com/PapenfussLab/gridss/releases/download/v2.9.2/gridss-2.9.2-gridss-jar-with-dependencies.jar
+RUN cd $external_software_dir && wget https://github.com/PapenfussLab/gridss/releases/download/v2.9.2/gridss.sh
+RUN cd $external_software_dir && wget https://github.com/PapenfussLab/clove/releases/download/v0.17/clove-0.17-jar-with-dependencies.jar
+RUN cd $external_software_dir && wget https://raw.githubusercontent.com/weiyuchung/CONY/master/CONY.R
+
+# give permissions to all
+RUN cd $external_software_dir && chmod 755 *

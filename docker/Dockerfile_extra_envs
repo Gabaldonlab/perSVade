@@ -1,0 +1,63 @@
+ARG tag=$tag
+FROM persvade_with_picard_env:$tag
+
+# installs the extra (untested envs) and creates the final image
+
+# define the working directory (creates the folder /perSVade inside the virtual machine)
+WORKDIR /perSVade
+
+# make the following commands to run from the base environment
+SHELL ["conda", "run", "-n", "base", "/bin/bash", "-e", "-c"]
+
+# add conda channels
+RUN conda config --add channels conda-forge
+RUN conda config --add channels anaconda
+RUN conda config --add channels bioconda
+
+# define vars
+ARG conda_dir=/opt/conda
+ARG env_name=perSVade_env
+ARG bcftools_env_name="$env_name"_bcftools_1.10.2_env
+ARG ete3_env_name="$env_name"_ete3_3.0.0_env
+ARG R_env_name="$env_name"_R_env
+ARG CONY_env_name="$env_name"_CONY_env
+ARG AneuFinder_env_name="$env_name"_AneuFinder_env
+ARG HMMcopy_env_name="$env_name"_HMMcopy_env
+
+# create bcftools environment
+RUN mamba create -y --name $bcftools_env_name -c bioconda bcftools=1.10.2
+
+# create a submenvironment that has ete3=3.0.0
+RUN conda config --add channels conda-forge
+RUN mamba create -y --name $ete3_env_name python=3.6
+RUN mamba install -n $ete3_env_name -c etetoolkit -y ete3=3.1.2
+RUN source $conda_dir/etc/profile.d/conda.sh && conda activate $ete3_env_name && python -c 'import ete3'
+
+# create a subenvironment with all the R dependencies
+RUN mamba create -y --name $R_env_name
+RUN mamba install -n $R_env_name -c conda-forge -y r-base=4.0.2
+RUN mamba install -n $R_env_name -c conda-forge -y r-argparser=0.6
+RUN mamba install -n $R_env_name -c bioconda -y bioconductor-rsvsim=1.28
+RUN mamba install -n $R_env_name -c conda-forge -y r-emdbook=1.3.12
+RUN mamba install -n $R_env_name -c bioconda -y bioconductor-rtracklayer=1.48.0
+RUN mamba install -n $R_env_name -c conda-forge -y r-r.utils=2.9.2
+RUN mamba install -n $R_env_name -c bioconda -y bioconductor-structuralvariantannotation=1.4.0
+
+# create environment to run CONY
+RUN mamba create -y --name $CONY_env_name -c bioconda bioconductor-iranges=2.8.2 bioconductor-exomecopy=1.22.0 r-snow=0.4
+RUN mamba install -y -n $CONY_env_name -c conda-forge r-argparser=0.4
+
+# create an environment to run AneuFinder
+RUN mamba create -y --name $AneuFinder_env_name -c bioconda bioconductor-aneufinder=1.18.0
+RUN mamba install -y -n $AneuFinder_env_name -c conda-forge r-argparser=0.6
+
+# create a subenvironment to run HMMCOPY
+RUN mamba create -y --name $HMMcopy_env_name
+RUN conda config --add channels conda-forge
+RUN mamba install -y -n $HMMcopy_env_name -c bioconda bioconductor-hmmcopy=1.32.0
+RUN mamba install -y -n $HMMcopy_env_name -c conda-forge r-argparser=0.6
+RUN mamba install -y -n $HMMcopy_env_name -c conda-forge r-kernsmooth=2.23
+
+# activate perSVade's environment on running. "conda run --no-capture-output" would be to skip the generation of STDs
+ENTRYPOINT ["conda", "run", "--no-capture-output", "--live-stream", "-n", "perSVade_env"] 
+

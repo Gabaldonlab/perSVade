@@ -1,0 +1,30 @@
+ARG tag=$tag
+FROM persvade_with_repeats:$tag
+
+# installs the gridss env
+
+# define the working directory (creates the folder /perSVade inside the virtual machine)
+WORKDIR /perSVade
+
+# make the following commands to run from the environment
+SHELL ["conda", "run", "-n", "base", "/bin/bash", "-e", "-c"]
+
+# add conda channels
+RUN conda config --add channels conda-forge
+RUN conda config --add channels anaconda
+RUN conda config --add channels bioconda
+
+# define vars
+ARG conda_dir=/opt/conda
+ARG env_name=perSVade_env
+ARG gridss_env_name="$env_name"_gridss_env
+
+# create a subenvironment to run gridss
+RUN mamba create -y --name $gridss_env_name -c conda-forge r-base=4.0.2
+RUN mamba install -n $gridss_env_name --force-reinstall -c bioconda -y samtools=1.10 # --force-reinstall to uninstall and reinstall
+RUN mamba install -n $gridss_env_name -c bioconda -y bwa=0.7.17
+RUN mamba install -n $gridss_env_name -c anaconda -y openjdk=8.0.152
+
+# test that samtools is properly installed
+RUN source $conda_dir/etc/profile.d/conda.sh && conda activate $gridss_env_name && samtools --help # check that samtools is properly installed
+

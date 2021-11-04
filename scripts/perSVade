@@ -1,0 +1,32 @@
+#!/usr/bin/env python
+
+# This is a script to execute perSVade by modules
+
+# get environment
+import sys
+import os
+
+# get the cwd were all the scripts are 
+CWD = "/".join(__file__.split("/")[0:-1]); sys.path.insert(0, CWD)
+
+# if there are no arguments, just print the first one
+if len(sys.argv)==1 or sys.argv[1] in ["-h","--help","getopt","usage","help","-help"]:
+
+    print("""
+    --------------------------------------------------------------------------------
+    perSVade: personalized Structural Variation detection
+    This is a pipeline to call small variants, strcutural variants (SV) and/or coverage-derived copy number variants (CNV). 
+    --------------------------------------------------------------------------------
+
+    These are the available modules:
+
+        small_variant_calling       Call small variants (SNPs and INDELs) and calculate coverage per gene
+
+    Usage:
+
+        perSVade <module> <args>. Type 'perSVade <module> -h' for more information on each of them.
+
+    """)
+
+else: jgafdjdgdaf
+
