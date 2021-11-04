@@ -85,7 +85,6 @@ fun.soft_link_files(inputs_Calbicans_chr1_2_6, Calbicans_chr1_2_6)
 
 ########################################
 
-<<<<<<< HEAD
 ######## TEST SPECIFIC PARTS ##########
 
 if len(sys.argv)>1:
@@ -104,8 +103,6 @@ if len(sys.argv)>1:
 
 ###### GENERAL TESTING ########
 
-=======
->>>>>>> aa6ac893d942c3018f9ddc93a6c180e92d153b6c
 # calculate the memory that is available
 #fun.print_with_runtime("running testings on %s Gb of RAM"%(fun.get_availableGbRAM(testing_outputs_dir)))
 
@@ -169,18 +166,15 @@ real_bedpe_breakpoints = test_fun.test_realSVgeneration(Cglabrata_subsampled_rea
 # test the repeat masker obtention for a long chromosome 1, 2 and 6
 #test_fun.test_get_repeat_maskerDF(Calbicans_chr1_2_6, replace=False)
 
-<<<<<<< HEAD
 
 fun.print_with_runtime("\n\n---\nSUCCESS: perSVade was properly installed\n---\n\n")
 
 ###############################
-=======
+
 ############################################
 
 fun.print_with_runtime("\n\n---\nSUCCESS: perSVade was properly installed\n---\n\n")
 
-
->>>>>>> aa6ac893d942c3018f9ddc93a6c180e92d153b6c
 
 
 
