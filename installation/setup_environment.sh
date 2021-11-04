@@ -57,7 +57,7 @@ wget https://github.com/PapenfussLab/clove/releases/download/v0.17/clove-0.17-ja
 wget https://raw.githubusercontent.com/weiyuchung/CONY/master/CONY.R
 
 # give execution permission to all
-chmod u+x *;
+chmod 755 *;
 
 ###################################
 

@@ -5,18 +5,13 @@
 
 ##### DEFINE ENVIRONMENT #######
 
-# module imports
+# general module imports
 import argparse, os
-import pandas as pd
-import numpy as np
 from argparse import RawTextHelpFormatter
 import copy as cp
 import pickle
 import string
 import shutil 
-from Bio import SeqIO
-from Bio.Seq import Seq
-from Bio.SeqRecord import SeqRecord
 import random
 import sys
 from shutil import copyfile
@@ -30,6 +25,13 @@ EnvDir = "/".join(sys.executable.split("/")[0:-2])
 
 # import functions
 import sv_functions as fun
+
+# import persvade-specific modules
+from Bio import SeqIO
+from Bio.Seq import Seq
+from Bio.SeqRecord import SeqRecord
+import pandas as pd
+import numpy as np
 
 # packages installed into the conda environment 
 samtools = "%s/bin/samtools"%EnvDir
@@ -490,8 +492,8 @@ if opt.parameters_json_file is not None:
     fun.default_max_rel_coverage_to_consider_del = max_rel_coverage_to_consider_del
     fun.default_min_rel_coverage_to_consider_dup = min_rel_coverage_to_consider_dup
 
-# get the gff info
-if opt.gff is not None: correct_gff, gff_with_biotype = fun.get_correct_gff_and_gff_with_biotype(opt.gff, replace=opt.replace)
+# test whether the gff is correct
+if opt.gff is not None: fun.check_that_gff_is_correct(opt.gff, opt.ref, opt.mitochondrial_chromosome, opt.mitochondrial_code, opt.gDNA_code, opt.threads, opt.replace)
 
 # check that the tmpdir exists
 if opt.tmpdir is not None:

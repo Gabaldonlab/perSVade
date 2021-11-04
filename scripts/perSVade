@@ -9,6 +9,8 @@ import os
 # get the cwd were all the scripts are 
 CWD = "/".join(__file__.split("/")[0:-1]); sys.path.insert(0, CWD)
 
+# perSVade file
+
 # if there are no arguments, just print the first one
 if len(sys.argv)==1 or sys.argv[1] in ["-h","--help","getopt","usage","help","-help"]:
 
@@ -28,5 +30,7 @@ if len(sys.argv)==1 or sys.argv[1] in ["-h","--help","getopt","usage","help","-h
 
     """)
 
-else: jgafdjdgdaf
+else:
+
+    thisisnotready
 

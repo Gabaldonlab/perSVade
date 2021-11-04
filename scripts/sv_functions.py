@@ -7,64 +7,78 @@
 ######################################################
 
 # module imports
-import os
-import re
-import string
-import random
-import pandas as pd
-import numpy as np
-import sys
-from collections import ChainMap
-from collections import OrderedDict
-import traceback
-import warnings
-from Bio import SeqIO
-from scipy import linalg
-from math import ceil
-from Bio.Seq import Seq
-from Bio.SeqRecord import SeqRecord
-import pickle
-import cylowess 
-import itertools
-import ast
-import copy as cp
-import re
-import logging
-import shutil
-from datetime import date
-import multiprocessing as multiproc
-import scipy.stats
-import numpy.polynomial.polynomial as poly
-from scipy.optimize import curve_fit
-from sklearn import linear_model
-import time
-from sklearn.metrics import r2_score
-from collections import Counter, defaultdict
-from sklearn.model_selection import KFold
-import collections
-import scipy.interpolate as scipy_interpolate
-#from ete3 import Tree, NCBITaxa
-from shutil import copyfile
-import urllib
-from subprocess import STDOUT, check_output
-import subprocess
-import subprocess, datetime, signal
-import json
-import sklearn
-import matplotlib.colors as mcolors
-import matplotlib.patches as mpatches
-from matplotlib.collections import PatchCollection
-import scipy.stats as stats
-import psutil
-from sklearn.utils import resample
+try:
 
-import plotly.plotly as py
-import plotly.figure_factory as ff
-import plotly.offline as off_py
-import plotly.graph_objs as go
-from plotly import tools
-from plotly.offline import init_notebook_mode, plot, iplot # download_plotlyjs
-import cufflinks as cf
+    import os
+    import re
+    import string
+    import random
+    import pandas as pd
+    import numpy as np
+    import sys
+    from collections import ChainMap
+    from collections import OrderedDict
+    import traceback
+    import warnings
+    from Bio import SeqIO
+    from scipy import linalg
+    from math import ceil
+    from Bio.Seq import Seq
+    from Bio.SeqRecord import SeqRecord
+    import pickle
+    import cylowess 
+    import itertools
+    import ast
+    import copy as cp
+    import re
+    import logging
+    import shutil
+    from datetime import date
+    import multiprocessing as multiproc
+    import scipy.stats
+    import numpy.polynomial.polynomial as poly
+    from scipy.optimize import curve_fit
+    from sklearn import linear_model
+    import time
+    from sklearn.metrics import r2_score
+    from collections import Counter, defaultdict
+    from sklearn.model_selection import KFold
+    import collections
+    import scipy.interpolate as scipy_interpolate
+    #from ete3 import Tree, NCBITaxa
+    from shutil import copyfile
+    import urllib
+    from subprocess import STDOUT, check_output
+    import subprocess
+    import subprocess, datetime, signal
+    import json
+    import sklearn
+    import matplotlib.colors as mcolors
+    import matplotlib.patches as mpatches
+    from matplotlib.collections import PatchCollection
+    import scipy.stats as stats
+    import psutil
+    from sklearn.utils import resample
+    import plotly.plotly as py
+    import plotly.figure_factory as ff
+    import plotly.offline as off_py
+    import plotly.graph_objs as go
+    from plotly import tools
+    from plotly.offline import init_notebook_mode, plot, iplot # download_plotlyjs
+    import cufflinks as cf
+
+# if some modules imports didn't work, add an exception
+except Exception as err:
+
+    print("\n\n---\nERROR: loading the modules of sv_functions did not work properly. This may be because your environment is not properly set. When running perSVade, make sure that the python interpreter is the expected with 'which python'.\n\nFor BSC users using the mschikora installation:\n\n- Verify that the python interpreter is /gpfs/projects/bsc40/mschikora/anaconda3/envs/perSVade_<version>_env/bin/python to check that the environment is correctly activated.\n\n- You may find trouble executing perSVde with the source /gpfs/projects/bsc40/mschikora/anaconda3/etc/profile.d/conda.sh if you have other conda environments installed in the cluster (for example the mn0 conda). You can manually fix this by changing the PATH variable with export PATH=$PATH:/gpfs/projects/bsc40/mschikora/anaconda3/envs/perSVade_<version>_env/bin.\n---\n\n")
+
+    print("---\nThis is the error thrown when trying to import python modules:")
+
+    import traceback
+    traceback.print_tb(err.__traceback__)
+    print(err)
+    print("---\n")
+    sys.exit(1)
 
 #### UNIVERSAL FUNCTIONS ####
 
@@ -853,13 +867,9 @@ def extract_BEDofGENES_of_gff3(gff, bed, replace=False, reference=""):
         # get the ID
         IDlist = [x.lstrip("ID=") for x in attributes.split(";") if x.startswith("ID=")]
 
-        #print(IDlist)
-
-
         # check that the ID is correct
         if len(IDlist)!=1: 
-            print_if_verbose(IDlist, attributes)
-            raise ValueError("IDlist has to be of length 1")
+            raise ValueError("Each gff record is expected to have one, and only one ID. This was not the case for the current record with attributes '%s'. You should provide a valid gff."%attributes)
 
         # get the ID
         ID = IDlist[0]
@@ -20699,3 +20709,86 @@ def get_integrated_SV_CNV_df_severalSamples(paths_df, outdir, gff, reference_gen
 #######################################################################################
 #######################################################################################
 
+def get_random_vcf(tmpdir, reference_genome):
+
+    """Creates a random vcf file for the reference genome"""
+
+    random_vcf = "%s/random_vars.vcf"%tmpdir
+    if file_is_empty(random_vcf):
+
+        # init the lines
+        vcf_fields = ["#CHROM", "POS", "ID", "REF", "ALT", "QUAL", "FILTER", "INFO", "FORMAT"]
+        vcf_lines = ["##fileformat=4.2", "\t".join(vcf_fields)]
+        all_mutations = []
+
+        # get random vcf records for each chromosome
+        for chrom, chrom_len in get_chr_to_len(reference_genome).items():
+            all_positions = list(range(1, chrom_len+1))
+            all_vars = {"A", "C", "G", "T"}
+
+            for Ivar in range(10): 
+                ref_nt = next(iter((all_vars)))
+                alt_nt = next(iter(all_vars.difference({ref_nt})))
+                var = [chrom, str(random.choice(all_positions)), "%s_%i"%(chrom, Ivar+1), ref_nt, alt_nt, "100", ".", ".", "."]
+                all_mutations.append(var)
+
+        # sort mutations
+        sorted_mutations = sorted(all_mutations, key=(lambda x: (x[0], int(x[1]))))
+        vcf_lines += ["\t".join(mut) for mut in sorted_mutations]
+
+        # write vcf
+        random_vcf_tmp = "%s.tmp"%random_vcf
+        open(random_vcf_tmp, "w").write("\n".join(vcf_lines)+"\n")
+        os.rename(random_vcf_tmp, random_vcf)
+
+    return random_vcf
+
+def check_that_gff_is_correct(input_gff, reference_genome, mitochondrial_chromosome, mitochondrial_code, gDNA_code, threads, replace):
+
+    """Takes the gff provided in perSVade and checks if it is correct"""
+
+    print_if_verbose("Testing input gff")
+
+    # define a tmpdir
+    tmpdir = "%s.checking"%input_gff
+    delete_folder(tmpdir)
+    make_folder(tmpdir)
+
+    try:
+
+        # get the gff
+        gff = "%s/annotations.gff"%tmpdir
+        soft_link_files(input_gff, gff)
+
+        # get the gff
+        correct_gff, gff_with_biotype = get_correct_gff_and_gff_with_biotype(gff, replace=replace)
+
+        # check that the gff is fine for extract_BEDofGENES_of_gff3
+        print_if_verbose("testing that extract_BEDofGENES_of_gff3 function can be run on gff")
+        bed_file = "%s.bed_index1"%correct_gff; bed_file_regions = extract_BEDofGENES_of_gff3(correct_gff, bed_file, replace=replace, reference=reference_genome)
+
+        # test that vep can be ran
+        print_if_verbose("testing that vep can be ran")
+
+        # create a random vcf
+        random_vcf = get_random_vcf(tmpdir, reference_genome)
+
+        # run vep
+        run_vep_parallel(random_vcf, reference_genome, gff_with_biotype, mitochondrial_chromosome, mitochondrial_code, gDNA_code, threads=threads, replace=replace)
+
+    except Exception as err:
+
+        print("\n\n---\nERROR: The gff is not correct. You may skip the gff-related processes (variant annotation and/or calculation of coverage per gene) and handle them on your own. You can do this by simply not providing the gff\n---\n\n")
+        print("---\nThis is the error thrown when checking if the gff is correct (you may follow it to understand why your gff is not fit for perSVade):\n")
+
+        import traceback
+        traceback.print_tb(err.__traceback__)
+        print(err)
+        print("---\n")
+        sys.exit(1)
+
+    # print success
+    print_if_verbose("The gff is correct")
+
+    # clean
+    delete_folder(tmpdir)
