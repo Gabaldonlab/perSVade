@@ -1,0 +1,165 @@
+#!/usr/bin/env python
+
+######################################
+############# DEFINE ENV #############
+######################################
+
+# general module imports
+import argparse, os
+from argparse import RawTextHelpFormatter
+import copy as cp
+import pickle
+import string
+import shutil 
+import random
+import sys
+from shutil import copyfile
+import time
+
+# get the cwd were all the scripts are 
+CWD = "/".join(__file__.split("/")[0:-1]); sys.path.insert(0, CWD)
+
+# define the module name
+module_name = __file__.split("/")[-1]
+
+# define the EnvDir where the environment is defined
+EnvDir = "/".join(sys.executable.split("/")[0:-2])
+
+# import functions
+import sv_functions as fun
+
+# import perSVade-specific modules
+
+######################################
+######################################
+######################################
+
+
+#################################### 
+############## ARGS ################
+####################################
+
+description = """
+Runs trimmomatic to trim reads and fastqc to perform quality control.
+"""
+
+parser = argparse.ArgumentParser(description=description, formatter_class=RawTextHelpFormatter)
+parser.add_argument("-o", "--outdir", dest="outdir", action="store", required=True, help="Output directory.")
+parser.add_argument("-f1", "--fastq1", dest="fastq1", required=True, help="The FWD reads in fastq.gz format")
+parser.add_argument("-f2", "--fastq2", dest="fastq2", required=True, help="The RV reads in fastq.gz format.")
+parser.add_argument("--replace", dest="replace", action="store_true", help="Re-run all the steps by deleting the output directory.")
+parser.add_argument("--verbose", dest="verbose", action="store_true", default=False, help="Print a verbose log.")
+
+# resources
+parser.add_argument("--fraction_available_mem", dest="fraction_available_mem", default=None, type=float, help="This pipeline calculates the available RAM for several steps, and it may not work well in some systems (i.e. HPC clusters). This parameter allows you to correct possible errors. If --fraction_available_mem is not provided (default behavior), this pipeline will calculate the available RAM by filling the memory, which may give errors. If you want to use all the available memory you should specify --fraction_available_mem 1.0. See the FAQ 'How does the --fraction_available_mem work?' from https://github.com/Gabaldonlab/perSVade/wiki/8.-FAQs for more info.")
+
+parser.add_argument("-thr", "--threads", dest="threads", default=16, type=int, help="Number of threads, Default: 16")
+parser.add_argument("--fractionRAM_to_dedicate", dest="fractionRAM_to_dedicate", type=float,  default=0.5, help="This is the fraction of the available memory that will be used by several java programs that require a heap size. By default we set this to 0.5 to not overload the system.")
+
+opt = parser.parse_args()
+
+####################################
+####################################
+####################################
+
+#################################
+########### MAIN CODE ###########
+#################################
+
+# remove outdir if replace, and set replace to False
+if opt.replace is True: fun.delete_folder(opt.outdir)
+opt.replace = False
+
+# make the outdir
+fun.make_folder(opt.outdir)
+
+# exit if the final file exists
+final_file = "%s/perSVade_finished_file.txt"%opt.outdir
+
+if not fun.file_is_empty(final_file): 
+    fun.print_with_runtime("WARNING: %s exists, suggesting that perSVade was already  run in this folder. Remove this file if you want this command to work. Exiting..."%final_file)
+    sys.exit(0)
+
+# define the start time
+start_time = time.time()
+
+# define the verbosity. If opt.verbose is False, none of the 'print' statements of sv_functions will have an effect
+fun.printing_verbose_mode = opt.verbose
+
+# define a file that will contain all the cmds ran
+fun.log_file_all_cmds = "%s/all_cmds.txt"%opt.outdir
+if fun.file_is_empty(fun.log_file_all_cmds): open(fun.log_file_all_cmds, "w").write("# These are all the cmds:\n")
+
+# get sample name
+sample_name = fun.get_sampleName_from_perSVade_outdir(opt.outdir)
+
+####### SET RESOURCES ########
+
+# define the fraction of RAM to dedicate
+if opt.fractionRAM_to_dedicate>0.95: raise ValueError("You are using >95 pct of the systems RAM, which is dangerous")
+fun.fractionRAM_to_dedicate = opt.fractionRAM_to_dedicate
+
+# define the fraction of available mem
+fun.fraction_available_mem = opt.fraction_available_mem
+if opt.fraction_available_mem is None: fun.print_with_runtime("WARNING: You did not specify how much RAM should be used through --fraction_available_mem. perSVade will calculate this by filling the memory, which may be dangerous. If you want to use all the allocated memory you should specify --fraction_available_mem 1.0")
+
+# print the available resources
+real_available_threads = fun.get_available_threads(opt.outdir)
+if opt.threads>real_available_threads:  fun.print_with_runtime("WARNING: There are %i available threads, and you required %i."%(real_available_threads, opt.threads))
+
+available_Gb_RAM = fun.get_availableGbRAM(opt.outdir)
+fun.print_with_runtime("Running perSVade %s into %s with %.3f Gb of RAM and %i cores"%(module_name, opt.outdir, available_Gb_RAM, opt.threads))
+
+##############################
+
+# define the reads dir
+reads_dir = "%s/reads"%opt.outdir; fun.make_folder(reads_dir)
+
+# define the raw reads under reads dir
+dest_fastq1 = "%s/raw_reads1.fastq.gz"%reads_dir
+dest_fastq2 = "%s/raw_reads2.fastq.gz"%reads_dir
+
+# log
+fun.print_with_runtime("Running trimmomatic")
+
+# get the reads under reads_dir
+fun.soft_link_files(opt.fastq1, dest_fastq1)
+fun.soft_link_files(opt.fastq2, dest_fastq2)
+
+# trim reads
+trimmed_reads1, trimmed_reads2 = fun.run_trimmomatic(dest_fastq1, dest_fastq2, replace=opt.replace, threads=opt.threads)
+
+# remove unnecessary files
+for f in os.listdir(reads_dir): 
+    if f not in {fun.get_file(trimmed_reads1), fun.get_file(trimmed_reads2)}: fun.delete_file_or_folder("%s/%s"%(reads_dir, f))
+
+# run FASTQC
+fun.print_with_runtime("Running FASTQC")
+fastqc_report_1 = fun.run_fastqc(trimmed_reads1, opt.replace, opt.threads)
+fastqc_report_2 = fun.run_fastqc(trimmed_reads2, opt.replace, opt.threads)
+
+#################################
+#################################
+#################################
+
+
+##################################
+########## CLEAN OUTPUT ##########
+##################################
+
+# move the reads into outdir
+for origin_path, dest_file in [(trimmed_reads1, "trimmed_reads1.fastq.gz"), (trimmed_reads2, "trimmed_reads2.fastq.gz"), (fastqc_report_1, "trimmed_reads1_fastqcReport.html"), (fastqc_report_2, "trimmed_reads2_fastqcReport.html")]:
+	os.rename(origin_path, "%s/%s"%(opt.outdir, dest_file))
+
+# clean
+fun.delete_folder(reads_dir)
+
+# wite final file
+fun.generate_final_file_report_one_module(final_file, start_time, time.time())
+
+# print the message
+fun.print_with_runtime("perSVade %s finished correctly"%module_name)
+
+##################################
+##################################
+##################################

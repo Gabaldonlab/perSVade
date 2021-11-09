@@ -248,6 +248,7 @@ analyze_svVCF = "%s/generate_files_from_svVCF.R"%CWD
 analyze_svVCF_simple = "%s/generate_files_from_svVCF_simple.R"%CWD
 TRIMMOMATIC = "%s/run_trimmomatic.py"%CWD 
 perSVade_py = "%s/perSVade.py"%CWD 
+perSVade_modules = "%s/perSVade"%CWD 
 run_trimmomatic_and_fastqc_py = "%s/run_trimmomatic_and_fastqc.py"%CWD
 get_trimmed_reads_for_srr_py = "%s/get_trimmed_reads_for_srr.py"%CWD
 run_vep = "%s/run_vep.py"%CWD
@@ -649,6 +650,15 @@ def run_cmd_simple(cmd):
     out_stat = os.system(cmd) 
     if out_stat!=0: raise ValueError("\n%s\n did not finish correctly. Out status: %i"%(cmd, out_stat))
 
+def run_cmd_simple_noError(cmd):
+
+    """Runs os.system in cmd"""
+
+    out_stat = os.system(cmd) 
+    if out_stat!=0: 
+        print("\nERROR!!! Out status: %i"%(out_stat))
+        sys.exit(out_stat)
+
 def run_cmd(cmd, env=EnvName):
 
     """This function runs a cmd with a given env"""
@@ -947,8 +957,6 @@ def get_availableGbRAM(outdir):
 
     # get the memory with psutil
     available_mem = psutil.virtual_memory().available/1e9
-
-    print(available_mem)
 
     # define the fraction_total_running 
     if fraction_available_mem is None:
@@ -4428,14 +4436,14 @@ def get_perSVade_window_l(reference_genome, mitochondrial_chromosome, min_chromo
 
     # debug and report
     if len(valid_chrom_lens)==0: raise ValueError("There are no chromosomes to calculate the window_l. Decrease --min_chromosome_len.")
-    print("There are %i chromosomes to calculate window length"%len(valid_chrom_lens))
+    print_if_verbose("There are %i chromosomes to calculate window length"%len(valid_chrom_lens))
 
     # define the window length
     final_window_length = int(np.median(valid_chrom_lens)*0.05) + 1
     if pd.isna(final_window_length): final_window_length = 1000
 
     # report
-    print("using a window length of %i"%final_window_length)
+    print_if_verbose("using a window length of %i"%final_window_length)
 
     return final_window_length
 
@@ -4618,6 +4626,33 @@ def get_set_adapter_fastqc_report(fastqc_report):
                 break
 
     return overrepresented_seqs
+
+
+def run_fastqc(reads, replace, threads):
+
+    """Runs fastqc on some reads"""
+
+    # define a function that gets the html files
+    def get_html_files_from_fastqc_dir(fastqc_dir): 
+        html_files = ["%s/%s"%(fastqc_dir, x) for x in os.listdir(fastqc_dir) if x.endswith(".html")]
+        if len(html_files)>1: raise ValueError("There can't be >1 html file")
+        return html_files
+
+    # define the outdir and html files
+    fastqc_dir = "%s_fastqc_dir"%(reads); make_folder(fastqc_dir)
+    html_files = get_html_files_from_fastqc_dir(fastqc_dir)
+
+    # get the fastqc
+    if len(html_files)==0 or replace is True:
+
+        std_fastqc = "%s/std.txt"%fastqc_dir
+        print_if_verbose("running fastqc. The std is in %s"%std_fastqc)
+        run_cmd("%s -o %s --threads %i --extract --java %s %s > %s 2>&1"%(FASTQC, fastqc_dir, threads, JAVA, reads, std_fastqc))
+        remove_file(std_fastqc)
+
+    # get  the html file
+    return get_html_files_from_fastqc_dir(fastqc_dir)[0]
+
 
 def run_trimmomatic(reads1, reads2, replace=False, threads=1):
 
@@ -9271,7 +9306,7 @@ def get_benchmarking_df_for_testSVs_from_trainSV_filterSets(test_SVdict, outdir,
 ################# GRAPHICS FUNCTIONS #################
 ######################################################
 
-def plot_clustermap_with_annotation(df, row_colors_df, col_colors_df, filename, title="clustermap", col_cluster=False, row_cluster=False, colorbar_label="default label", adjust_position=True, legend=True, idxs_separator_pattern="_", texts_to_strip={"L001"}, default_label_legend="control", df_annotations=None, cmap=sns.color_palette("RdBu_r", 50), ylabels_graphics_df=None, grid_lines=True, add_to_legend_x=1, figsize=None, multiplier_width_colorbars=1, vmax=None, vmin=None):
+def plot_clustermap_with_annotation(df, row_colors_df, col_colors_df, filename, title="clustermap", col_cluster=False, row_cluster=False, colorbar_label="default label", adjust_position=True, legend=True, idxs_separator_pattern="_", texts_to_strip={"L001"}, default_label_legend="control", df_annotations=None, cmap=sns.color_palette("RdBu_r", 50), ylabels_graphics_df=None, grid_lines=True, add_to_legend_x=1, figsize=None, multiplier_width_colorbars=1, vmax=None, vmin=None, size_annot=8):
 
     """Takes a df were the index is the annotation and the cols are samples. It will be saved under filename. ylabels_graphics_df can be a df containing fontweight and color for each index value in df"""
 
@@ -9310,7 +9345,7 @@ def plot_clustermap_with_annotation(df, row_colors_df, col_colors_df, filename, 
         figsize = (len(df.columns)*0.3, len(df)*0.35)
 
         # get the clustermap
-        cm = sns.clustermap(df, col_cluster=col_cluster, row_cluster=row_cluster, row_colors=row_colors_df, col_colors=col_colors_df, cbar_kws={'label': colorbar_label}, xticklabels=False, square=False, figsize=figsize, cmap=cmap, annot=annot, fmt="", annot_kws={"size": 6.5}, linecolor=linecolor, linewidths=linewidths, yticklabels=yticklabels, vmax=vmax, vmin=vmin) # figsize=figsize, linecolor=linecolor, linewidths=linewidths, yticklabels=yticklabels
+        cm = sns.clustermap(df, col_cluster=col_cluster, row_cluster=row_cluster, row_colors=row_colors_df, col_colors=col_colors_df, cbar_kws={'label': colorbar_label}, xticklabels=False, square=False, figsize=figsize, cmap=cmap, annot=annot, fmt="", annot_kws={"size": size_annot}, linecolor=linecolor, linewidths=linewidths, yticklabels=yticklabels, vmax=vmax, vmin=vmin) # figsize=figsize, linecolor=linecolor, linewidths=linewidths, yticklabels=yticklabels
 
         # move the heatmap to the right
         hm_pos = cm.ax_heatmap.get_position()
@@ -11269,6 +11304,13 @@ def generate_final_file_report(final_file, start_time_GeneralProcessing, end_tim
     open(final_file, "w").write("\n".join(lines))
 
 
+def generate_final_file_report_one_module(final_file, start_time, end_time):
+
+    """Writes the seconds taht it took to finish the pipeline"""
+
+    open(final_file, "w").write("perSVade finished in %s seconds"%(end_time-start_time))
+
+
 def get_goldenSet_table_fromSRA(target_taxID, reference_genome, outdir, min_coverage, replace, threads, max_n_samples, run_in_parallel=True):
 
     """This function takes a taxID and downloads a set of .srr files for each fo them. It needs internet"""
@@ -11910,8 +11952,14 @@ def get_svtype_to_svDF_withFiltering(min_val_filt, tol_bp, type_caller, min_val_
     outdir = "%s/parameters_%s_%s_%s_%s_%s_%s_%s"%(outdir_all, min_val_filt, tol_bp, type_caller, min_val_field, type_SVs_longReads, filter_IMPRECISE_sniffles, remaining_treatment); make_folder(outdir)
 
     # define the genotypes
-    type_SVs_longReads_to_GTs = {"all_SVs" : {"homozygous", "heterozygous", "not_called"}}
+    type_SVs_longReads_to_GTs = {"all_SVs" : {"homozygous", "heterozygous", "not_called"}, "haploid_SVs":{"homozygous", "not_called"}}
     GTs = type_SVs_longReads_to_GTs[type_SVs_longReads]
+
+    # check that the genotypes are as expected
+    strange_genotypes = set(vars_df.GT).difference({'homozygous', 'not_called', 'heterozygous'})
+    if len(strange_genotypes)>0: raise ValueError("There are some strange genotypes: %s"%strange_genotypes)
+
+    # filter GTs
     vars_df = vars_df[vars_df.GT.isin(GTs)]
 
     # get the filtered dfs by min_val_filt
@@ -20792,3 +20840,50 @@ def check_that_gff_is_correct(input_gff, reference_genome, mitochondrial_chromos
 
     # clean
     delete_folder(tmpdir)
+
+
+def get_sampleName_from_perSVade_outdir(perSVade_outdir):
+
+    """define the name as the sample as the first 10 characters of the outdir"""
+    
+    if perSVade_outdir.endswith("/"): name_sample = "sampleX"
+    else: name_sample = get_file(perSVade_outdir)[0:10]
+    if len(name_sample)==0: raise ValueError("name_sample should not be empty")
+
+    return name_sample
+
+def prepare_reference_genome_for_perSVade(perSVade_ref, perSVade_outdir, mitochondrial_chromosome, simulation_chromosomes, replace):
+
+    """Takes the reference genome as provided to perSVade and returns the linked, corrected version."""
+
+    # define where the reference genome will be stored
+    reference_genome_dir = "%s/reference_genome_dir"%(perSVade_outdir); make_folder(reference_genome_dir)
+    new_reference_genome_file = "%s/reference_genome.fasta"%reference_genome_dir
+
+    # rewrite the reference genome so that all the chars ar upper
+    all_chroms_seqRecords = [SeqRecord(Seq(str(seq.seq).upper()), id=seq.id, description="", name="") for seq in SeqIO.parse(perSVade_ref, "fasta")]
+    SeqIO.write(all_chroms_seqRecords, new_reference_genome_file, "fasta")
+
+    # check that the mitoChromosomes are in the ref
+    all_chroms = {s.id for s in SeqIO.parse(new_reference_genome_file, "fasta")}
+    if any([x not in all_chroms for x in mitochondrial_chromosome.split(",")]) and mitochondrial_chromosome!="no_mitochondria":
+        raise ValueError("The provided mitochondrial_chromosomes are not in the reference genome.")
+
+    # check that the simulation_chromosomes are in all_chroms
+    if simulation_chromosomes is not None: 
+        strange_chroms = set(simulation_chromosomes.split(",")).difference(all_chroms)
+        if len(strange_chroms)>0: raise ValueError("The --simulation_chromosomes argument was not properly set. There are some chromosome IDs (%s) not found in the provided reference genome"%strange_chroms)
+
+
+    # get the genome length
+    genome_length = sum(get_chr_to_len(new_reference_genome_file).values())
+    print_if_verbose("The genome has %.2f Mb"%(genome_length/1000000))
+
+    # index the genome
+    index_genome(new_reference_genome_file, replace=replace)
+
+    # create a sequence dict
+    create_sequence_dict(new_reference_genome_file, replace=replace)
+
+    # returna set of things
+    return new_reference_genome_file, reference_genome_dir

@@ -89,7 +89,7 @@ test_fun.get_crossbenchmarking_distributions_default_and_best(df_cross_accuracy_
 #%% CROSS BENCHMARKING PLOT SIMULATIONS
 
 # define the accuracy_f
-accuracy_f = "recall"; # it could be Fvalue, precision or recall
+accuracy_f = "precision"; # it could be Fvalue, precision or recall
 
 # all data
 fileprefix = "%s/all_cross_accuracy"%PlotsDir
@@ -115,7 +115,7 @@ test_fun.get_crossbenchmarking_distributions_differentSetsOfParameters(df_cross_
 #%% CROSSACCURACY REAL SVs HEATMAP
 
 # define the accuracy_f
-accuracy_f = "precision"; # it could be Fvalue, precision or recall
+accuracy_f = "Fvalue"; # it could be Fvalue, precision or recall
 
 # all data
 fileprefix = "%s/all_cross_accuracy_realSVs"%PlotsDir
@@ -128,7 +128,11 @@ accuracy_f = "Fvalue"; # it could be Fvalue, precision or recall
 
 # plots the cross accuracy in a distributions-like manner
 fileprefix = "%s/cross_accuracy_distribution_realSVs"%PlotsDir
-test_fun.get_crossbenchmarking_distributions_differentSetsOfParameters_realSVs(df_cross_accuracy_benchmark_realSVs, fileprefix, accuracy_f=accuracy_f, svtype="integrated")
+ax = test_fun.get_crossbenchmarking_distributions_differentSetsOfParameters_realSVs(df_cross_accuracy_benchmark_realSVs, fileprefix, accuracy_f=accuracy_f, svtype="deletions")
+
+# plot scatterplot as compared to optimised parameters
+#fileprefix = "%s/cross_accuracy_scatter_realSVs"%PlotsDir
+#ax = test_fun.get_crossbenchmarking_distributions_differentSetsOfParameters_realSVs_scatter(df_cross_accuracy_benchmark_realSVs, fileprefix, accuracy_f=accuracy_f, svtype="integrated")
 
 #%% GOLDEN ACCURACY BAR PLOTS (ONLY DEFAULT AND OPTIMISED PARAMETERS)
 

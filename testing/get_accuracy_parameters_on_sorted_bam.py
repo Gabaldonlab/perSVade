@@ -21,6 +21,10 @@ perSVade_scripts_dir = "%s/scripts/perSVade/perSVade_repository/scripts"%ParentD
 sys.path.insert(0, perSVade_scripts_dir)
 import sv_functions as fun
 
+perSVadeTesting_dir = "%s/scripts/perSVade/perSVade_repository/testing"%ParentDir
+sys.path.insert(0, perSVadeTesting_dir)
+import testing_functions as test_fun
+
 ### CMD LINE ###
 
 description = """
@@ -38,6 +42,7 @@ parser.add_argument("--svtables_prefix", dest="svtables_prefix", required=True, 
 parser.add_argument("--interesting_svtypes", dest="interesting_svtypes", type=str, required=False, default="insertions,deletions,translocations,inversions,tandemDuplications", help="A comma-sepparated set of svtypes on which to focus the analysis. By default this is done on all but the remaining cathegory")
 parser.add_argument("--threads", dest="threads", default=4, type=int, help="Number of threads, Default: 4")
 parser.add_argument("--verbose", dest="verbose", action="store_true", help="verbosity mode")
+parser.add_argument("--remove_SVs_overlapping_simple_repeats", dest="remove_SVs_overlapping_simple_repeats", action="store_true", help="verbosity mode")
 
 opt = parser.parse_args()
 
@@ -104,9 +109,17 @@ for svtype in interesting_svtypes:
 
 	known_sv_dict[svtype] = dest_svfile
 
+# remove SVs that somehow overlap repeats
+if opt.remove_SVs_overlapping_simple_repeats is True:
+	repeats_file = reference_genome+".repeats.tab"
+	known_sv_dict = test_fun.get_sv_dict_without_simple_repeats(known_sv_dict, repeats_file, "%s/modify_known_sv_dict"%outdir, reference_genome)
+	sv_dict = test_fun.get_sv_dict_without_simple_repeats(sv_dict, repeats_file, "%s/modify_sv_dict"%outdir, reference_genome)
+
+
 # get the benchmarking
 fileprefix = "%s/benchmarking"%outdir
 df_benchmark = fun.benchmark_processedSVs_against_knownSVs_inHouse(sv_dict, known_sv_dict, fileprefix, replace=False, add_integrated_benchmarking=True, consider_all_svtypes=False, tol_bp=50, fast_mode=True, pct_overlap=0.75)
+
 
 # save
 fun.delete_folder(outdir)

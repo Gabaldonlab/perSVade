@@ -418,7 +418,7 @@ def get_df_benchmark_from_file(Idf, df_benchmarking_file, parms_row, test_row, p
     # keep
     return df_benchmark[all_keys]
 
-def get_df_accuracy_of_parameters_on_test_samples(parameters_df, test_df, outdir, replace=False, threads=4, threads_integration=48):
+def get_df_accuracy_of_parameters_on_test_samples(parameters_df, test_df, outdir, replace=False, threads=4, threads_integration=48, remove_SVs_overlapping_simple_repeats=False):
 
     """This function tests the accuracy of each of the parameters df on the simulations of test_df. It runs each comparison in a sepparate perSVade job in the cluster"""
 
@@ -479,6 +479,7 @@ def get_df_accuracy_of_parameters_on_test_samples(parameters_df, test_df, outdir
                     cmd_test = "%s --reference_genome %s --df_benchmarking_file %s --sorted_bam %s --gridss_vcf %s --svtables_prefix %s --threads %i --parameters_json %s --verbose --mitochondrial_chromosome %s"%(testing_script, test_row.reference_genome, df_benchmarking_file, test_row.sorted_bam, test_row.gridss_vcf, test_row.svtables_prefix, threads, unique_parms_row.parameters_json, test_row.mitochondrial_chromosome)
 
                     if "interesting_svtypes" in set(test_row.keys()): cmd_test += " --interesting_svtypes %s"%(test_row.interesting_svtypes)
+                    if remove_SVs_overlapping_simple_repeats is True: cmd_test += " --remove_SVs_overlapping_simple_repeats"
 
                     # keep cmd and continue
                     all_cmds.append(cmd_test)
@@ -493,9 +494,8 @@ def get_df_accuracy_of_parameters_on_test_samples(parameters_df, test_df, outdir
         print("There are %i jobs to run. These are %i unique jobs"%(len(all_cmds), len(all_cmds_unique)))
 
         # run cmds
-        if run_in_cluster is False: 
+        if run_in_cluster is False: # 'or True is debug' 
             for cmd in all_cmds_unique: 
-
                 fun.run_cmd(cmd)
                 raiseErrorAfterFirstTry
 
@@ -1135,6 +1135,10 @@ def generate_highConfidence_and_all_SVs_files_ONcalling_severalParameter_combina
         svim_df = fun.get_svim_as_df(dict_paths["svim_outdir"], reference_genome, min_svim_QUAL)
         sniffles_df = fun.get_sniffles_as_df(dict_paths["sniffles_outdir"], reference_genome)
 
+        from collections import Counter
+        print("svim GT:", Counter(svim_df.GT))
+        print("sniffles GT:", Counter(sniffles_df.GT))
+
         # define SVIM and SNIFFLES filters (same number each)
         all_min_QUAL_svim = [3, 5, 7, 10, 12, 15, 20, 30, 40, 50] # max of 100
         all_min_RE_sniffles = np.linspace(min(sniffles_df.INFO_RE), np.percentile(sniffles_df.INFO_RE, 90), len(all_min_QUAL_svim))
@@ -1143,11 +1147,16 @@ def generate_highConfidence_and_all_SVs_files_ONcalling_severalParameter_combina
         sorted_bam_longReads =  "%s/aligned_reads.sorted.bam"%dict_paths["svim_outdir"]
 
         # define general parameters
-        type_SVs_longReads = "all_SVs" # take all SVs, not only one ploidy
         filter_IMPRECISE_sniffles = True # remove the SVs with a tag of 'IMPRECISE'
         remaining_treatment = "drop" # do not consider the 'remaining' SVs
         tol_bp = 50 # standard to define the overlaps
         pct_overlap = 0.75 # standard to define the overlaps
+
+        # define the type_SVs_longReads based on the species
+        species = "_".join(reference_genome.split("/")[-2].split("_")[0:2])
+        if species in {"Candida_glabrata", "Cryptococcus_neoformans"}: type_SVs_longReads = "haploid_SVs"
+        elif species in {"Candida_albicans", "Arabidopsis_thaliana", "Drosophila_melanogaster"}: type_SVs_longReads = "all_SVs"
+        else: raise ValueError("%s is not valid"%species)
 
         # define an outdir for this type of overlaps
         outdir_SVIMandSNIFFLEScalling = "%s/svim_and_snifflesCalling_%s_%s_%s_%s"%(outdir, type_SVs_longReads, filter_IMPRECISE_sniffles, remaining_treatment, tol_bp); fun.make_folder(outdir_SVIMandSNIFFLEScalling)
@@ -1161,7 +1170,7 @@ def generate_highConfidence_and_all_SVs_files_ONcalling_severalParameter_combina
         inputs_fn = [tuple(list(x)+[I]) for I,x in enumerate(inputs_fn)]
 
         # run fn
-        print("getting SVIM and SNIFFLES sv_to_svdf for %i filters"%(len(inputs_fn)))
+        print("getting SVIM and SNIFFLES sv_to_svdf for %i filters and %i threads"%(len(inputs_fn), threads))
         
         if run_in_parallel is False: list_tuples_svtype_to_svDF_ON = list(map(lambda x: fun.get_svtype_to_svDF_withFiltering(x[0], x[1], x[2], x[3], x[4], x[5], x[6], x[7], x[8], x[9], x[10], x[11]), inputs_fn))
 
@@ -1268,7 +1277,7 @@ def get_df_benchmark_cross_accuracy_ONbasedGoldenSet(CurDir, parameters_df, outd
 
             # define the cross-accuracy benchmark
             outdir_cross_accuracy_typeONvars = "%s/cross_accuracy_%s"%(outdir_cross_accuracy_ONbased, typeONvars)
-            typeONvars_to_crossAccuracy_df[typeONvars] = get_df_accuracy_of_parameters_on_test_samples(parameters_df, test_df, outdir_cross_accuracy_typeONvars, replace=replace)
+            typeONvars_to_crossAccuracy_df[typeONvars] = get_df_accuracy_of_parameters_on_test_samples(parameters_df, test_df, outdir_cross_accuracy_typeONvars, replace=replace, remove_SVs_overlapping_simple_repeats=True)
 
         # merge the two
         print("integrating and saving")
@@ -1491,7 +1500,7 @@ def get_df_benchmark_cross_accuracy_humanGoldenSet(CurDir, parameters_df, outdir
         test_df = pd.DataFrame(test_df_dict).transpose()[["species", "sampleID", "sorted_bam", "gridss_vcf", "reference_genome", "mitochondrial_chromosome", "svtables_prefix", "interesting_svtypes"]]
 
         outdir_cross_accuracy_human_generatingFiles = "%s/cross_accuracy_files"%outdir_cross_accuracy_human
-        df_benchmark_human = get_df_accuracy_of_parameters_on_test_samples(parameters_df, test_df, outdir_cross_accuracy_human_generatingFiles, replace=replace, threads=24)
+        df_benchmark_human = get_df_accuracy_of_parameters_on_test_samples(parameters_df, test_df, outdir_cross_accuracy_human_generatingFiles, replace=replace, threads=24, remove_SVs_overlapping_simple_repeats=True)
 
         # save
         fun.save_df_as_tab(df_benchmark_human, df_benchmark_human_file)
@@ -1659,7 +1668,7 @@ def generate_heatmap_accuracy_of_parameters_on_test_samples(df_benchmark, filepr
     # define the figure size
     figsize = (int(len(df_square.columns)*0.03), int(len(df_square)*0.03))
 
-    fun.plot_clustermap_with_annotation(df_square, row_colors_df, col_colors_df, filename, title="cross accuracy", col_cluster=col_cluster, row_cluster=row_cluster, colorbar_label=accuracy_f, adjust_position=True, legend=True, idxs_separator_pattern="||||", texts_to_strip={"L001"}, default_label_legend="control", df_annotations=df_annotations, cmap=sns.color_palette("RdBu_r", 50), ylabels_graphics_df=None, grid_lines=False, figsize=figsize, multiplier_width_colorbars=multiplier_width_colorbars, vmax=1.0, vmin=0.0)
+    fun.plot_clustermap_with_annotation(df_square, row_colors_df, col_colors_df, filename, title="cross accuracy", col_cluster=col_cluster, row_cluster=row_cluster, colorbar_label=accuracy_f, adjust_position=True, legend=True, idxs_separator_pattern="||||", texts_to_strip={"L001"}, default_label_legend="control", df_annotations=df_annotations, cmap=sns.color_palette("RdBu_r", 50), ylabels_graphics_df=None, grid_lines=False, figsize=figsize, multiplier_width_colorbars=multiplier_width_colorbars, vmax=1.0, vmin=0.0, size_annot=12)
 
 
 def get_value_to_color(values, palette="mako", n=100, type_color="rgb", center=None):
@@ -1788,7 +1797,7 @@ def generate_heatmap_accuracy_of_parameters_on_test_samples_realSVs(df_benchmark
     # define the figure size
     figsize = (int(len(df_square.columns)*0.03), int(len(df_square)*0.03))
 
-    fun.plot_clustermap_with_annotation(df_square, row_colors_df, col_colors_df, filename, title="cross accuracy", col_cluster=col_cluster, row_cluster=row_cluster, colorbar_label=accuracy_f, adjust_position=True, legend=True, idxs_separator_pattern="||||", texts_to_strip={"L001"}, default_label_legend="control", df_annotations=df_annotations, cmap=sns.color_palette("RdBu_r", 50), ylabels_graphics_df=None, grid_lines=False, figsize=figsize, multiplier_width_colorbars=multiplier_width_colorbars, vmax=1.0, vmin=0.0)
+    fun.plot_clustermap_with_annotation(df_square, row_colors_df, col_colors_df, filename, title="cross accuracy", col_cluster=col_cluster, row_cluster=row_cluster, colorbar_label=accuracy_f, adjust_position=True, legend=True, idxs_separator_pattern="||||", texts_to_strip={"L001"}, default_label_legend="control", df_annotations=df_annotations, cmap=sns.color_palette("RdBu_r", 50), ylabels_graphics_df=None, grid_lines=False, figsize=figsize, multiplier_width_colorbars=multiplier_width_colorbars, vmax=1.0, vmin=0.0, size_annot=12)
 
 
 
@@ -2024,13 +2033,12 @@ def get_crossbenchmarking_distributions_differentSetsOfParameters(df_cross_accur
     fig.savefig(filename, bbox_inches='tight')
 
 
+def get_crossbenchmarking_distributions_differentSetsOfParameters_realSVs_scatter(df_cross_accuracy_benchmark, fileprefix, accuracy_f="Fvalue", svtype="integrated"):
 
-def get_crossbenchmarking_distributions_differentSetsOfParameters_realSVs(df_cross_accuracy_benchmark, fileprefix, accuracy_f="Fvalue", svtype="integrated"):
-
-    """This is like get_crossbenchmarking_distributions_differentSetsOfParameters but for real SVs"""
+    """Plots a scatterplot of maximum accuracy (y) vs accuray of different parameters (x). The color would be the type of parameters. The color would be the type of parameters and the symbol the sampleID. The rows will be different specues. The cols are different types of training parameters."""
 
     # keep one df
-    df_cross_accuracy_benchmark = df_cross_accuracy_benchmark[df_cross_accuracy_benchmark.svtype==svtype]
+    df_cross_accuracy_benchmark = cp.deepcopy(df_cross_accuracy_benchmark[df_cross_accuracy_benchmark.svtype==svtype])
 
     # define parms
     sorted_species = ["Candida_glabrata", "Candida_albicans", "Cryptococcus_neoformans", "Arabidopsis_thaliana", "Drosophila_melanogaster", "Homo_sapiens"]
@@ -2040,54 +2048,229 @@ def get_crossbenchmarking_distributions_differentSetsOfParameters_realSVs(df_cro
     typeComparison_to_orderI = dict(zip(sorted_typeComparisons, range(len(sorted_typeComparisons))))
     df_cross_accuracy_benchmark["type_comparison_I"] = df_cross_accuracy_benchmark.type_comparison.apply(lambda x: typeComparison_to_orderI[x])
 
+    # define the type of training simulations
+    sorted_training_typeSim = ["uniform", "realSVs", "arroundHomRegions"]
+
     # add a shorter to type comparison
     typeComparison_to_newTypeComparison = {"fast":"default", "different_species": "different spp", "same_species":"same spp", "same_sample":"same sample"}
     df_cross_accuracy_benchmark["training parameters"] = df_cross_accuracy_benchmark.type_comparison.apply(lambda x: typeComparison_to_newTypeComparison[x])
 
     # define graphics
-    trainingParmsToColor = {"default":"gray", "different spp": "greenyellow", "same spp":"lime", "same sample":"black"}
+    trainingParmsToColor = {"default":"gray", "different spp": "m", "same spp":"black"}
+    #trainingParmsToLetter = {"default":"d", "different spp": "\neq", "same spp":"~", "same sample":"="}
 
     # add fields
     df_cross_accuracy_benchmark["test_typeSVs"] = "real SVs"
 
     # init fig
     nrows = len(sorted_species)
+    ncols = 3
     I = 1
-    fig = plt.figure(figsize=(1*0.8, nrows*1.3))
+    fig = plt.figure(figsize=(ncols*2.8, nrows*2.8))
 
     for Ir, test_species in enumerate(sorted_species):
-        print(test_species)
 
-        # get df
-        df_plot =  df_cross_accuracy_benchmark[(df_cross_accuracy_benchmark.test_species==test_species)].sort_values(by=["type_comparison_I"])
+        # define the ylim
+        #df_species =  df_cross_accuracy_benchmark[(df_cross_accuracy_benchmark.test_species==test_species)].sort_values(by=["type_comparison_I"])
+        #lims = [min(df_species[accuracy_f])-0.05, max(df_species[accuracy_f])+0.05]
+        #ylim = [-0.05, 1.05]
+        lims = [-0.05, max(df_cross_accuracy_benchmark[accuracy_f])+0.05]
 
-        # get the subplot
-        ax = plt.subplot(nrows, 1, I); I+=1
+        for Ic, parms_typeSim in enumerate(sorted_training_typeSim):
 
-        # get the stripplot
-        if len(df_plot)>0: ax = sns.stripplot(data=df_plot, x="test_typeSVs", y=accuracy_f, hue="training parameters", palette=trainingParmsToColor,  dodge=True,  linewidth=.01, edgecolor="gray", size=3, alpha=.75)
 
-        # set the ylims
-        #ax.set_ylim([-0.05, 1.1])
+            # get df
+            df_plot =  df_cross_accuracy_benchmark[(df_cross_accuracy_benchmark.test_species==test_species) & (df_cross_accuracy_benchmark.parms_typeSimulations.isin({"fast", parms_typeSim}))].sort_values(by=["type_comparison_I"])
 
-        # remove title
-        ax.set_title("")
-        if Ir==2: ax.set_ylabel("%s\n%s. %s"%(accuracy_f, test_species.split("_")[0][0], test_species.split("_")[1]))
-        else: ax.set_ylabel("%s. %s"%(test_species.split("_")[0][0], test_species.split("_")[1]))
+            # get the subplot
+            ax = plt.subplot(nrows, ncols, I); I+=1
 
-        # remove the xticklabels except in the last row
-        ax.set_xlabel("")
-        ax.set_xticks([])
-        if test_species!=sorted_species[-1]: ax.set_xticklabels([])
-        else: 
-            ax.set_xlabel("real SVs", rotation=75)
+            # skip if empty
+            if sum(df_plot["training parameters"]=="same sample")==0: 
+                ax.set_xlabel("")
+                ax.set_xticks([])
+                ax.set_ylabel("")
+                ax.set_yticks([])
 
-        # get the legen only in the first box
-        if Ir==0: ax.legend(bbox_to_anchor=(1, 1)) 
-        elif len(df_plot)>0: ax.get_legend().remove()
+                continue
+
+            # get the df_plot of accuracy of the same sample
+            df_plot_same_sample = df_plot[df_plot["training parameters"]=="same sample"]
+            accuracy_same_sample_f = "%s optimized same sample"%accuracy_f 
+            df_plot_same_sample[accuracy_same_sample_f] = df_plot_same_sample[accuracy_f]
+
+            # add to df_plot the accuracy of the same sample
+            df_plot = df_plot.merge(df_plot_same_sample[[accuracy_same_sample_f, "test_sampleID"]], on="test_sampleID", validate="many_to_one")
+            df_plot = df_plot[df_plot["training parameters"]!="same sample"]
+            if any(pd.isna(df_plot[accuracy_same_sample_f])): raise ValueError("There can't be NaNs in accuracy_same_sample_f")
+
+            # create a df that has the 'training parameters' 
+            ax = sns.scatterplot(data=df_plot, x=accuracy_f, y=accuracy_same_sample_f, style="test_sampleID", edgecolor=[trainingParmsToColor[x] for x in df_plot["training parameters"]], alpha=1, facecolor="none", linewidth=1.5)
+
+            # set lims
+            #lims = [-0.05, 1.05]
+            #all_vals = df_plot[accuracy_f].append(df_plot[accuracy_same_sample_f])
+            #lims = [min(all_vals)-.05, max(all_vals)+.05]
+
+            ax.set_ylim(lims)
+            ax.set_xlim(lims)
+
+            # add horizontal line
+            plt.plot([0, 1], [0, 1], linewidth=.7, color="gray", linestyle="--")
+
+
+            # legend
+            ax.get_legend().remove()
+            #if Ir==0 and Ic==2: ax.legend(bbox_to_anchor=(1, 1)) 
+            #elif len(df_plot)>0: ax.get_legend().remove()
+
+
+            #if len(df_plot)>0: ax = sns.stripplot(data=df_plot, x="test_typeSVs", y=accuracy_f, hue="training parameters", palette=trainingParmsToColor,  dodge=True,  linewidth=.01, edgecolor="gray", size=3, alpha=.75, edgecolor="none")
+
+            #if len(df_plot)>0: ax = sns.stripplot(data=df_plot, x="test_typeSVs", y=accuracy_f, hue="training parameters", palette=trainingParmsToColor,  dodge=True,  linewidth=.01, edgecolor="gray", size=3, alpha=.75)
+
+
+
+            
+def get_crossbenchmarking_distributions_differentSetsOfParameters_realSVs(df_cross_accuracy_benchmark, fileprefix, accuracy_f="Fvalue", svtype="integrated"):
+
+    """This is like get_crossbenchmarking_distributions_differentSetsOfParameters but for real SVs"""
+
+    # imports
+    from matplotlib.ticker import FormatStrFormatter
+
+    # keep one df
+    df_cross_accuracy_benchmark = cp.deepcopy(df_cross_accuracy_benchmark[df_cross_accuracy_benchmark.svtype==svtype])
+
+    # define parms
+    sorted_species = ["Candida_glabrata", "Candida_albicans", "Cryptococcus_neoformans", "Arabidopsis_thaliana", "Drosophila_melanogaster", "Homo_sapiens"]
+
+    # add the order of the type of teh comparison
+    sorted_typeComparisons = ["fast", "different_species", "same_species", "same_sample"]
+    typeComparison_to_orderI = dict(zip(sorted_typeComparisons, range(len(sorted_typeComparisons))))
+    df_cross_accuracy_benchmark["type_comparison_I"] = df_cross_accuracy_benchmark.type_comparison.apply(lambda x: typeComparison_to_orderI[x])
+
+    # define the type of training simulations
+    sorted_training_typeSim = ["uniform", "realSVs", "arroundHomRegions"]
+
+    # add a shorter to type comparison
+    typeComparison_to_newTypeComparison = {"fast":"default", "different_species": "different spp", "same_species":"same spp", "same_sample":"same sample"}
+    df_cross_accuracy_benchmark["training parameters"] = df_cross_accuracy_benchmark.type_comparison.apply(lambda x: typeComparison_to_newTypeComparison[x])
+
+    # define graphics
+    trainingParmsToColor = {"default":"gray", "different spp": "greenyellow", "same spp":"lime", "same sample":"black"}
+    trainingParmsToLetter = {"default":"d", "different spp": r'$\neq$', "same spp":"~", "same sample":"="}
+    traininTypeSim_to_correctName = {"uniform":"random", "realSVs":"known", "arroundHomRegions":"homologous"}
+
+    # add fields
+    df_cross_accuracy_benchmark["test_typeSVs"] = "real SVs"
+
+    # init fig
+    nrows = len(sorted_species)
+    ncols = 3
+    I = 1
+    fig = plt.figure(figsize=(ncols*0.8, nrows*1.8))
+
+
+    for Ir, test_species in enumerate(sorted_species):
+
+        # define the ylim
+        df_species =  df_cross_accuracy_benchmark[(df_cross_accuracy_benchmark.test_species==test_species)].sort_values(by=["type_comparison_I"])
+        ylim = [min(df_species[accuracy_f])-0.05, max(df_species[accuracy_f])+0.05]
+        #ylim = [-0.05, 1.05]
+
+        for Ic, parms_typeSim in enumerate(sorted_training_typeSim):
+
+            # get df
+            df_plot =  df_cross_accuracy_benchmark[(df_cross_accuracy_benchmark.test_species==test_species) & (df_cross_accuracy_benchmark.parms_typeSimulations.isin({"fast", parms_typeSim}))].sort_values(by=["type_comparison_I"])
+
+            # get the subplot
+            ax = plt.subplot(nrows, ncols, I); I+=1
+
+            # skip if empty
+            if sum(df_plot["training parameters"]=="same sample")==0: 
+                ax.set_xlabel("")
+                ax.set_xticks([])
+                ax.set_ylabel("")
+                ax.set_yticks([])
+
+                continue
+
+
+
+            # get the stripplot
+            #if len(df_plot)>0: ax = sns.stripplot(data=df_plot, x="test_typeSVs", y=accuracy_f, hue="training parameters", palette=trainingParmsToColor,  dodge=True,  linewidth=.01, edgecolor="gray", size=3, alpha=.75)
+
+            # add lines pairing the same test_sampleID
+            sorted_training_parameters = [x for x in ["default", "different spp", "same spp", "same sample"] if x in set(df_plot["training parameters"])]
+
+            sorted_samples = sorted(set(df_plot.test_sampleID))
+            sampleID_to_color = fun.get_value_to_color(sorted_samples, palette="tab10", type_color="rgb", center=None)[0]
+
+
+            for Ifrom in range(len(sorted_training_parameters)-1):
+                Ito = Ifrom+1
+
+                # define the parameters
+                parm_from = sorted_training_parameters[Ifrom]
+                parm_to = sorted_training_parameters[Ito]
+
+                # go through all samples
+                for sampleID in set(df_plot.test_sampleID):
+                    
+                    # get the df of the from and to
+                    df_from = df_plot[(df_plot.test_sampleID==sampleID) & (df_plot["training parameters"]==parm_from)]
+                    df_to = df_plot[(df_plot.test_sampleID==sampleID) & (df_plot["training parameters"]==parm_to)]
+
+                    # go through each
+                    for from_y in df_from[accuracy_f].values:
+                        for to_y in df_to[accuracy_f].values:
+
+                            # get the xfrom to 
+                            #from_x = np.mean(np.array(ax.collections[Ifrom].get_offsets()).T[0])
+                            #to_x = np.mean(np.array(ax.collections[Ito].get_offsets()).T[0])
+
+                            plt.plot([Ifrom, Ito], [from_y, to_y], linestyle="-", linewidth=.7, color=sampleID_to_color[sampleID], alpha=.8)
+
+            # set the ylims
+            ax.set_ylim(ylim)
+
+            # add the lines
+            #for y in [0.5, 0.75]: plt.axhline(y, color="gray", linestyle="--", linewidth=.7)
+
+            # title for the first row
+            if Ir==0: ax.set_title(traininTypeSim_to_correctName[parms_typeSim],  rotation=75)
+
+            # ylabel (only first col)
+            if Ic==0:
+
+                if Ir==2: ax.set_ylabel("%s\n%s. %s"%(accuracy_f, test_species.split("_")[0][0], test_species.split("_")[1]))
+                else: ax.set_ylabel("%s. %s"%(test_species.split("_")[0][0], test_species.split("_")[1]))
+
+                ax.yaxis.set_major_formatter(FormatStrFormatter('%.2f'))
+
+            else:
+                ax.set_yticklabels([])
+                ax.set_ylabel("")
+                ax.set_yticks([])
+
+            # remove the xticklabels except in the last row
+            ax.set_xlabel("")
+            #ax.set_xticks([])
+            ax.set_xticks(list(range(len(sorted_training_parameters))))
+            ax.set_xticklabels([trainingParmsToLetter[p] for p in sorted_training_parameters])
+
+            #if test_species!=sorted_species[-1]: ax.set_xticklabels([])
+            #elif Ic==1: 
+            if Ic==1 and test_species==sorted_species[-1]: ax.set_xlabel("real SVs", rotation=0)
+
+            # get the legen only in the first box
+            #if Ir==0 and Ic==2: ax.legend(bbox_to_anchor=(1, 1)) 
+            #elif len(df_plot)>0: ax.get_legend().remove()
 
     # spaces
-    plt.subplots_adjust(wspace=0.00, hspace=0.1)
+    print("saving")
+    plt.subplots_adjust(wspace=0.1, hspace=0.3)
     filename = "%s_%s_%s.pdf"%(fileprefix, accuracy_f, svtype)
     fig.savefig(filename, bbox_inches='tight')
 
@@ -2640,3 +2823,83 @@ def plot_used_resources_testing_on_simulations(CurDir, ProcessedDataDir, PlotsDi
 
     ##################################################################
 
+svtype_to_positionField_to_chromosome = {"inversions": {"Start":"Chr", "End":"Chr"},
+                                         "tandemDuplications": {"Start":"Chr", "End":"Chr"},
+                                         "deletions": {"Start":"Chr", "End":"Chr"},
+                                         "insertions": {"StartA":"ChrA", "EndA":"ChrA", "StartB":"ChrB"},
+                                         "translocations_noINV": {"EndA":"ChrA", "EndB":"ChrB"},
+                                         "translocations_INV": {"EndA":"ChrA", "StartB":"ChrB"},
+                                         "remaining": {"POS":"#CHROM", "START":"CHR2", "END":"CHR2"}}
+
+def get_sv_dict_without_simple_repeats(sv_dict, repeats_file, outdir, reference_genome):
+
+    """Gets an svdict without variants that overlap repeats by <50 bp in any of the relevant positions"""
+
+    # make the outdir
+    fun.delete_folder(outdir)
+    fun.make_folder(outdir)
+
+    # get the chromosome to len
+    chr_to_len = fun.get_chr_to_len(reference_genome)
+
+    # get the repeats df of simple SVs
+    repeats_df = fun.get_tab_as_df_or_empty_df(repeats_file)
+    repeats_df = repeats_df[repeats_df["type"].isin({"Low_complexity", "Simple_repeat"})]
+    simple_repeats_table = "%s/simple_repeats.tab"%outdir
+    fun.save_df_as_tab(repeats_df, simple_repeats_table)
+
+    # init modified sv_dict
+    filt_sv_dict = {}
+
+    # go through each svfile
+    for svtype, svfile in sv_dict.items():
+
+        # define the name of the
+        svfile_filt = "%s/%s_noSimpleRepeats.tab"%(outdir, svtype)
+
+        # load the svDF and add an ID
+        svDF = fun.get_tab_as_df_or_empty_df(svfile).reset_index(drop=True)
+        initial_fields = cp.deepcopy(list(svDF.keys()))
+        svDF["varID"] = svtype + "_" + pd.Series(list(range(len(svDF))), index=svDF.index).apply(str)
+
+        # if there is something
+        if len(svDF)>0:
+
+            # create an svdict that maps different parts of the chroms
+            if svtype=="translocations": 
+                svDF["is_inverted"] = svDF.StartB>0
+                print("There are %i/%i inverted balanced translocations"%(sum(svDF.is_inverted), len(svDF)))                
+                inner_svtype_to_svDF = {"translocations_INV":svDF[svDF.is_inverted], "translocations_noINV":svDF[~(svDF.is_inverted)]}
+
+            else: inner_svtype_to_svDF = {svtype : svDF}
+
+            # create a vcf_df with all the regions under SV
+            vcf_df = pd.DataFrame()
+            for inner_svtype, inner_svDF in inner_svtype_to_svDF.items():
+                for pos_field, chrom_field in svtype_to_positionField_to_chromosome[inner_svtype].items():
+                    vcf_df = vcf_df.append(inner_svDF[[chrom_field, pos_field, "varID"]].rename(columns={chrom_field:"#CHROM", pos_field:"POS"}))
+
+            # add the ID (to be 1-based)
+            vcf_df["POS"] = vcf_df.POS.apply(int)+1
+            vcf_df = vcf_df.sort_values(by=["#CHROM", "POS"]).reset_index(drop=True)
+            vcf_df["ID"] = "region_" + pd.Series(list(range(len(vcf_df))), index=vcf_df.index).apply(str)
+            vcf_df = vcf_df[["#CHROM", "POS", "ID", "varID"]].set_index("ID", drop=False)
+
+            # get a vcf_df with the CHROM and POS of svtype_to_positionField_to_chromosome
+            vcf_df["overlaps_repeats"] = fun.get_series_variant_in_repeats(vcf_df, simple_repeats_table, replace=False)
+            print("There are %i/%i variant regions overlapping repeats"%(sum(vcf_df.overlaps_repeats), len(vcf_df)))
+
+            # keep only svs that don't overlap repets
+            varIDs_overlap_repeats = set(vcf_df[vcf_df.overlaps_repeats].varID)
+            svDF_filt = svDF[~(svDF.varID.isin(varIDs_overlap_repeats))]
+            print("There are %i/%i SVs that don't overlap repeats"%(len(svDF_filt), len(svDF)))
+
+            fun.save_df_as_tab(svDF_filt[initial_fields], svfile_filt)
+
+        # else
+        else: fun.soft_link_files(svfile, svfile_filt)
+
+        # keep the filtered SVs
+        filt_sv_dict[svtype] = svfile_filt
+
+    return filt_sv_dict

@@ -5,14 +5,21 @@
 # get environment
 import sys
 import os
+import pandas as pd
+import re
 
 # get the cwd were all the scripts are 
 CWD = "/".join(__file__.split("/")[0:-1]); sys.path.insert(0, CWD)
 
-# perSVade file
+# define env
+import sv_functions as fun
+perSVade_py = "%s/perSVade.py"%CWD 
+
+# define help messages
+help_args = ["-h","--help","getopt","usage","help","-help"]
 
 # if there are no arguments, just print the first one
-if len(sys.argv)==1 or sys.argv[1] in ["-h","--help","getopt","usage","help","-help"]:
+if len(sys.argv)==1 or sys.argv[1] in help_args:
 
     print("""
     --------------------------------------------------------------------------------
@@ -22,7 +29,13 @@ if len(sys.argv)==1 or sys.argv[1] in ["-h","--help","getopt","usage","help","-h
 
     These are the available modules:
 
-        small_variant_calling       Call small variants (SNPs and INDELs) and calculate coverage per gene
+        trim_reads_and_QC           Trim reads and perform quality control
+        align_reads                 Align reads with bwa mem and mark duplicates
+        infer_repeats               Find repeats in a genome with RepeatModeler and RepeatMasker
+
+        small_variant_calling       Call small variants (SNPs and INDELs)
+        SV_calling                  Call structural variants from user-defined parameters
+        find_homologous_regions
 
     Usage:
 
@@ -32,5 +45,19 @@ if len(sys.argv)==1 or sys.argv[1] in ["-h","--help","getopt","usage","help","-h
 
 else:
 
-    thisisnotready
+    # define the modules
+    available_modules = {"trim_reads_and_QC", "align_reads", "infer_repeats"}
+    module = sys.argv[1]
 
+    # define script of this module
+    module_script = "%s/%s"%(CWD, module)
+
+    # unavailable modules
+    if fun.file_is_empty(module_script) or module not in available_modules:
+        print("ERROR: module '%s' is not available. Type 'perSVade -h' for more info"%(module)); sys.exit(1)
+
+    # print help
+    if len(sys.argv)==2 or sys.argv[2] in help_args: fun.run_cmd_simple_noError("%s --help"%module_script)
+
+    # run script
+    else: fun.run_cmd_simple_noError("%s %s"%(module_script, " ".join(sys.argv[2:])))
