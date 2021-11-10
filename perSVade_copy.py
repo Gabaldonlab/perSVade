@@ -68,8 +68,6 @@ general_optional_args.add_argument("-mcode", "--mitochondrial_code", dest="mitoc
 general_optional_args.add_argument("-gcode", "--gDNA_code", dest="gDNA_code", default=1, type=int, help="The code of the NCBI gDNA genetic code. You can find the numbers for your species here https://www.ncbi.nlm.nih.gov/Taxonomy/Utils/wprintgc.cgi . For C. albicans it is 12. The information of this website may be wrong, so you may want to double check with the literature.")
 
 
-general_optional_args.add_argument("--QC_and_trimming_reads", dest="QC_and_trimming_reads", action="store_true", default=False, help="Will run fastq and trimmomatic of reads, and use the trimmed reads for downstream analysis. This option will generate files under the same dir as f1 and f2, so be aware of it. This is a rather dangerous option, sinc you may want to do the quality control of the reads before running perSVade.")
-
 general_optional_args.add_argument("--min_chromosome_len", dest="min_chromosome_len", default=100000, type=int, help="The minimum length to consider chromosomes from the provided fasta for calculating the window length. Any chromosomes that shorter than the window length will not be considered in the random SV simulations.")
 
 
@@ -83,6 +81,8 @@ SVcalling_args = parser.add_argument_group("SV CALLING")
 
 SVcalling_args.add_argument("--parameters_json_file", dest="parameters_json_file", type=str, default=None, help="A file with the json parameters to use. This only has effect if --fast_SVcalling is specified")
 
+
+
 SVcalling_args.add_argument("--fast_SVcalling", dest="fast_SVcalling", action="store_true", default=False, help="Run SV calling with a default set of parameters. There will not be any optimisation nor reporting of accuracy. This is expected to work almost as fast as gridss and clove together. If --parameters_json_file, the parameters are substituted by the json parameters.")
 
 SVcalling_args.add_argument("--simulation_chromosomes", dest="simulation_chromosomes", type=str, default=None, help="A comma-sepparated set of chromosomes (i.e.: chr1,chr2,chr3) in which to perform simulations. By default it takes all the chromosomes.")
@@ -95,17 +95,14 @@ SVcalling_args.add_argument("--simulation_ploidies", dest="simulation_ploidies",
 
 SVcalling_args.add_argument("--range_filtering_benchmark", dest="range_filtering_benchmark", type=str, default="theoretically_meaningful", help='The range of parameters that should be tested in the SV optimisation pipeline. It can be any of large, medium, small, theoretically_meaningful, theoretically_meaningful_NoFilterRepeats or single. ')
 
-SVcalling_args.add_argument("--simulate_SVs_around_repeats", dest="simulate_SVs_around_repeats", action="store_true", default=False, help="Simulate SVs around repeats. This requires that there are some repeats inferred. This option will generate a simulated set of breakpoints around repeats, if possible of the same family, and with random orientations.")
 
-SVcalling_args.add_argument("--simulate_SVs_around_HomologousRegions", dest="simulate_SVs_around_HomologousRegions", action="store_true", default=False, help="Simulate SVs around regions that have high similarity.")
 
-SVcalling_args.add_argument("--simulate_SVs_around_HomologousRegions_queryWindowSize", dest="simulate_SVs_around_HomologousRegions_queryWindowSize",  default=500, type=int, help="The window size used for finding regions with high similarity. This only works if --simulate_SVs_around_HomologousRegions is specified.")
 
-SVcalling_args.add_argument("--simulate_SVs_around_HomologousRegions_maxEvalue", dest="simulate_SVs_around_HomologousRegions_maxEvalue",  default=1e-5, type=float, help="The maximum evalue by which two regions will be said to have high similarity. This only works if --simulate_SVs_around_HomologousRegions is specified.")
 
-SVcalling_args.add_argument("--simulate_SVs_around_HomologousRegions_minPctOverlap", dest="simulate_SVs_around_HomologousRegions_minPctOverlap",  default=50, type=int, help="The minimum percentage of overlap between two homologous regions so that there can be a brèkpoint drawn in between. This only works if --simulate_SVs_around_HomologousRegions is specified.")
 
-SVcalling_args.add_argument("--simulate_SVs_around_HomologousRegions_previousBlastnFile", dest="simulate_SVs_around_HomologousRegions_previousBlastnFile",  default=None, help="A file that contains the output of blastn of regions of the genome against itself. It will be put under refetence genome dir")
+
+
+
 
 ########################################################
 
@@ -113,7 +110,6 @@ SVcalling_args.add_argument("--simulate_SVs_around_HomologousRegions_previousBla
 
 realSVs_args = parser.add_argument_group("SV CALLING. FINDING REAL SVs")
 
-realSVs_args.add_argument("--close_shortReads_table", dest="close_shortReads_table", type=str, default=None, help="This is the path to a table that has 4 fields: sampleID,runID,short_reads1,short_reads2. These should be WGS runs of samples that are close to the reference genome and some expected SV. Whenever this argument is provided, the pipeline will find SVs in these samples and generate a folder <outdir>/findingRealSVs<>/SVs_compatible_to_insert that will contain one file for each SV, so that they are compatible and ready to insert in a simulated genome. This table will be used if --testAccuracy is specified, which will require at least 3 runs for each sample. It can be 'auto', in which case it will be inferred from the taxID provided by --target_taxID.")
 
 realSVs_args.add_argument("--real_bedpe_breakpoints", dest="real_bedpe_breakpoints", type=str, default=None, help="A file with the list of 'real' breakpoints around which to insert the SVs in simulations. It may be created with --close_shortReads_table. If both --real_bedpe_breakpoints and --close_shortReads_table are provided, --real_bedpe_breakpoints will be used, and --close_shortReads_table will have no effect. If none of them are provided, this pipeline will base the parameter optimization on randomly inserted SVs (the default behavior). The coordinates have to be 1-based, as they are ready to insert into RSVsim.")
 
@@ -158,12 +154,6 @@ smallVars_args.add_argument("--remove_smallVarsCNV_nonEssentialFiles", dest="rem
 
 #######################################
 
-##### skipping some steps #####
-
-skipping_args = parser.add_argument_group("SKIP SOME STEPS")
-
-skipping_args.add_argument("--skip_repeat_analysis", dest="skip_repeat_analysis", default=False, action="store_true", help="Skip the inference of repeats. If --previous_repeats_table is provided, this argument will override it.")
-
 
 
 
@@ -197,19 +187,6 @@ else:
 
 #########################
 
-#### REPLACE THE REPEATS TABLE IF PROVIDED ####
-
-# define the repeats table. This will work for any downstream analysis of this
-repeats_table_file = "%s.repeats.tab"%opt.ref
-
-if opt.previous_repeats_table is not None:
-    print("using privided repeats %s"%opt.previous_repeats_table)
-
-    if fun.file_is_empty(opt.previous_repeats_table): raise ValueError("The provided repeats table does not exist")
-    
-    # softlink
-    fun.remove_file(repeats_table_file)
-    fun.soft_link_files(opt.previous_repeats_table, repeats_table_file)
 
 ###############################################
 
@@ -243,16 +220,6 @@ fun.window_l = fun.get_perSVade_window_l(opt.ref, opt.mitochondrial_chromosome, 
 # define the min_CNVsize_coverageBased
 fun.min_CNVsize_coverageBased = opt.min_CNVsize_coverageBased
 
-# change the default parameters if specified
-if opt.parameters_json_file is not None:
-
-    gridss_blacklisted_regions, gridss_maxcoverage, gridss_filters_dict, max_rel_coverage_to_consider_del, min_rel_coverage_to_consider_dup = fun.get_parameters_from_json(opt.parameters_json_file)
-
-    fun.default_filtersDict_gridss = gridss_filters_dict
-    fun.default_gridss_blacklisted_regions = gridss_blacklisted_regions
-    fun.default_gridss_maxcoverage = gridss_maxcoverage
-    fun.default_max_rel_coverage_to_consider_del = max_rel_coverage_to_consider_del
-    fun.default_min_rel_coverage_to_consider_dup = min_rel_coverage_to_consider_dup
 
 # test whether the gff is correct
 if opt.gff is not None: fun.check_that_gff_is_correct(opt.gff, opt.ref, opt.mitochondrial_chromosome, opt.mitochondrial_code, opt.gDNA_code, opt.threads, opt.replace)
@@ -261,69 +228,12 @@ if opt.gff is not None: fun.check_that_gff_is_correct(opt.gff, opt.ref, opt.mito
 if opt.tmpdir is not None:
     if not os.path.isdir(opt.tmpdir): raise ValueError("The folder that you specified with --tmpdir does not exist")
 
-# get the repeats table
-if opt.skip_repeat_analysis is False:
-
-else:
-
-    print("skipping the repeats analysis")
-    fun.write_repeats_table_file(repeats_table_file)
-
-
 
 ####### GENERATE real_bedpe_breakpoints AROUND HOMOLOGOUS REGIONS #########
 
-if opt.simulate_SVs_around_HomologousRegions is True:
-    print("simulating around Homologous regions")
-
-
-    # get a file that contains the blastn of some regions of the genome
-    if opt.simulate_SVs_around_HomologousRegions_previousBlastnFile is None: blastn_file = fun.get_blastn_regions_genome_against_itself(opt.ref, opt.simulate_SVs_around_HomologousRegions_maxEvalue, opt.simulate_SVs_around_HomologousRegions_queryWindowSize, opt.replace, opt.threads)
-
-    else: blastn_file = opt.simulate_SVs_around_HomologousRegions_previousBlastnFile
-
-    # define the bedpe breakpoints around the homologous regions
-    bedpe_breakpoints = "%s/breakpoints_aroundHomRegions_wsize=%ibp_maxEval=%s_minQcovS=%i.bedpe"%(opt.outdir, opt.simulate_SVs_around_HomologousRegions_queryWindowSize, opt.simulate_SVs_around_HomologousRegions_maxEvalue, opt.simulate_SVs_around_HomologousRegions_minPctOverlap)
-
-    opt.real_bedpe_breakpoints = fun.get_bedpe_breakpoints_around_homologousRegions(blastn_file, bedpe_breakpoints, replace=opt.replace, threads=opt.threads, max_eval=opt.simulate_SVs_around_HomologousRegions_maxEvalue, query_window_size=opt.simulate_SVs_around_HomologousRegions_queryWindowSize, min_qcovs=opt.simulate_SVs_around_HomologousRegions_minPctOverlap, max_n_hits=(opt.nvars*5*2500))
 
 ############################################################################
 
-
-
-#####################################
-############# BAM FILE ##############
-#####################################
-
-start_time_alignment =  time.time()
-
-if not any([x=="skip" for x in {opt.fastq1, opt.fastq2}]):
-
-    ##### DEFINE THE SORTED BAM #####
-
-    # define the dest bam files
-    bamfile = "%s/aligned_reads.bam"%opt.outdir
-    sorted_bam = "%s.sorted"%bamfile
-    index_bam = "%s.bai"%sorted_bam
-
-    # if you provided a sorted bam it should be placed into sorted_bam
-    if opt.sortedbam is not None:
-
-        # debug the fact that you prvided reads and bam. You should just provide one
-        if any([not x is None for x in {opt.fastq1, opt.fastq2}]): raise ValueError("You have provided reads and a bam, you should only provide one")
-
-
-        # get the linked bam files
-        fun.soft_link_files(fun.get_fullpath(opt.sortedbam), sorted_bam)
-        fun.soft_link_files(fun.get_fullpath(opt.sortedbam)+".bai", sorted_bam+".bai")
-        
-    ###################################
-
-
-
-#####################################
-#####################################
-#####################################
 
 
 

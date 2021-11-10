@@ -657,7 +657,7 @@ def run_cmd_simple_noError(cmd):
     out_stat = os.system(cmd) 
     if out_stat!=0: 
         print("\nERROR!!! Out status: %i"%(out_stat))
-        sys.exit(out_stat)
+        sys.exit(10)
 
 def run_cmd(cmd, env=EnvName):
 
@@ -10657,7 +10657,8 @@ def blastn_query_against_subject(query_fasta, database_multifasta, blast_outfile
                 SeqIO.write([chrom], database_chrom, "fasta")
 
                 # make blast db
-                run_cmd("%s -in %s -dbtype nucl"%(makeblastdb, database_chrom), env=EnvName_RepeatMasker)
+                makeblastdb_out = "%s.generating.std"%database_chrom
+                run_cmd("%s -in %s -dbtype nucl > %s"%(makeblastdb, database_chrom, makeblastdb_out), env=EnvName_RepeatMasker)
 
                 # run blast
                 blast_outfile_chrom_tmp = "%s.tmp"%blast_outfile_chrom
@@ -10668,6 +10669,7 @@ def blastn_query_against_subject(query_fasta, database_multifasta, blast_outfile
 
                 # clean
                 remove_file(blast_std)
+                remove_file(makeblastdb_out)
                 delete_folder(outdir_chrom)
                 os.rename(blast_outfile_chrom_tmp, blast_outfile_chrom)
 
@@ -20887,3 +20889,71 @@ def prepare_reference_genome_for_perSVade(perSVade_ref, perSVade_outdir, mitocho
 
     # returna set of things
     return new_reference_genome_file, reference_genome_dir
+
+def get_sorted_bam_in_outdir(perSVade_sorted_bam, perSVade_outdir):
+
+    """Gets a sorted bam and puts it under the outdir"""
+
+    # define files
+    sorted_bam = "%s/aligned_reads.bam.sorted"%perSVade_outdir
+    index_bam = "%s.bai"%sorted_bam
+
+    # link
+    soft_link_files(get_fullpath(perSVade_sorted_bam), sorted_bam)
+    soft_link_files(get_fullpath(perSVade_sorted_bam)+".bai", sorted_bam+".bai")
+
+    return sorted_bam, index_bam
+
+def get_SVcalling_parameters(SVcalling_parameters):
+
+    """Gets the SV calling parameters"""
+
+    # if it is default
+    if SVcalling_parameters=="default":
+
+        gridss_filters_dict = default_filtersDict_gridss
+        gridss_blacklisted_regions = default_gridss_blacklisted_regions
+        gridss_maxcoverage = default_gridss_maxcoverage
+        max_rel_coverage_to_consider_del = default_max_rel_coverage_to_consider_del
+        min_rel_coverage_to_consider_dup = default_min_rel_coverage_to_consider_dup
+
+    # if it is a json file
+    elif not file_is_empty(SVcalling_parameters): gridss_blacklisted_regions, gridss_maxcoverage, gridss_filters_dict, max_rel_coverage_to_consider_del, min_rel_coverage_to_consider_dup = get_parameters_from_json(SVcalling_parameters)
+
+    else: raise ValueError("The calling parameters %s are not valid"%SVcalling_parameters)
+
+    # check 
+    if type(gridss_blacklisted_regions)!=str: raise ValueError("gridss_blacklisted_regions %s is not valid"%gridss_blacklisted_regions)
+    if type(gridss_maxcoverage)!=int: raise ValueError("gridss_maxcoverage %s is not valid"%gridss_maxcoverage)
+    if type(gridss_filters_dict)!=dict: raise ValueError("gridss_filters_dict %s is not valid"%gridss_filters_dict)
+    if type(max_rel_coverage_to_consider_del)!=float: raise ValueError("max_rel_coverage_to_consider_del %s is not valid"%max_rel_coverage_to_consider_del)
+    if type(min_rel_coverage_to_consider_dup)!=float: raise ValueError("min_rel_coverage_to_consider_dup %s is not valid"%min_rel_coverage_to_consider_dup)
+
+    # return
+    return gridss_blacklisted_regions, gridss_maxcoverage, gridss_filters_dict, max_rel_coverage_to_consider_del, min_rel_coverage_to_consider_dup
+
+
+def prepare_repeats_file_for_perSVade(repeats_file, ref):
+
+    """Puts the repeats file after the reference genome"""
+
+    # get the repeats table
+    dest_repeats_file = "%s.repeats.tab"%ref
+
+    # write empty repeats
+    if repeats_file=="skip": write_repeats_table_file(dest_repeats_file)
+
+    # get repeats under outdir
+    elif not file_is_empty(repeats_file): 
+
+        # check that the repeats are in a resonable format
+        repeats_df = get_tab_as_df_or_empty_df(repeats_file)
+
+        strange_chroms = set(repeats_df.chromosome).difference(set(get_chr_to_len(ref)))
+        if len(strange_chroms)>0: raise ValueError("The repeats file %s has some unexpected chromosomes: %s"%(repeats_file, strange_chroms))
+
+        # keep the repeats file
+        soft_link_files(repeats_file, dest_repeats_file)
+
+    # debug
+    else: raise ValueError("--repeats_file should be a valid file or 'skip'. '%s' is not valid."%repeats_file)

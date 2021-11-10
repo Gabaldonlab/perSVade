@@ -52,6 +52,11 @@ if fun.file_is_empty(ref_genome): fun.run_cmd("cp %s %s"%(test_ref_genome, ref_g
 sim_reads1 = "%s/all_reads1.correct.fq.gz"%testing_inputs_dir
 sim_reads2 = "%s/all_reads2.correct.fq.gz"%testing_inputs_dir
 
+# define a close_shortReads_table
+close_shortReads_table_df = fun.pd.DataFrame({I : {"sampleID":"sample_%i"%I, "short_reads1":sim_reads1, "short_reads2":sim_reads2} for I in range(2)}).transpose()
+close_shortReads_table = "%s/close_shortReads_table.tab"%testing_outputs_dir
+fun.save_df_as_tab(close_shortReads_table_df, close_shortReads_table)
+
 # define randomly subsampled C. glabrata reads
 cglab_reads1 = "%s/Cglabrata_reads/sampled_readsR1_first100k.fq.gz"%testing_inputs_dir
 cglab_reads2 = "%s/Cglabrata_reads/sampled_readsR2_first100k.fq.gz"%testing_inputs_dir
@@ -98,6 +103,40 @@ threads = fun.multiproc.cpu_count()
 
 ######## TEST DIFFERENT MODULES #########
 
+# get homologous regions
+outdir_homRegions = "%s/find_hom_regions"%testing_outputs_dir
+fun.run_cmd("%s find_homologous_regions --threads %i --fraction_available_mem 1.0 -o %s --ref %s --min_chromosome_len 1000"%(fun.perSVade_modules, threads, outdir_homRegions, Calbicans_chr1_2_6))
+
+# align reads with SVs
+outdir_align_reads_SVs = "%s/align_reads_sim_SVs"%testing_outputs_dir
+fun.run_cmd("%s align_reads --threads %i --fraction_available_mem 1.0 -f1 %s -f2 %s -o %s --ref %s --min_chromosome_len 100"%(fun.perSVade_modules, threads, sim_reads1, sim_reads2, outdir_align_reads_SVs, ref_genome))
+
+# check that that the database has been created
+repeat_masker_db = "%s/Libraries/RepeatMasker.lib.nsq"%(fun.repeatmasker_dir) 
+if fun.file_is_empty(repeat_masker_db): raise ValueError("%s is missing. Check that you ran ./installation/setup_environment.sh"%repeat_masker_db)
+
+# get repeats for a large genome
+#outdir_repeats = "%s/repeats_infer_Calbicans"%testing_outputs_dir
+#fun.run_cmd("%s infer_repeats --threads %i --fraction_available_mem 1.0 -o %s --ref %s --min_chromosome_len 1000 --verbose"%(fun.perSVade_modules, threads, outdir_repeats, Calbicans_chr1_2_6))
+
+# get repeats small genome
+outdir_repeats_fast = "%s/repeats_infer_Cglab"%testing_outputs_dir
+fun.run_cmd("%s infer_repeats --threads %i --fraction_available_mem 1.0 -o %s --ref %s --min_chromosome_len 100"%(fun.perSVade_modules, threads, outdir_repeats_fast, ref_genome))
+
+# run parameter optimisation based on random regions
+outdir_parameter_optimization = "%s/parameter_optimization"%testing_outputs_dir
+fun.run_cmd("%s optimize_parameters --threads %i --fraction_available_mem 1.0 -o %s --ref %s --min_chromosome_len 1000 --sortedbam %s/aligned_reads.bam.sorted --mitochondrial_chromosome mito_C_glabrata_CBS138 --repeats_file %s/combined_repeats.tab --regions_SVsimulations random --simulation_ploidies diploid_hetero --verbose --nsimulations 1 --nvars 5"%(fun.perSVade_modules, threads, outdir_parameter_optimization, ref_genome, outdir_align_reads_SVs, outdir_repeats_fast))
+
+
+
+print(outdir_parameter_optimization)
+
+adkjghaj
+close_shortReads_table
+
+
+
+
 # trimming of reads
 outdir_trimmed_reads = "%s/read_trimmingCglab"%testing_outputs_dir
 fun.run_cmd("%s trim_reads_and_QC --threads %i --fraction_available_mem 1.0 -f1 %s -f2 %s -o %s"%(fun.perSVade_modules, threads, cglab_reads1, cglab_reads2, outdir_trimmed_reads))
@@ -106,19 +145,18 @@ fun.run_cmd("%s trim_reads_and_QC --threads %i --fraction_available_mem 1.0 -f1 
 outdir_align_reads = "%s/align_reads_Cglab"%testing_outputs_dir
 fun.run_cmd("%s align_reads --threads %i --fraction_available_mem 1.0 -f1 %s -f2 %s -o %s --ref %s --min_chromosome_len 100"%(fun.perSVade_modules, threads, cglab_reads1, cglab_reads2, outdir_align_reads, ref_genome))
 
-# check that that the database has been created
-repeat_masker_db = "%s/Libraries/RepeatMasker.lib.nsq"%(fun.repeatmasker_dir) 
-if fun.file_is_empty(repeat_masker_db): raise ValueError("%s is missing. Check that you ran ./installation/setup_environment.sh"%repeat_masker_db)
 
-# get repeats in a slow way
-#outdir_repeats = "%s/repeats_infer_Calbicans"%testing_outputs_dir
-#fun.run_cmd("%s infer_repeats --threads %i --fraction_available_mem 1.0 -o %s --ref %s --min_chromosome_len 1000 --verbose"%(fun.perSVade_modules, threads, outdir_repeats, Calbicans_chr1_2_6))
 
-# get repeats small genome
-outdir_repeats_fast = "%s/repeats_infer_Cglab"%testing_outputs_dir
-fun.run_cmd("%s infer_repeats --threads %i --fraction_available_mem 1.0 -o %s --ref %s --min_chromosome_len 100"%(fun.perSVade_modules, threads, outdir_repeats_fast, ref_genome))
+# SV calling
+outdir_SVcalling = "%s/call_SVs"%testing_outputs_dir
+fun.run_cmd("%s call_SVs --threads %i --fraction_available_mem 1.0 -o %s --ref %s --min_chromosome_len 10000 -sbam %s/aligned_reads.bam.sorted --mitochondrial_chromosome mito_C_glabrata_CBS138 --SVcalling_parameters default --repeats_file skip"%(fun.perSVade_modules, threads, outdir_SVcalling, ref_genome, outdir_align_reads_SVs))
 
-print(outdir_repeats_fast)
+# get regions with known SVs
+outdir_known_regions = "%s/known_SVs"%testing_outputs_dir
+fun.run_cmd("%s find_knownSVs_regions --threads %i --fraction_available_mem 1.0 -o %s --ref %s --min_chromosome_len 10000 --mitochondrial_chromosome mito_C_glabrata_CBS138 --SVcalling_parameters default --repeats_file skip --close_shortReads_table %s --skip_marking_duplicates"%(fun.perSVade_modules, threads, outdir_known_regions, ref_genome, close_shortReads_table))
+
+
+print(outdir_homRegions)
 jdhgjhda
 #test_fun.test_get_repeat_maskerDF(Calbicans_chr1_2_6, replace=False)
 

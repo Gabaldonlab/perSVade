@@ -462,6 +462,10 @@ def get_df_accuracy_of_parameters_on_test_samples(parameters_df, test_df, outdir
             # define the running parm from parmID_to_parmIDtoRun (avoid duplications)
             running_parmID = parmID_to_parmIDtoRun[Irow]
             unique_parms_row = parameters_df.loc[running_parmID]
+
+            print(unique_parms_row)
+            print(parameters_df_metadata)
+
             outdir_parms = "%s/parms_%s"%(outdir_cross_benchmark_files, "_".join(unique_parms_row[parameters_df_metadata]))
             fun.make_folder(outdir_parms)
 

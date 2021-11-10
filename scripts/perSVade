@@ -24,18 +24,24 @@ if len(sys.argv)==1 or sys.argv[1] in help_args:
     print("""
     --------------------------------------------------------------------------------
     perSVade: personalized Structural Variation detection
-    This is a pipeline to call small variants, strcutural variants (SV) and/or coverage-derived copy number variants (CNV). 
+    This is a pipeline to call small variants, strcutural variants (SV) and/or coverage-derived copy number variants (CNV)
+    Find more information in https://github.com/Gabaldonlab/perSVade
     --------------------------------------------------------------------------------
 
-    These are the available modules:
+    These are the available modules (See https://github.com/Gabaldonlab/perSVade/wiki/1.-Pipeline-overview to combine them):
 
-        trim_reads_and_QC           Trim reads and perform quality control
+        trim_reads_and_QC           Trimming (with trimmomatic) and quality control (with fastqc) of the reads 
+                                    IMPORTANT: Check the output of fastqc before using the trimmed reads
+
         align_reads                 Align reads with bwa mem and mark duplicates
+        
         infer_repeats               Find repeats in a genome with RepeatModeler and RepeatMasker
 
-        small_variant_calling       Call small variants (SNPs and INDELs)
-        SV_calling                  Call structural variants from user-defined parameters
-        find_homologous_regions
+        find_homologous_regions     Find regions with pairwise homology in a genome
+        find_knownSVs_regions       Find regions with perSVade-inferred SVs
+        optimize_parameters         Find optimal parameters for SV calling through simulations 
+        call_SVs                    Call structural variants (SVs) with gridss and clove
+
 
     Usage:
 
@@ -46,7 +52,7 @@ if len(sys.argv)==1 or sys.argv[1] in help_args:
 else:
 
     # define the modules
-    available_modules = {"trim_reads_and_QC", "align_reads", "infer_repeats"}
+    available_modules = {"trim_reads_and_QC", "align_reads", "infer_repeats", "find_homologous_regions", "call_SVs", "find_knownSVs_regions", "optimize_parameters"}
     module = sys.argv[1]
 
     # define script of this module
@@ -61,3 +67,4 @@ else:
 
     # run script
     else: fun.run_cmd_simple_noError("%s %s"%(module_script, " ".join(sys.argv[2:])))
+

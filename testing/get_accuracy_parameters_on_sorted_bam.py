@@ -55,7 +55,7 @@ if not fun.file_is_empty(opt.df_benchmarking_file): sys.exit(0)
 
 # define the outdir
 outdir = "%s_generatingDir"%opt.df_benchmarking_file
-#fun.delete_folder(outdir)
+fun.delete_folder(outdir)
 fun.make_folder(outdir)
 
 # define the print mode
