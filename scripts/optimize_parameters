@@ -142,9 +142,7 @@ sorted_bam, index_bam = fun.get_sorted_bam_in_outdir(opt.sortedbam, opt.outdir)
 fun.prepare_repeats_file_for_perSVade(opt.repeats_file, opt.ref)
 
 # debug the regions_SVsimulations
-if opt.regions_SVsimulations=="random": real_bedpe_breakpoints = None
-elif not fun.file_is_empty(opt.regions_SVsimulations): real_bedpe_breakpoints = opt.regions_SVsimulations
-else: raise ValueError("--regions_SVsimulations is not properly provided")
+real_bedpe_breakpoints = fun.get_debugged_real_bedpe_breakpoints_for_SVsimulation(opt.regions_SVsimulations, opt.outdir, opt.ref)
 
 # get the simulation ploidies
 simulation_ploidies = opt.simulation_ploidies.split(",")
@@ -199,8 +197,11 @@ for f in os.listdir(parameter_optimisation_dir):
 
 # remove specific dirs
 for f in [reference_genome_dir, SVdetection_outdir]: fun.delete_folder(f)
-#for f in ["gridss_output.vcf.withSimpleEventType.vcf.vcf_df.py"]: fun.remove_file("%s/%s"%(opt.outdir, f))
 
+# move the parameter accuracy to the outdir
+df_accuracy = fun.get_tab_as_df_or_empty_df("%s/benchmarking_all_filters_for_all_genomes_and_ploidies/df_cross_benchmark_best.tab"%(opt.outdir))
+df_accuracy = df_accuracy[["test_simName", "test_ploidy", "test_svtype", "precision", "recall", "Fvalue", "nevents", "TP", "FP", "FN"]].rename(columns={"test_simName":"simulation_genome", "test_ploidy":"simulation_ploidy", "test_svtype":"SV_type"})
+fun.save_df_as_tab(df_accuracy, "%s/optimized_parameters_accuracy.tab"%opt.outdir)
 
 # wite final file
 fun.generate_final_file_report_one_module(final_file, start_time, time.time())

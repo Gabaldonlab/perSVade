@@ -1937,6 +1937,19 @@ def insert_balanced_translocations_into_rearranged_genome(reference_genome, inpu
 
     """This function takes a rearranged genome and insert the translocations generating output_rearranged_genome. This substitutes the translocations_file in case that some translocations cannot be inserted. svDF should contain translocations. The svDF should have 1s on it. svDF has to be in 1-based coordinates"""
 
+    # if there are no translocations, just write untouched files
+    if len(svDF)==0: 
+        print_if_verbose("There are no translocations")
+
+        # write the empty translocations file (with the correct format)
+        svDF.to_csv(translocations_file, sep="\t", header=True, index=False)
+
+        # write the output_rearranged_genome
+        rsync_file(input_rearranged_genome, output_rearranged_genome)
+
+        # do not continue
+        return
+
     print_if_verbose("inserting translocations inHouse")
 
     # keep
@@ -20957,3 +20970,34 @@ def prepare_repeats_file_for_perSVade(repeats_file, ref):
 
     # debug
     else: raise ValueError("--repeats_file should be a valid file or 'skip'. '%s' is not valid."%repeats_file)
+
+
+def get_debugged_real_bedpe_breakpoints_for_SVsimulation(regions_SVsimulations, perSVade_outdir, reference_genome):
+
+    """Takes the arg --regions_SVsimulations and returns the real_bedpe_breakpoints"""
+
+    # random sims
+    if regions_SVsimulations=="random": real_bedpe_breakpoints = None
+
+    elif not file_is_empty(regions_SVsimulations): 
+
+        # check that they are correct
+        bedpe_fields = ["chrom1", "start1", "end1", "chrom2", "start2", "end2", "name", "score", "strand1", "strand2"]
+        df_bedpe = pd.read_csv(regions_SVsimulations, sep="\t", header=-1, names=bedpe_fields)
+        
+        for f in ["chrom1", "chrom2"]:
+
+            strange_chroms = set(df_bedpe[f]).difference(set(get_chr_to_len(reference_genome)))
+            if len(strange_chroms)>0: raise ValueError("There are unexpected chromosomes in %s of the file provided with --regions_SVsimulations: %s"%(f, strange_chroms))
+
+        # print a warning if there are few items
+        if len(df_bedpe)<100: print_with_runtime("WARNING: There are only %i regions for SV simulations as provided by --regions_SVsimulations. This may yield errors"%(len(df_bedpe)))
+
+        # if everything is correct, move under outdir
+        real_bedpe_breakpoints = "%s/regions_SVsimulations.bedpe"%perSVade_outdir
+        soft_link_files(regions_SVsimulations, real_bedpe_breakpoints)
+    
+    # debug
+    else: raise ValueError("--regions_SVsimulations is not properly provided. It should be either 'random' or an exiting .bedpe file.")
+
+    return real_bedpe_breakpoints
