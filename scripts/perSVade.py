@@ -356,10 +356,7 @@ if not fun.file_is_empty(final_file):
     sys.exit(0)
 
 # define the name as the sample as the first 10 characters of the outdir
-if opt.outdir.endswith("/"): name_sample = "sampleX"
-else: name_sample = fun.get_file(opt.outdir)[0:10]
-if len(name_sample)==0: raise ValueError("name_sample should not be empty")
-
+name_sample = fun.get_sampleName_from_perSVade_outdir(opt.outdir)
 print("Running perSVade into %s. The name_sample is %s"%(opt.outdir, name_sample))
 
 #### REPLACE THE REF GENOME ####

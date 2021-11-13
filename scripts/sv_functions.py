@@ -254,7 +254,7 @@ get_trimmed_reads_for_srr_py = "%s/get_trimmed_reads_for_srr.py"%CWD
 run_vep = "%s/run_vep.py"%CWD
 calculate_memory_py = "%s/calculate_memory.py"%CWD
 get_interestingTaxIDs_distanceToTarget_taxID_to_sciName_py = "%s/get_interestingTaxIDs_distanceToTarget_taxID_to_sciName.py"%CWD
-libraries_CONY = "%s/CONY_package_debugged.R "%CWD
+libraries_CONY = "%s/CONY_package_debugged.R"%CWD
 run_svim_and_sniffles_py = "%s/run_svim_and_sniffles.py"%CWD
 
 # old code
@@ -1214,9 +1214,76 @@ def run_gatk_HaplotypeCaller(outdir_gatk, ref, sorted_bam, ploidy, threads, cove
     # return the filtered file
     return gatk_out_filtered
 
+def get_df_from_picard_CollectInsertSizeMetrics_out(outfile_picard):
+
+    """Takes the outfile of picard CollectInsertSizeMetrics and returns the df """
+
+
+    # define the header line
+    i_header_lines = [I for I,l in enumerate(open(outfile_picard, "r").readlines()) if l.startswith("MEDIAN_INSERT_SIZE")]
+    if len(i_header_lines)!=1: raise ValueError("There should be only one header line in %s"%outfile_picard)
+    i_header_line = i_header_lines[0]
+
+    # define the 
+    n_foot_lines = 0
+    recording_foot_lines = False
+
+    for I,l in enumerate(open(outfile_picard, "r").readlines()):
+        line = l.strip()
+
+        # define wthether to start recording wrong lines when you already passed the df
+        if I>i_header_line and (line=="" or line.startswith("##")): recording_foot_lines = True
+
+        # record
+        if recording_foot_lines is True: n_foot_lines += 1
+
+    # get the df  
+    df = pd.read_csv(outfile_picard, sep="\t", skip_blank_lines=False, header=6, skipfooter=n_foot_lines, engine='python')
+
+    # check that the npairs are correct
+    if any(pd.isna(df.READ_PAIRS)): raise ValueError("There should not be any nans in the READ_PAIRS. Check %s"%outfile_picard)
+
+    return df
+
+def check_sorted_bam_has_correct_insert_sizes(input_sorted_bam, replace, threads):
+
+    """This function throws an error if the sorted bam has a weird insert size"""
+
+    # define a working dir
+    workdir = "%s.checking_correct_insertSizes"%input_sorted_bam
+    delete_folder(workdir)
+    make_folder(workdir)
+
+    # move the sorted bam inside the workdir
+    sorted_bam = "%s/aligned_reads.bam.sorted"%workdir
+    soft_link_files(input_sorted_bam, sorted_bam)
+
+    # get the insert size (and the picard file, which states the insert size for 1% of reads) 
+    median_insert_size, median_insert_size_sd  = get_insert_size_distribution(sorted_bam, replace=replace, threads=threads)
+    if median_insert_size>1000: print_with_runtime("WARNING: The median insert size is long (%i). This could be wrong and indicate that the .bam file was not properly generated."%median_insert_size)
+
+    # get the number of reads used for the insert size calculation
+    outfile_picard = "%s.CollectInsertSizeMetrics.out"%sorted_bam
+    df_collectInsertSizes = get_df_from_picard_CollectInsertSizeMetrics_out(outfile_picard)
+    npairs_insertSizeCalculation = sum(df_collectInsertSizes.READ_PAIRS.apply(int))
+
+    # get the 1% of the number of pairs
+    npairs_1pct = count_number_read_pairs(sorted_bam, replace=replace, threads=threads)/100
+
+    # debug if the fraction of read pairs used for insert size calculation is very low
+    pct_reads_InsertSize = (npairs_insertSizeCalculation/npairs_1pct)*100
+    if pct_reads_InsertSize<5 or pd.isna(pct_reads_InsertSize): raise ValueError("Less than 5 percent of the reads (only %.5f percent) were used for insert size calculation. There may be an error in the generation of the sorted bam file. %s contains the output of picard CollectInsertSizeMetrics, which can be checked to understand what happened."%(pct_reads_InsertSize, outfile_picard))
+
+    # report
+    print_if_verbose("%.5f percent of the reads were used for insert size calculation. The median insert size is %i"%(pct_reads_InsertSize, median_insert_size))
+
+    # clean
+    delete_folder(workdir)
+
 def run_bwa_mem(fastq1, fastq2, ref, outdir, bamfile, sorted_bam, index_bam, name_sample, threads=1, replace=False, MarkDuplicates=True, tmpdir_writingFiles=None):
 
     """Takes a set of files and runs bwa mem getting sorted_bam and index_bam. skip_MarkingDuplicates will not mark duplicates"""
+
 
     if file_is_empty(sorted_bam) or replace is True:
 
@@ -1287,7 +1354,7 @@ def run_bwa_mem(fastq1, fastq2, ref, outdir, bamfile, sorted_bam, index_bam, nam
             # remove all temporary files generated previously in samtools sort (they'd make a new sort to be an error)
             for outdir_file in os.listdir(outdir): 
                 fullfilepath = "%s/%s"%(outdir, outdir_file)
-                if outdir_file.startswith("aligned_reads") and ".tmp." in outdir_file: os.unlink(fullfilepath)
+                if outdir_file.startswith("aligned_reads") and ".tmp." in outdir_file: delete_file_or_folder(fullfilepath)
 
             # define the temporary file
             sorted_bam_tmp = "%s.tmp"%sorted_bam
@@ -1296,6 +1363,9 @@ def run_bwa_mem(fastq1, fastq2, ref, outdir, bamfile, sorted_bam, index_bam, nam
             bam_sort_std = "%s.generating.txt"%sorted_bam
             print_if_verbose("the sorting bam std is in %s. Running on %i threads and %iMb RAM/thread"%(bam_sort_std, threads, max_MbRAM_per_thread))
             cmd_sort = "%s sort --threads %i -m %iM -o %s %s > %s 2>&1"%(samtools, threads, max_MbRAM_per_thread, sorted_bam_tmp, bamfile_MarkedDuplicates, bam_sort_std); run_cmd(cmd_sort)
+
+            # check that the sorted bam has correct insert sizes
+            check_sorted_bam_has_correct_insert_sizes(sorted_bam_tmp, replace, threads)
 
             # remove files
             for f in [bam_sort_std, bamfile_MarkedDuplicates, bamfile]: remove_file(f)
@@ -7584,8 +7654,7 @@ def get_insert_size_distribution(sorted_bam, replace=False, threads=4):
         os.rename(outfile_tmp, outfile)
 
     # get stats
-    wrong_foot_lines = [l for l in open(outfile, "r").readlines() if len(l.split("\t"))==2 and not l.startswith("## METRICS CLASS")]
-    df = pd.read_csv(outfile, sep="\t", skip_blank_lines=False, header=6, skipfooter=len(wrong_foot_lines)+2, engine='python').iloc[0]
+    df = get_df_from_picard_CollectInsertSizeMetrics_out(outfile).iloc[0]
 
     return (int(float(df["MEDIAN_INSERT_SIZE"])), int(float(df["MEDIAN_ABSOLUTE_DEVIATION"])))
 
@@ -10247,6 +10316,9 @@ def run_GridssClove_optimising_parameters(sorted_bam, reference_genome, outdir, 
         # calculate the insert size
         median_insert_size, median_insert_size_sd  = get_insert_size_distribution(sorted_bam, replace=replace, threads=threads)
         print_if_verbose("The median insert size is %i, with an absolute deviation of %i"%(median_insert_size, median_insert_size_sd))
+
+        # debug very high insert sizes
+        if median_insert_size>10000: raise ValueError("The median insert size is very high (%s). Maybe there was an error with the bam file generation."%(median_insert_size))
 
         #####################################
 
@@ -13337,7 +13409,9 @@ def run_CNV_calling_CONY_one_chromosome(reference_genome, outdir, chromosome, re
     df_coverage_chrom["nonAmb"] = 1 - df_coverage_chrom.fraction_N_bases
 
     # if there are less than min_number_of_regions_CNVcalling return an empty df, meaning that there are no calls
-    if len(df_coverage_chrom)<min_number_of_regions_CNVcalling: return pd.DataFrame()
+    if len(df_coverage_chrom)<min_number_of_regions_CNVcalling: 
+        os.chdir(CurDir)
+        return pd.DataFrame()
 
     # write the file
     coverage_file_chrom = "./CONY.2-TempRegion.%s.%s.SumUp.AdjRD.txt"%(chromosome, sample_name)
@@ -20857,10 +20931,14 @@ def check_that_gff_is_correct(input_gff, reference_genome, mitochondrial_chromos
     delete_folder(tmpdir)
 
 
-def get_sampleName_from_perSVade_outdir(perSVade_outdir):
+def get_sampleName_from_perSVade_outdir(perSVade_outdir, get_automatic_sampleName=True):
 
     """define the name as the sample as the first 10 characters of the outdir"""
-    
+
+    # automatic
+    if get_automatic_sampleName is True: return "SAMPLE"
+        
+    # based on the input
     if perSVade_outdir.endswith("/"): name_sample = "sampleX"
     else: name_sample = get_file(perSVade_outdir)[0:10]
     if len(name_sample)==0: raise ValueError("name_sample should not be empty")
@@ -21001,3 +21079,30 @@ def get_debugged_real_bedpe_breakpoints_for_SVsimulation(regions_SVsimulations, 
     else: raise ValueError("--regions_SVsimulations is not properly provided. It should be either 'random' or an exiting .bedpe file.")
 
     return real_bedpe_breakpoints
+
+
+def check_that_paired_reads_are_different(fastq1, fastq2, outdir, nreads=10000):
+
+    """Check whether the reads are different"""
+
+    print_if_verbose("Checking wether the reads are different")
+
+    # make folders
+    delete_folder(outdir); make_folder(outdir)
+
+    # get the first 10000 reads of each
+    first_reads_1 = "%s/first_reads_1.fastq"%outdir
+    first_reads_2 = "%s/first_reads_2.fastq"%outdir
+
+    stderr = "%s/stderr.txt"%outdir
+    run_cmd("zcat %s | egrep -v '^@' | head -n %i > %s 2>%s"%(fastq1, nreads*3, first_reads_1, stderr))
+    run_cmd("zcat %s | egrep -v '^@' | head -n %i > %s 2>%s"%(fastq2, nreads*3, first_reads_2, stderr))
+
+    # check that they are not the same
+    list_first_reads_1 = open(first_reads_1, "r").readlines()
+    list_first_reads_2 = open(first_reads_2, "r").readlines()
+
+    if list_first_reads_1==list_first_reads_2 and os.path.getsize(fastq1)==os.path.getsize(fastq2): raise ValueError("The sequences and qualities of the first %i reads are the same in both input -f1 and -f2. In addition, they have the exact same size. This suggests that they are the exact same file, which makes no sense. Check that the inputs -f1 and -f2 are in fact a set of FWD and RV reads."%nreads)
+
+    # clean
+    delete_folder(outdir)

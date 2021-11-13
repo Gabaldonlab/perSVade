@@ -126,7 +126,7 @@ if fun.file_is_empty(outfile_vep_raw):
     fun.run_cmd(cmd)
 
     # check that there are no errors in the output
-    if any([any({e in l.upper() for e in {"EXCEPTION", "ERROR"}}) and (not l.upper().startswith("WARNING")) for l in open(vep_std, "r").readlines()]): raise ValueError("There was an error running vep. Check %s"%vep_std) 
+    if any([any({e in l.upper() for e in {"EXCEPTION", "ERROR"}}) and (not l.upper().startswith("WARNING")) for l in open(vep_std, "r").readlines()]): raise ValueError("There was an error running vep. Check %s to see what happened. You may want to validate that your GFF is ok (in http://genometools.org/cgi-bin/gff3validator.cgi)"%vep_std) 
 
     #and (not l.startswith("WARNING")) 
 

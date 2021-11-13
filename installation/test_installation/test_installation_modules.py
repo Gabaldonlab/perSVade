@@ -103,13 +103,29 @@ threads = fun.multiproc.cpu_count()
 
 ######## TEST DIFFERENT MODULES #########
 
-# get regions with known SVs
-outdir_known_regions = "%s/known_SVs"%testing_outputs_dir
-fun.run_cmd("%s find_knownSVs_regions --threads %i --fraction_available_mem 1.0 -o %s --ref %s --min_chromosome_len 10000 --mitochondrial_chromosome mito_C_glabrata_CBS138 --SVcalling_parameters default --repeats_file skip --close_shortReads_table %s --skip_marking_duplicates"%(fun.perSVade_modules, threads, outdir_known_regions, ref_genome, close_shortReads_table))
-
 # align reads with SVs
 outdir_align_reads_SVs = "%s/align_reads_sim_SVs"%testing_outputs_dir
 fun.run_cmd("%s align_reads --threads %i --fraction_available_mem 1.0 -f1 %s -f2 %s -o %s --ref %s --min_chromosome_len 100"%(fun.perSVade_modules, threads, sim_reads1, sim_reads2, outdir_align_reads_SVs, ref_genome))
+
+# run CNV calling
+outdir_CNVcalling = "%s/call_CNVs"%testing_outputs_dir
+fun.run_cmd("%s call_CNVs --threads %i --fraction_available_mem 1.0 -o %s --ref %s --min_chromosome_len 10000 -sbam %s/aligned_reads.bam.sorted --mitochondrial_chromosome mito_C_glabrata_CBS138 -p 1 --cnv_calling_algs HMMcopy,CONY,AneuFinder --min_CNVsize 500 --window_size_CNVcalling 500 --verbose"%(fun.perSVade_modules, threads, outdir_CNVcalling, ref_genome, outdir_align_reads_SVs))
+
+# SV calling
+outdir_SVcalling = "%s/call_SVs"%testing_outputs_dir
+fun.run_cmd("%s call_SVs --threads %i --fraction_available_mem 1.0 -o %s --ref %s --min_chromosome_len 10000 -sbam %s/aligned_reads.bam.sorted --mitochondrial_chromosome mito_C_glabrata_CBS138 --SVcalling_parameters default --repeats_file skip"%(fun.perSVade_modules, threads, outdir_SVcalling, ref_genome, outdir_align_reads_SVs))
+
+# integrate SV and CNV calls
+outdir_merged_calling = "%s/integrate_SV_and_CNV"%testing_outputs_dir
+fun.run_cmd("%s integrate_SV_CNV_calls --threads %i --fraction_available_mem 1.0 -o %s --ref %s --min_chromosome_len 10000  --mitochondrial_chromosome mito_C_glabrata_CBS138 "%(fun.perSVade_modules, threads, outdir_merged_calling, ref_genome))
+
+print(outdir_merged_calling)
+
+adkdgdagaj
+
+# get regions with known SVs
+outdir_known_regions = "%s/known_SVs"%testing_outputs_dir
+fun.run_cmd("%s find_knownSVs_regions --threads %i --fraction_available_mem 1.0 -o %s --ref %s --min_chromosome_len 10000 --mitochondrial_chromosome mito_C_glabrata_CBS138 --SVcalling_parameters default --repeats_file skip --close_shortReads_table %s --skip_marking_duplicates"%(fun.perSVade_modules, threads, outdir_known_regions, ref_genome, close_shortReads_table))
 
 # run parameter optimization on pre-defined regions (knownSVs) and 2 chromosomes
 outdir_parameter_optimization_known = "%s/parameter_optimization_known"%testing_outputs_dir
@@ -150,10 +166,6 @@ fun.run_cmd("%s align_reads --threads %i --fraction_available_mem 1.0 -f1 %s -f2
 
 
 
-# SV calling
-outdir_SVcalling = "%s/call_SVs"%testing_outputs_dir
-fun.run_cmd("%s call_SVs --threads %i --fraction_available_mem 1.0 -o %s --ref %s --min_chromosome_len 10000 -sbam %s/aligned_reads.bam.sorted --mitochondrial_chromosome mito_C_glabrata_CBS138 --SVcalling_parameters default --repeats_file skip"%(fun.perSVade_modules, threads, outdir_SVcalling, ref_genome, outdir_align_reads_SVs))
-
 
 
 
@@ -165,9 +177,6 @@ jdhgjhda
 
 
 print(outdir_repeats)
-
-dakdhagajhg
-
 
 
 #########################################

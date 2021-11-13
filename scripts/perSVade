@@ -31,16 +31,17 @@ if len(sys.argv)==1 or sys.argv[1] in help_args:
     These are the available modules (See https://github.com/Gabaldonlab/perSVade/wiki/1.-Pipeline-overview to combine them):
 
         trim_reads_and_QC           Trimming (with trimmomatic) and quality control (with fastqc) of the reads 
-                                    IMPORTANT: Check the output of fastqc before using the trimmed reads
+                                    IMPORTANT: Check the output of fastqc before using the trimmed reads for other analyses
 
         align_reads                 Align reads with bwa mem and mark duplicates
-        
         infer_repeats               Find repeats in a genome with RepeatModeler and RepeatMasker
-
         find_homologous_regions     Find regions with pairwise homology in a genome
         find_knownSVs_regions       Find regions with perSVade-inferred SVs
         optimize_parameters         Find optimal parameters for SV calling through simulations 
         call_SVs                    Call structural variants (SVs) with gridss and clove
+        call_CNVs                   Call copy-number variants (CNVs) based on coverage
+        integrate_SV_CNV_calls      Integrate the variant calls of 'call_SVs' and 'call_CNVs' into a single .vcf file
+
 
 
     Usage:
@@ -52,7 +53,7 @@ if len(sys.argv)==1 or sys.argv[1] in help_args:
 else:
 
     # define the modules
-    available_modules = {"trim_reads_and_QC", "align_reads", "infer_repeats", "find_homologous_regions", "call_SVs", "find_knownSVs_regions", "optimize_parameters"}
+    available_modules = {"trim_reads_and_QC", "align_reads", "infer_repeats", "find_homologous_regions", "call_SVs", "find_knownSVs_regions", "optimize_parameters", "call_CNVs", "integrate_SV_CNV_calls"}
     module = sys.argv[1]
 
     # define script of this module

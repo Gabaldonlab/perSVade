@@ -40,17 +40,25 @@ import sv_functions as fun
 ####################################
 
 description = """
-Aligns a set of paired fastq.gz reads with bwa mem and marks duplicates (with either gatk MarkDuplicatesSpark or picard MarkDuplicates, depending on the system), resulting in a sorted .bam file.
+Call copy-number variants (CNVs) based on read depth. This pipeline takes a sorted .bam file and calculates coverage per windows (which size is determined with --window_size_CNVcalling). This coverage is corrected by GC content, mappability and distance to the telomere. The corrected coverage is used by either HMMcopy, CONY and/or AneuFinder to call CNVs. The results of the caller programs are merged into a consensus set of CNVs. Note that these CNVs are the raw outputs of the callers, and you may want to further filter them based on coverage.
 """
 
+# mandatory
 parser = argparse.ArgumentParser(description=description, formatter_class=RawTextHelpFormatter)
 parser.add_argument("-o", "--outdir", dest="outdir", action="store", required=True, help="Output directory.")
-parser.add_argument("-f1", "--fastq1", dest="fastq1", required=True, help="The FWD reads in fastq.gz format")
-parser.add_argument("-f2", "--fastq2", dest="fastq2", required=True, help="The RV reads in fastq.gz format.")
 parser.add_argument("-r", "--ref", dest="ref", required=True, help="Reference genome. It has to end with .fasta.")
+parser.add_argument("-sbam", "--sortedbam", dest="sortedbam", required=True, help="The path to the sorted .bam file, which should have a bam.bai file in the same dir. For example, if your bam file is called 'aligned_reads.bam', there should be an 'aligned_reads.bam.bai' as well.")
+parser.add_argument("-mchr", "--mitochondrial_chromosome", dest="mitochondrial_chromosome", required=True, type=str, help="The name of the mitochondrial chromosome. If there is no mitochondria just put 'no_mitochondria'. If there is more than one mitochindrial scaffold, provide them as comma-sepparated IDs, like '--mitochondrial_chromosome chr_mito_1,chr_mito_2'.")
+parser.add_argument("-p", "--ploidy", dest="ploidy", required=True, type=int, help="Ploidy, can be 1 or 2.")
+parser.add_argument("--cnv_calling_algs", dest="cnv_calling_algs", required=True, type=str, help="A comma-sepparated string that indicates which programs should be used for the CNV calling. It can be any of HMMcopy,CONY,AneuFinder. We found that CONY sometimes produces unreliable results on some small chromosomes or large binned windows. In addition, CONY is slower than the other programs. We thus generally recommend setting this as '--cnv_calling_algs HMMcopy,AneuFinder'")
+parser.add_argument("--min_CNVsize", dest="min_CNVsize", required=True, type=int, help="Filter out CNVs shorter than this value. By default we set '--min_CNVsize 300'")
+parser.add_argument("--window_size_CNVcalling", dest="window_size_CNVcalling", required=True, type=int, help="The window size in which the genome will be fragmented for CNV calling. This determines the resolution of the calling, By default we set '--window_size_CNVcalling 100', but this may depend on the genome size. Very small windows for large genomes may result in higher running time.")
 
+# optional for CNV calling
+parser.add_argument("--bg_sorted_bam_CNV", dest="bg_sorted_bam_CNV", default=None, help="This may be a sorted bam (with duplicated marked) that is taken as a 'reference' background in the CNV calling. By default, perSVade corrects the coverage by GC content, mappability and the distance to the telomere and infers absolute CNVs. If --bg_sorted_bam_CNV, the coverage will be normalised by the coverage of this sorted bam, and the CNV calls will be relative.")
+
+# general optional
 parser.add_argument("--min_chromosome_len", dest="min_chromosome_len", default=100000, type=int, help="The minimum length to consider chromosomes from the provided fasta for calculating the window length (used in may steps of perSVade to parallelize across fractions of the genome).")
-parser.add_argument("--skip_marking_duplicates", dest="skip_marking_duplicates", default=False, action="store_true", help="Don't mark the duplicate reads in the .bam file. This can save you some time.")
 parser.add_argument("--replace", dest="replace", action="store_true", help="Re-run all the steps by deleting the output directory.")
 parser.add_argument("--verbose", dest="verbose", action="store_true", default=False, help="Print a verbose log.")
 
@@ -59,8 +67,6 @@ parser.add_argument("--fraction_available_mem", dest="fraction_available_mem", d
 
 parser.add_argument("-thr", "--threads", dest="threads", default=16, type=int, help="Number of threads, Default: 16")
 parser.add_argument("--fractionRAM_to_dedicate", dest="fractionRAM_to_dedicate", type=float,  default=0.5, help="This is the fraction of the available memory that will be used by several java programs that require a heap size. By default we set this to 0.5 to not overload the system.")
-
-parser.add_argument("--tmpdir", dest="tmpdir", default=None, help="A full path to a directory where to write intermediate files. This is useful if you are running on a cluster that has some directories that have higher writing speed than others.")
 
 opt = parser.parse_args()
 
@@ -93,7 +99,7 @@ start_time = time.time()
 fun.printing_verbose_mode = opt.verbose
 
 # define a file that will contain all the cmds ran
-fun.log_file_all_cmds = "%s/all_cmds.txt"%opt.outdir
+fun.log_file_all_cmds = "%s/all_cmds.txt"%(fun.get_fullpath(opt.outdir))
 if fun.file_is_empty(fun.log_file_all_cmds): open(fun.log_file_all_cmds, "w").write("# These are all the cmds:\n")
 
 # get sample name
@@ -118,34 +124,24 @@ fun.print_with_runtime("Running perSVade %s into %s with %.3f Gb of RAM and %i c
 
 ##############################
 
-# check that the tmpdir exists
-if opt.tmpdir is not None:
-    if not os.path.isdir(opt.tmpdir): raise ValueError("The folder that you specified with --tmpdir does not exist")
+# prepare the reference genome
+opt.ref, reference_genome_dir = fun.prepare_reference_genome_for_perSVade(opt.ref, opt.outdir, opt.mitochondrial_chromosome, None, opt.replace)
+fun.window_l = fun.get_perSVade_window_l(opt.ref, opt.mitochondrial_chromosome, opt.min_chromosome_len)
 
-# prepare the reference genome and the window length
-opt.ref, reference_genome_dir = fun.prepare_reference_genome_for_perSVade(opt.ref, opt.outdir, "no_mitochondria", None, opt.replace)
-fun.window_l = fun.get_perSVade_window_l(opt.ref, "no_mitochondria", opt.min_chromosome_len)
+# get the bam file under output
+sorted_bam, index_bam = fun.get_sorted_bam_in_outdir(opt.sortedbam, opt.outdir)
 
-# define the dest bam files
-bamfile = "%s/aligned_reads.bam"%opt.outdir
-sorted_bam = "%s.sorted"%bamfile
-index_bam = "%s.bai"%sorted_bam
+# get the min_CNVsize_coverageBased
+fun.min_CNVsize_coverageBased = opt.min_CNVsize
 
-# define if marking duplicates (default yes)
-if opt.skip_marking_duplicates is True: bwa_mem_MarkDuplicates = False
-else: bwa_mem_MarkDuplicates = True
+# define the CNV calling algs (and debug)
+cnv_calling_algs = set(opt.cnv_calling_algs.split(","))
+all_expected_cnv_calling_algs = {"HMMcopy", "AneuFinder", "CONY"}
+if len(cnv_calling_algs.difference(all_expected_cnv_calling_algs))>0: raise ValueError("the cnv calling algs specfied with --cnv_calling_algs should be in %s"%all_expected_cnv_calling_algs)
 
-# check that the reads are different
-fun.check_that_paired_reads_are_different(opt.fastq1, opt.fastq2, "%s/checking_that_reads_are_different"%opt.outdir)
-
-# align reads and mark duplicates
-fun.print_with_runtime("Aligning reads")
-fun.run_bwa_mem(opt.fastq1, opt.fastq2, opt.ref, opt.outdir, bamfile, sorted_bam, index_bam, sample_name, threads=opt.threads, replace=opt.replace, tmpdir_writingFiles=opt.tmpdir, MarkDuplicates=bwa_mem_MarkDuplicates)
-
-# calculate the coverage
-fun.print_with_runtime("Calculating coverage per window")
-destination_dir = "%s.calculating_windowcoverage"%sorted_bam
-coverage_file = fun.generate_coverage_per_window_file_parallel(opt.ref, destination_dir, sorted_bam, windows_file="none", replace=opt.replace, run_in_parallel=True, delete_bams=True)
+# run CNV calling
+fun.print_with_runtime("Running CNV calling")
+fun.run_CNV_calling(sorted_bam, opt.ref, opt.outdir, opt.threads, opt.replace, opt.mitochondrial_chromosome, opt.window_size_CNVcalling, opt.ploidy, bg_sorted_bam_CNV=opt.bg_sorted_bam_CNV, cnv_calling_algs=cnv_calling_algs)
 
 #################################
 #################################
@@ -157,9 +153,11 @@ coverage_file = fun.generate_coverage_per_window_file_parallel(opt.ref, destinat
 ##################################
 
 # clean
-os.rename(coverage_file, "%s/%s"%(opt.outdir, fun.get_file(coverage_file)))
-for f in os.listdir(opt.outdir):
-    if f not in {fun.get_file(sorted_bam), fun.get_file(index_bam), "all_cmds.txt", fun.get_file(coverage_file)}: fun.delete_file_or_folder("%s/%s"%(opt.outdir, f))
+files_folder_to_keep = {"all_cmds.txt", "calculating_corrected_coverage", "final_CNVcalling.tab", "final_df_coverage.tab", "plots"}
+
+for f in os.listdir(opt.outdir): 
+    file_path = "%s/%s"%(opt.outdir, f)
+    if f not in files_folder_to_keep: fun.delete_file_or_folder(file_path)
 
 # wite final file
 fun.generate_final_file_report_one_module(final_file, start_time, time.time())
