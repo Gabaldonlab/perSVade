@@ -135,7 +135,7 @@ index_bam = "%s.bai"%sorted_bam
 if opt.skip_marking_duplicates is True: bwa_mem_MarkDuplicates = False
 else: bwa_mem_MarkDuplicates = True
 
-# check that the reads are different
+# check that the reads are different (this generated errors in the insert size calculation)
 fun.check_that_paired_reads_are_different(opt.fastq1, opt.fastq2, "%s/checking_that_reads_are_different"%opt.outdir)
 
 # align reads and mark duplicates

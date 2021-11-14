@@ -42,6 +42,13 @@ if len(sys.argv)==1 or sys.argv[1] in help_args:
         call_CNVs                   Call copy-number variants (CNVs) based on coverage
         integrate_SV_CNV_calls      Integrate the variant calls of 'call_SVs' and 'call_CNVs' into a single .vcf file
 
+        annotate_SVs
+        call_small_variants
+        annotate_small_vars
+        get_cov_genes
+
+
+
 
 
     Usage:

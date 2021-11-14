@@ -117,11 +117,10 @@ fun.run_cmd("%s call_SVs --threads %i --fraction_available_mem 1.0 -o %s --ref %
 
 # integrate SV and CNV calls
 outdir_merged_calling = "%s/integrate_SV_and_CNV"%testing_outputs_dir
-fun.run_cmd("%s integrate_SV_CNV_calls --threads %i --fraction_available_mem 1.0 -o %s --ref %s --min_chromosome_len 10000  --mitochondrial_chromosome mito_C_glabrata_CBS138 "%(fun.perSVade_modules, threads, outdir_merged_calling, ref_genome))
+fun.run_cmd("%s integrate_SV_CNV_calls --threads %i --fraction_available_mem 1.0 -o %s --ref %s --min_chromosome_len 10000  --mitochondrial_chromosome mito_C_glabrata_CBS138 -sbam %s/aligned_reads.bam.sorted -p 1 --outdir_callSVs %s --outdir_callCNVs %s --verbose --repeats_file skip"%(fun.perSVade_modules, threads, outdir_merged_calling, ref_genome, outdir_align_reads_SVs, outdir_SVcalling, outdir_CNVcalling))
 
 print(outdir_merged_calling)
-
-adkdgdagaj
+djhgdajgad
 
 # get regions with known SVs
 outdir_known_regions = "%s/known_SVs"%testing_outputs_dir

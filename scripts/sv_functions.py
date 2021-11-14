@@ -3431,7 +3431,12 @@ def get_clove_output(output_vcf_clove, getID_as_gridss=True):
     # load df
     df = pd.read_csv(output_vcf_clove, skiprows=list(range(len([line for line in open(output_vcf_clove, "r", encoding='utf-8', errors='ignore') if line.startswith("##")]))), sep="\t", na_values=vcf_strings_as_NaNs, keep_default_na=False)
 
-    if len(df)==0: return df
+    # if empty, return df with added fields
+    if len(df)==0: 
+
+        # add missing empty fields
+        for f in ["ADP", "CHR2", "CHR2", "END", "START", "SUPPORT", "SVTYPE"]: df[f] = []
+        return df
 
     # get FORMAT into several cells
     INFOfields_data = pd.DataFrame(dict(df.INFO.apply(lambda x: {content.split("=")[0] : content.split("=")[1]  for content in  make_flat_listOflists([y.split(";") for y in x.split("; ")])}))).transpose()
@@ -7236,6 +7241,32 @@ def get_svtype_to_svfile_and_df_gridss_from_perSVade_outdir(perSVade_outdir, ref
 
     return svtype_to_svfile, df_gridss
 
+
+def get_svtype_to_svfile_and_df_gridss_from_call_SVs_outdir(outdir, reference_genome):
+
+    """This function takes from the call_SVs outdir the svdict and the df_gridss"""
+
+    # define the vcf
+    gridss_vcf = "%s/gridss_output.raw.vcf"%outdir 
+
+    # get the SV files
+    svtype_to_svfile = {svtype : "%s/%s.tab"%(outdir, svtype)  for svtype in {"insertions", "deletions", "tandemDuplications", "translocations", "inversions"}}
+    svtype_to_svfile["remaining"] = "%s/unclassified_SVs.tab"%outdir 
+
+    # get the gridss file
+    df_gridss_file = "%s.df_gridss.addedInfo.py"%gridss_vcf
+    if file_is_empty(df_gridss_file):
+
+        df_gridss = add_info_to_gridssDF(load_single_sample_VCF(gridss_vcf), reference_genome)
+        save_object(df_gridss, df_gridss_file)
+
+    df_gridss = load_object(df_gridss_file)
+
+    # keep only the ones that exist
+    svtype_to_svfile = {svtype : file for svtype, file in svtype_to_svfile.items() if not file_is_empty(file)}
+    print_if_verbose("There are %i svfiles"%len(svtype_to_svfile))
+
+    return svtype_to_svfile, df_gridss
 
 def get_is_protein_altering_consequence(consequence):
 
@@ -18125,7 +18156,112 @@ def get_vcf_all_SVs_and_CNV(perSVade_outdir, outdir, sorted_bam, reference_genom
         os.rename(vcf_SVcalling_tmp, vcf_SVcalling)
 
     return vcf_SVcalling
-    
+
+
+def soft_link_folders(origin_folder, dest_folder):
+
+    """Softlinks all the files under origin_folder into dest_folder"""
+
+    # make folder
+    make_folder(dest_folder)
+
+    # softlink the files
+    for f in os.listdir(origin_folder):
+
+        # define paths
+        origin_path = "%s/%s"%(origin_folder, f)
+        dest_path = "%s/%s"%(dest_folder, f)
+
+        if os.path.isfile(origin_path): soft_link_files(origin_path, dest_path)
+
+
+def get_vcf_all_SVs_and_or_CNV(outdir, sorted_bam, reference_genome, ploidy, df_CNV_coverage, window_size_CNVcalling, cnv_calling_algs, svtype_to_svfile, df_gridss, outfile_clove, replace=False, threads=4, mitochondrial_chromosome="mito_C_glabrata_CBS138"):
+
+    """This function generates a vcf that has all the SVs and CNVs integrated, in a way that you can provide one ore the other."""
+
+    # get the vcf SV calling
+    vcf_SVcalling = "%s/SV_and_CNV_variant_calling.vcf"%outdir
+
+    if file_is_empty(vcf_SVcalling) or replace is True:
+        print_if_verbose("getting all CNV and SVs into one vcf")
+
+        # clean the sorted bam coverage per window
+        print_if_verbose("cleaning sorted_bam") # this is fast
+        clean_sorted_bam_coverage_per_window_files(sorted_bam)
+
+        # get the clove df
+        print_if_verbose("getting clove output") # this is fast
+        df_clove = get_clove_output(outfile_clove)
+
+        ######## GET THE VCF OF SVs ########
+
+        df_vcf_final_file = "%s/vcf_merged_CNVcalling_SVcalling.vcf"%outdir
+        if file_is_empty(df_vcf_final_file) or replace is True:
+
+            if len(svtype_to_svfile)==0:  
+
+                vcf_fields = ["#CHROM", "POS", "ID", "REF", "ALT", "QUAL", "FILTER", "INFO", "FORMAT"]
+                df_vcf = pd.DataFrame(columns=vcf_fields)
+
+            else:
+
+                # get the svDF metadata
+                print_if_verbose("getting the svtype_to_svDF") # this is fast
+                svtype_to_svDF = get_sampleID_to_svtype_to_svDF_filtered({"x":svtype_to_svfile}, {"x":df_gridss}, sampleID_to_parentIDs={}, breakend_info_to_keep=['#CHROM', 'POS', 'other_coordinates', 'allele_frequency', 'allele_frequency_SmallEvent', 'real_AF', 'FILTER', 'inserted_sequence', 'has_poly16GC', 'length_inexactHomology', 'length_microHomology', 'QUAL', 'overlaps_repeats', 'REF', 'BREAKPOINTID'])["x"]
+
+                print_if_verbose("svtype_to_svDF got")
+
+                # get a vcf df, that comes from all vcfs
+                print_if_verbose("getting df_vcf from each SV") # this is fast
+                df_vcf = pd.concat([get_vcf_df_for_svDF(svDF, svtype, reference_genome, df_gridss) for svtype, svDF in svtype_to_svDF.items() if svtype in {"tandemDuplications", "deletions", "inversions", "translocations", "insertions", "remaining"}])
+
+            # add the df_CNV_coverage
+            print_if_verbose("getting non-redundant vcf of SVs and CNVs") # this is fast enough
+            get_df_vcf_with_df_CNV_coverage_added_nonRedundant(sorted_bam, reference_genome, mitochondrial_chromosome, df_vcf, df_CNV_coverage, outdir, df_gridss, df_clove, threads, replace, window_size_CNVcalling, cnv_calling_algs, df_vcf_final_file)
+
+        # load
+        df_vcf = get_tab_as_df_or_empty_df(df_vcf_final_file).sort_values(by=["#CHROM", "POS"])
+        vcf_fields = cp.deepcopy(list(df_vcf.keys()))
+
+        # debug 
+        #df_vcf = df_vcf.iloc[0:1000]
+
+        ####################################
+
+        # add a tag to the ID, that makes it unique
+        print_if_verbose("add correct INFO") # this is fast
+        df_vcf[["ID", "INFO"]] = df_vcf.apply(get_correctID_and_INFO_df_vcf_SV_CNV, axis=1)
+
+        # check that it is unique
+        if len(df_vcf)!=len(set(df_vcf.ID)): raise ValueError("IDs are not unique")
+
+        # add the POS and END that are correct, these should be 1-based. Note that they wont match the ID
+        print_if_verbose("add correct POS") # this is fast
+        df_vcf["POS"] = df_vcf.apply(get_correct_POS_in1based, axis=1)
+
+        # add to the END + 1
+        print_if_verbose("add correct INFO with END+1") # this is fast
+        chr_to_len = get_chr_to_len(reference_genome)
+        df_vcf["INFO"] = df_vcf.apply(get_correct_INFO_withEND_in1based, chr_to_len=chr_to_len, axis=1)        
+        
+        # add the breakend IDs and the metadata info 
+        print_if_verbose("add correct INFO with bIDs") # this is the bottleneck
+        df_gridss, df_vcf = get_df_gridss_df_vcf_for_get_correct_INFO_with_bendIDs_and_bendStats(df_gridss, df_vcf)
+
+        print_if_verbose("running get_correct_INFO_with_bendIDs_and_bendStats")
+        df_vcf["INFO"] = df_vcf.apply(get_correct_INFO_with_bendIDs_and_bendStats, df_gridss=df_gridss, axis=1)
+
+        # write vcf
+        print_if_verbose("writing vcf_SVcalling")
+        vcf_SVcalling_tmp = "%s.tmp"%vcf_SVcalling
+        vcf_lines = df_vcf[vcf_fields].to_csv(sep="\t", header=False, index=False)
+        header_lines = "\n".join([l.strip() for l in open(outfile_clove, "r").readlines() if l.startswith("#CHROM") or l.startswith("##fileformat")])
+        open(vcf_SVcalling_tmp, "w").write(header_lines + "\n" + vcf_lines)
+        os.rename(vcf_SVcalling_tmp, vcf_SVcalling)
+
+    return vcf_SVcalling
+   
+
 def clean_vep_output_files(run_vep_outfile):
 
     """Takes the --outfile passed to run_vep and cleans it"""
@@ -21083,9 +21219,9 @@ def get_debugged_real_bedpe_breakpoints_for_SVsimulation(regions_SVsimulations, 
 
 def check_that_paired_reads_are_different(fastq1, fastq2, outdir, nreads=10000):
 
-    """Check whether the reads are different"""
+    """Check whether the reads are different. Write tmp files under outdir, which will be removed after run."""
 
-    print_if_verbose("Checking wether the reads are different")
+    print_if_verbose("Checking if the reads are different.")
 
     # make folders
     delete_folder(outdir); make_folder(outdir)
@@ -21102,7 +21238,7 @@ def check_that_paired_reads_are_different(fastq1, fastq2, outdir, nreads=10000):
     list_first_reads_1 = open(first_reads_1, "r").readlines()
     list_first_reads_2 = open(first_reads_2, "r").readlines()
 
-    if list_first_reads_1==list_first_reads_2 and os.path.getsize(fastq1)==os.path.getsize(fastq2): raise ValueError("The sequences and qualities of the first %i reads are the same in both input -f1 and -f2. In addition, they have the exact same size. This suggests that they are the exact same file, which makes no sense. Check that the inputs -f1 and -f2 are in fact a set of FWD and RV reads."%nreads)
+    if list_first_reads_1==list_first_reads_2 and os.path.getsize(fastq1)==os.path.getsize(fastq2): raise ValueError("The sequences and qualities of the first %i reads are the same in both input -f1 and -f2. In addition, they have the exact same size. This suggests that they are the exact same file (even if they have different names), which makes no sense. Check that the inputs -f1 and -f2 are in fact a set of FWD and RV reads."%nreads)
 
     # clean
     delete_folder(outdir)
