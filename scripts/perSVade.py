@@ -491,7 +491,9 @@ if opt.parameters_json_file is not None:
     fun.default_min_rel_coverage_to_consider_dup = min_rel_coverage_to_consider_dup
 
 # test whether the gff is correct
-if opt.gff is not None: fun.check_that_gff_is_correct(opt.gff, opt.ref, opt.mitochondrial_chromosome, opt.mitochondrial_code, opt.gDNA_code, opt.threads, opt.replace)
+if opt.gff is not None: 
+    correct_gff, gff_with_biotype = fun.get_correct_gff_and_gff_with_biotype(opt.gff, replace=opt.replace)
+    fun.check_that_gff_is_correct(opt.gff, opt.ref, opt.mitochondrial_chromosome, opt.mitochondrial_code, opt.gDNA_code, opt.threads, opt.replace)
 
 # check that the tmpdir exists
 if opt.tmpdir is not None:

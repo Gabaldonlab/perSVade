@@ -24,10 +24,14 @@ test_ref_genome = "%s/reduced_genome.fasta"%testing_inputs_dir
 test_mutated_genome = "%s/reduced_genome_mutated.fasta"%testing_inputs_dir
 test_gff = "%s/reduced_annotation.gff"%testing_inputs_dir
 
+# define the whole Cglabrata genome and annotations
+Cglabrata_genome = "%s/Candida_glabrata.fasta"%testing_inputs_dir
+Cglabrata_annotations= "%s/Candida_glabrata.gff"%testing_inputs_dir
+
 # load the functions (test if you can import python packages)
 import sv_functions as fun
 fun.print_with_runtime("loading python packages worked successfully")
-fun.printing_verbose_mode = False # this may be changed
+fun.printing_verbose_mode = True # this may be changed
 
 # define the testing inuts dir 
 testing_outputs_dir = "%s/testing_outputs"%test_dir # this is the normal place
@@ -103,6 +107,26 @@ threads = fun.multiproc.cpu_count()
 
 ######## TEST DIFFERENT MODULES #########
 
+# generate a set of simulated reads with some variants
+#outdir_simulate_reads_Muts = "%s/getting_reads_with_small_Vars"%testing_outputs_dir
+#reads_small_vars1, reads_small_vars2 = test_fun.get_reads_with_small_variants(ref_genome, outdir_simulate_reads_Muts, threads)
+#print("muttated reads got")
+
+# align subsampled 100k reads of C. glabrata
+outdir_align_reads = "%s/align_reads_Cglab_subsampledReads"%testing_outputs_dir
+fun.run_cmd("%s align_reads --threads %i --fraction_available_mem 1.0 -f1 %s -f2 %s -o %s --ref %s --min_chromosome_len 100 --verbose"%(fun.perSVade_modules, threads, cglab_reads1, cglab_reads2, outdir_align_reads, Cglabrata_genome))
+
+# call small variants
+outdir_small_vars = "%s/calling_small_vars"%testing_outputs_dir
+fun.run_cmd("%s call_small_variants --threads %i --fraction_available_mem 1.0 --min_chromosome_len 100 -o %s -r %s -sbam %s/aligned_reads.bam.sorted --repeats_file skip -p 1 --callers bcftools,freebayes,HaplotypeCaller --min_AF 0.9 --min_coverage 0 --verbose"%(fun.perSVade_modules, threads, outdir_small_vars, Cglabrata_genome, outdir_align_reads))
+
+# annotate small variants
+
+
+djgahjhagjhdg
+
+
+
 # align reads with SVs
 outdir_align_reads_SVs = "%s/align_reads_sim_SVs"%testing_outputs_dir
 fun.run_cmd("%s align_reads --threads %i --fraction_available_mem 1.0 -f1 %s -f2 %s -o %s --ref %s --min_chromosome_len 100"%(fun.perSVade_modules, threads, sim_reads1, sim_reads2, outdir_align_reads_SVs, ref_genome))
@@ -118,6 +142,12 @@ fun.run_cmd("%s call_SVs --threads %i --fraction_available_mem 1.0 -o %s --ref %
 # integrate SV and CNV calls
 outdir_merged_calling = "%s/integrate_SV_and_CNV"%testing_outputs_dir
 fun.run_cmd("%s integrate_SV_CNV_calls --threads %i --fraction_available_mem 1.0 -o %s --ref %s --min_chromosome_len 10000  --mitochondrial_chromosome mito_C_glabrata_CBS138 -sbam %s/aligned_reads.bam.sorted -p 1 --outdir_callSVs %s --outdir_callCNVs %s --verbose --repeats_file skip"%(fun.perSVade_modules, threads, outdir_merged_calling, ref_genome, outdir_align_reads_SVs, outdir_SVcalling, outdir_CNVcalling))
+
+# annotate SVs
+outdir_annotate_SVs = "%s/annotate_SVs"%testing_outputs_dir
+fun.run_cmd("%s annotate_SVs --threads %i --fraction_available_mem 1.0 -o %s --ref %s --min_chromosome_len 10000  --mitochondrial_chromosome mito_C_glabrata_CBS138 --verbose --SV_CNV_vcf %s/SV_and_CNV_variant_calling.vcf -gff %s -mcode 3 -gcode 1"%(fun.perSVade_modules, threads, outdir_annotate_SVs, ref_genome, outdir_merged_calling, gff))
+
+
 
 print(outdir_merged_calling)
 djhgdajgad

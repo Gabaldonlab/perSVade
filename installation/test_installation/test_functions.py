@@ -6,6 +6,9 @@
 import sys
 import os
 import traceback
+from Bio import SeqIO
+from Bio.Seq import Seq
+import random
 
 # get the cwd were all the scripts are 
 test_dir = "/".join(__file__.split("/")[0:-1]); sys.path.insert(0, test_dir)
@@ -422,3 +425,62 @@ def test_picard_env(testing_inputs_dir, testing_outputs_dir):
     fun.create_sequence_dict(ref_genome, replace=False)
 
     fun.print_with_runtime("picard_env was properly generated")
+
+
+def get_mutated_seqrecord(seq, mutation_rate=0.02):
+
+    """Gets a seqrecord and mutates it"""
+
+    # keep seq
+    import copy as cp
+    import numpy as np
+    modified_seq = cp.deepcopy(seq)
+
+    # define a function that takes a base and returns a random one in some cases
+    all_bases = ["A", "C", "G", "T"]
+    def get_random_base(input_base):
+        if random.random()<=mutation_rate: return random.choice(all_bases)
+        else: return input_base.upper()
+
+    # get mutated seq
+    modified_seq.seq = Seq("".join(list(map(get_random_base, str(seq.seq)))))
+
+    # calculate the number of modified bases
+    mutated_bases = sum(np.array(list(modified_seq.seq))!=np.array(list(seq.seq)))
+
+    # log
+    print("There are %i/%i mutated bases in %s"%(mutated_bases, len(seq.seq), seq.id))
+
+    return modified_seq
+
+def get_reads_with_small_variants(reference_genome, outdir, threads):
+
+    """Takes a reference genome and generates some reads with mutations"""  
+
+    # get outdir
+    #fun.delete_folder(outdir)
+    fun.make_folder(outdir)
+
+    # get mutated reference genome
+    mut_reference_genome = "%s/mutated_ref_genome.fasta"%outdir
+    if fun.file_is_empty(mut_reference_genome):
+        print("getting mutated genome")
+
+        # get mutated seqs
+        mutated_seqs = [get_mutated_seqrecord(seq) for seq in  SeqIO.parse(reference_genome, "fasta")]
+
+        # write them
+        mut_reference_genome_tmp  = "%s.tmp"%mut_reference_genome
+        SeqIO.write(mutated_seqs, mut_reference_genome_tmp, "fasta")
+        os.rename(mut_reference_genome_tmp, mut_reference_genome)
+
+    # get the mutated reads
+    print("getting the mutated reads")
+    genome_len = sum(fun.get_chr_to_len(mut_reference_genome).values())
+    read_len = 150
+    coverage = 30
+    npairs = (coverage*genome_len)/read_len
+
+    mut_reads1, mut_reads2 = fun.simulate_testing_reads_on_genome(mut_reference_genome, window_l=4000, npairs=npairs, read_length=read_len, median_insert_size=150, median_insert_size_sd=15, threads=threads, replace=False)
+
+    return mut_reads1, mut_reads2

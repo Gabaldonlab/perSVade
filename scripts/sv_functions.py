@@ -12697,7 +12697,7 @@ def remove_smallVarsCNV_nonEssentialFiles(outdir, ploidy):
 
             if f not in files_to_keep: files_to_remove.append(file)
 
-    for f in files_to_remove: remove_file(f)
+    for f in files_to_remove: delete_file_or_folder(f)
 
 
 
@@ -21231,8 +21231,9 @@ def check_that_paired_reads_are_different(fastq1, fastq2, outdir, nreads=10000):
     first_reads_2 = "%s/first_reads_2.fastq"%outdir
 
     stderr = "%s/stderr.txt"%outdir
-    run_cmd("zcat %s | egrep -v '^@' | head -n %i > %s 2>%s"%(fastq1, nreads*3, first_reads_1, stderr))
-    run_cmd("zcat %s | egrep -v '^@' | head -n %i > %s 2>%s"%(fastq2, nreads*3, first_reads_2, stderr))
+    run_cmd("zcat %s 2>%s | egrep -v '^@' 2>%s | head -n %i > %s 2>%s"%(fastq1, stderr, stderr, nreads*3, first_reads_1, stderr))
+    run_cmd("zcat %s 2>%s | egrep -v '^@' 2>%s | head -n %i > %s 2>%s"%(fastq2, stderr, stderr, nreads*3, first_reads_2, stderr))
+
 
     # check that they are not the same
     list_first_reads_1 = open(first_reads_1, "r").readlines()
