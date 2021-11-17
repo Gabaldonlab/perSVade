@@ -3,6 +3,7 @@ testing/Cglabrata
 testing/plots
 testing/docker_testing
 testing/cross_accuracy_calculations_realSVs
+testing/cross_accuracy_calculations_realSVs_onlyHuman_trainOnSimulationsDatasets
 testing/testing_perSVade_benchmark_stderr.txt
 testing/testing_perSVade_benchmark_stdout.txt
 testing/failed_assemblies_taxID5207
