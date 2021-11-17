@@ -158,8 +158,8 @@ if opt.outdir_callCNVs is not None:
     if len(strange_cnv_calling_algs)>0: raise ValueError("the cnv calling algs specfied with --cnv_calling_algs are wrong. These are the unexpected ones:%s. This suggests that the file provided in --CNV_calls is not in the correct format."%strange_cnv_calling_algs)
     if len(cnv_calling_algs)==0: raise ValueError("There are no CNV calling args, suggesting that the file provided in --CNV_calls is not in the correct format")
 
-    # get the min_CNVsize_coverageBased as the smallest CNV
-    fun.min_CNVsize_coverageBased = min(df_CNV_coverage.end-df_CNV_coverage.start)
+    # get the min_CNVsize_coverageBased as the smallest CNV. This is to not filter anything
+    fun.min_CNVsize_coverageBased = min(df_CNV_coverage.end-df_CNV_coverage.start) - 1
 
     # define the window_size_CNVcalling from the final_df_coverage.tab
     df_coverag_windows = fun.get_tab_as_df_or_empty_df("%s/final_df_coverage.tab"%opt.outdir_callCNVs)

@@ -1,0 +1,42 @@
+[2021-11-17 15:02:58] Start greasing /gpfs/projects/bsc40/mschikora/scripts/perSVade/perSVade_repository/testing/cross_accuracy_calculations_realSVs_onlyHuman_trainOnSimulationsDatasets/cross_accuracy_human/cross_accuracy_files/jobs.getting_crossAccuracy
+[2021-11-17 15:02:58] INFO: File with 138 correct Tasks
+[2021-11-17 15:02:58] INFO: MPI engine is ready to run with 16 workers
+[2021-11-17 15:02:58] INFO: Current Working Dir /gpfs/projects/bsc40/current/mschikora/scripts/perSVade/perSVade_repository/testing/cross_accuracy_calculations_realSVs_onlyHuman_trainOnSimulationsDatasets/cross_accuracy_human/cross_accuracy_files
+[2021-11-17 15:02:58] INFO: Run on 8 nodes
+[2021-11-17 15:02:58] INFO: Job ID 18494219
+[2021-11-17 15:02:58] INFO: Allocating task 1 located in line 1 to Worker 1
+[2021-11-17 15:02:58] INFO: Allocating task 2 located in line 2 to Worker 2
+[2021-11-17 15:02:58] INFO: Allocating task 3 located in line 3 to Worker 3
+[2021-11-17 15:02:58] INFO: Allocating task 4 located in line 4 to Worker 4
+[2021-11-17 15:02:58] INFO: Allocating task 5 located in line 5 to Worker 5
+[2021-11-17 15:02:58] INFO: Allocating task 6 located in line 6 to Worker 6
+[2021-11-17 15:02:58] INFO: Allocating task 7 located in line 7 to Worker 7
+[2021-11-17 15:02:58] INFO: Allocating task 8 located in line 8 to Worker 8
+[2021-11-17 15:02:58] INFO: Allocating task 9 located in line 9 to Worker 9
+[2021-11-17 15:02:58] INFO: Allocating task 10 located in line 10 to Worker 10
+[2021-11-17 15:02:58] INFO: Allocating task 11 located in line 11 to Worker 11
+[2021-11-17 15:02:58] INFO: Worker 4 on node s18r1b42
+[2021-11-17 15:02:58] INFO: Worker 6 on node s18r1b43
+[2021-11-17 15:02:58] INFO: Worker 11 on node s19r2b35
+[2021-11-17 15:02:58] INFO: Allocating task 12 located in line 12 to Worker 12
+[2021-11-17 15:02:58] INFO: Worker 3 on node s18r1b42
+[2021-11-17 15:02:58] INFO: Worker 7 on node s18r1b44
+[2021-11-17 15:02:58] INFO: Worker 10 on node s18r1b45
+[2021-11-17 15:02:58] INFO: Worker 5 on node s18r1b43
+[2021-11-17 15:02:58] INFO: Worker 2 on node s18r1b28
+[2021-11-17 15:02:58] INFO: Worker 8 on node s18r1b44
+[2021-11-17 15:02:58] INFO: Worker 9 on node s18r1b45
+[2021-11-17 15:02:58] INFO: Worker 12 on node s19r2b35
+[2021-11-17 15:02:58] INFO: Allocating task 13 located in line 13 to Worker 13
+[2021-11-17 15:02:58] INFO: Worker 1 on node s18r1b28
+[2021-11-17 15:02:58] INFO: Allocating task 14 located in line 14 to Worker 14
+[2021-11-17 15:02:58] INFO: Allocating task 15 located in line 15 to Worker 15
+[2021-11-17 15:02:58] INFO: Allocating task 16 located in line 16 to Worker 16
+[2021-11-17 15:02:58] INFO: Worker 13 on node s19r2b36
+[2021-11-17 15:02:58] INFO: Worker 14 on node s19r2b36
+[2021-11-17 15:02:58] INFO: Worker 15 on node s19r2b37
+[2021-11-17 15:02:58] INFO: Worker 16 on node s19r2b37
+[2021-11-17 15:04:16] ERROR: Caught TERM signal
+[2021-11-17 15:04:16] INFO: Creating restart file /gpfs/projects/bsc40/current/mschikora/scripts/perSVade/perSVade_repository/testing/cross_accuracy_calculations_realSVs_onlyHuman_trainOnSimulationsDatasets/cross_accuracy_human/cross_accuracy_files/jobs.getting_crossAccuracy-18494219.rst...
+[2021-11-17 15:04:16] INFO: Restart file created
+[2021-11-17 15:04:16] ERROR: Greasy was interrupted. Check restart & log files

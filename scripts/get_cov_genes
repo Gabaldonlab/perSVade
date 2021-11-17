@@ -1,0 +1,202 @@
+#!/usr/bin/env python
+
+######################################
+############# DEFINE ENV #############
+######################################
+
+# general module imports
+import argparse, os
+from argparse import RawTextHelpFormatter
+import copy as cp
+import pickle
+import string
+import shutil 
+import random
+import sys
+from shutil import copyfile
+import time
+
+# get the cwd were all the scripts are 
+CWD = "/".join(__file__.split("/")[0:-1]); sys.path.insert(0, CWD)
+
+# define the module name
+module_name = __file__.split("/")[-1]
+
+# define the EnvDir where the environment is defined
+EnvDir = "/".join(sys.executable.split("/")[0:-2])
+
+# import functions
+import sv_functions as fun
+
+# import perSVade-specific modules
+import pandas as pd
+
+######################################
+######################################
+######################################
+
+
+#################################### 
+############## ARGS ################
+####################################
+
+description = """
+This module calculates the covergae for each gene in a provided gff file (-gff). In addition, it calculates the coverage relative to the 5' and 3' regions. This can be used to perform a coverage-based CNV calling per gene.
+"""
+
+parser = argparse.ArgumentParser(description=description, formatter_class=RawTextHelpFormatter)
+
+# mandatory args
+parser.add_argument("-o", "--outdir", dest="outdir", action="store", required=True, help="Output directory.")
+parser.add_argument("-r", "--ref", dest="ref", required=True, help="Reference genome. It has to end with .fasta.")
+parser.add_argument("-sbam", "--sortedbam", dest="sortedbam", required=True, help="The path to the sorted .bam file, which should have a bam.bai file in the same dir. For example, if your bam file is called 'aligned_reads.bam', there should be an 'aligned_reads.bam.bai' as well.")
+parser.add_argument("-gff", "--gff-file", dest="gff", required=True, help="path to the GFF3 annotation of the reference genome.")
+
+
+# optional args
+parser.add_argument("--min_chromosome_len", dest="min_chromosome_len", default=100000, type=int, help="The minimum length to consider chromosomes from the provided fasta for calculating the window length (used in may steps of perSVade to parallelize across fractions of the genome).")
+parser.add_argument("--replace", dest="replace", action="store_true", help="Re-run all the steps by deleting the output directory.")
+parser.add_argument("--verbose", dest="verbose", action="store_true", default=False, help="Print a verbose log.")
+
+# resources
+parser.add_argument("--fraction_available_mem", dest="fraction_available_mem", default=None, type=float, help="This pipeline calculates the available RAM for several steps, and it may not work well in some systems (i.e. HPC clusters). This parameter allows you to correct possible errors. If --fraction_available_mem is not provided (default behavior), this pipeline will calculate the available RAM by filling the memory, which may give errors. If you want to use all the available memory you should specify --fraction_available_mem 1.0. See the FAQ 'How does the --fraction_available_mem work?' from https://github.com/Gabaldonlab/perSVade/wiki/8.-FAQs for more info.")
+
+parser.add_argument("-thr", "--threads", dest="threads", default=16, type=int, help="Number of threads, Default: 16")
+parser.add_argument("--fractionRAM_to_dedicate", dest="fractionRAM_to_dedicate", type=float,  default=0.5, help="This is the fraction of the available memory that will be used by several java programs that require a heap size. By default we set this to 0.5 to not overload the system.")
+
+opt = parser.parse_args()
+
+####################################
+####################################
+####################################
+
+#################################
+########### MAIN CODE ###########
+#################################
+
+# remove outdir if replace, and set replace to False
+if opt.replace is True: fun.delete_folder(opt.outdir)
+opt.replace = False
+
+# make the outdir
+fun.make_folder(opt.outdir)
+
+# exit if the final file exists
+final_file = "%s/perSVade_finished_file.txt"%opt.outdir
+
+if not fun.file_is_empty(final_file): 
+    fun.print_with_runtime("WARNING: %s exists, suggesting that perSVade was already  run in this folder. Remove this file if you want this command to work. Exiting..."%final_file)
+    sys.exit(0)
+
+# define the start time
+start_time = time.time()
+
+# define the verbosity. If opt.verbose is False, none of the 'print' statements of sv_functions will have an effect
+fun.printing_verbose_mode = opt.verbose
+
+# define a file that will contain all the cmds ran
+fun.log_file_all_cmds = "%s/all_cmds.txt"%opt.outdir
+if fun.file_is_empty(fun.log_file_all_cmds): open(fun.log_file_all_cmds, "w").write("# These are all the cmds:\n")
+
+# get sample name
+sample_name = fun.get_sampleName_from_perSVade_outdir(opt.outdir)
+
+####### SET RESOURCES ########
+
+# define the fraction of RAM to dedicate
+if opt.fractionRAM_to_dedicate>0.95: raise ValueError("You are using >95 pct of the systems RAM, which is dangerous")
+fun.fractionRAM_to_dedicate = opt.fractionRAM_to_dedicate
+
+# define the fraction of available mem
+fun.fraction_available_mem = opt.fraction_available_mem
+if opt.fraction_available_mem is None: fun.print_with_runtime("WARNING: You did not specify how much RAM should be used through --fraction_available_mem. perSVade will calculate this by filling the memory, which may be dangerous. If you want to use all the allocated memory you should specify --fraction_available_mem 1.0")
+
+# print the available resources
+real_available_threads = fun.get_available_threads(opt.outdir)
+if opt.threads>real_available_threads:  fun.print_with_runtime("WARNING: There are %i available threads, and you required %i."%(real_available_threads, opt.threads))
+
+available_Gb_RAM = fun.get_availableGbRAM(opt.outdir)
+fun.print_with_runtime("Running perSVade %s into %s with %.3f Gb of RAM and %i cores"%(module_name, opt.outdir, available_Gb_RAM, opt.threads))
+
+##############################
+
+# prepare the reference genome
+opt.ref, reference_genome_dir = fun.prepare_reference_genome_for_perSVade(opt.ref, opt.outdir, "no_mitochondria", None, opt.replace)
+fun.window_l = fun.get_perSVade_window_l(opt.ref, "no_mitochondria", opt.min_chromosome_len)
+
+# get the bam file under output
+sorted_bam, index_bam = fun.get_sorted_bam_in_outdir(opt.sortedbam, opt.outdir)
+
+# prepare the gff
+replaced_gff = "%s/reference_genome_features.gff"%reference_genome_dir
+fun.soft_link_files(opt.gff, replaced_gff)
+opt.gff = replaced_gff
+
+# get the corrected gff
+correct_gff, gff_with_biotype = fun.get_correct_gff_and_gff_with_biotype(opt.gff, replace=opt.replace)
+
+fun.print_with_runtime("Getting coverage per gene")
+
+# make a folder for the CNV anlysis
+cnv_outdir = "%s/CNV_results"%opt.outdir
+if not os.path.isdir(cnv_outdir): os.mkdir(cnv_outdir)
+
+# get the bed file, and also the one of the regions surrounding each gene
+bed_file = "%s.bed_index1"%correct_gff; bed_file_regions = fun.extract_BEDofGENES_of_gff3(correct_gff, bed_file, replace=opt.replace, reference=opt.ref)
+
+# define the interetsing beds
+gene_to_coverage_file = "%s/gene_to_coverage_genes.tab"%cnv_outdir
+gene_to_coverage_file_regions = "%s/gene_to_coverage_regions.tab"%cnv_outdir
+
+# go through each region of bed file
+for bed, final_coverge_file in [(bed_file, gene_to_coverage_file), (bed_file_regions, gene_to_coverage_file_regions)]: fun.write_coverage_per_gene_mosdepth_and_parallel(sorted_bam, opt.ref, cnv_outdir, bed, final_coverge_file, replace=opt.replace, threads=opt.threads)
+
+
+# write the integrated file
+integrated_coverage_file = "%s/genes_and_regions_coverage.tab"%cnv_outdir; integrated_coverage_file_tmp = "%s.tmp"%integrated_coverage_file
+if fun.file_is_empty(integrated_coverage_file) or opt.replace is True: 
+
+   # integrate in one
+    df_genes = pd.read_csv(gene_to_coverage_file, sep="\t")
+    df_regions = pd.read_csv(gene_to_coverage_file_regions, sep="\t")
+    df_integrated = df_genes.merge(df_regions, on="ID", validate="one_to_one", suffixes=("", "_+-10kb_region"))
+
+    # write
+    df_integrated.to_csv(integrated_coverage_file_tmp, sep="\t", header=True, index=False)
+    os.rename(integrated_coverage_file_tmp, integrated_coverage_file)
+
+
+#################################
+#################################
+#################################
+
+
+##################################
+########## CLEAN OUTPUT ##########
+##################################
+
+# clean 
+fun.print_with_runtime("cleaning")
+
+# remove everyhing that is not the coverage file
+for f in os.listdir(cnv_outdir): 
+    if f not in {fun.get_file(gene_to_coverage_file), fun.get_file(gene_to_coverage_file_regions), fun.get_file(integrated_coverage_file)}: fun.delete_file_or_folder("%s/%s"%(cnv_outdir, f))
+ 
+# get the only important file under outdir
+os.rename("%s/genes_and_regions_coverage.tab"%cnv_outdir, "%s/genes_and_regions_coverage.tab"%opt.outdir)
+
+# clean
+files_folder_to_keep = {"all_cmds.txt", "genes_and_regions_coverage.tab"}
+for f in os.listdir(opt.outdir): 
+    file_path = "%s/%s"%(opt.outdir, f)
+    if f not in files_folder_to_keep: fun.delete_file_or_folder(file_path)
+
+# wite final file
+fun.generate_final_file_report_one_module(final_file, start_time, time.time())
+
+# print the message
+fun.print_with_runtime("perSVade %s finished correctly"%module_name)
+
+##################################
+##################################
+##################################

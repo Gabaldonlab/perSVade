@@ -51,7 +51,6 @@ parser.add_argument("-sbam", "--sortedbam", dest="sortedbam", required=True, hel
 parser.add_argument("-mchr", "--mitochondrial_chromosome", dest="mitochondrial_chromosome", required=True, type=str, help="The name of the mitochondrial chromosome. If there is no mitochondria just put 'no_mitochondria'. If there is more than one mitochindrial scaffold, provide them as comma-sepparated IDs, like '--mitochondrial_chromosome chr_mito_1,chr_mito_2'.")
 parser.add_argument("-p", "--ploidy", dest="ploidy", required=True, type=int, help="Ploidy, can be 1 or 2.")
 parser.add_argument("--cnv_calling_algs", dest="cnv_calling_algs", required=True, type=str, help="A comma-sepparated string that indicates which programs should be used for the CNV calling. It can be any of HMMcopy,CONY,AneuFinder. We found that CONY sometimes produces unreliable results on some small chromosomes or large binned windows. In addition, CONY is slower than the other programs. We thus generally recommend setting this as '--cnv_calling_algs HMMcopy,AneuFinder'")
-parser.add_argument("--min_CNVsize", dest="min_CNVsize", required=True, type=int, help="Filter out CNVs shorter than this value. By default we set '--min_CNVsize 300'")
 parser.add_argument("--window_size_CNVcalling", dest="window_size_CNVcalling", required=True, type=int, help="The window size in which the genome will be fragmented for CNV calling. This determines the resolution of the calling, By default we set '--window_size_CNVcalling 100', but this may depend on the genome size. Very small windows for large genomes may result in higher running time.")
 
 # optional for CNV calling
@@ -131,8 +130,6 @@ fun.window_l = fun.get_perSVade_window_l(opt.ref, opt.mitochondrial_chromosome, 
 # get the bam file under output
 sorted_bam, index_bam = fun.get_sorted_bam_in_outdir(opt.sortedbam, opt.outdir)
 
-# get the min_CNVsize_coverageBased
-fun.min_CNVsize_coverageBased = opt.min_CNVsize
 
 # define the CNV calling algs (and debug)
 cnv_calling_algs = set(opt.cnv_calling_algs.split(","))

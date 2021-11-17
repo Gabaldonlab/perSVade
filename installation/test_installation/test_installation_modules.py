@@ -31,7 +31,7 @@ Cglabrata_annotations= "%s/Candida_glabrata.gff"%testing_inputs_dir
 # load the functions (test if you can import python packages)
 import sv_functions as fun
 fun.print_with_runtime("loading python packages worked successfully")
-fun.printing_verbose_mode = True # this may be changed
+fun.printing_verbose_mode = False # this may be changed
 
 # define the testing inuts dir 
 testing_outputs_dir = "%s/testing_outputs"%test_dir # this is the normal place
@@ -107,33 +107,33 @@ threads = fun.multiproc.cpu_count()
 
 ######## TEST DIFFERENT MODULES #########
 
-# generate a set of simulated reads with some variants
-#outdir_simulate_reads_Muts = "%s/getting_reads_with_small_Vars"%testing_outputs_dir
-#reads_small_vars1, reads_small_vars2 = test_fun.get_reads_with_small_variants(ref_genome, outdir_simulate_reads_Muts, threads)
-#print("muttated reads got")
-
-# align subsampled 100k reads of C. glabrata
-outdir_align_reads = "%s/align_reads_Cglab_subsampledReads"%testing_outputs_dir
-fun.run_cmd("%s align_reads --threads %i --fraction_available_mem 1.0 -f1 %s -f2 %s -o %s --ref %s --min_chromosome_len 100 --verbose"%(fun.perSVade_modules, threads, cglab_reads1, cglab_reads2, outdir_align_reads, Cglabrata_genome))
-
-# call small variants
-outdir_small_vars = "%s/calling_small_vars"%testing_outputs_dir
-fun.run_cmd("%s call_small_variants --threads %i --fraction_available_mem 1.0 --min_chromosome_len 100 -o %s -r %s -sbam %s/aligned_reads.bam.sorted --repeats_file skip -p 1 --callers bcftools,freebayes,HaplotypeCaller --min_AF 0.9 --min_coverage 0 --verbose"%(fun.perSVade_modules, threads, outdir_small_vars, Cglabrata_genome, outdir_align_reads))
-
-# annotate small variants
-
-
-djgahjhagjhdg
-
-
-
 # align reads with SVs
 outdir_align_reads_SVs = "%s/align_reads_sim_SVs"%testing_outputs_dir
 fun.run_cmd("%s align_reads --threads %i --fraction_available_mem 1.0 -f1 %s -f2 %s -o %s --ref %s --min_chromosome_len 100"%(fun.perSVade_modules, threads, sim_reads1, sim_reads2, outdir_align_reads_SVs, ref_genome))
 
+# get the coverage per gene
+outdir_call_coverage_per_gene = "%s/cov_per_gene"%testing_outputs_dir
+fun.run_cmd("%s get_cov_genes --threads %i --fraction_available_mem 1.0  -o %s --ref %s --min_chromosome_len 100 -gff %s -sbam %s/aligned_reads.bam.sorted"%(fun.perSVade_modules, threads, outdir_call_coverage_per_gene, ref_genome, gff, outdir_align_reads_SVs))
+
+# align subsampled 100k reads of C. glabrata
+outdir_align_reads = "%s/align_reads_Cglab_subsampledReads"%testing_outputs_dir
+fun.run_cmd("%s align_reads --threads %i --fraction_available_mem 1.0 -f1 %s -f2 %s -o %s --ref %s --min_chromosome_len 100"%(fun.perSVade_modules, threads, cglab_reads1, cglab_reads2, outdir_align_reads, Cglabrata_genome))
+
+# run CNV calling for the previous reads
+outdir_CNVcalling_cglab = "%s/call_CNVs_Cglab_subsampledReads"%testing_outputs_dir
+fun.run_cmd("%s call_CNVs --threads %i --fraction_available_mem 1.0 -o %s --ref %s --min_chromosome_len 10000 -sbam %s/aligned_reads.bam.sorted --mitochondrial_chromosome mito_C_glabrata_CBS138 -p 1 --cnv_calling_algs AneuFinder --window_size_CNVcalling 100000"%(fun.perSVade_modules, threads, outdir_CNVcalling_cglab, Cglabrata_genome, outdir_align_reads))
+
+# call small variants
+outdir_small_vars = "%s/calling_small_vars"%testing_outputs_dir
+fun.run_cmd("%s call_small_variants --threads %i --fraction_available_mem 1.0 --min_chromosome_len 100 -o %s -r %s -sbam %s/aligned_reads.bam.sorted --repeats_file skip -p 1 --callers bcftools,freebayes,HaplotypeCaller --min_AF 0.9 --min_coverage 0 --outdir_callCNVs %s"%(fun.perSVade_modules, threads, outdir_small_vars, Cglabrata_genome, outdir_align_reads, outdir_CNVcalling_cglab))
+
+# annotate small variants
+outdir_annotate_small_vars = "%s/annotate_small_vars"%testing_outputs_dir
+fun.run_cmd("%s annotate_small_vars --threads %i --fraction_available_mem 1.0 -o %s --ref %s --min_chromosome_len 10000  --mitochondrial_chromosome mito_C_glabrata_CBS138 --merged_vcf %s/merged_vcfs_allVars_ploidy1.vcf -gff %s -mcode 3 -gcode 1"%(fun.perSVade_modules, threads, outdir_annotate_small_vars, ref_genome, outdir_small_vars, Cglabrata_annotations))
+
 # run CNV calling
 outdir_CNVcalling = "%s/call_CNVs"%testing_outputs_dir
-fun.run_cmd("%s call_CNVs --threads %i --fraction_available_mem 1.0 -o %s --ref %s --min_chromosome_len 10000 -sbam %s/aligned_reads.bam.sorted --mitochondrial_chromosome mito_C_glabrata_CBS138 -p 1 --cnv_calling_algs HMMcopy,CONY,AneuFinder --min_CNVsize 500 --window_size_CNVcalling 500 --verbose"%(fun.perSVade_modules, threads, outdir_CNVcalling, ref_genome, outdir_align_reads_SVs))
+fun.run_cmd("%s call_CNVs --threads %i --fraction_available_mem 1.0 -o %s --ref %s --min_chromosome_len 10000 -sbam %s/aligned_reads.bam.sorted --mitochondrial_chromosome mito_C_glabrata_CBS138 -p 1 --cnv_calling_algs HMMcopy,CONY,AneuFinder --window_size_CNVcalling 500"%(fun.perSVade_modules, threads, outdir_CNVcalling, ref_genome, outdir_align_reads_SVs))
 
 # SV calling
 outdir_SVcalling = "%s/call_SVs"%testing_outputs_dir
@@ -141,16 +141,11 @@ fun.run_cmd("%s call_SVs --threads %i --fraction_available_mem 1.0 -o %s --ref %
 
 # integrate SV and CNV calls
 outdir_merged_calling = "%s/integrate_SV_and_CNV"%testing_outputs_dir
-fun.run_cmd("%s integrate_SV_CNV_calls --threads %i --fraction_available_mem 1.0 -o %s --ref %s --min_chromosome_len 10000  --mitochondrial_chromosome mito_C_glabrata_CBS138 -sbam %s/aligned_reads.bam.sorted -p 1 --outdir_callSVs %s --outdir_callCNVs %s --verbose --repeats_file skip"%(fun.perSVade_modules, threads, outdir_merged_calling, ref_genome, outdir_align_reads_SVs, outdir_SVcalling, outdir_CNVcalling))
+fun.run_cmd("%s integrate_SV_CNV_calls --threads %i --fraction_available_mem 1.0 -o %s --ref %s --min_chromosome_len 10000  --mitochondrial_chromosome mito_C_glabrata_CBS138 -sbam %s/aligned_reads.bam.sorted -p 1 --outdir_callSVs %s --outdir_callCNVs %s --repeats_file skip"%(fun.perSVade_modules, threads, outdir_merged_calling, ref_genome, outdir_align_reads_SVs, outdir_SVcalling, outdir_CNVcalling))
 
 # annotate SVs
 outdir_annotate_SVs = "%s/annotate_SVs"%testing_outputs_dir
-fun.run_cmd("%s annotate_SVs --threads %i --fraction_available_mem 1.0 -o %s --ref %s --min_chromosome_len 10000  --mitochondrial_chromosome mito_C_glabrata_CBS138 --verbose --SV_CNV_vcf %s/SV_and_CNV_variant_calling.vcf -gff %s -mcode 3 -gcode 1"%(fun.perSVade_modules, threads, outdir_annotate_SVs, ref_genome, outdir_merged_calling, gff))
-
-
-
-print(outdir_merged_calling)
-djhgdajgad
+fun.run_cmd("%s annotate_SVs --threads %i --fraction_available_mem 1.0 -o %s --ref %s --min_chromosome_len 10000  --mitochondrial_chromosome mito_C_glabrata_CBS138  --SV_CNV_vcf %s/SV_and_CNV_variant_calling.vcf -gff %s -mcode 3 -gcode 1"%(fun.perSVade_modules, threads, outdir_annotate_SVs, ref_genome, outdir_merged_calling, gff))
 
 # get regions with known SVs
 outdir_known_regions = "%s/known_SVs"%testing_outputs_dir
@@ -158,12 +153,8 @@ fun.run_cmd("%s find_knownSVs_regions --threads %i --fraction_available_mem 1.0 
 
 # run parameter optimization on pre-defined regions (knownSVs) and 2 chromosomes
 outdir_parameter_optimization_known = "%s/parameter_optimization_known"%testing_outputs_dir
-fun.run_cmd("%s optimize_parameters --threads %i --fraction_available_mem 1.0 -o %s --ref %s --min_chromosome_len 1000 --sortedbam %s/aligned_reads.bam.sorted --mitochondrial_chromosome mito_C_glabrata_CBS138 --repeats_file skip --regions_SVsimulations %s/knownSVs_breakpoints.bedpe --simulation_ploidies haploid --nsimulations 1 --nvars 5 --simulation_chromosomes ChrA_C_glabrata_CBS138,ChrB_C_glabrata_CBS138 --verbose"%(fun.perSVade_modules, threads, outdir_parameter_optimization_known, ref_genome, outdir_align_reads_SVs, outdir_known_regions))
+fun.run_cmd("%s optimize_parameters --threads %i --fraction_available_mem 1.0 -o %s --ref %s --min_chromosome_len 1000 --sortedbam %s/aligned_reads.bam.sorted --mitochondrial_chromosome mito_C_glabrata_CBS138 --repeats_file skip --regions_SVsimulations %s/knownSVs_breakpoints.bedpe --simulation_ploidies haploid --nsimulations 1 --nvars 5 --simulation_chromosomes ChrA_C_glabrata_CBS138,ChrB_C_glabrata_CBS138"%(fun.perSVade_modules, threads, outdir_parameter_optimization_known, ref_genome, outdir_align_reads_SVs, outdir_known_regions))
 
-print(outdir_parameter_optimization_known)
-
-adkjghaj
-close_shortReads_table
 
 # get homologous regions in C. albicans
 outdir_homRegions = "%s/find_hom_regions"%testing_outputs_dir
@@ -175,7 +166,7 @@ if fun.file_is_empty(repeat_masker_db): raise ValueError("%s is missing. Check t
 
 # get repeats for a large genome
 #outdir_repeats = "%s/repeats_infer_Calbicans"%testing_outputs_dir
-#fun.run_cmd("%s infer_repeats --threads %i --fraction_available_mem 1.0 -o %s --ref %s --min_chromosome_len 1000 --verbose"%(fun.perSVade_modules, threads, outdir_repeats, Calbicans_chr1_2_6))
+#fun.run_cmd("%s infer_repeats --threads %i --fraction_available_mem 1.0 -o %s --ref %s --min_chromosome_len 1000"%(fun.perSVade_modules, threads, outdir_repeats, Calbicans_chr1_2_6))
 
 # get repeats small genome
 outdir_repeats_fast = "%s/repeats_infer_Cglab"%testing_outputs_dir
@@ -190,125 +181,9 @@ outdir_trimmed_reads = "%s/read_trimmingCglab"%testing_outputs_dir
 fun.run_cmd("%s trim_reads_and_QC --threads %i --fraction_available_mem 1.0 -f1 %s -f2 %s -o %s"%(fun.perSVade_modules, threads, cglab_reads1, cglab_reads2, outdir_trimmed_reads))
 
 # align reads
-outdir_align_reads = "%s/align_reads_Cglab"%testing_outputs_dir
-fun.run_cmd("%s align_reads --threads %i --fraction_available_mem 1.0 -f1 %s -f2 %s -o %s --ref %s --min_chromosome_len 100"%(fun.perSVade_modules, threads, cglab_reads1, cglab_reads2, outdir_align_reads, ref_genome))
-
-
-
-
-
-
-print(outdir_homRegions)
-jdhgjhda
-#test_fun.test_get_repeat_maskerDF(Calbicans_chr1_2_6, replace=False)
-
-#test_fun.test_get_repeat_maskerDF(ref_genome, replace=False) # this will not work for repeat masker
-
-
-print(outdir_repeats)
-
+#outdir_align_reads = "%s/align_reads_Cglab"%testing_outputs_dir
+#fun.run_cmd("%s align_reads --threads %i --fraction_available_mem 1.0 -f1 %s -f2 %s -o %s --ref %s --min_chromosome_len 100"%(fun.perSVade_modules, threads, cglab_reads1, cglab_reads2, outdir_align_reads, ref_genome))
 
 #########################################
 
 fun.print_with_runtime("\n\n---\nSUCCESS: perSVade was properly installed\n---\n\n")
-adkjahkjadd
-
-
-
-
-JDAVJGAJGDA
-
-
-######## TEST SPECIFIC PARTS ##########
-
-if len(sys.argv)>1:
-	part_test = sys.argv[1]
-
-	# check that the picard environment is fine
-	if part_test=="picard_env": test_fun.test_picard_env(testing_inputs_dir, testing_outputs_dir)
-
-	else: raise ValueError("%s is not valid"%part_test)
-
-	# exit
-	print("testing %s worked well"%part_test)
-	sys.exit(0)
-
-#######################################
-
-###### GENERAL TESTING ########
-
-# calculate the memory that is available
-#fun.print_with_runtime("running testings on %s Gb of RAM"%(fun.get_availableGbRAM(testing_outputs_dir)))
-
-# check that that the database has been created
-repeat_masker_db = "%s/Libraries/RepeatMasker.lib.nsq"%(fun.repeatmasker_dir) 
-if fun.file_is_empty(repeat_masker_db): raise ValueError("%s is missing. Check that you ran ./installation/setup_environment.sh"%repeat_masker_db)
-
-# test that the environment can be recreated. This is only important from the developer's package
-#test_fun.test_conda_env_generation(testing_outputs_dir, replace=True)
-
-# test repeat masker obtention
-test_fun.test_get_repeat_maskerDF(ref_genome, replace=False) # this will not work for repeat masker
-
-# test read simulation by simulating reads from the mutated genome
-r1_mutGenome, r2_mutGenome = test_fun.test_read_simulation_and_get_reads(mut_genome)
-
-# test bwa mem, samtools and picard
-sorted_bam_mutGenome = test_fun.test_bwa_mem_and_get_bam(r1_mutGenome, r2_mutGenome, ref_genome)
-
-# test the joining and unjoining of multiallleles. This is a test for bcftools 1.10
-outdir_testing_CalbicansVarCall = "%s/testing_CalbicansVarCall"%testing_outputs_dir
-test_fun.test_processing_varcalling(Calbicans_varCall_outdir, Calbicans_genome, outdir_testing_CalbicansVarCall, sorted_bam_mutGenome)
-
-# test bcftools, freebayes, gatk4, mosdepth, vep by running the small variant calling pipeline
-test_fun.test_smallVarCall_CNV_running(sorted_bam_mutGenome, outdir_small_variantCalling, ref_genome, gff, replace=False)
-
-# generate a genome that is rearranged 
-rearranged_genome = test_fun.test_rearranging_genome_random(ref_genome, replace=False)
-
-# generate simulated reads from this rearranged genome, and also a bam file
-r1_svGenome, r2_svGenome = test_fun.test_read_simulation_and_get_reads(rearranged_genome, replace=False)
-sorted_bam_svGenome = test_fun.test_bwa_mem_and_get_bam(r1_svGenome, r2_svGenome, ref_genome, replace=False)
-
-# test whether you can run the gridss and clove pipeline
-outdir_testing_gridss_clove = "%s/testing_gridss_clove_pipeline_default_parms"%(testing_outputs_dir)
-test_fun.test_gridss_clove_pipeline(sorted_bam_svGenome, ref_genome, outdir_testing_gridss_clove, replace=False)
-
-# test whether the parameter optimisation pipeline works well to find the rearrangements
-outdir_testing_parameterOptimisation = "%s/testing_parameter_optimisation_pipeline"%(testing_outputs_dir)
-test_fun.test_parameter_optimisation_perSVade(sorted_bam_svGenome, ref_genome, outdir_testing_parameterOptimisation, replace=False)
-
-# test the integration of variants from previous sequencing data
-Cglabrata_genome = "%s/Candida_glabrata.fasta"%testing_inputs_dir
-Cglabrata_subsampled_reads_dir = "%s/Cglabrata_reads"%testing_inputs_dir
-Cglabrata_subsampled_perSVade_outdir = "%s/Cglabrata_reads_subsampled_perSVade_outdir"%testing_outputs_dir
-Cglabrata_repeats = "%s/Candida_glabrata.repeats.tab"%testing_inputs_dir
-relaxed_parms = "%s/perSVade_parameters_relaxed.json"%testing_inputs_dir
-real_bedpe_breakpoints = test_fun.test_realSVgeneration(Cglabrata_subsampled_reads_dir, Cglabrata_subsampled_perSVade_outdir, Cglabrata_repeats, Cglabrata_genome, relaxed_parms, replace=False)
-
-# test the parameter optimisation based on real_bedpe_breakpoints
-#test_fun.test_parameter_optimisation_perSVade_real(Cglabrata_subsampled_reads_dir, Cglabrata_subsampled_perSVade_outdir, Cglabrata_repeats, Cglabrata_genome, real_bedpe_breakpoints, replace=False)
-
-# test CNV calling with each of the three programs (CONY is not tested because it should not be used by default)
-
-### TESTING THINGS THAT ARE DISPENSABLE ###
-
-# test the querying of the SRA database and downloading, and trimming of reads and also gztool
-#outdir_SRAdb_query_downloading_and_readTrimming = "%s/testing_SRAdb_query_downloading_and_readTrimming_MERS"%testing_outputs_dir
-#test_fun.test_SRAdb_query_downloading_and_readTrimming(outdir_SRAdb_query_downloading_and_readTrimming, MERS_genome, 1335626, replace=False)
-
-# test the repeat masker obtention for a long chromosome 1, 2 and 6
-#test_fun.test_get_repeat_maskerDF(Calbicans_chr1_2_6, replace=False)
-
-
-fun.print_with_runtime("\n\n---\nSUCCESS: perSVade was properly installed\n---\n\n")
-
-###############################
-
-############################################
-
-fun.print_with_runtime("\n\n---\nSUCCESS: perSVade was properly installed\n---\n\n")
-
-
-
-

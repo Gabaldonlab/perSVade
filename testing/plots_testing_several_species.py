@@ -53,7 +53,13 @@ ProcessedDataDir = "%s/processed_data"%PlotsDir; fun.make_folder(ProcessedDataDi
 #%% GET PROCESSED DFs
 
 # get a cross accuracy df from the real SVs, both based on the golden set and the human real set of SVs
-df_cross_accuracy_benchmark_realSVs = test_fun.get_cross_accuracy_df_realSVs(CurDir, ProcessedDataDir, threads=threads, replace=False)
+#df_cross_accuracy_benchmark_realSVs = test_fun.get_cross_accuracy_df_realSVs(CurDir, ProcessedDataDir, threads=threads, replace=False)
+
+# get a cross accuracy df from the real SVs, only based on the human datastes and training on simulations' parameters
+df_cross_accuracy_benchmark_realSVs_onlyHuman = test_fun.get_cross_accuracy_df_realSVs_onlyHuman(CurDir, ProcessedDataDir, threads=threads, replace=False)
+
+
+raiseAfter_df_cross_accuracy_benchmark_realSVs_onlyHuman
 
 # get cross-accuracy measurements testing on simulations (it already includes the human hg38 as testing)
 df_cross_accuracy_benchmark = test_fun.get_cross_accuracy_df_several_perSVadeSimulations(outdir_testing, outdir_testing_human, genomes_and_annotations_dir, replace=False)
@@ -119,20 +125,20 @@ accuracy_f = "Fvalue"; # it could be Fvalue, precision or recall
 
 # all data
 fileprefix = "%s/all_cross_accuracy_realSVs"%PlotsDir
-test_fun.generate_heatmap_accuracy_of_parameters_on_test_samples_realSVs(df_cross_accuracy_benchmark_realSVs, fileprefix, replace=False, threads=4, accuracy_f=accuracy_f, svtype="integrated", col_cluster = False, row_cluster = False)
+test_fun.generate_heatmap_accuracy_of_parameters_on_test_samples_realSVs(df_cross_accuracy_benchmark_realSVs, fileprefix, replace=False, threads=4, accuracy_f=accuracy_f, svtype="integrated", col_cluster = False, row_cluster = False, min_n_SVs=15)
 
 #%% CROSSACCURACY DISTRIBUTION REAL SVs PER CATHEGORIES
 
 # define the accuracy_f
-accuracy_f = "Fvalue"; # it could be Fvalue, precision or recall
+accuracy_f = "recall"; # it could be Fvalue, precision or recall
 
 # plots the cross accuracy in a distributions-like manner
 fileprefix = "%s/cross_accuracy_distribution_realSVs"%PlotsDir
-ax = test_fun.get_crossbenchmarking_distributions_differentSetsOfParameters_realSVs(df_cross_accuracy_benchmark_realSVs, fileprefix, accuracy_f=accuracy_f, svtype="deletions")
+ax = test_fun.get_crossbenchmarking_distributions_differentSetsOfParameters_realSVs(df_cross_accuracy_benchmark_realSVs, fileprefix, accuracy_f=accuracy_f, svtype="integrated", min_n_SVs=15)
 
 # plot scatterplot as compared to optimised parameters
-#fileprefix = "%s/cross_accuracy_scatter_realSVs"%PlotsDir
-#ax = test_fun.get_crossbenchmarking_distributions_differentSetsOfParameters_realSVs_scatter(df_cross_accuracy_benchmark_realSVs, fileprefix, accuracy_f=accuracy_f, svtype="integrated")
+fileprefix = "%s/cross_accuracy_scatter_realSVs"%PlotsDir
+#ax = test_fun.get_crossbenchmarking_distributions_differentSetsOfParameters_realSVs_scatter(df_cross_accuracy_benchmark_realSVs, fileprefix, accuracy_f=accuracy_f, svtype="integrated", min_n_SVs=15)
 
 #%% GOLDEN ACCURACY BAR PLOTS (ONLY DEFAULT AND OPTIMISED PARAMETERS)
 

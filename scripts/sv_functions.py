@@ -10070,6 +10070,7 @@ def get_best_parameters_for_GridssClove_run(sorted_bam, reference_genome, outdir
 
     # simulate reads for the reference if you are not only simulating haploid
     if set(simulation_ploidies)!={"haploid"}: 
+        print_with_runtime("Simulating reference genome reads")
 
         # get the info of the reference genome with predictions of coverage per window
         df_REFgenome_info = get_windows_infoDF_with_predictedFromFeatures_coverage(reference_genome, distToTel_chrom_GC_to_coverage_fn, expected_coverage_per_bp, replace=replace, threads=threads)
@@ -10098,6 +10099,7 @@ def get_best_parameters_for_GridssClove_run(sorted_bam, reference_genome, outdir
         # go throigh each simulation (these are technical replicates of the pipeline)
         for simulation_ID in range(1, n_simulated_genomes+1):
             print_if_verbose("working on simulation %i"%simulation_ID)
+            print_with_runtime("working on simulation %i"%simulation_ID)
 
             ############# GET THE SIMULATED GENOME TRYING SEVERAL TIMES #############
 
@@ -10164,6 +10166,7 @@ def get_best_parameters_for_GridssClove_run(sorted_bam, reference_genome, outdir
             # go through each of the target ploidies and generate the resulting bam files:
             for ploidy in simulation_ploidies:
                 print_if_verbose("working on %s"%ploidy)
+                print_with_runtime("working on %s"%ploidy)
 
                 # define the final sorted bam depending on the ploidy (which also includes populations)
                 ploidy_merged_bam = get_merged_bamfile_for_ploidy(variant_bamfile=simulation_bam_file, reference_bamfile=simulated_reference_bam_file, ploidy=ploidy, replace=replace, threads=threads)
@@ -10215,6 +10218,7 @@ def get_best_parameters_for_GridssClove_run(sorted_bam, reference_genome, outdir
 
 
     print_if_verbose("getting report of the accuracies between simulations")
+    print_with_runtime("getting report of the accuracies between simulations")
 
     df_cross_benchmark_best, best_f = get_and_report_filtering_accuracy_across_genomes_and_ploidies(df_benchmark_all, genomeID_to_knownSVdict, outdir_benchmarking, PlotsDir_benchmarking, reference_genome, replace=replace, consider_integrated_filtering=True, threads=threads)
 
@@ -18505,7 +18509,7 @@ def remove_files_SV_CNVcalling(outdir):
     for f in files_to_remove: delete_file_or_folder("%s/%s"%(parameter_optimisation_dir, f))
 
 
-def get_small_variant_calling_withCNstate(varcall_file, df_CNV_coverage, replace=False):
+def get_small_variant_calling_withCNstate(varcall_file, df_CNV_coverage, replace=False, range_overlap=None):
 
     """This function rewrites varcall_file by adding a column called relative_CN. This includes which is the relative CN state of each variant. """
 
@@ -18540,12 +18544,15 @@ def get_small_variant_calling_withCNstate(varcall_file, df_CNV_coverage, replace
         variants_bed = "%s/variants.bed"%outdir_adding_relativeCN
         df_varcall[["#CHROM", "start_bed", "end_bed", "#Uploaded_variation"]].to_csv(variants_bed, sep="\t", index=False, header=False)
 
+        # redefine the range overlap
+        if range_overlap is None: range_overlap = min_CNVsize_coverageBased
+
         # run bedmap to get the IDs of the CNVs that overlap each of the variants_bed
         bedmap_outfile = "%s/bedmap_outfile.txt"%outdir_adding_relativeCN
         bedmap_stderr = "%s/bedmap_stderr.txt"%outdir_adding_relativeCN
 
         print_if_verbose("running bedmap. The stderr is in %s"%bedmap_stderr)
-        run_cmd("%s --delim '\t' --range %i --echo-map-id %s %s > %s 2>%s"%(bedmap, min_CNVsize_coverageBased, variants_bed, cnv_bed, bedmap_outfile, bedmap_stderr))
+        run_cmd("%s --delim '\t' --range %i --echo-map-id %s %s > %s 2>%s"%(bedmap, range_overlap, variants_bed, cnv_bed, bedmap_outfile, bedmap_stderr))
 
         # add to df
         def get_relative_CN_from_mappedID(mapID):

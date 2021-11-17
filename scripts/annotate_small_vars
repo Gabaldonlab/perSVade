@@ -1,0 +1,200 @@
+#!/usr/bin/env python
+
+######################################
+############# DEFINE ENV #############
+######################################
+
+# general module imports
+import argparse, os
+from argparse import RawTextHelpFormatter
+import copy as cp
+import pickle
+import string
+import shutil 
+import random
+import sys
+from shutil import copyfile
+import time
+
+# get the cwd were all the scripts are 
+CWD = "/".join(__file__.split("/")[0:-1]); sys.path.insert(0, CWD)
+
+# define the module name
+module_name = __file__.split("/")[-1]
+
+# define the EnvDir where the environment is defined
+EnvDir = "/".join(sys.executable.split("/")[0:-2])
+
+# import functions
+import sv_functions as fun
+
+# import perSVade-specific modules
+import pandas as pd
+
+######################################
+######################################
+######################################
+
+
+#################################### 
+############## ARGS ################
+####################################
+
+description = """
+Annotates the fuctional impact of the variants from 'call_small_variants' with the Ensembl Variant Effect Predictor (VEP). It first runs VEP on all variants with default parameters (which assumes a NCBI translation code of 1 for all proteins). This module then corrects the functional annotation of the variants according to the provided genetic codes (through '-mcode' and '-gcode. The final, corrected annotations are stored in 'annotated_variants.tab'. This file is the 'Default VEP outout' (tabular) format from https://www.ensembl.org/info/docs/tools/vep/vep_formats.html#output. In addition, this file also contains information about whether the annotation refers to a SNP (in the 'is_snp' field) and whether it is a protein-altering annotation (through the 'is_protein_altering' field). """
+
+# mandatory args
+parser = argparse.ArgumentParser(description=description, formatter_class=RawTextHelpFormatter)
+parser.add_argument("-o", "--outdir", dest="outdir", action="store", required=True, help="Output directory.")
+parser.add_argument("-r", "--ref", dest="ref", required=True, help="Reference genome. It has to end with .fasta.")
+parser.add_argument("-mchr", "--mitochondrial_chromosome", dest="mitochondrial_chromosome", required=True, type=str, help="The name of the mitochondrial chromosome. If there is no mitochondria just put 'no_mitochondria'. If there is more than one mitochindrial scaffold, provide them as comma-sepparated IDs, like '--mitochondrial_chromosome chr_mito_1,chr_mito_2'.")
+parser.add_argument("--merged_vcf", dest="merged_vcf", required=True, type=str, help="A .vcf file with the small variant calls. It may be the 'merged_vcfs_allVars_ploidy<ploidy>.vcf' output from the module 'call_small_variants'")
+parser.add_argument("-gff", "--gff-file", dest="gff", required=True, help="path to the GFF3 annotation of the reference genome.")
+parser.add_argument("-mcode", "--mitochondrial_code", dest="mitochondrial_code", required=True, type=int, help="The code of the NCBI mitochondrial genetic code. For yeasts it is 3 ('-mcode 3'). You can find the numbers for your species here https://www.ncbi.nlm.nih.gov/Taxonomy/Utils/wprintgc.cgi. The information of this website may be wrong, so you may want to double check with the literature.")
+parser.add_argument("-gcode", "--gDNA_code", dest="gDNA_code", required=True, type=int, help="The code of the NCBI gDNA genetic code. You can find the numbers for your species here https://www.ncbi.nlm.nih.gov/Taxonomy/Utils/wprintgc.cgi . For example, for C. albicans it is 12 (-gcode 12), since it has an alternative genetic code. The information of this website may be wrong, so you may want to double check with the literature.")
+
+# optional args
+parser.add_argument("--min_chromosome_len", dest="min_chromosome_len", default=100000, type=int, help="The minimum length to consider chromosomes from the provided fasta for calculating the window length (used in may steps of perSVade to parallelize across fractions of the genome).")
+parser.add_argument("--replace", dest="replace", action="store_true", help="Re-run all the steps by deleting the output directory.")
+parser.add_argument("--verbose", dest="verbose", action="store_true", default=False, help="Print a verbose log.")
+
+# resources
+parser.add_argument("--fraction_available_mem", dest="fraction_available_mem", default=None, type=float, help="This pipeline calculates the available RAM for several steps, and it may not work well in some systems (i.e. HPC clusters). This parameter allows you to correct possible errors. If --fraction_available_mem is not provided (default behavior), this pipeline will calculate the available RAM by filling the memory, which may give errors. If you want to use all the available memory you should specify --fraction_available_mem 1.0. See the FAQ 'How does the --fraction_available_mem work?' from https://github.com/Gabaldonlab/perSVade/wiki/8.-FAQs for more info.")
+
+parser.add_argument("-thr", "--threads", dest="threads", default=16, type=int, help="Number of threads, Default: 16")
+parser.add_argument("--fractionRAM_to_dedicate", dest="fractionRAM_to_dedicate", type=float,  default=0.5, help="This is the fraction of the available memory that will be used by several java programs that require a heap size. By default we set this to 0.5 to not overload the system.")
+
+opt = parser.parse_args()
+
+####################################
+####################################
+####################################
+
+#################################
+########### MAIN CODE ###########
+#################################
+
+# remove outdir if replace, and set replace to False
+if opt.replace is True: fun.delete_folder(opt.outdir)
+opt.replace = False
+
+# make the outdir
+fun.make_folder(opt.outdir)
+
+# exit if the final file exists
+final_file = "%s/perSVade_finished_file.txt"%opt.outdir
+
+if not fun.file_is_empty(final_file): 
+    fun.print_with_runtime("WARNING: %s exists, suggesting that perSVade was already  run in this folder. Remove this file if you want this command to work. Exiting..."%final_file)
+    sys.exit(0)
+
+# define the start time
+start_time = time.time()
+
+# define the verbosity. If opt.verbose is False, none of the 'print' statements of sv_functions will have an effect
+fun.printing_verbose_mode = opt.verbose
+
+# define a file that will contain all the cmds ran
+fun.log_file_all_cmds = "%s/all_cmds.txt"%opt.outdir
+if fun.file_is_empty(fun.log_file_all_cmds): open(fun.log_file_all_cmds, "w").write("# These are all the cmds:\n")
+
+# get sample name
+sample_name = fun.get_sampleName_from_perSVade_outdir(opt.outdir)
+
+####### SET RESOURCES ########
+
+# define the fraction of RAM to dedicate
+if opt.fractionRAM_to_dedicate>0.95: raise ValueError("You are using >95 pct of the systems RAM, which is dangerous")
+fun.fractionRAM_to_dedicate = opt.fractionRAM_to_dedicate
+
+# define the fraction of available mem
+fun.fraction_available_mem = opt.fraction_available_mem
+if opt.fraction_available_mem is None: fun.print_with_runtime("WARNING: You did not specify how much RAM should be used through --fraction_available_mem. perSVade will calculate this by filling the memory, which may be dangerous. If you want to use all the allocated memory you should specify --fraction_available_mem 1.0")
+
+# print the available resources
+real_available_threads = fun.get_available_threads(opt.outdir)
+if opt.threads>real_available_threads:  fun.print_with_runtime("WARNING: There are %i available threads, and you required %i."%(real_available_threads, opt.threads))
+
+available_Gb_RAM = fun.get_availableGbRAM(opt.outdir)
+fun.print_with_runtime("Running perSVade %s into %s with %.3f Gb of RAM and %i cores"%(module_name, opt.outdir, available_Gb_RAM, opt.threads))
+
+##############################
+
+# prepare the reference genome
+opt.ref, reference_genome_dir = fun.prepare_reference_genome_for_perSVade(opt.ref, opt.outdir, opt.mitochondrial_chromosome, None, opt.replace)
+fun.window_l = fun.get_perSVade_window_l(opt.ref, opt.mitochondrial_chromosome, opt.min_chromosome_len)
+
+# prepare the gff
+replaced_gff = "%s/reference_genome_features.gff"%reference_genome_dir
+fun.soft_link_files(opt.gff, replaced_gff)
+opt.gff = replaced_gff
+
+# move the vcf in the outdir
+merged_vcf = "%s/%s"%(opt.outdir, fun.get_file(opt.merged_vcf))
+fun.soft_link_files(opt.merged_vcf, merged_vcf)
+opt.merged_vcf = merged_vcf
+
+# get the corrected gff
+correct_gff, gff_with_biotype = fun.get_correct_gff_and_gff_with_biotype(opt.gff, replace=opt.replace)
+
+# get the annotated vcf
+fun.print_with_runtime("Running VEP to annotate variants")
+annotated_vcf = fun.run_vep_parallel(opt.merged_vcf, opt.ref, gff_with_biotype, opt.mitochondrial_chromosome, opt.mitochondrial_code, opt.gDNA_code, threads=opt.threads, replace=opt.replace)
+
+# get as df
+df_vep = pd.read_csv(annotated_vcf, sep="\t")
+
+# get variant annotation table
+fun.print_with_runtime("Adding information to the annotated variants")
+
+# add the ref and alt 
+df_vep["ref"] = df_vep["#Uploaded_variation"].apply(lambda x: x.split("_")[-1].split("/")[-2])
+df_vep["alt"] = df_vep["#Uploaded_variation"].apply(lambda x: x.split("_")[-1].split("/")[-1])
+
+# add whether it is a snp
+df_vep['is_snp'] = (df_vep["ref"].apply(len)==1) & (df_vep["ref"]!="-") & (df_vep["alt"].apply(len)==1) & (df_vep["alt"]!="-")
+
+# add whether it is protein altering
+def get_nan_to_str(cons):
+    if pd.isna(cons): return "-"
+    else: return cons
+
+df_vep["Consequence"] = df_vep.Consequence.apply(get_nan_to_str)
+df_vep["consequences_set"] = df_vep.Consequence.apply(lambda x: set(str(x).split(",")))
+df_vep["is_protein_altering"] = df_vep.Consequence.apply(fun.get_is_protein_altering_consequence)
+
+# generate a table that has all the variant annotation info
+varSpec_fields = ['#Uploaded_variation', 'Gene', 'Feature', 'Feature_type', 'Consequence', 'cDNA_position', 'CDS_position', 'Protein_position', 'Amino_acids', 'Codons', 'is_snp', 'is_protein_altering']
+
+# write the final vars
+fun.print_with_runtime("write annotations")
+variantAnnotation_table = "%s/annotated_variants.tab"%opt.outdir
+df_vep[varSpec_fields].drop_duplicates().to_csv(variantAnnotation_table, sep="\t", header=True, index=False)
+
+#################################
+#################################
+#################################
+
+
+##################################
+########## CLEAN OUTPUT ##########
+##################################
+
+# clean
+fun.print_with_runtime("Cleaning")
+
+# clean
+files_folder_to_keep = {"all_cmds.txt", "annotated_variants.tab"}
+for f in os.listdir(opt.outdir): 
+    file_path = "%s/%s"%(opt.outdir, f)
+    if f not in files_folder_to_keep: fun.delete_file_or_folder(file_path)
+
+# wite final file
+fun.generate_final_file_report_one_module(final_file, start_time, time.time())
+
+# print the message
+fun.print_with_runtime("perSVade %s finished correctly"%module_name)
+
+##################################
+##################################
+##################################
