@@ -1,2 +1,2 @@
 running pipeline
-srun -n 17 -O /apps/GREASY/2.2.3/INTEL/IMPI/bin/greasybin /gpfs/projects/bsc40/mschikora/scripts/perSVade/perSVade_repository/testing/cross_accuracy_calculations_realSVs_onlyHuman_trainOnSimulationsDatasets/cross_accuracy_human/cross_accuracy_files/jobs.getting_crossAccuracy
+srun -n 49 -O /apps/GREASY/2.2.3/INTEL/IMPI/bin/greasybin /gpfs/projects/bsc40/mschikora/scripts/perSVade/perSVade_repository/testing/cross_accuracy_calculations_realSVs_onlyHuman_trainOnSimulationsDatasets/cross_accuracy_human/cross_accuracy_files/jobs.getting_crossAccuracy

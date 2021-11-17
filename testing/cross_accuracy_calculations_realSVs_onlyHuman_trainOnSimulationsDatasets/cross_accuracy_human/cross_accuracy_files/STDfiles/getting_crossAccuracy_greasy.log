@@ -1,42 +1,102 @@
-[2021-11-17 15:02:58] Start greasing /gpfs/projects/bsc40/mschikora/scripts/perSVade/perSVade_repository/testing/cross_accuracy_calculations_realSVs_onlyHuman_trainOnSimulationsDatasets/cross_accuracy_human/cross_accuracy_files/jobs.getting_crossAccuracy
-[2021-11-17 15:02:58] INFO: File with 138 correct Tasks
-[2021-11-17 15:02:58] INFO: MPI engine is ready to run with 16 workers
-[2021-11-17 15:02:58] INFO: Current Working Dir /gpfs/projects/bsc40/current/mschikora/scripts/perSVade/perSVade_repository/testing/cross_accuracy_calculations_realSVs_onlyHuman_trainOnSimulationsDatasets/cross_accuracy_human/cross_accuracy_files
-[2021-11-17 15:02:58] INFO: Run on 8 nodes
-[2021-11-17 15:02:58] INFO: Job ID 18494219
-[2021-11-17 15:02:58] INFO: Allocating task 1 located in line 1 to Worker 1
-[2021-11-17 15:02:58] INFO: Allocating task 2 located in line 2 to Worker 2
-[2021-11-17 15:02:58] INFO: Allocating task 3 located in line 3 to Worker 3
-[2021-11-17 15:02:58] INFO: Allocating task 4 located in line 4 to Worker 4
-[2021-11-17 15:02:58] INFO: Allocating task 5 located in line 5 to Worker 5
-[2021-11-17 15:02:58] INFO: Allocating task 6 located in line 6 to Worker 6
-[2021-11-17 15:02:58] INFO: Allocating task 7 located in line 7 to Worker 7
-[2021-11-17 15:02:58] INFO: Allocating task 8 located in line 8 to Worker 8
-[2021-11-17 15:02:58] INFO: Allocating task 9 located in line 9 to Worker 9
-[2021-11-17 15:02:58] INFO: Allocating task 10 located in line 10 to Worker 10
-[2021-11-17 15:02:58] INFO: Allocating task 11 located in line 11 to Worker 11
-[2021-11-17 15:02:58] INFO: Worker 4 on node s18r1b42
-[2021-11-17 15:02:58] INFO: Worker 6 on node s18r1b43
-[2021-11-17 15:02:58] INFO: Worker 11 on node s19r2b35
-[2021-11-17 15:02:58] INFO: Allocating task 12 located in line 12 to Worker 12
-[2021-11-17 15:02:58] INFO: Worker 3 on node s18r1b42
-[2021-11-17 15:02:58] INFO: Worker 7 on node s18r1b44
-[2021-11-17 15:02:58] INFO: Worker 10 on node s18r1b45
-[2021-11-17 15:02:58] INFO: Worker 5 on node s18r1b43
-[2021-11-17 15:02:58] INFO: Worker 2 on node s18r1b28
-[2021-11-17 15:02:58] INFO: Worker 8 on node s18r1b44
-[2021-11-17 15:02:58] INFO: Worker 9 on node s18r1b45
-[2021-11-17 15:02:58] INFO: Worker 12 on node s19r2b35
-[2021-11-17 15:02:58] INFO: Allocating task 13 located in line 13 to Worker 13
-[2021-11-17 15:02:58] INFO: Worker 1 on node s18r1b28
-[2021-11-17 15:02:58] INFO: Allocating task 14 located in line 14 to Worker 14
-[2021-11-17 15:02:58] INFO: Allocating task 15 located in line 15 to Worker 15
-[2021-11-17 15:02:58] INFO: Allocating task 16 located in line 16 to Worker 16
-[2021-11-17 15:02:58] INFO: Worker 13 on node s19r2b36
-[2021-11-17 15:02:58] INFO: Worker 14 on node s19r2b36
-[2021-11-17 15:02:58] INFO: Worker 15 on node s19r2b37
-[2021-11-17 15:02:58] INFO: Worker 16 on node s19r2b37
-[2021-11-17 15:04:16] ERROR: Caught TERM signal
-[2021-11-17 15:04:16] INFO: Creating restart file /gpfs/projects/bsc40/current/mschikora/scripts/perSVade/perSVade_repository/testing/cross_accuracy_calculations_realSVs_onlyHuman_trainOnSimulationsDatasets/cross_accuracy_human/cross_accuracy_files/jobs.getting_crossAccuracy-18494219.rst...
-[2021-11-17 15:04:16] INFO: Restart file created
-[2021-11-17 15:04:16] ERROR: Greasy was interrupted. Check restart & log files
+[2021-11-17 15:09:01] Start greasing /gpfs/projects/bsc40/mschikora/scripts/perSVade/perSVade_repository/testing/cross_accuracy_calculations_realSVs_onlyHuman_trainOnSimulationsDatasets/cross_accuracy_human/cross_accuracy_files/jobs.getting_crossAccuracy
+[2021-11-17 15:09:01] INFO: File with 138 correct Tasks
+[2021-11-17 15:09:01] INFO: MPI engine is ready to run with 48 workers
+[2021-11-17 15:09:01] INFO: Current Working Dir /gpfs/projects/bsc40/current/mschikora/scripts/perSVade/perSVade_repository/testing/cross_accuracy_calculations_realSVs_onlyHuman_trainOnSimulationsDatasets/cross_accuracy_human/cross_accuracy_files
+[2021-11-17 15:09:01] INFO: Run on 8 nodes
+[2021-11-17 15:09:01] INFO: Job ID 18494252
+[2021-11-17 15:09:01] INFO: Allocating task 1 located in line 1 to Worker 1
+[2021-11-17 15:09:01] INFO: Allocating task 2 located in line 2 to Worker 2
+[2021-11-17 15:09:01] INFO: Allocating task 3 located in line 3 to Worker 3
+[2021-11-17 15:09:01] INFO: Allocating task 4 located in line 4 to Worker 4
+[2021-11-17 15:09:01] INFO: Allocating task 5 located in line 5 to Worker 5
+[2021-11-17 15:09:01] INFO: Allocating task 6 located in line 6 to Worker 6
+[2021-11-17 15:09:01] INFO: Allocating task 7 located in line 7 to Worker 7
+[2021-11-17 15:09:01] INFO: Worker 1 on node s01r2b29
+[2021-11-17 15:09:01] INFO: Worker 2 on node s01r2b29
+[2021-11-17 15:09:01] INFO: Worker 3 on node s01r2b29
+[2021-11-17 15:09:01] INFO: Worker 5 on node s01r2b29
+[2021-11-17 15:09:01] INFO: Worker 4 on node s01r2b29
+[2021-11-17 15:09:01] INFO: Worker 6 on node s01r2b29
+[2021-11-17 15:09:01] INFO: Allocating task 8 located in line 8 to Worker 8
+[2021-11-17 15:09:01] INFO: Allocating task 9 located in line 9 to Worker 9
+[2021-11-17 15:09:01] INFO: Allocating task 10 located in line 10 to Worker 10
+[2021-11-17 15:09:01] INFO: Allocating task 11 located in line 11 to Worker 11
+[2021-11-17 15:09:01] INFO: Allocating task 12 located in line 12 to Worker 12
+[2021-11-17 15:09:01] INFO: Allocating task 13 located in line 13 to Worker 13
+[2021-11-17 15:09:01] INFO: Allocating task 14 located in line 14 to Worker 14
+[2021-11-17 15:09:01] INFO: Allocating task 15 located in line 15 to Worker 15
+[2021-11-17 15:09:01] INFO: Allocating task 16 located in line 16 to Worker 16
+[2021-11-17 15:09:01] INFO: Allocating task 17 located in line 17 to Worker 17
+[2021-11-17 15:09:01] INFO: Allocating task 18 located in line 18 to Worker 18
+[2021-11-17 15:09:01] INFO: Allocating task 19 located in line 19 to Worker 19
+[2021-11-17 15:09:01] INFO: Allocating task 20 located in line 20 to Worker 20
+[2021-11-17 15:09:01] INFO: Worker 19 on node s11r1b10
+[2021-11-17 15:09:01] INFO: Worker 20 on node s11r1b10
+[2021-11-17 15:09:01] INFO: Allocating task 21 located in line 21 to Worker 21
+[2021-11-17 15:09:01] INFO: Worker 12 on node s11r1b08
+[2021-11-17 15:09:01] INFO: Worker 13 on node s11r1b09
+[2021-11-17 15:09:01] INFO: Worker 14 on node s11r1b09
+[2021-11-17 15:09:01] INFO: Worker 16 on node s11r1b09
+[2021-11-17 15:09:01] INFO: Worker 21 on node s11r1b10
+[2021-11-17 15:09:01] INFO: Allocating task 22 located in line 22 to Worker 22
+[2021-11-17 15:09:01] INFO: Worker 10 on node s11r1b08
+[2021-11-17 15:09:01] INFO: Worker 17 on node s11r1b09
+[2021-11-17 15:09:01] INFO: Worker 22 on node s11r1b10
+[2021-11-17 15:09:01] INFO: Allocating task 23 located in line 23 to Worker 23
+[2021-11-17 15:09:01] INFO: Worker 8 on node s11r1b08
+[2021-11-17 15:09:01] INFO: Worker 15 on node s11r1b09
+[2021-11-17 15:09:01] INFO: Worker 18 on node s11r1b09
+[2021-11-17 15:09:01] INFO: Worker 23 on node s11r1b10
+[2021-11-17 15:09:01] INFO: Allocating task 24 located in line 24 to Worker 24
+[2021-11-17 15:09:01] INFO: Worker 7 on node s11r1b08
+[2021-11-17 15:09:01] INFO: Worker 11 on node s11r1b08
+[2021-11-17 15:09:01] INFO: Worker 9 on node s11r1b08
+[2021-11-17 15:09:01] INFO: Allocating task 25 located in line 25 to Worker 25
+[2021-11-17 15:09:01] INFO: Worker 24 on node s11r1b10
+[2021-11-17 15:09:01] INFO: Allocating task 26 located in line 26 to Worker 26
+[2021-11-17 15:09:01] INFO: Worker 25 on node s11r1b11
+[2021-11-17 15:09:01] INFO: Allocating task 27 located in line 27 to Worker 27
+[2021-11-17 15:09:01] INFO: Worker 26 on node s11r1b11
+[2021-11-17 15:09:01] INFO: Worker 27 on node s11r1b11
+[2021-11-17 15:09:01] INFO: Allocating task 28 located in line 28 to Worker 28
+[2021-11-17 15:09:01] INFO: Allocating task 29 located in line 29 to Worker 29
+[2021-11-17 15:09:01] INFO: Allocating task 30 located in line 30 to Worker 30
+[2021-11-17 15:09:01] INFO: Allocating task 31 located in line 31 to Worker 31
+[2021-11-17 15:09:01] INFO: Allocating task 32 located in line 32 to Worker 32
+[2021-11-17 15:09:01] INFO: Allocating task 33 located in line 33 to Worker 33
+[2021-11-17 15:09:01] INFO: Allocating task 34 located in line 34 to Worker 34
+[2021-11-17 15:09:01] INFO: Allocating task 35 located in line 35 to Worker 35
+[2021-11-17 15:09:01] INFO: Allocating task 36 located in line 36 to Worker 36
+[2021-11-17 15:09:01] INFO: Allocating task 37 located in line 37 to Worker 37
+[2021-11-17 15:09:01] INFO: Allocating task 38 located in line 38 to Worker 38
+[2021-11-17 15:09:01] INFO: Allocating task 39 located in line 39 to Worker 39
+[2021-11-17 15:09:01] INFO: Allocating task 40 located in line 40 to Worker 40
+[2021-11-17 15:09:01] INFO: Allocating task 41 located in line 41 to Worker 41
+[2021-11-17 15:09:01] INFO: Worker 28 on node s11r1b11
+[2021-11-17 15:09:01] INFO: Worker 39 on node s11r1b15
+[2021-11-17 15:09:01] INFO: Worker 41 on node s11r1b15
+[2021-11-17 15:09:01] INFO: Worker 31 on node s11r1b12
+[2021-11-17 15:09:01] INFO: Worker 34 on node s11r1b12
+[2021-11-17 15:09:01] INFO: Allocating task 42 located in line 42 to Worker 42
+[2021-11-17 15:09:01] INFO: Allocating task 43 located in line 43 to Worker 43
+[2021-11-17 15:09:01] INFO: Worker 30 on node s11r1b11
+[2021-11-17 15:09:01] INFO: Worker 40 on node s11r1b15
+[2021-11-17 15:09:01] INFO: Worker 42 on node s11r1b15
+[2021-11-17 15:09:01] INFO: Worker 32 on node s11r1b12
+[2021-11-17 15:09:01] INFO: Worker 43 on node s11r1b17
+[2021-11-17 15:09:01] INFO: Allocating task 44 located in line 44 to Worker 44
+[2021-11-17 15:09:01] INFO: Worker 29 on node s11r1b11
+[2021-11-17 15:09:01] INFO: Worker 37 on node s11r1b15
+[2021-11-17 15:09:01] INFO: Worker 35 on node s11r1b12
+[2021-11-17 15:09:01] INFO: Worker 44 on node s11r1b17
+[2021-11-17 15:09:01] INFO: Allocating task 45 located in line 45 to Worker 45
+[2021-11-17 15:09:01] INFO: Worker 38 on node s11r1b15
+[2021-11-17 15:09:01] INFO: Worker 36 on node s11r1b12
+[2021-11-17 15:09:01] INFO: Worker 33 on node s11r1b12
+[2021-11-17 15:09:02] INFO: Worker 45 on node s11r1b17
+[2021-11-17 15:09:02] INFO: Allocating task 46 located in line 46 to Worker 46
+[2021-11-17 15:09:02] INFO: Allocating task 47 located in line 47 to Worker 47
+[2021-11-17 15:09:02] INFO: Allocating task 48 located in line 48 to Worker 48
+[2021-11-17 15:09:02] INFO: Worker 46 on node s11r1b17
+[2021-11-17 15:09:02] INFO: Worker 48 on node s11r1b17
+[2021-11-17 15:09:02] INFO: Worker 47 on node s11r1b17

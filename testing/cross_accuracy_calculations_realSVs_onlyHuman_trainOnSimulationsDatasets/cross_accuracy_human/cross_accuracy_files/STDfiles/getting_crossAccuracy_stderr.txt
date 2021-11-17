@@ -1,4 +1,1 @@
 load greasy/latest (PATH) 
-srun: Job step aborted: Waiting up to 32 seconds for job step to finish.
-slurmstepd: error: *** JOB 18494219 ON s18r1b28 CANCELLED AT 2021-11-17T15:04:16 ***
-slurmstepd: error: *** STEP 18494219.0 ON s18r1b28 CANCELLED AT 2021-11-17T15:04:16 ***

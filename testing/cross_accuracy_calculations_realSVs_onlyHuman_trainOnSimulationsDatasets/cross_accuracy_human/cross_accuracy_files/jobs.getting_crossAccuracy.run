@@ -6,8 +6,8 @@
 #SBATCH --workdir=/gpfs/projects/bsc40/mschikora/scripts/perSVade/perSVade_repository/testing/cross_accuracy_calculations_realSVs_onlyHuman_trainOnSimulationsDatasets/cross_accuracy_human/cross_accuracy_files
 #SBATCH --time=02:00:00
 #SBATCH --qos=debug
-#SBATCH --cpus-per-task=24
-#SBATCH --ntasks=16
+#SBATCH --cpus-per-task=8
+#SBATCH --ntasks=48
 
 
 module load greasy
