@@ -1,0 +1,23 @@
+ARG from_tag=$from_tag
+
+# get the image
+FROM mikischikora/persvade:$from_tag
+
+# define the working directory (creates the folder /perSVade inside the virtual machine)
+WORKDIR /perSVade
+
+# copy all the necessary files
+COPY ./scripts ./scripts
+COPY ./installation/test_installation ./installation/test_installation 
+
+# get all the permissions
+RUN chmod 755 /perSVade/scripts/*
+RUN chmod 755 /perSVade/installation/*
+RUN chmod -R 777 /perSVade/installation/test_installation/
+
+# test that you can run perSVade
+RUN source /opt/conda/etc/profile.d/conda.sh && conda activate perSVade_env && python /perSVade/scripts/perSVade --help
+RUN echo 'SUCCESS! perSVade can be ran correctly'
+
+# activate perSVade's environment on running. "conda run --no-capture-output" would be to skip the generation of STDs
+ENTRYPOINT ["conda", "run", "--no-capture-output", "--live-stream", "-n", "perSVade_env"] 

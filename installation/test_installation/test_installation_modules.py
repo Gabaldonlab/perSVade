@@ -57,7 +57,7 @@ sim_reads1 = "%s/all_reads1.correct.fq.gz"%testing_inputs_dir
 sim_reads2 = "%s/all_reads2.correct.fq.gz"%testing_inputs_dir
 
 # define a close_shortReads_table
-close_shortReads_table_df = fun.pd.DataFrame({I : {"sampleID":"sample_%i"%I, "short_reads1":sim_reads1, "short_reads2":sim_reads2} for I in range(2)}).transpose()
+close_shortReads_table_df = fun.pd.DataFrame({I : {"sampleID":"sample_%i"%I, "short_reads1":sim_reads1, "short_reads2":sim_reads2} for I in range(1)}).transpose()
 close_shortReads_table = "%s/close_shortReads_table.tab"%testing_outputs_dir
 fun.save_df_as_tab(close_shortReads_table_df, close_shortReads_table)
 
@@ -106,6 +106,7 @@ threads = fun.multiproc.cpu_count()
 ########################################
 
 ######## TEST DIFFERENT MODULES #########
+fun.print_with_runtime("Running modules")
 
 # align reads with SVs
 outdir_align_reads_SVs = "%s/align_reads_sim_SVs"%testing_outputs_dir

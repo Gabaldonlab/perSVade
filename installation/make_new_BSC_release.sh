@@ -35,4 +35,4 @@ cd $code_dir
 # install extra dependencies
 ./installation/install_standalone_packages.sh
 
-echo "perSVade version $version was created. You can now test it with 'cd /gpfs/projects/bsc40/mschikora/scripts/perSVade/releases/perSVade-$version' and 'installation/test_installation/test_installation.py &' "
+echo "perSVade version $version was created. You can now test it in the cluster with 'cd /gpfs/projects/bsc40/mschikora/scripts/perSVade/releases/perSVade-$version' and 'installation/test_installation/test_installation_modules.py &' "

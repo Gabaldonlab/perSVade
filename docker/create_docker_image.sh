@@ -70,7 +70,7 @@ check_image_exists $final_image || {
 # check that the image works
 echo 'Testing the image'
 mkdir $PWD/docker/perSVade_testing_outputs_$tag || echo 'perSVade_testing_outputs already exists'
-docker run -v $PWD/docker/perSVade_testing_outputs_$tag:/perSVade/installation/test_installation/testing_outputs mikischikora/persvade:$tag python -u /perSVade/installation/test_installation/test_installation.py
+docker run -v $PWD/docker/perSVade_testing_outputs_$tag:/perSVade/installation/test_installation/testing_outputs mikischikora/persvade:$tag python -u /perSVade/installation/test_installation/test_installation_modules.py
 
 # success message
 echo "SUCCESS: You could create the docker image of perSVade. You can publish this image with docker push mikischikora/persvade:$tag. You can then create a singularity image with singularity build --docker-login ./mikischikora_persvade_$tag.sif docker://mikischikora/persvade:$tag"
