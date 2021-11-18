@@ -10,6 +10,14 @@ WORKDIR /perSVade
 COPY ./scripts ./scripts
 COPY ./installation/test_installation ./installation/test_installation 
 
+# make the following commands to run from the environment perSVade_env
+SHELL ["conda", "run", "-n", "perSVade_env", "/bin/bash", "-e", "-c"]
+
+# install rsync
+RUN conda install -c conda-forge rsync=3.2.3
+RUN rsync --help
+RUN echo 'rsync was installed'
+
 # get all the permissions
 RUN chmod 755 /perSVade/scripts/*
 RUN chmod 755 /perSVade/installation/*

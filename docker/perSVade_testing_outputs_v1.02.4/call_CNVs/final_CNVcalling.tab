@@ -1,2 +1,0 @@
-chromosome	merged_relative_CN	start	end	CNVid	median_coverage	median_coverage_corrected	median_relative_CN_AneuFinder	median_relative_CN_CONY	median_relative_CN_HMMcopy	SVTYPE
-ChrA_C_glabrata_CBS138	0.0	16000	17000	0	0.0	0.0	0.5	0.0	0.0	DEL
