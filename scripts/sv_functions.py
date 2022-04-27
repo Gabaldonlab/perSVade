@@ -9419,7 +9419,7 @@ def get_benchmarking_df_for_testSVs_from_trainSV_filterSets(test_SVdict, outdir,
 ################# GRAPHICS FUNCTIONS #################
 ######################################################
 
-def plot_clustermap_with_annotation(df, row_colors_df, col_colors_df, filename, title="clustermap", col_cluster=False, row_cluster=False, colorbar_label="default label", adjust_position=True, legend=True, idxs_separator_pattern="_", texts_to_strip={"L001"}, default_label_legend="control", df_annotations=None, cmap=sns.color_palette("RdBu_r", 50), ylabels_graphics_df=None, grid_lines=True, add_to_legend_x=1, figsize=None, multiplier_width_colorbars=1, vmax=None, vmin=None, size_annot=8):
+def plot_clustermap_with_annotation(df, row_colors_df, col_colors_df, filename, title="clustermap", col_cluster=False, row_cluster=False, colorbar_label="default label", adjust_position=True, legend=True, idxs_separator_pattern="_", texts_to_strip={"L001"}, default_label_legend="control", df_annotations=None, cmap=sns.color_palette("RdBu_r", 50), ylabels_graphics_df=None, grid_lines=True, add_to_legend_x=1, figsize=None, multiplier_width_colorbars=1, vmax=None, vmin=None, size_annot=8, color_bar_x0_position_add=0):
 
     """Takes a df were the index is the annotation and the cols are samples. It will be saved under filename. ylabels_graphics_df can be a df containing fontweight and color for each index value in df"""
 
@@ -9486,7 +9486,7 @@ def plot_clustermap_with_annotation(df, row_colors_df, col_colors_df, filename, 
         rdendro_pos = cm.ax_row_dendrogram.get_position()
         height_colorbar = hm_pos.height/2
         width_colorbar = rc_pos.width/2
-        cm.cax.set_position([rdendro_pos.x0 - width_row_dendrogram - hm_pos.width*0.5, rdendro_pos.y0 + (rdendro_pos.height-rdendro_pos.y0)/2 - height_colorbar/2, width_colorbar, height_colorbar])
+        cm.cax.set_position([rdendro_pos.x0 - width_row_dendrogram - hm_pos.width*0.5 + color_bar_x0_position_add, rdendro_pos.y0 + (rdendro_pos.height-rdendro_pos.y0)/2 - height_colorbar/2, width_colorbar, height_colorbar])
         
         # adjust position of the col dendrogram
         cdendro_pos = cm.ax_col_dendrogram.get_position()
@@ -20367,7 +20367,7 @@ def get_other_samples_with_variant_series_writeFile(varsDF, sampleID, small_vars
 
     return final_file
 
-def get_integrated_small_vars_df_severalSamples(paths_df, outdir, ploidy, gff, run_ploidy2_ifHaploid=False, threads=4, replace=False, fields_varCall="all", fields_varAnnot="all"):
+def get_integrated_small_vars_df_severalSamples(paths_df, outdir, ploidy, gff, run_ploidy2_ifHaploid=False, threads=4, replace=False, fields_varCall="all", fields_varAnnot="all", add_overlapping_samples=False):
 
     """
     This function generates several datsets under outdir that result from the integration of several small variant callsets by perSVade. These are the arguments:
@@ -20550,6 +20550,33 @@ def get_integrated_small_vars_df_severalSamples(paths_df, outdir, ploidy, gff, r
         # check that the relative_CN is there
         if run_ploidy2_ifHaploid is True:
             if any(pd.isna(small_vars_df.relative_CN)): raise ValueError("there can't be NaNs in small_vars_df")
+
+        #### ADD THE SAMPLES THAT SHARE VARIANTS ####
+
+        # add the overlap with other samples (comma-sepparated) (only the called ones)
+        if add_overlapping_samples is True:
+
+            # map each sample to a set with the called variants
+            def get_set_variants_from_df_s(df_s): return set(df_s["#Uploaded_variation"])
+            sampleID_to_calledVariants = small_vars_df.groupby("sampleID").apply(get_set_variants_from_df_s)
+
+            # init the field of other samples
+            small_vars_df["other_samples_with_variant_called"] = ""
+
+            # map each sample that is mapping 
+            for sampleID, variants in sampleID_to_calledVariants.items():
+                bool_to_text = {True: ","+sampleID, False:""}
+                small_vars_df["other_samples_with_variant_called"] += small_vars_df["#Uploaded_variation"].isin(variants).map(bool_to_text)
+
+            # get the final set of samples
+            def get_set_other_samples_withVar(r): return set(r["other_samples_with_variant_called"].split(",")).difference({"", r["sampleID"]})
+            def convert_list_to_string(x): return ",".join(x)
+            small_vars_df["other_samples_with_variant_called"] = small_vars_df.apply(get_set_other_samples_withVar, axis=1).apply(sorted).apply(convert_list_to_string)
+
+            # overwrite small_vars_df_file_tmp
+            save_df_as_tab(small_vars_df, small_vars_df_file_tmp)
+
+        #############################################
 
         ##################################################
 

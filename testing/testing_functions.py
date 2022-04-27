@@ -15,6 +15,8 @@ import subprocess
 import itertools
 from matplotlib.lines import Line2D
 import copy as cp
+import random
+from collections import Counter
 
 # define the parent dir of the cluster or not
 ParentDir = "%s/samba"%(os.getenv("HOME")); # local
@@ -737,6 +739,121 @@ def plot_goldenSet_accuracy_barplots(df, fileprefix, accuracy_f="Fvalue", svtype
 
     fig.savefig(filename, bbox_inches='tight')
 
+
+
+def get_df_all_parameters_benchmarking_simulations(outdir_testing, outdir_testing_human, df_parameters_used):
+
+    """Gets the accuracy of all the parameters on all the simulations. df_parameters_used is the set of used parameters"""
+
+    # define file
+    processed_data_dir = "%s/processed_data"%outdir_testing; fun.make_folder(processed_data_dir)
+    df_all_parameters_benchmarking_simulations_file = "%s/df_all_parameters_benchmarking_simulations.py"%processed_data_dir
+
+    if fun.file_is_empty(df_all_parameters_benchmarking_simulations_file):
+
+        # keep
+        df_parameters_used = cp.deepcopy(df_parameters_used)
+
+        # check that all the default parameters are the same in df_parameters_used
+        parameters_fields_gridss = [k for k in df_parameters_used.keys() if k.startswith("GRIDSS")]
+        parameters_fields_clove = [k for k in df_parameters_used.keys() if k.startswith("CLOVE")]
+
+        if len(df_parameters_used[df_parameters_used.typeSimulations=="fast"][parameters_fields_gridss + parameters_fields_clove].drop_duplicates())!=1: raise ValueError("not all fast parameters are the same")
+
+        # init df
+        df_benchmark_all = pd.DataFrame()
+
+        # map each species to a type of simulations and to outdir_species_simulations
+        spName_to_typeSimulations_to_outdir_species_simulations = {spName : {typeSimulations : "%s/%s_%s/testing_Accuracy/%s"%(outdir_testing, taxID, spName, typeSimulations) for typeSimulations in ["arroundHomRegions", "uniform", "realSVs", "fast"]} for (taxID, spName, ploidy, mitochondrial_chromosome, max_coverage_sra_reads) in species_Info}
+
+        spName_to_typeSimulations_to_outdir_species_simulations["Homo_sapiens"] = {typeSimulations : "%s/testing_Accuracy/%s"%(outdir_testing_human, typeSimulations) for typeSimulations in ["uniform", "realSVs", "fast"]}
+
+        # keep appending data
+        for spName, typeSimulations_to_outdir_species_simulations in spName_to_typeSimulations_to_outdir_species_simulations.items(): 
+            for typeSimulations, outdir_species_simulations in typeSimulations_to_outdir_species_simulations.items():
+                if typeSimulations=="fast": continue
+                    
+                # define samples
+                all_sampleIDs = [x for x in os.listdir(outdir_species_simulations) if not x.startswith(".")]
+
+                # go through each sampleID
+                for sampleID in all_sampleIDs:
+                    print(spName, typeSimulations, sampleID)
+
+                    # get the df with the simulations
+                    outdir_sample = "%s/%s"%(outdir_species_simulations, sampleID)
+
+                    # load the benchmarking df, keeping only some fields
+                    df_benchmark = fun.load_object("%s/SVdetection_output/parameter_optimisation/df_benchmark_all.py"%outdir_sample).reset_index(drop=True).rename(columns={"benchmarkID":"gridss_benchmarkID"})[["filters_dict", "clove_max_rel_coverage_to_consider_del", "clove_min_rel_coverage_to_consider_dup", "gridss_benchmarkID", "svtype", "genomeID", "Fvalue", "precision", "recall", "nevents"]]
+
+      
+
+                    # add fields to be like in df_parameters_used
+                    df_benchmark["CLOVE max_rel_coverage_del"] = df_benchmark.clove_max_rel_coverage_to_consider_del
+                    df_benchmark["CLOVE min_rel_coverage_dup"] = df_benchmark.clove_min_rel_coverage_to_consider_dup
+
+                    df_benchmark_gridss = pd.DataFrame({I : fdict for I, fdict in df_benchmark.filters_dict.iteritems()}).transpose()
+                    df_benchmark_gridss = df_benchmark_gridss.rename(columns={k : "GRIDSS %s"%k for k in df_benchmark_gridss.keys()})
+
+                    for k in df_benchmark_gridss.keys(): 
+                        if any(pd.isna(df_benchmark_gridss[k])): raise ValueError("there can't be nans in %s"%k)
+
+                    if set(df_benchmark_gridss.keys())!={k for k in df_parameters_used.keys() if k.startswith("GRIDSS")}: raise ValueError("the parameters are not the same as df_parameters_used")
+
+                    df_benchmark = df_benchmark.merge(df_benchmark_gridss, left_index=True, right_index=True, validate="one_to_one")
+
+                    # keep some fields
+                    df_benchmark = df_benchmark[parameters_fields_gridss + parameters_fields_clove + ["genomeID", "gridss_benchmarkID", "svtype", "Fvalue", "precision", "recall", "nevents"]]
+
+                    # check unique
+                    if len(df_benchmark)!=len(df_benchmark.drop_duplicates()): raise ValueError("non unique df")
+
+                    # add fields
+                    df_benchmark["species"] = spName
+                    df_benchmark["typeSimulations"] = typeSimulations
+                    df_benchmark["sampleID"] = sampleID
+                    df_benchmark["GRIDSS tuple_parms"] = df_benchmark[parameters_fields_gridss].apply(tuple, axis=1)
+                    df_benchmark["CLOVE tuple_parms"] = df_benchmark[parameters_fields_clove].apply(tuple, axis=1)
+
+                    # check that you have parameters as expected
+                    print("checking")
+                    df_benchmark = df_benchmark.set_index(["genomeID", "svtype"], drop=False)
+                    svtype_to_clove_f_to_nvals = {svtype : {clove_f : len(set(df_benchmark[df_benchmark.svtype==svtype][clove_f])) for clove_f in parameters_fields_clove} for svtype in {"deletions", "tandemDuplications"}}
+
+                    for genomeID in ["simulation_1", "simulation_2"]:
+                        for svtype in sorted(set(df_benchmark.svtype)):
+
+                            # get df
+                            df_svtype = df_benchmark.loc[{(genomeID, svtype)}]
+                            if len(df_svtype)==0: raise ValueError("0 df_svtype")
+
+                            # define the number of gridss filters
+                            n_gridss_filters = len(set(df_svtype.gridss_benchmarkID))
+
+                            # depending on the svtype
+                            if svtype in {"insertions", "inversions", "translocations"}:
+
+                                # there should be unique gridss benchmarkIDs
+                                if len(df_svtype)!=n_gridss_filters: raise ValueError("there should be one line for each gridss benchmark ID")
+
+                            elif svtype in {"deletions", "tandemDuplications"}: 
+
+                                # check that there are the expected nvals of clove fields
+                                for clove_f, expected_nvals in svtype_to_clove_f_to_nvals[svtype].items():
+                                    if len(df_svtype[["gridss_benchmarkID", clove_f]].drop_duplicates())!=(expected_nvals*n_gridss_filters): raise ValueError("there should be the expected nvals")
+
+                            else: raise ValueError("invalid svtype")
+
+                    df_benchmark = df_benchmark.reset_index(drop=True)
+
+                    # add
+                    df_benchmark_all = df_benchmark_all.append(df_benchmark).reset_index(drop=True)
+
+        # save
+        fun.save_object(df_benchmark_all, df_all_parameters_benchmarking_simulations_file)
+
+    return fun.load_object(df_all_parameters_benchmarking_simulations_file)
+
 def get_used_parameters_testing_several_species(outdir_testing, outdir_testing_human):
 
     """Takes the outdir testing and outputs a df with the used parameters."""
@@ -753,7 +870,7 @@ def get_used_parameters_testing_several_species(outdir_testing, outdir_testing_h
         for typeSimulations, outdir_species_simulations in typeSimulations_to_outdir_species_simulations.items():
                 
                 # define samples
-                all_sampleIDs = [x for x in os.listdir(outdir_species_simulations)]
+                all_sampleIDs = [x for x in os.listdir(outdir_species_simulations) if not x.startswith(".")]
 
                 # go through each sampleID
                 for sampleID in all_sampleIDs:
@@ -1869,7 +1986,7 @@ def generate_heatmap_accuracy_of_parameters_on_test_samples_realSVs(df_benchmark
     df_plot = df_benchmark[(df_benchmark.svtype==svtype)]
 
     # keep only the samples where there are >=min_n_SVs
-    df_plot = get_df_benchmark_one_svtype_onlySamples_with_min_SVs(df_plot, min_n_SVs)
+    if min_n_SVs is not None: df_plot = get_df_benchmark_one_svtype_onlySamples_with_min_SVs(df_plot, min_n_SVs)
 
     # define square df
     parms_keys = ["parms_species", "parms_typeSimulations", "parms_sampleID"]
@@ -1934,7 +2051,7 @@ def generate_heatmap_accuracy_of_parameters_on_test_samples_realSVs(df_benchmark
     # define the figure size
     figsize = (int(len(df_square.columns)*0.03), int(len(df_square)*0.03))
 
-    fun.plot_clustermap_with_annotation(df_square, row_colors_df, col_colors_df, filename, title="cross accuracy", col_cluster=col_cluster, row_cluster=row_cluster, colorbar_label=accuracy_f, adjust_position=True, legend=True, idxs_separator_pattern="||||", texts_to_strip={"L001"}, default_label_legend="control", df_annotations=df_annotations, cmap=sns.color_palette("RdBu_r", 50), ylabels_graphics_df=None, grid_lines=False, figsize=figsize, multiplier_width_colorbars=multiplier_width_colorbars, vmax=1.0, vmin=0.0, size_annot=12)
+    fun.plot_clustermap_with_annotation(df_square, row_colors_df, col_colors_df, filename, title="cross accuracy", col_cluster=col_cluster, row_cluster=row_cluster, colorbar_label=accuracy_f, adjust_position=True, legend=True, idxs_separator_pattern="||||", texts_to_strip={"L001"}, default_label_legend="control", df_annotations=df_annotations, cmap=sns.color_palette("RdBu_r", 50), ylabels_graphics_df=None, grid_lines=False, figsize=figsize, multiplier_width_colorbars=multiplier_width_colorbars, vmax=1.0, vmin=0.0, size_annot=12, color_bar_x0_position_add=-1)
 
 
 
@@ -1999,6 +2116,45 @@ def get_fastqgz_from_bam(bamfile, threads=4, replace=False, already_sorted_by_re
         os.rename(reads2_tmp_gz, reads2_gz)
 
     return reads1_gz, reads2_gz
+
+
+def get_crossbenchmarking_distributions_default_and_best_onePlot(df_cross_accuracy_benchmark, fileprefix, accuracy_f="Fvalue"):
+
+    """Similar to get_crossbenchmarking_distributions_default_and_best"""
+
+    # keep only default and same sample, uniform and integrated svs
+    df_plot = df_cross_accuracy_benchmark[(df_cross_accuracy_benchmark.type_comparison.isin({"fast", "same_run_and_simulation"})) & (df_cross_accuracy_benchmark.svtype=="integrated") & (df_cross_accuracy_benchmark.test_typeSimulations=="uniform")]
+
+    # define graphics
+    sorted_species = ["Candida_glabrata", "Candida_albicans", "Cryptococcus_neoformans", "Arabidopsis_thaliana", "Drosophila_melanogaster", "Homo_sapiens"]
+
+    # add the parameters
+    typeComparison_to_newTypeComparison = {"fast":"default", "same_run_and_simulation":"optimized"}
+    df_plot["parameters"] = df_plot.type_comparison.apply(lambda x: typeComparison_to_newTypeComparison[x])
+
+    # define graphics
+    parms_to_color = {"default":"gray", "optimized":"red"}
+
+    # create small svtype
+    svtype_to_shortSVtype = { "integrated":"all"}
+    df_plot["svtype"] = df_plot.svtype.apply(lambda x: svtype_to_shortSVtype[x])
+
+    # init figure
+    fig = plt.figure(figsize=(3, 2))
+
+    # get the stripplot
+    ax = sns.stripplot(data=df_plot, x="test_species", y=accuracy_f, hue="parameters", palette=parms_to_color,  dodge=True,  linewidth=.3, edgecolor="black", size=6, alpha=.9)
+
+    # set the graphics
+    ax.set_ylim([-0.05, 1.1])
+    plt.setp(ax.get_xticklabels(), rotation=90, fontsize=10)
+    #plt.axhline(0.75, linestyle="--", linewidth=.7, color="k")
+    for x in [0.5, 1.5, 2.5, 3.5, 4.5]: plt.axvline(x, linestyle="--", linewidth=.4, color="k")
+    ax.legend(bbox_to_anchor=(1.6, 0.5), title="parameters") 
+
+    # save
+    filename = "%s_%s.pdf"%(fileprefix, accuracy_f)
+    fig.savefig(filename, bbox_inches='tight')
 
 
 def get_crossbenchmarking_distributions_default_and_best(df_cross_accuracy_benchmark, fileprefix, accuracy_f="Fvalue", width_multiplier=2.8, legend_deviation=1.9):
@@ -2270,10 +2426,20 @@ def get_crossbenchmarking_distributions_differentSetsOfParameters_realSVs_scatte
 
             #if len(df_plot)>0: ax = sns.stripplot(data=df_plot, x="test_typeSVs", y=accuracy_f, hue="training parameters", palette=trainingParmsToColor,  dodge=True,  linewidth=.01, edgecolor="gray", size=3, alpha=.75)
 
+def get_rd_float_around_point(x, range_x):
 
+    """Gets a random value in x+-range. """
 
+    # get a random float between 
+    rd_float = random.random()
+
+    # get the random float between x+-range
+    start = x-range_x
+    length = 2*range_x
+
+    return start + (length*rd_float)
             
-def get_crossbenchmarking_distributions_differentSetsOfParameters_realSVs(df_cross_accuracy_benchmark, fileprefix, accuracy_f="Fvalue", svtype="integrated", min_n_SVs=10):
+def get_crossbenchmarking_distributions_differentSetsOfParameters_realSVs(df_cross_accuracy_benchmark, fileprefix, accuracy_f="Fvalue", svtype="integrated", min_n_SVs=10, xticklabels_as_symbols=True):
 
     """This is like get_crossbenchmarking_distributions_differentSetsOfParameters but for real SVs"""
 
@@ -2284,11 +2450,10 @@ def get_crossbenchmarking_distributions_differentSetsOfParameters_realSVs(df_cro
     df_cross_accuracy_benchmark = cp.deepcopy(df_cross_accuracy_benchmark[df_cross_accuracy_benchmark.svtype==svtype])
 
     # keep only the samples with min_n_SVs
-    df_cross_accuracy_benchmark = get_df_benchmark_one_svtype_onlySamples_with_min_SVs(df_cross_accuracy_benchmark, min_n_SVs)
-
+    if min_n_SVs is not None: df_cross_accuracy_benchmark = get_df_benchmark_one_svtype_onlySamples_with_min_SVs(df_cross_accuracy_benchmark, min_n_SVs)
 
     # define parms
-    sorted_species = ["Candida_glabrata", "Candida_albicans", "Cryptococcus_neoformans", "Arabidopsis_thaliana", "Drosophila_melanogaster", "Homo_sapiens"]
+    sorted_species = [s for s in ["Candida_glabrata", "Candida_albicans", "Cryptococcus_neoformans", "Arabidopsis_thaliana", "Drosophila_melanogaster", "Homo_sapiens"] if s in set(df_cross_accuracy_benchmark.test_species)]
 
     # add the order of the type of teh comparison
     sorted_typeComparisons = ["fast", "different_species", "same_species", "same_sample"]
@@ -2296,7 +2461,8 @@ def get_crossbenchmarking_distributions_differentSetsOfParameters_realSVs(df_cro
     df_cross_accuracy_benchmark["type_comparison_I"] = df_cross_accuracy_benchmark.type_comparison.apply(lambda x: typeComparison_to_orderI[x])
 
     # define the type of training simulations
-    sorted_training_typeSim = ["uniform", "realSVs", "arroundHomRegions"]
+    #sorted_training_typeSim = ["uniform", "realSVs", "arroundHomRegions"]
+    sorted_training_typeSim = ["uniform", "realSVs"]
 
     # add a shorter to type comparison
     typeComparison_to_newTypeComparison = {"fast":"default", "different_species": "different spp", "same_species":"same spp", "same_sample":"same sample"}
@@ -2312,9 +2478,9 @@ def get_crossbenchmarking_distributions_differentSetsOfParameters_realSVs(df_cro
 
     # init fig
     nrows = len(sorted_species)
-    ncols = 3
+    ncols = len(sorted_training_typeSim)
     I = 1
-    fig = plt.figure(figsize=(ncols*0.8, nrows*1.8))
+    fig = plt.figure(figsize=(ncols*1.2, nrows*2.5))
 
 
     for Ir, test_species in enumerate(sorted_species):
@@ -2322,13 +2488,12 @@ def get_crossbenchmarking_distributions_differentSetsOfParameters_realSVs(df_cro
         # define the ylim
         df_species =  df_cross_accuracy_benchmark[(df_cross_accuracy_benchmark.test_species==test_species)].sort_values(by=["type_comparison_I"])
         #ylim = [min(df_species[accuracy_f])-0.05, max(df_species[accuracy_f])+0.05]
-        ylim = [-0.05, 1.05]
+        ylim = [-0.01, 1.01]
 
         # print the number of events of each sample
         if test_species=="Homo_sapiens": field_nevents = "nevents"
         else: field_nevents = "nevents_highConf"
         df_species[field_nevents] = df_species[field_nevents].apply(int)
-
         print(df_species[["test_species", "test_sampleID", field_nevents]].drop_duplicates())
 
         for Ic, parms_typeSim in enumerate(sorted_training_typeSim):
@@ -2367,6 +2532,10 @@ def get_crossbenchmarking_distributions_differentSetsOfParameters_realSVs(df_cro
                 parm_from = sorted_training_parameters[Ifrom]
                 parm_to = sorted_training_parameters[Ito]
 
+                # redefine the Ito and Ifrom with random vals
+                #Ifrom = cp.deepcopy(get_rd_float_around_point(Ifrom, 0.2))
+                #Ito = cp.deepcopy(get_rd_float_around_point(Ito, 0.2))
+
                 # go through all samples
                 for sampleID in set(df_plot.test_sampleID):
                     
@@ -2382,7 +2551,11 @@ def get_crossbenchmarking_distributions_differentSetsOfParameters_realSVs(df_cro
                             #from_x = np.mean(np.array(ax.collections[Ifrom].get_offsets()).T[0])
                             #to_x = np.mean(np.array(ax.collections[Ito].get_offsets()).T[0])
 
-                            plt.plot([Ifrom, Ito], [from_y, to_y], linestyle="-", linewidth=.7, color=sampleID_to_color[sampleID], alpha=.8)
+                            # plot line
+                            plt.plot([Ifrom, Ito], [from_y, to_y], linestyle="-", linewidth=.3, color=sampleID_to_color[sampleID], alpha=.5)
+
+                            # plor points
+                            plt.scatter([Ifrom, Ito], [from_y, to_y], color=sampleID_to_color[sampleID], alpha=.4, s=4, marker="o")
 
             # set the ylims
             ax.set_ylim(ylim)
@@ -2391,13 +2564,17 @@ def get_crossbenchmarking_distributions_differentSetsOfParameters_realSVs(df_cro
             for y in [0.5, 0.75]: plt.axhline(y, color="gray", linestyle="--", linewidth=.7)
 
             # title for the first row
-            if Ir==0: ax.set_title(traininTypeSim_to_correctName[parms_typeSim],  rotation=75)
+            if Ir==0: 
+                if Ic==0: title = "                   training parameters\n%s"%traininTypeSim_to_correctName[parms_typeSim]
+                else: title = traininTypeSim_to_correctName[parms_typeSim]
+                ax.set_title(title,  rotation=0)
 
             # ylabel (only first col)
             if Ic==0:
 
-                if Ir==3: ax.set_ylabel("%s\n%s. %s"%(accuracy_f, test_species.split("_")[0][0], test_species.split("_")[1]))
-                else: ax.set_ylabel("%s. %s"%(test_species.split("_")[0][0], test_species.split("_")[1]))
+                #if Ir==3: ax.set_ylabel("%s\n%s. %s"%(accuracy_f, test_species.split("_")[0][0], test_species.split("_")[1]))
+                #else: ax.set_ylabel("%s. %s"%(test_species.split("_")[0][0], test_species.split("_")[1]))
+                ax.set_ylabel("%s\n%s. %s"%(accuracy_f, test_species.split("_")[0][0], test_species.split("_")[1]))
 
                 ax.yaxis.set_major_formatter(FormatStrFormatter('%.2f'))
 
@@ -2410,19 +2587,33 @@ def get_crossbenchmarking_distributions_differentSetsOfParameters_realSVs(df_cro
             ax.set_xlabel("")
             #ax.set_xticks([])
             ax.set_xticks(list(range(len(sorted_training_parameters))))
-            ax.set_xticklabels([trainingParmsToLetter[p] for p in sorted_training_parameters])
+
+            
+            if xticklabels_as_symbols is True: ax.set_xticklabels([trainingParmsToLetter[p] for p in sorted_training_parameters])
+            else: ax.set_xticklabels([p for p in sorted_training_parameters], rotation=90)
 
             #if test_species!=sorted_species[-1]: ax.set_xticklabels([])
             #elif Ic==1: 
-            if Ic==1 and test_species==sorted_species[-1]: ax.set_xlabel("real SVs", rotation=0)
+            #if Ic==1 and test_species==sorted_species[-1]: ax.set_xlabel("training parameters", rotation=0)
 
             # get the legen only in the first box
             #if Ir==0 and Ic==2: ax.legend(bbox_to_anchor=(1, 1)) 
             #elif len(df_plot)>0: ax.get_legend().remove()
 
+            # add a legend in the last box
+            if Ic==1:
+                print("adding legend")
+
+                legend_items = [plt.Rectangle((0,0),1,1,fc=sampleID_to_color[s], edgecolor = 'none') for s in sorted_samples]
+                legend_names = [s.split("run")[0] for s in sorted_samples]
+
+                plt.legend(legend_items, legend_names, loc=2, ncol = 1, prop={'size':12}, bbox_to_anchor=(1.05, 1), borderaxespad=0., title="testing samples")
+
+
+
     # spaces
     print("saving")
-    plt.subplots_adjust(wspace=0.1, hspace=0.3)
+    plt.subplots_adjust(wspace=0.15, hspace=0.3)
     filename = "%s_%s_%s.pdf"%(fileprefix, accuracy_f, svtype)
     fig.savefig(filename, bbox_inches='tight')
 
@@ -3055,3 +3246,143 @@ def get_sv_dict_without_simple_repeats(sv_dict, repeats_file, outdir, reference_
         filt_sv_dict[svtype] = svfile_filt
 
     return filt_sv_dict
+
+
+
+def plot_effect_of_parameters_on_simulations(df_all_parameters_benchmarking, df_cross_accuracy_benchmark, df_parameters_used, PlotsDir, ProcessedDataDir, accuracy_f="Fvalue"):
+
+    """Generates a lineplot of how changing each parameter in all the simulations is related to some accuracy"""
+
+
+    ######### GET SQUARE DF ######
+
+    # define the parameter fields
+    parameters_fields_gridss = [k for k in df_parameters_used.keys() if k.startswith("GRIDSS")]
+    parameters_fields_clove = [k for k in df_parameters_used.keys() if k.startswith("CLOVE")]
+
+    # keep only df_all_parameters_benchmarking with parameters that actually change
+    parms_to_nvals = pd.Series({p : len(set(df_all_parameters_benchmarking[p])) for p in (parameters_fields_gridss + parameters_fields_clove)})
+    parameters_fields =  sorted(parms_to_nvals[parms_to_nvals>1].index) # min_length_inversions and min_QUAL are not variable in the choice
+
+    # define the row fields of the heatmap
+    row_fields = ["typeSimulations", "svtype", "species", "sampleID", "genomeID"]
+
+    # define file
+    df_square_file = "%s/plot_effect_of_parameters_on_simulations_df_square_%s_%s.py"%(ProcessedDataDir, "_".join(row_fields), accuracy_f)
+    if fun.file_is_empty(df_square_file):
+
+        # create a df that has, for each combination of row fields, a square df with accuracy_f. Each col should be one parameter
+
+        # keep df
+        df_all_parameters_benchmarking = cp.deepcopy(df_all_parameters_benchmarking.iloc[0:10000])
+
+        # redefine the sampleID, to be numeric and unique for each species
+        print("adding numeric sampleID")
+        spp_sampleID_to_numeric_sampleID = {}
+        for spp in set(df_all_parameters_benchmarking.species):
+            all_sampleIDs = sorted(set(df_all_parameters_benchmarking[df_all_parameters_benchmarking.species==spp].sampleID))
+            spp_sampleID_to_numeric_sampleID = {**spp_sampleID_to_numeric_sampleID, **{(spp, s) : "sample%i"%(Is+1) for Is, s in enumerate(all_sampleIDs)}}
+
+        df_all_parameters_benchmarking["sampleID"] = df_all_parameters_benchmarking[["species", "sampleID"]].apply(tuple, axis=1).map(spp_sampleID_to_numeric_sampleID)
+        if any(pd.isna(df_all_parameters_benchmarking["sampleID"])): raise ValueError("no nans in sampleID")
+
+        # create the sample as a tuple
+        df_all_parameters_benchmarking["rowID"] = df_all_parameters_benchmarking[row_fields].apply(tuple, axis=1)
+
+        # define df
+        df_all_parameters_benchmarking = df_all_parameters_benchmarking.set_index("rowID", drop=False)
+
+        # add cols to df
+        sorted_rows = sorted(set(df_all_parameters_benchmarking.rowID)) 
+        df_square = pd.DataFrame(index=sorted_rows)
+
+        for parm in parameters_fields:
+            for parm_vals in sorted(set(df_all_parameters_benchmarking[parm])):
+
+                # create a col that has all the filters for each row
+                dajgjdagjgd
+
+
+
+
+
+
+        print(sorted_rows)
+
+        khgdahadgjdagjdag
+
+
+        print(df_all_parameters_benchmarking.sampleID, set(df_all_parameters_benchmarking.sampleID))
+        adjkhdakjdahkjdh
+
+
+
+        
+
+
+    ###############################
+
+    """
+     'Fvalue',
+     'precision',
+     'recall',
+
+
+     'nevents',
+     'species',
+     'typeSimulations',
+     'sampleID']
+
+    """
+
+
+
+    print(parameters_fields)
+
+    dajdafadafgd
+    df_all_parameters_benchmarking = df_all_parameters_benchmarking[df_all_parameters_benchmarking]
+
+
+    # add fields
+    df_all_parameters_benchmarking["type_simulation_and_svtype"] = df_all_parameters_benchmarking.typeSimulations + "_" + df_all_parameters_benchmarking.svtype
+
+
+    # define rows and cols
+    sorted_rows = sorted(set(df_all_parameters_benchmarking["type_simulation_and_svtype"])); nrows = len(sorted_rows)
+    sorted_cols = parameters_fields_gridss + parameters_fields_clove; ncols = len(sorted_cols)
+
+    # init figure
+    fig = plt.figure(figsize=(ncols*1, nrows*1))
+
+    # go through each data
+    for Ir, type_simulation_and_svtype in enumerate(sorted_rows):
+
+        # get df
+        df_plot = df_all_parameters_benchmarking[df_all_parameters_benchmarking.type_simulation_and_svtype==type_simulation_and_svtype]
+
+        # go through all cols
+        for Ic, parameter in enumerate(sorted_cols):
+
+            pass
+
+
+    # rows are types of parameters
+
+
+    # cols are type_sim_and_svtype
+
+
+
+    ['genomeID',
+     
+     'gridss_benchmarkID',
+     'svtype',
+
+     'Fvalue'
+     'precision',
+     'recall',
+     'nevents',
+
+     'species',
+     'typeSimulations',
+     'sampleID']

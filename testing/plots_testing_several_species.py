@@ -4,6 +4,10 @@
 
 #%% DEFINE ENVIRONMENT
 
+# make sure that the plots are shown
+import matplotlib.pyplot as plt
+plt.plot()
+
 # module imports
 import os
 import sys
@@ -58,9 +62,6 @@ ProcessedDataDir = "%s/processed_data"%PlotsDir; fun.make_folder(ProcessedDataDi
 # get a cross accuracy df from the real SVs, only based on the human datastes and training on simulations' parameters
 df_cross_accuracy_benchmark_realSVs_onlyHuman = test_fun.get_cross_accuracy_df_realSVs_onlyHuman(CurDir, ProcessedDataDir, threads=threads, replace=False)
 
-
-raiseAfter_df_cross_accuracy_benchmark_realSVs_onlyHuman
-
 # get cross-accuracy measurements testing on simulations (it already includes the human hg38 as testing)
 df_cross_accuracy_benchmark = test_fun.get_cross_accuracy_df_several_perSVadeSimulations(outdir_testing, outdir_testing_human, genomes_and_annotations_dir, replace=False)
 
@@ -69,6 +70,14 @@ df_goldenSetAccuracy = test_fun.get_accuracy_df_goldenSet(outdir_testing_GoldenS
 
 # load used parameters (this already includes the human hg38)
 df_parameters_used = test_fun.get_used_parameters_testing_several_species(outdir_testing, outdir_testing_human)
+
+# get an integrated df of how each parameters affects each simulation
+df_all_parameters_benchmarking = test_fun.get_df_all_parameters_benchmarking_simulations(outdir_testing, outdir_testing_human, df_parameters_used)
+
+#%% PLOT EFFECT OF PARAMETERS ON SIMULATIONS
+
+test_fun.plot_effect_of_parameters_on_simulations(df_all_parameters_benchmarking, df_cross_accuracy_benchmark, df_parameters_used, PlotsDir, ProcessedDataDir)
+
 
 #%% PLOT USED RESOURCES
 
@@ -81,6 +90,11 @@ test_fun.plot_used_resources_testing_on_simulations(CurDir, ProcessedDataDir, Pl
 filename = "%s/used_parameters_testing_several_species.pdf"%PlotsDir
 df_plot = test_fun.get_heatmaps_used_parameters(df_parameters_used, filename)
 
+#%% PLOT MOST IMPORTANT PARAMETERS
+
+test_fun.plot
+
+
 #%% ACCURACY ON SIMULATIONS VS DEFAULT
 
 # define the accuracy_f
@@ -91,6 +105,16 @@ accuracy_f = "recall"; width_multiplier = 1.6; legend_deviation = 2.1
 # all data
 fileprefix = "%s/accuracy_simulations_vs_default"%PlotsDir
 test_fun.get_crossbenchmarking_distributions_default_and_best(df_cross_accuracy_benchmark, fileprefix, accuracy_f=accuracy_f, width_multiplier=width_multiplier, legend_deviation=legend_deviation)
+
+#%% ACCURACY ON SIMULATIONS VS DEFAULT ONE SINGLE PLOT
+
+# define the accuracy_f
+accuracy_f = "Fvalue"
+
+# all data
+fileprefix = "%s/accuracy_simulations_vs_default_onePlot"%PlotsDir
+test_fun.get_crossbenchmarking_distributions_default_and_best_onePlot(df_cross_accuracy_benchmark, fileprefix, accuracy_f="Fvalue")
+
 
 #%% CROSS BENCHMARKING PLOT SIMULATIONS
 
@@ -117,6 +141,41 @@ accuracy_f = "Fvalue"; # it could be Fvalue, precision or recall
 # plots the cross accuracy in a distributions-like manner
 fileprefix = "%s/cross_accuracy_distribution"%PlotsDir
 test_fun.get_crossbenchmarking_distributions_differentSetsOfParameters(df_cross_accuracy_benchmark, fileprefix, accuracy_f=accuracy_f, svtype="integrated")
+
+#%% CROSSACCURACY REAL SVs HEATMAP ONLY HUMAN
+
+# define the accuracy_f
+accuracy_f = "Fvalue"; # it could be Fvalue, precision or recall
+
+# all data
+fileprefix = "%s/all_cross_accuracy_realSVs_onlyHuman"%PlotsDir
+test_fun.generate_heatmap_accuracy_of_parameters_on_test_samples_realSVs(df_cross_accuracy_benchmark_realSVs_onlyHuman, fileprefix, replace=False, threads=4, accuracy_f=accuracy_f, svtype="integrated", col_cluster = False, row_cluster = False, min_n_SVs=None)
+
+#%% CROSSACCURACY REAL SVs HEATMAP ONLY HUMAN ONLY RANDOM SIMULATIONS
+
+# filter
+df_plot = df_cross_accuracy_benchmark_realSVs_onlyHuman[df_cross_accuracy_benchmark_realSVs_onlyHuman.parms_typeSimulations.isin({"fast", "uniform"})]
+
+
+# define the accuracy_f
+accuracy_f = "Fvalue"; # it could be Fvalue, precision or recall
+
+# all data
+fileprefix = "%s/all_cross_accuracy_realSVs_onlyHuman_onlyUniform"%PlotsDir
+test_fun.generate_heatmap_accuracy_of_parameters_on_test_samples_realSVs(df_plot, fileprefix, replace=False, threads=4, accuracy_f=accuracy_f, svtype="integrated", col_cluster = False, row_cluster = False, min_n_SVs=None, multiplier_width_colorbars=1)
+
+
+
+
+#%% CROSSACCURACY DISTRIBUTION REAL SVs PER CATHEGORIES ONLY HUMANS
+
+# define the accuracy_f
+accuracy_f = "precision"; # it could be Fvalue, precision or recall
+
+# plots the cross accuracy in a distributions-like manner
+fileprefix = "%s/cross_accuracy_distribution_realSVs_onlyHumans"%PlotsDir
+ax = test_fun.get_crossbenchmarking_distributions_differentSetsOfParameters_realSVs(df_cross_accuracy_benchmark_realSVs_onlyHuman, fileprefix, accuracy_f=accuracy_f, svtype="integrated", min_n_SVs=None, xticklabels_as_symbols=False)
+
 
 #%% CROSSACCURACY REAL SVs HEATMAP
 
