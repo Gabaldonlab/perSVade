@@ -16097,11 +16097,18 @@ def get_vep_df_for_vcf_df(vcf_df, outdir, reference_genome, gff_with_biotype, mi
         
         if log_file_all_cmds is not None: vep_cmd += " --log_file_all_cmds %s"%log_file_all_cmds
         vep_cmd += " > %s 2>&1"%vep_std
-
         run_cmd(vep_cmd)
+
+        # print a warning if all the variants are intergenic
+        df_vep = pd.read_csv(annotated_vcf_tmp, sep="\t")
+        if all(df_vep.Consequence=="intergenic_variant"): print_with_runtime("!!!! WARNING !!!!! All the variants annotated by VEP are intergenic for a chunk of variants (those from '%s'). This suggests that the input files may not be properly formatted. If all the chunks are like this you can probably not trust the output"%prefix)
 
         # check that the std contains no signs of compressing the gff
         if any(["compressing gff before running vep" in l for l in open(vep_std, "r").readlines()]): raise ValueError("There was a compression of the gff before running vep. This is not acceptable when running in parallel")   
+
+        # print the VEP warnings, which can be useful to debug
+        vep_warnings = "".join([l for l in open(vep_std, "r").readlines() if "WARNING" in l.upper()])
+        if len(vep_warnings)>0: print_with_runtime("\n---There are WARNING's in VEP:\n%s\n---"%(vep_warnings))
 
         remove_file(vep_std)
 

@@ -71,8 +71,14 @@ df_goldenSetAccuracy = test_fun.get_accuracy_df_goldenSet(outdir_testing_GoldenS
 # load used parameters (this already includes the human hg38)
 df_parameters_used = test_fun.get_used_parameters_testing_several_species(outdir_testing, outdir_testing_human)
 
+#%%
+
+# get a cross accuracy benchmark of how changing different parameters as compared to the default changes accuracy in simulations
+df_cross_accuracy_benchmark = test_fun.get_cross_accuracy_df_several_perSVadeSimulations_changing_single_parameters(outdir_testing, outdir_testing_human, genomes_and_annotations_dir, df_parameters_used, replace=False)
+
+nzcczgvzcnczbvzcnbv
 # get an integrated df of how each parameters affects each simulation
-df_all_parameters_benchmarking = test_fun.get_df_all_parameters_benchmarking_simulations(outdir_testing, outdir_testing_human, df_parameters_used)
+#df_all_parameters_benchmarking = test_fun.get_df_all_parameters_benchmarking_simulations(outdir_testing, outdir_testing_human, df_parameters_used)
 
 #%% PLOT EFFECT OF PARAMETERS ON SIMULATIONS
 

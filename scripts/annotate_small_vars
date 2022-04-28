@@ -137,8 +137,10 @@ opt.merged_vcf = merged_vcf
 # get the corrected gff
 correct_gff, gff_with_biotype = fun.get_correct_gff_and_gff_with_biotype(opt.gff, replace=opt.replace)
 
+
 # get the annotated vcf
-fun.print_with_runtime("Running VEP to annotate variants")
+fun.print_with_runtime("Running VEP to annotate variants.  If this fails, you may double check that the provided gff is consistent with http://genometools.org/cgi-bin/gff3validator.cgi")
+
 annotated_vcf = fun.run_vep_parallel(opt.merged_vcf, opt.ref, gff_with_biotype, opt.mitochondrial_chromosome, opt.mitochondrial_code, opt.gDNA_code, threads=opt.threads, replace=opt.replace)
 
 # get as df

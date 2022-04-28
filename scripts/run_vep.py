@@ -128,7 +128,9 @@ if fun.file_is_empty(outfile_vep_raw):
     # check that there are no errors in the output
     if any([any({e in l.upper() for e in {"EXCEPTION", "ERROR"}}) and (not l.upper().startswith("WARNING")) for l in open(vep_std, "r").readlines()]): raise ValueError("There was an error running vep. Check %s to see what happened. You may want to validate that your GFF is ok (in http://genometools.org/cgi-bin/gff3validator.cgi)"%vep_std) 
 
-    #and (not l.startswith("WARNING")) 
+    # print all the warnings found in vep_std
+    for l in open(vep_std, "r").readlines(): 
+        if "WARNING" in l.upper(): print("VEP "+l)
 
     # check that <10% of the variants were not annotated
     nlines_vep_output = len([l for l in open(outfile_vep_raw_tmp, "r").readlines() if not l.startswith("#")])
@@ -139,6 +141,7 @@ if fun.file_is_empty(outfile_vep_raw):
 
     # rename
     os.rename(outfile_vep_raw_tmp, outfile_vep_raw)
+
 
 #############################################
 #############################################
@@ -152,6 +155,9 @@ print("Correcting proteins for the genetic_code")
 
 # get into df
 vep_df = pd.read_csv(outfile_vep_raw, sep="\t", header=len([x for x in open(outfile_vep_raw, "r") if x.startswith("##")]), na_values=fun.vcf_strings_as_NaNs, keep_default_na=False)
+
+# print a warning if all consequences are intergenic
+if all(vep_df.Consequence=="intergenic_variant"): fun.print_with_runtime("!!!! WARNING !!!!! All the variants annotated by VEP are intergenic for a chunk of variants (those from '%s'). This suggests that the input files may not be properly formatted."%opt.input_vcf)
 
 # modify the consequences for BND rows
 vep_df["Consequence"] = vep_df.apply(fun.get_corrected_Consequence_for_vep_r, axis=1)

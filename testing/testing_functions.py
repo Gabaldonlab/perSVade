@@ -424,7 +424,10 @@ def get_df_accuracy_of_parameters_on_test_samples(parameters_df, test_df, outdir
 
     """This function tests the accuracy of each of the parameters df on the simulations of test_df. It runs each comparison in a sepparate perSVade job in the cluster"""
 
-    if replace is True: fun.delete_folder(outdir)
+    if replace is True: 
+        print("deleting folder to replace")
+        adkhagdagahdg
+        fun.delete_folder(outdir)
     fun.make_folder(outdir)
 
     # define the metadata of each df
@@ -464,9 +467,6 @@ def get_df_accuracy_of_parameters_on_test_samples(parameters_df, test_df, outdir
             # define the running parm from parmID_to_parmIDtoRun (avoid duplications)
             running_parmID = parmID_to_parmIDtoRun[Irow]
             unique_parms_row = parameters_df.loc[running_parmID]
-
-            print(unique_parms_row)
-            print(parameters_df_metadata)
 
             outdir_parms = "%s/parms_%s"%(outdir_cross_benchmark_files, "_".join(unique_parms_row[parameters_df_metadata]))
             fun.make_folder(outdir_parms)
@@ -515,7 +515,7 @@ def get_df_accuracy_of_parameters_on_test_samples(parameters_df, test_df, outdir
             fun.generate_jobarray_file(jobs_filename, "gettingCloseShortReads")
 
             # submit to the cluster
-            fun.run_jobarray_file_MN4_greasy(jobs_filename, "getting_crossAccuracy", time="02:00:00", queue="debug", threads_per_job=threads, nodes=8) # max 8 nodes (often ran on 6 nodes)
+            fun.run_jobarray_file_MN4_greasy(jobs_filename, "getting_crossAccuracy", time="02:00:00", queue="debug", threads_per_job=threads, nodes=16) # max 16 nodes (often ran on 6 nodes)
             #fun.run_jobarray_file_MN4_greasy(jobs_filename, "getting_crossAccuracy", time="10:00:00", queue="bsc_ls", threads_per_job=threads, nodes=3)
 
             # exit before it starts
@@ -1085,6 +1085,163 @@ def get_df_cross_accuracy_benchmark_withExtraFields(df_cross_accuracy_benchmark)
     df_cross_accuracy_benchmark["test_numeric_run"] = df_cross_accuracy_benchmark.apply(get_test_numeric_run, axis=1)
 
     return df_cross_accuracy_benchmark
+
+
+def get_cross_accuracy_df_several_perSVadeSimulations_changing_single_parameters(outdir_testing, outdir_testing_human, genomes_and_annotations_dir, df_parameters_used, replace=False):
+
+    """This tests how changing each parameter, and keeping the others as default, yields each accuracy set in all simulations."""
+
+
+    # define the final outdir
+    outdir_cross_accuracy = "%s/cross_accuracy_calculations_changing_single_parameters"%outdir_testing; fun.make_folder(outdir_cross_accuracy)
+    df_benchmark_all_file = "%s/cross_benchmarking_parameters.tab"%outdir_cross_accuracy
+
+    if fun.file_is_empty(df_benchmark_all_file) or replace is True:
+
+
+        ########## CREATE TEST DF ############
+
+        # test_df: This is info on which to test the running of gridss+clove. It contains metadata cols (sampleID, runID, optimisation type (real, uniform), simName, ploidy, svtype) and data to run the optimisation on (sorted_bam, gridss_vcf, reference_genome, mitochondrial_chromosome)
+        test_df_dict = {}
+
+        # map each species to a type of simulations and to outdir_species_simulations
+        spName_to_typeSimulations_to_outdir_species_simulations = {spName : {typeSimulations : "%s/%s_%s/testing_Accuracy/%s"%(outdir_testing, taxID, spName, typeSimulations) for typeSimulations in ["arroundHomRegions", "uniform", "realSVs"]} for (taxID, spName, ploidy, mitochondrial_chromosome, max_coverage_sra_reads) in species_Info}
+        
+        spName_to_typeSimulations_to_outdir_species_simulations["Homo_sapiens"] = {typeSimulations : "%s/testing_Accuracy/%s"%(outdir_testing_human, typeSimulations) for typeSimulations in ["uniform", "realSVs"]}
+
+        # create the used parameters df
+        for taxID, spName, ploidy, mitochondrial_chromosome, max_coverage_sra_reads in species_Info_WithHumanHg38:
+            for typeSimulations in ["arroundHomRegions", "uniform", "realSVs"]:
+
+                # skip the human arroundHomRegions
+                if spName=="Homo_sapiens" and typeSimulations=="arroundHomRegions": continue
+
+                # define outir
+                outdir_species_simulations = spName_to_typeSimulations_to_outdir_species_simulations[spName][typeSimulations]
+
+                # define samples and runs
+                all_sampleIDs = [x for x in os.listdir(outdir_species_simulations) if not x.startswith(".")]
+
+                # go through each sampleID
+                for sampleID in os.listdir(outdir_species_simulations):
+                    if sampleID.startswith("."): continue
+                    print(spName, typeSimulations, sampleID)
+
+                    # define the outdir of the run
+                    sampleID_simulations_files = "%s/%s/simulations_files_and_parameters"%(outdir_species_simulations, sampleID)
+                    if not os.path.isdir(sampleID_simulations_files): raise ValueError("%s does not exist"%sampleID_simulations_files)
+
+                    # define simulation ploidies
+                    if ploidy==1: simulation_ploidy = "haploid"
+                    elif ploidy==2: simulation_ploidy = "diploid_hetero"
+
+                    # go through each 
+                    for simName in ["sim1", "sim2"]:
+
+                        # define things
+                        sorted_bam = "%s/reads_%s_%s.bam"%(sampleID_simulations_files, simName, simulation_ploidy)
+                        gridss_vcf = "%s/gridss_vcf_%s_%s.vcf"%(sampleID_simulations_files, simName, simulation_ploidy)
+                        svtables_prefix =  "%s/SVs_%s"%(sampleID_simulations_files, simName)
+
+                        # define the reference genome (note that it has to be the hg38 for human)
+                        if spName=="Homo_sapiens": reference_genome = "%s/../data/hg38.fa.corrected.fasta"%outdir_testing_human
+                        else: reference_genome = "%s/%s.fasta"%(genomes_and_annotations_dir, spName)
+
+                        # check that the genome is there
+                        if fun.file_is_empty(reference_genome): raise ValueError("%s does not exist"%reference_genome)
+                        
+
+                        # add to dict
+                        test_df_dict[(spName, sampleID, typeSimulations, simName, simulation_ploidy)] = {"species":spName, "sampleID":sampleID, "typeSimulations":typeSimulations, "simName":simName, "simulation_ploidy":simulation_ploidy, "sorted_bam":sorted_bam, "gridss_vcf":gridss_vcf, "reference_genome":reference_genome, "mitochondrial_chromosome":mitochondrial_chromosome, "svtables_prefix":svtables_prefix}
+
+
+        # get the test df
+        test_df = pd.DataFrame(test_df_dict).transpose()[["species", "sampleID", "typeSimulations", "simName", "simulation_ploidy", "sorted_bam", "gridss_vcf", "reference_genome", "mitochondrial_chromosome", "svtables_prefix"]]
+
+        ######################################
+
+
+        ########### CREATE PARMS DF #############
+
+        # the parameters_df. The first cols are metadata (like sampleID, runID and optimisation type) and the others are things necessary for runnning gridss: and the path to the parameters_json
+        parameters_df_dict = {}
+
+        # define the parameters df, changing all the parms to the default
+        default_parms_json = "%s/5478_Candida_glabrata/testing_Accuracy/fast/BG2_ANI/simulations_files_and_parameters/final_parameters.json"%outdir_testing
+        gridss_blacklisted_regions, gridss_maxcoverage, default_gridss_filters_dict, default_max_rel_coverage_to_consider_del, default_min_rel_coverage_to_consider_dup = fun.get_parameters_from_json(default_parms_json)
+
+        # add the default parameters
+        parameters_df_dict[("none", "none")] = {"changing_parameter":"none", "changing_parameter_value":"none",  "parameters_json":default_parms_json}
+
+        # iterate through all changing parameters and add them to parameters_df_dict
+        df_parameters_used = df_parameters_used[df_parameters_used.typeSimulations!="fast"]
+        parameters_fields = [x for x in df_parameters_used.keys() if x.split()[0] in {"GRIDSS", "CLOVE"}]
+
+        for changing_parameter in parameters_fields:
+
+            # define the defalut value
+            changing_parameter_alg, changing_parameter_name = changing_parameter.split()
+            if changing_parameter_alg=="CLOVE": changing_parameter_default_value = {"CLOVE max_rel_coverage_del":default_max_rel_coverage_to_consider_del, "CLOVE min_rel_coverage_dup":default_min_rel_coverage_to_consider_dup}[changing_parameter]
+
+            elif changing_parameter_alg=="GRIDSS": changing_parameter_default_value = default_gridss_filters_dict[changing_parameter_name]
+            else: raise ValueError("incorrect changing_parameter_alg")
+
+            # get the values picked in df_parameters_used, discarding the default ones
+            all_changing_parameter_values = sorted(set(df_parameters_used[changing_parameter]).difference({changing_parameter_default_value}))
+
+            # if there are any changing parameters values, generate one entry in parameters_df_dict for each of them
+            if len(all_changing_parameter_values)>0: 
+                for changing_parameter_value in all_changing_parameter_values:
+
+                    # int parameters with the default
+                    gridss_filters_dict = cp.deepcopy(default_gridss_filters_dict)
+                    max_rel_coverage_to_consider_del = cp.deepcopy(default_max_rel_coverage_to_consider_del)
+                    min_rel_coverage_to_consider_dup = cp.deepcopy(default_min_rel_coverage_to_consider_dup)
+
+                    # change the parameter to changing_parameter_value
+                    if changing_parameter_alg=="CLOVE":
+
+                        if changing_parameter=="CLOVE max_rel_coverage_del": max_rel_coverage_to_consider_del = changing_parameter_value
+                        elif changing_parameter=="CLOVE min_rel_coverage_dup": min_rel_coverage_to_consider_dup = changing_parameter_value
+                        else: raise ValueError("incorrect parm")
+
+                    elif changing_parameter_alg=="GRIDSS": 
+                        if changing_parameter_name not in gridss_filters_dict: raise ValueError("unavailable changing_parameter")
+                        gridss_filters_dict[changing_parameter_name] = changing_parameter_value
+
+                    else: raise ValueError("incorrect changing_parameter_alg")
+
+
+                    # define a function that changes spaces to strings
+                    def mod_spaces(x): return "_".join(str(x).split())
+
+
+                    # write a json that has the changed parameters
+                    outdir_parameters = "%s/cross_accuracy_calculations_changing_single_parameters_parameters_dir"%outdir_testing; fun.make_folder(outdir_parameters)
+                    json_file = "%s/%s_%s.json"%(outdir_parameters, mod_spaces(changing_parameter), mod_spaces(changing_parameter_value))
+                    fun.write_gridss_parameters_as_json(gridss_blacklisted_regions, gridss_maxcoverage, gridss_filters_dict, max_rel_coverage_to_consider_del, min_rel_coverage_to_consider_dup, json_file, replace=False)
+
+                    # keep
+                    parameters_df_dict[(mod_spaces(changing_parameter), mod_spaces(changing_parameter_value))] = {"changing_parameter":mod_spaces(changing_parameter), "changing_parameter_value":mod_spaces(changing_parameter_value),  "parameters_json":json_file}
+
+            else: print("There is no changing in  %s (always %s)"%(changing_parameter, changing_parameter_default_value))
+
+
+        # get df
+        parameters_df = pd.DataFrame(parameters_df_dict).transpose()[["changing_parameter", "changing_parameter_value", "parameters_json"]]
+        for k in parameters_df.columns: 
+            if any(pd.isna(parameters_df[k])): raise ValueError("nans in df")
+
+        #########################################
+
+        # get cross-accuracy
+        print("getting cross-accuracy df")
+        df_cross_accuracy_benchmark = get_df_accuracy_of_parameters_on_test_samples(parameters_df, test_df, outdir_cross_accuracy, replace=replace)
+
+        print(df_cross_accuracy_benchmark)
+
+    df_cross_accuracy_benchmark = fun.get_tab_as_df_or_empty_df(df_benchmark_all_file)
+
 
 
 

@@ -69,5 +69,7 @@ else:
     if len(sys.argv)==2 or sys.argv[2] in help_args: fun.run_cmd_simple_noError("%s --help"%module_script)
 
     # run script
-    else: fun.run_cmd_simple_noError("%s %s"%(module_script, " ".join(sys.argv[2:])))
+    else: 
+        print("Running module %s..."%module)
+        fun.run_cmd_simple_noError("%s %s"%(module_script, " ".join(sys.argv[2:])))
 
