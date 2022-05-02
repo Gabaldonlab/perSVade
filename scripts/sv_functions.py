@@ -9589,8 +9589,9 @@ def plot_clustermap_with_annotation(df, row_colors_df, col_colors_df, filename, 
 
 
     # SAVE
-    print_if_verbose("saving %s"%filename)
-    cm.savefig(filename)
+    if filename is not None: 
+        print_if_verbose("saving %s"%filename)
+        cm.savefig(filename)
 
     return cm
 

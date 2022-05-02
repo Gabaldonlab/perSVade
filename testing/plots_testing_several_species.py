@@ -56,6 +56,13 @@ ProcessedDataDir = "%s/processed_data"%PlotsDir; fun.make_folder(ProcessedDataDi
 
 #%% GET PROCESSED DFs
 
+
+# load used parameters (this already includes the human hg38)
+df_parameters_used = test_fun.get_used_parameters_testing_several_species(outdir_testing, outdir_testing_human)
+
+# get a cross accuracy benchmark of how changing different parameters as compared to the default changes accuracy in simulations
+df_cross_accuracy_benchmark_changeSingleParameters = test_fun.get_cross_accuracy_df_several_perSVadeSimulations_changing_single_parameters(outdir_testing, outdir_testing_human, genomes_and_annotations_dir, df_parameters_used, replace=False)
+
 # get a cross accuracy df from the real SVs, both based on the golden set and the human real set of SVs
 #df_cross_accuracy_benchmark_realSVs = test_fun.get_cross_accuracy_df_realSVs(CurDir, ProcessedDataDir, threads=threads, replace=False)
 
@@ -68,21 +75,18 @@ df_cross_accuracy_benchmark = test_fun.get_cross_accuracy_df_several_perSVadeSim
 # load golden set df that comes from the testing (it does not include the human testing)
 df_goldenSetAccuracy = test_fun.get_accuracy_df_goldenSet(outdir_testing_GoldenSet)
 
-# load used parameters (this already includes the human hg38)
-df_parameters_used = test_fun.get_used_parameters_testing_several_species(outdir_testing, outdir_testing_human)
-
-#%%
-
-# get a cross accuracy benchmark of how changing different parameters as compared to the default changes accuracy in simulations
-df_cross_accuracy_benchmark = test_fun.get_cross_accuracy_df_several_perSVadeSimulations_changing_single_parameters(outdir_testing, outdir_testing_human, genomes_and_annotations_dir, df_parameters_used, replace=False)
-
-nzcczgvzcnczbvzcnbv
 # get an integrated df of how each parameters affects each simulation
 #df_all_parameters_benchmarking = test_fun.get_df_all_parameters_benchmarking_simulations(outdir_testing, outdir_testing_human, df_parameters_used)
 
-#%% PLOT EFFECT OF PARAMETERS ON SIMULATIONS
+#%% CROSS-ACCURACY SINGLE PARAMETERE CHANGES
 
-test_fun.plot_effect_of_parameters_on_simulations(df_all_parameters_benchmarking, df_cross_accuracy_benchmark, df_parameters_used, PlotsDir, ProcessedDataDir)
+# define the accuracy_f
+#accuracy_f = "Fvalue"; # it could be Fvalue, precision or recall
+accuracy_f = "relative_Fvalue"; # Fvalue relative to the optimal Fvalue
+
+# all data
+fileprefix = "%s/changing_single_parms_all_cross_accuracy"%PlotsDir
+test_fun.generate_heatmap_accuracy_of_parameters_on_test_samples_changing_single_parameters(df_cross_accuracy_benchmark_changeSingleParameters, df_parameters_used, df_cross_accuracy_benchmark, fileprefix, replace=False, threads=4, accuracy_f=accuracy_f, svtype="integrated", col_cluster = False, row_cluster = False, show_only_species_and_simType=True)
 
 
 #%% PLOT USED RESOURCES
@@ -95,10 +99,6 @@ test_fun.plot_used_resources_testing_on_simulations(CurDir, ProcessedDataDir, Pl
 
 filename = "%s/used_parameters_testing_several_species.pdf"%PlotsDir
 df_plot = test_fun.get_heatmaps_used_parameters(df_parameters_used, filename)
-
-#%% PLOT MOST IMPORTANT PARAMETERS
-
-test_fun.plot
 
 
 #%% ACCURACY ON SIMULATIONS VS DEFAULT
@@ -120,6 +120,8 @@ accuracy_f = "Fvalue"
 # all data
 fileprefix = "%s/accuracy_simulations_vs_default_onePlot"%PlotsDir
 test_fun.get_crossbenchmarking_distributions_default_and_best_onePlot(df_cross_accuracy_benchmark, fileprefix, accuracy_f="Fvalue")
+
+
 
 
 #%% CROSS BENCHMARKING PLOT SIMULATIONS

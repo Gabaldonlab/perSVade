@@ -414,7 +414,17 @@ def get_df_benchmark_from_file(Idf, df_benchmarking_file, parms_row, test_row, p
     df_benchmark = fun.get_tab_as_df_or_empty_df(df_benchmarking_file) 
 
     # add metadata fields
-    for x in parameters_df_metadata: df_benchmark["parms_%s"%x] = parms_row[x]
+    for x in parameters_df_metadata: 
+
+        try: df_benchmark["parms_%s"%x] = [parms_row[x]]*len(df_benchmark)
+        except:
+
+            print("\n\n", parms_row, "\n")
+            print(x,  "\n")
+            print(df_benchmark,  "\n")
+
+            raise ValueError("error in parameters_df_metadata")
+
     for x in test_df_metadata: df_benchmark["test_%s"%x] = test_row[x]
 
     # keep
@@ -466,10 +476,16 @@ def get_df_accuracy_of_parameters_on_test_samples(parameters_df, test_df, outdir
 
             # define the running parm from parmID_to_parmIDtoRun (avoid duplications)
             running_parmID = parmID_to_parmIDtoRun[Irow]
-            unique_parms_row = parameters_df.loc[running_parmID]
+            unique_parms_row = parameters_df.loc[{running_parmID}]
+            if len(unique_parms_row)!=1: raise ValueError("there should be one row")
+            unique_parms_row = unique_parms_row.iloc[0]
 
-            outdir_parms = "%s/parms_%s"%(outdir_cross_benchmark_files, "_".join(unique_parms_row[parameters_df_metadata]))
+            outdir_parms = generate_correct_filename("%s/parms_%s"%(outdir_cross_benchmark_files, "_".join([str(x) for x in unique_parms_row[parameters_df_metadata]])))
             fun.make_folder(outdir_parms)
+
+            # check that the outdir of the parameters can be accessed and also the parameters json
+            #fun.run_cmd("ls %s > /dev/null"%outdir_parms)
+            #fun.run_cmd("ls %s > /dev/null"%unique_parms_row.parameters_json)
 
             for numeric_test_index, (Itest, test_row) in enumerate(test_df.iterrows()):
             
@@ -515,14 +531,19 @@ def get_df_accuracy_of_parameters_on_test_samples(parameters_df, test_df, outdir
             fun.generate_jobarray_file(jobs_filename, "gettingCloseShortReads")
 
             # submit to the cluster
-            fun.run_jobarray_file_MN4_greasy(jobs_filename, "getting_crossAccuracy", time="02:00:00", queue="debug", threads_per_job=threads, nodes=16) # max 16 nodes (often ran on 6 nodes)
+            #fun.run_jobarray_file_MN4_greasy(jobs_filename, "getting_crossAccuracy", time="02:00:00", queue="debug", threads_per_job=threads, nodes=16) # max 16 nodes (often ran on 6 nodes)
             #fun.run_jobarray_file_MN4_greasy(jobs_filename, "getting_crossAccuracy", time="10:00:00", queue="bsc_ls", threads_per_job=threads, nodes=3)
+            fun.run_jobarray_file_MN4_greasy(jobs_filename, "getting_crossAccuracy", time="16:00:00", queue="bsc_ls", threads_per_job=threads, nodes=15) # max 16 nodes (often ran on 6 nodes)
 
             # exit before it starts
             print("You need to run all the jobs from %s"%jobs_filename)
             sys.exit(0)
 
+
+        #list_dfs_benchmark_files = list_dfs_benchmark_files[2854:2858] # debug
+
         # get the df for a function
+        """
         with multiproc.Pool(threads_integration) as pool:
 
             # run in parallel porechop runs for each chunk
@@ -531,6 +552,12 @@ def get_df_accuracy_of_parameters_on_test_samples(parameters_df, test_df, outdir
             # close the pool
             pool.close()
             pool.terminate()
+
+        """
+
+        # run not in parallel
+        list_dfs_benchmark = list(map(lambda x: get_df_benchmark_from_file(x[0], x[1], x[2], x[3], x[4], x[5], x[6]), list_dfs_benchmark_files))
+
 
         # merge
         df_benchmark_all = pd.concat(list_dfs_benchmark)
@@ -1087,6 +1114,14 @@ def get_df_cross_accuracy_benchmark_withExtraFields(df_cross_accuracy_benchmark)
     return df_cross_accuracy_benchmark
 
 
+def generate_correct_filename(x): 
+
+    """Takes a filename and returns a corrected str"""
+
+    return "_".join(str(x).split()).replace("'", "").replace("(", "").replace(")", "").replace(",", "-")
+
+
+
 def get_cross_accuracy_df_several_perSVadeSimulations_changing_single_parameters(outdir_testing, outdir_testing_human, genomes_and_annotations_dir, df_parameters_used, replace=False):
 
     """This tests how changing each parameter, and keeping the others as default, yields each accuracy set in all simulations."""
@@ -1212,17 +1247,15 @@ def get_cross_accuracy_df_several_perSVadeSimulations_changing_single_parameters
                     else: raise ValueError("incorrect changing_parameter_alg")
 
 
-                    # define a function that changes spaces to strings
-                    def mod_spaces(x): return "_".join(str(x).split())
-
-
                     # write a json that has the changed parameters
-                    outdir_parameters = "%s/cross_accuracy_calculations_changing_single_parameters_parameters_dir"%outdir_testing; fun.make_folder(outdir_parameters)
-                    json_file = "%s/%s_%s.json"%(outdir_parameters, mod_spaces(changing_parameter), mod_spaces(changing_parameter_value))
+                    outdir_parameters = "%s/cross_accuracy_calculations_changing_single_parameters_parameters_dir"%outdir_testing; 
+                    #fun.delete_folder(outdir_parameters)
+                    fun.make_folder(outdir_parameters)
+                    json_file = "%s/%s_%s.json"%(outdir_parameters, generate_correct_filename(changing_parameter), generate_correct_filename(changing_parameter_value))
                     fun.write_gridss_parameters_as_json(gridss_blacklisted_regions, gridss_maxcoverage, gridss_filters_dict, max_rel_coverage_to_consider_del, min_rel_coverage_to_consider_dup, json_file, replace=False)
 
                     # keep
-                    parameters_df_dict[(mod_spaces(changing_parameter), mod_spaces(changing_parameter_value))] = {"changing_parameter":mod_spaces(changing_parameter), "changing_parameter_value":mod_spaces(changing_parameter_value),  "parameters_json":json_file}
+                    parameters_df_dict[(changing_parameter, changing_parameter_value)] = {"changing_parameter":changing_parameter, "changing_parameter_value":changing_parameter_value,  "parameters_json":json_file}
 
             else: print("There is no changing in  %s (always %s)"%(changing_parameter, changing_parameter_default_value))
 
@@ -1238,12 +1271,9 @@ def get_cross_accuracy_df_several_perSVadeSimulations_changing_single_parameters
         print("getting cross-accuracy df")
         df_cross_accuracy_benchmark = get_df_accuracy_of_parameters_on_test_samples(parameters_df, test_df, outdir_cross_accuracy, replace=replace)
 
-        print(df_cross_accuracy_benchmark)
 
     df_cross_accuracy_benchmark = fun.get_tab_as_df_or_empty_df(df_benchmark_all_file)
-
-
-
+    return df_cross_accuracy_benchmark
 
 def get_cross_accuracy_df_several_perSVadeSimulations(outdir_testing, outdir_testing_human, genomes_and_annotations_dir, replace=False):
 
@@ -1962,6 +1992,222 @@ def get_cross_accuracy_df_realSVs_onlyHuman(CurDir, ProcessedDataDir, threads=4,
     return df_benchmark_all
 
 
+
+def generate_heatmap_accuracy_of_parameters_on_test_samples_changing_single_parameters(df_cross_accuracy_benchmark_changeSingleParameters, df_parameters_used, df_cross_accuracy_benchmark, fileprefix, replace=False, threads=4, accuracy_f="Fvalue", svtype="integrated", col_cluster = False, row_cluster = False, show_only_species_and_simType=False, multiplier_width_colorbars=3, show_only_species=False):
+
+    """Plots a heatmap showing how different changes in the parameters (as compared to default) generate one or another data"""
+
+    ######## RECONFIGURE df_cross_accuracy_benchmark_changeSingleParameters TO INCLUDE EACH DEFAULT AS A NONE ############
+
+    # keep df
+    df_cross_accuracy_benchmark_changeSingleParameters = cp.deepcopy(df_cross_accuracy_benchmark_changeSingleParameters)
+    df_cross_accuracy_benchmark = cp.deepcopy(df_cross_accuracy_benchmark)
+    df_parameters_used = cp.deepcopy(df_parameters_used)
+
+    # define parameters (only those that change at all)
+    parameters_fields = [x for x in df_parameters_used.keys() if x.split()[0] in {"GRIDSS", "CLOVE"} if len(set(df_parameters_used[x]))>1]
+
+    # define the row of df_parameters_used that has the default parameters
+    row_default_parms = df_parameters_used[df_parameters_used.typeSimulations=="fast"].iloc[0][parameters_fields]
+
+    # define the default df cross accuracy benchmark
+    df_cross_accuracy_benchmark_changeSingleParameters_default = df_cross_accuracy_benchmark_changeSingleParameters[df_cross_accuracy_benchmark_changeSingleParameters.parms_changing_parameter=="none"]
+
+    # keep only the non-default changes, and 
+    df_cross_accuracy_benchmark_changeSingleParameters = df_cross_accuracy_benchmark_changeSingleParameters[df_cross_accuracy_benchmark_changeSingleParameters.parms_changing_parameter!="none"]
+
+    df_cross_accuracy_benchmark_changeSingleParameters["parms_type_parm_default"] = "non_default" # this indicates whether the parameter is the one from default values
+
+    # add the default changes, for each default parameters
+    for field, val in row_default_parms.iteritems():
+
+        # checks
+        if field not in set(df_cross_accuracy_benchmark_changeSingleParameters.parms_changing_parameter): raise ValueError("field %s not in df"%field)
+        if val in set(df_cross_accuracy_benchmark_changeSingleParameters[df_cross_accuracy_benchmark_changeSingleParameters.parms_changing_parameter==field].parms_changing_parameter_value): raise ValueError("val %s should not be in field %s"%(val, field))
+
+        # add the default values 
+        df_cross_accuracy_benchmark_changeSingleParameters_default_val = cp.deepcopy(df_cross_accuracy_benchmark_changeSingleParameters_default)
+        df_cross_accuracy_benchmark_changeSingleParameters_default_val["parms_changing_parameter"] = field
+        df_cross_accuracy_benchmark_changeSingleParameters_default_val["parms_changing_parameter_value"] = str(val)
+        df_cross_accuracy_benchmark_changeSingleParameters_default_val["parms_type_parm_default"] = "default"
+
+        df_cross_accuracy_benchmark_changeSingleParameters = df_cross_accuracy_benchmark_changeSingleParameters.append(df_cross_accuracy_benchmark_changeSingleParameters_default_val)
+
+    # keep only df with this svtype
+    df_plot = df_cross_accuracy_benchmark_changeSingleParameters[(df_cross_accuracy_benchmark_changeSingleParameters.svtype==svtype)] 
+
+
+    # add the accuracies relative to the maximum
+    accuracy_fields = ["Fvalue"]
+    unique_test_rows = ["test_species", "test_typeSimulations", "test_sampleID", "test_simName"]
+
+    df_cross_accuracy_benchmark = df_cross_accuracy_benchmark[(df_cross_accuracy_benchmark.type_comparison=="same_run_and_simulation") & (df_cross_accuracy_benchmark.svtype==svtype)][unique_test_rows + accuracy_fields]
+    if len(df_cross_accuracy_benchmark)!=len(df_cross_accuracy_benchmark[unique_test_rows].drop_duplicates()): raise ValueError("there should be one row for each unique_test_rows")
+
+    df_plot = df_plot.merge(df_cross_accuracy_benchmark, on=unique_test_rows, how="left", suffixes=("", "_optimal"), validate="many_to_one")
+    for k in df_plot.columns: 
+        if any(pd.isna(df_plot[k])): raise ValueError("nans in %s"%k)
+
+    for f in accuracy_fields: 
+        df_plot["relative_%s"%f] = df_plot[f] / df_plot["%s_optimal"%f]
+        if any(pd.isna(df_plot["relative_%s"%f])): raise ValueError("nans in the relative fields")
+        if any(df_plot["relative_%s"%f]>1): 
+
+            df = df_plot[df_plot["relative_%s"%f]>1]
+            #print(df.set_index("test_species")[["test_typeSimulations", "test_sampleID", f, "%s_optimal"%f]])
+            #print("WARNING: rel field > 1")
+
+    # add the unique ID of optimal parameters
+    df_parameters_used["test_uniqueColID"] = df_parameters_used[["species", "typeSimulations", "sampleID"]].apply(tuple, axis=1)
+    df_plot["test_uniqueColID"] = df_plot[["test_species", "test_typeSimulations", "test_sampleID"]].apply(tuple, axis=1)
+    if set(df_parameters_used[df_parameters_used.typeSimulations!="fast"].test_uniqueColID)!=set(df_plot.test_uniqueColID): raise ValueError("not all the test_uniqueColID are corresponded")
+
+    # add the value used in the optimal running
+    df_parameters_used_no_fast = df_parameters_used[df_parameters_used.typeSimulations!="fast"]
+    def get_df_parameters_used_long_one_p(p):
+        df = df_parameters_used_no_fast[["test_uniqueColID", p]].rename(columns={p : "parms_changing_parameter_value"})
+        df["parms_changing_parameter"] = p
+        return df
+
+    df_parameters_used_long = pd.concat(list(map(get_df_parameters_used_long_one_p, parameters_fields)))
+    df_parameters_used_long["parms_changing_parameter_value"] = df_parameters_used_long.parms_changing_parameter_value.apply(str)
+    strange_parms = set(df_parameters_used_long.parms_changing_parameter_value).difference(set(df_plot.parms_changing_parameter_value))
+    if len(strange_parms)>0: raise ValueError("there are parms in df_parameters_used_long not in df_plot: %s"%strange_parms)
+    df_plot = df_plot.merge(df_parameters_used_long, on=["test_uniqueColID", "parms_changing_parameter"], how="left", validate="many_to_one", suffixes=("", "_used_parms"))
+    if any(pd.isna(df_plot.parms_changing_parameter_value_used_parms)): raise ValueError("nans in _used_parms")
+
+
+    # print the fraction
+    df = df_plot[(df_plot.parms_changing_parameter_value==df_plot.parms_changing_parameter_value_used_parms)]
+    print("The fraction of samples where the Fvalue is <0.75 of the optimal Fvalue changing only single parms is %s"%(sum(df.relative_Fvalue<0.75)/ len(df) ))
+
+    ######################################################################################################################
+
+    ############# MAKE PLOT ###########
+    print("plotting")
+
+    # define graphics
+    species_to_color = {'none': 'gray', 'Drosophila_melanogaster': 'darkorange', 'Arabidopsis_thaliana': 'olive', 'Cryptococcus_neoformans': 'lightcoral', 'Candida_albicans': 'magenta', 'Candida_glabrata': 'lightseagreen', "Homo_sapiens":"brown"}
+    typeSimulations_to_color = {"uniform":"blue", "realSVs":"red", "arroundHomRegions":"black", "fast":"gray"}
+    changing_parm_to_color = get_value_to_color(parameters_fields, palette="tab20", n=len(parameters_fields), type_color="hex", center=None)[0]
+
+
+    cathegory_to_colors_dict = {"parms_changing_parameter" : changing_parm_to_color,
+                                "parms_type_parm_default" : {"default":"gray", "non_default":"red"},
+                                "test_species" : species_to_color,
+                                "test_typeSimulations" : typeSimulations_to_color}
+
+    # define square df
+    parms_keys = ["parms_changing_parameter", "parms_changing_parameter_value", "parms_type_parm_default"]
+    test_keys = ["test_species", "test_typeSimulations", "test_sampleID", "test_simName"]
+
+    # define df
+    df_plot["parms_idx"] = df_plot.apply(lambda r: "||||".join([str(r[k]) for k in parms_keys]), axis=1)
+    df_plot["test_idx"] = df_plot.apply(lambda r: "||||".join([str(r[k]) for k in test_keys]), axis=1)
+    df_square = df_plot[["parms_idx", "test_idx", accuracy_f]].pivot(index='parms_idx', columns='test_idx', values=accuracy_f)
+
+    # check no nans
+    for k in df_square.columns: 
+        if any(pd.isna(df_square[k])): raise ValueError("nans in %s"%k)
+
+    # define the sorted columns by species
+    species_to_order =  {'none': 0, "Candida_glabrata":1, "Candida_albicans":2, "Cryptococcus_neoformans":3, "Arabidopsis_thaliana":4, "Drosophila_melanogaster":5, "Homo_sapiens":6}
+    col_to_order = {c : species_to_order[c.split("||||")[0]]  for c in df_square.columns}
+    sorted_cols = sorted(df_square.columns, key=(lambda x: col_to_order[x]))
+
+    # define the sorted indices
+    def get_range_filt_DEL_breakpoints_to_int(x): return int(x.split("(")[1].split(",")[0])
+    def get_wrong_FILTERtags_to_int(x): return {"('NO_ASSEMBLY',)":0, "('LOW_QUAL', 'INSUFFICIENT_SUPPORT')":1}[x]
+
+    p_to_function_correct_value_fn = {"CLOVE max_rel_coverage_del":float , "CLOVE min_rel_coverage_dup":float, "GRIDSS dif_between_insert_and_del":int, "GRIDSS filter_noReadPairs":bool, "GRIDSS filter_overlappingRepeats":bool, "GRIDSS max_to_be_considered_small_event":int, "GRIDSS maximum_lenght_inexactHomology":int, "GRIDSS maximum_microhomology":int, "GRIDSS maximum_strand_bias":float, "GRIDSS min_Nfragments":int, "GRIDSS min_QUAL":int, "GRIDSS min_af":float, "GRIDSS min_af_EitherSmallOrLargeEvent":float, "GRIDSS min_length_inversions":int, "GRIDSS range_filt_DEL_breakpoints":get_range_filt_DEL_breakpoints_to_int, "GRIDSS wrong_FILTERtags":get_wrong_FILTERtags_to_int}
+
+    def get_order_idx(idx):
+        parm, val = idx.split("||||")[0:2]
+        val = p_to_function_correct_value_fn[parm](val)
+        return (parm, val)
+
+    index_to_order = {idx : get_order_idx(idx) for idx in df_square.index}
+    sorted_index = sorted(df_square.index, key=(lambda x: index_to_order[x]))
+
+    # get sorted df
+    df_square = df_square.loc[sorted_index, sorted_cols]
+
+
+    # define dicts mapping objects
+    type_keys_to_keys = {"parms":["parms_changing_parameter", "parms_type_parm_default"], "test":["test_species", "test_typeSimulations"]}
+    type_keys_to_indices = {"parms":{0, 2}, "test":{0, 1}}
+
+    # generate the cols colors df
+    def get_colors_series(idx, type_keys="parms"):
+        # type_keys can be parms or test
+
+        # get the color dicts
+        keys = type_keys_to_keys[type_keys]
+        key_indices = type_keys_to_indices[type_keys]
+
+        # get the content
+        idx_content = [x for I,x in enumerate(idx.split("||||")) if I in key_indices]
+
+        # define the series
+        field_to_color = {keys[I] : cathegory_to_colors_dict[keys[I]][c] for I,c in enumerate(idx_content)}
+
+        return pd.Series(field_to_color)
+    
+    row_colors_df = pd.Series(df_square.index, index=df_square.index).apply(lambda x: get_colors_series(x, type_keys="parms"))
+    col_colors_df = pd.Series(df_square.columns, index=df_square.columns).apply(lambda x: get_colors_series(x, type_keys="test"))
+
+    # define the df annotation
+    bool_to_label = {True:"*", False:""}
+    df_plot["label"] = (df_plot.parms_changing_parameter_value==df_plot.parms_changing_parameter_value_used_parms).apply(lambda x: bool_to_label[x])
+    df_annotations = df_plot[["parms_idx", "test_idx", "label"]].pivot(index='parms_idx', columns='test_idx', values="label").loc[sorted_index, sorted_cols]
+
+
+
+
+    # define the figure size
+    figsize = (int(len(df_square.columns)*0.03), int(len(df_square)*0.03))
+
+    cm = fun.plot_clustermap_with_annotation(df_square, row_colors_df, col_colors_df, None, title="", col_cluster=col_cluster, row_cluster=row_cluster, colorbar_label=accuracy_f, adjust_position=True, legend=True, idxs_separator_pattern="||||", texts_to_strip={"L001"}, default_label_legend="control", df_annotations=df_annotations, cmap=sns.color_palette("RdBu_r", 50), ylabels_graphics_df=None, grid_lines=False, figsize=figsize, multiplier_width_colorbars=multiplier_width_colorbars, vmax=1.0, vmin=0.0, size_annot=12)
+
+    # change axes
+    cm.ax_col_colors.set_yticklabels([])
+    cm.ax_row_colors.set_xticklabels([])
+    cm.ax_heatmap.set_xlabel("")
+    cm.ax_heatmap.set_ylabel("")
+
+    # define the ticklabels of the parameters
+    ticklabels = []
+    yline_sepparators = []
+    previous_parm_name = ""
+    for I, x in enumerate(df_square.index):
+        parm_name, parm_val, d = x.split("||||")
+        
+        if parm_name!=previous_parm_name: 
+            ticklabel = "%s %s "%(parm_name[0], parm_name.split()[1])
+            if previous_parm_name!="": yline_sepparators.append(I)
+        else: ticklabel = ""
+
+        ticklabel += parm_val
+        ticklabels.append(ticklabel)
+        previous_parm_name = parm_name
+
+    yticks = [I+0.5 for I in range(len(ticklabels))]
+    cm.ax_row_colors.set_yticks(yticks)
+    cm.ax_row_colors.set_yticklabels(ticklabels, fontsize=14)
+
+    # add lines sepparating all parms
+    cm.ax_heatmap.hlines(yline_sepparators, *cm.ax_heatmap.get_xlim(), color="black", linestyle="--", linewidth=1.8)
+    plt.show()
+
+    # save the plot
+    filename = "%s_cross_accuracy_%s_%s_%s_%s.pdf"%(fileprefix, accuracy_f, svtype, col_cluster, row_cluster)
+    print("getting %s"%filename)
+    cm.savefig(filename)
+
+    ###################################
+
+
+
 def generate_heatmap_accuracy_of_parameters_on_test_samples(df_benchmark, fileprefix, replace=False, threads=4, accuracy_f="Fvalue", svtype="integrated", col_cluster = False, row_cluster = False, show_only_species_and_simType=False, multiplier_width_colorbars=3, show_only_species=False):
 
     """
@@ -2065,6 +2311,16 @@ def generate_heatmap_accuracy_of_parameters_on_test_samples(df_benchmark, filepr
 
     fun.plot_clustermap_with_annotation(df_square, row_colors_df, col_colors_df, filename, title="cross accuracy", col_cluster=col_cluster, row_cluster=row_cluster, colorbar_label=accuracy_f, adjust_position=True, legend=True, idxs_separator_pattern="||||", texts_to_strip={"L001"}, default_label_legend="control", df_annotations=df_annotations, cmap=sns.color_palette("RdBu_r", 50), ylabels_graphics_df=None, grid_lines=False, figsize=figsize, multiplier_width_colorbars=multiplier_width_colorbars, vmax=1.0, vmin=0.0, size_annot=12)
 
+
+def rgb_to_hex(rgb):
+
+    # Helper function to convert colour as RGB tuple to hex string
+    rgb = tuple([int(255*val) for val in rgb])
+    hex_val = '#%02x%02x%02x'%(rgb[0], rgb[1], rgb[2])
+
+    if len(hex_val)!=7: raise ValueError("%s is not valid"%hex_val)
+
+    return hex_val
 
 def get_value_to_color(values, palette="mako", n=100, type_color="rgb", center=None):
 
