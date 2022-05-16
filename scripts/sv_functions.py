@@ -9,6 +9,7 @@
 # module imports
 try:
 
+    # general modules
     import os
     import re
     import string
@@ -59,13 +60,12 @@ try:
     import scipy.stats as stats
     import psutil
     from sklearn.utils import resample
-    import plotly.plotly as py
-    import plotly.figure_factory as ff
+
+
+    # import plotly 
     import plotly.offline as off_py
     import plotly.graph_objs as go
     from plotly import tools
-    from plotly.offline import init_notebook_mode, plot, iplot # download_plotlyjs
-    import cufflinks as cf
 
 # if some modules imports didn't work, add an exception
 except Exception as err:
@@ -668,10 +668,10 @@ def run_cmd(cmd, env=EnvName):
 
     # define the cmds
     SOURCE_CONDA_CMD = "source %s/etc/profile.d/conda.sh"%CondaDir
-    cmd_prefix = "%s && conda activate %s &&"%(SOURCE_CONDA_CMD, env)
+    cmd_prefix = "%s && conda activate %s > /dev/null 2>&1 &&"%(SOURCE_CONDA_CMD, env)
 
     # define the cmd
-    cmd_to_run = "%s %s"%(cmd_prefix, cmd) # old, tested on local machine
+    cmd_to_run = "%s %s"%(cmd_prefix, cmd)
 
     # define a tmpdir to write the bash scripts
     if "PERSVADE_TMPDIR" in os.environ: tmpdir = os.environ["PERSVADE_TMPDIR"]
@@ -10042,32 +10042,26 @@ def get_best_parameters_for_GridssClove_run(sorted_bam, reference_genome, outdir
     read_length = get_read_length(sorted_bam, threads=threads, replace=replace)
     print_if_verbose("The median read length is %i"%read_length)
 
-    # count total number of reads
-    total_nread_pairs = count_number_read_pairs(sorted_bam, replace=replace, threads=threads)
-    #total_nread_pairs  = 100000 # this is to debug the simulation pipeline
-    expected_coverage_per_bp = int((total_nread_pairs*read_length) / sum(chr_to_len.values())) +  1 # the expected coverage per position with pseudocount
-
-    print_if_verbose("There are %i read pairs in your library. The expected coverage is %ix."%(total_nread_pairs, expected_coverage_per_bp))
-
-    ###### MODELLING COVERAGE ######
-    print_if_verbose("modelling coverage of the sample")
-
     # get a function that takes the GC content, chromosome and distance to the telomere and returns coverage. This is actually a lambda function
     outdir_coverage_calculation = "%s/coverage_per_regions%ibb"%(outdir, window_l); make_folder(outdir_coverage_calculation)
     df_coverage_train = pd.read_csv(generate_coverage_per_window_file_parallel(reference_genome, outdir_coverage_calculation, sorted_bam, windows_file="none", replace=replace, threads=threads), sep="\t")
 
-    distToTel_chrom_GC_to_coverage_fn = get_distanceToTelomere_chromosome_GCcontent_to_coverage_fn(df_coverage_train, reference_genome, outdir_coverage_calculation, mitochondrial_chromosome=mitochondrial_chromosome, replace=replace, threads=threads)
+    # count total number of reads
+    total_nread_pairs = count_number_read_pairs(sorted_bam, replace=replace, threads=threads)
+    #expected_coverage_per_bp = int((total_nread_pairs*read_length*2) / sum(chr_to_len.values())) +  1 # the expected coverage per position with pseudocount. It used to be set without the 2, which inflated the coverage of the simulations
+    expected_coverage_per_bp = get_median_coverage(df_coverage_train, mitochondrial_chromosome) # this is the coverage of the gDNA
 
-    print_if_verbose("coverage model obtained")
+    print_if_verbose("There are %i read pairs in your library. The observed median coverage of the nuclear genome is %ix"%(total_nread_pairs, expected_coverage_per_bp))
 
-    ################################
+    # modelling coverage
+    print_if_verbose("modelling coverage of the sample")
+    distToTel_chrom_GC_to_coverage_fn = get_distanceToTelomere_chromosome_GCcontent_to_coverage_fn(df_coverage_train, reference_genome, outdir_coverage_calculation, mitochondrial_chromosome=mitochondrial_chromosome, replace=replace, threads=threads) # returns the median coverage for gDNA or mtDNA, as calculated by get_median_coverage
 
     ############ GENERAL OPERATIONS THAT WILL BE NEEDED FOR ALL THE STEPS #####
 
     # the dir and genome names
     genome_dir = "/".join(reference_genome.split("/")[0:-1])
     genome_name = reference_genome.split("/")[-1].split(".")[0]
-
 
     # simulate reads for the reference if you are not only simulating haploid
     if set(simulation_ploidies)!={"haploid"}: 
@@ -10171,6 +10165,12 @@ def get_best_parameters_for_GridssClove_run(sorted_bam, reference_genome, outdir
 
                 # define the final sorted bam depending on the ploidy (which also includes populations)
                 ploidy_merged_bam = get_merged_bamfile_for_ploidy(variant_bamfile=simulation_bam_file, reference_bamfile=simulated_reference_bam_file, ploidy=ploidy, replace=replace, threads=threads)
+
+                # print the coverage of the simulated bam
+                ploidy_merged_bam_outdir_coverage_calc = "%s.calculate_cov"%ploidy_merged_bam
+                ploidy_merged_bam_median_coverage = get_median_coverage(pd.read_csv(generate_coverage_per_window_file_parallel(reference_genome, ploidy_merged_bam_outdir_coverage_calc, ploidy_merged_bam, windows_file="none", replace=replace, threads=threads), sep="\t"), mitochondrial_chromosome)
+
+                print_if_verbose("The observed median coverage of the nuclear genome is %ix. For %s-%s, the median coverage of the nuclear genome is %ix"%(expected_coverage_per_bp, genomeID, ploidy, ploidy_merged_bam_median_coverage))
 
                 # calculate the expected fraction of reads comming from each genome
                 fraction_var, fraction_ref = get_fractions_reads_for_ploidy(ploidy)
@@ -13610,6 +13610,7 @@ def generate_genome_mappability_file(genome, replace=False, threads=4):
     genome_dir = "/".join(genome.split("/")[0:-1])
     genome_name = genome.split("/")[-1]
     idx_folder = "%s/%s_genmap_idx"%(genome_dir, genome_name.split(".")[0])
+    genmap_std_file = "%s.genmap.std"%genome
 
     # define expected files
     expected_idx_files = ["index.info.concat", "index.lf.drv.sbl", "index.sa.val", "index.txt.limits", "index.lf.drv", "index.info.limits", "index.rev.lf.drp"]
@@ -13617,9 +13618,7 @@ def generate_genome_mappability_file(genome, replace=False, threads=4):
 
         # remove previously generated indices
         if os.path.isdir(idx_folder): shutil.rmtree(idx_folder)
-
-        print("Generating index")
-        run_cmd("%s index -F %s -I %s -v"%(genmap, genome, idx_folder))
+        run_cmd("%s index -F %s -I %s -v > %s 2>&1"%(genmap, genome, idx_folder, genmap_std_file))
 
     # generate map
     map_folder = "%s/%s_genmap_map"%(genome_dir, genome_name.split(".")[0])
@@ -13627,16 +13626,15 @@ def generate_genome_mappability_file(genome, replace=False, threads=4):
     if file_is_empty(map_outfile) or replace is True:
 
         if not os.path.isdir(map_folder): os.mkdir(map_folder)
+        run_cmd("%s map -E 2 -K 30 -I %s -O %s -b --threads %i -v > %s 2>&1"%(genmap, idx_folder, map_folder, threads, genmap_std_file))
 
-        print("Generating map")
-        run_cmd("%s map -E 2 -K 30 -I %s -O %s -b --threads %i -v "%(genmap, idx_folder, map_folder, threads))
+    # clean
+    remove_file(genmap_std_file)
 
     # deine the long file
     map_outfile_long = "%s.long.bed"%map_outfile
 
     if file_is_empty(map_outfile_long) or replace is True:
-
-        print("getting df in the long format")
 
         # convert to a file where each position in the genome appears. This is important because genmap generates a file that has only ranges
         df_map = pd.read_csv(map_outfile, sep="\t", header=None, names=["chromosome", "start", "end", "strand", "map_idx"])
@@ -14693,6 +14691,13 @@ def run_CNV_calling(sorted_bam, reference_genome, outdir, threads, replace, mito
         # make a df with windows of the genome
         df_coverage = get_coverage_df_for_windows_of_genome(sorted_bam, reference_genome, outdir, replace, threads, window_size)
 
+        # make sure that all the chromosomes have at least 2 windows
+        chrom_to_nwindows = df_coverage.groupby("chromosome").apply(len)
+        chroms_one_window = sorted(chrom_to_nwindows[chrom_to_nwindows<2].index)
+        chr_to_len = get_chr_to_len(reference_genome)
+
+        if len(chroms_one_window)>0: raise ValueError("There are %i chromosomes with <2 windows for CNV calling. These are the chroms and their lengths:\n\n%s\n\n Note that all chromosomes should have at least 2 windows for CNV calling. Reduce the window size (--window_size_CNVcalling) to include these or remove them from the reference genome before re-running this module (call_CNVs)."%(len(chroms_one_window), "\n".join(["%s (%i bp)"%(c, chr_to_len[c]) for c in chroms_one_window])))
+        
         # add the files to remove
         files_folders_remove.append("%s/coverage_per_windows_%ibp.tab"%(outdir, window_size))
 
@@ -21285,3 +21290,12 @@ def check_that_paired_reads_are_different(fastq1, fastq2, outdir, nreads=10000):
 
     # clean
     delete_folder(outdir)
+
+def check_that_reads_are_compressed(r1, r2):
+
+    """Raises an error if the reads are not gz compressed"""
+
+    for f in [r1, r2]:
+
+        if file_is_empty(f): raise ValueError("The reads %s do not exist"%f)
+        if not f.endswith(".gz"): raise ValueError("the filename of %s does not end with .gz. PerSVade only works with .gz compressed files. You can compress your reads with 'gzip <reads>'"%f)

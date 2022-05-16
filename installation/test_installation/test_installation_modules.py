@@ -108,9 +108,22 @@ threads = fun.multiproc.cpu_count()
 ######## TEST DIFFERENT MODULES #########
 fun.print_with_runtime("Running modules")
 
+# trimming of reads
+outdir_trimmed_reads = "%s/read_trimmingCglab"%testing_outputs_dir
+fun.run_cmd("%s trim_reads_and_QC --threads %i --fraction_available_mem 1.0 -f1 %s -f2 %s -o %s"%(fun.perSVade_modules, threads, cglab_reads1, cglab_reads2, outdir_trimmed_reads))
+
+
 # align reads with SVs
 outdir_align_reads_SVs = "%s/align_reads_sim_SVs"%testing_outputs_dir
 fun.run_cmd("%s align_reads --threads %i --fraction_available_mem 1.0 -f1 %s -f2 %s -o %s --ref %s --min_chromosome_len 100"%(fun.perSVade_modules, threads, sim_reads1, sim_reads2, outdir_align_reads_SVs, ref_genome))
+
+# get regions with known SVs
+outdir_known_regions = "%s/known_SVs"%testing_outputs_dir
+fun.run_cmd("%s find_knownSVs_regions --threads %i --fraction_available_mem 1.0 -o %s --ref %s --min_chromosome_len 10000 --mitochondrial_chromosome mito_C_glabrata_CBS138 --SVcalling_parameters default --repeats_file skip --close_shortReads_table %s --skip_marking_duplicates"%(fun.perSVade_modules, threads, outdir_known_regions, ref_genome, close_shortReads_table))
+
+# run parameter optimization on pre-defined regions (knownSVs) and 2 chromosomes
+outdir_parameter_optimization_known = "%s/parameter_optimization_known"%testing_outputs_dir
+fun.run_cmd("%s optimize_parameters --threads %i --fraction_available_mem 1.0 -o %s --ref %s --min_chromosome_len 1000 --sortedbam %s/aligned_reads.bam.sorted --mitochondrial_chromosome mito_C_glabrata_CBS138 --repeats_file skip --regions_SVsimulations %s/knownSVs_breakpoints.bedpe --simulation_ploidies haploid --nsimulations 1 --nvars 5 --simulation_chromosomes ChrA_C_glabrata_CBS138,ChrB_C_glabrata_CBS138"%(fun.perSVade_modules, threads, outdir_parameter_optimization_known, ref_genome, outdir_align_reads_SVs, outdir_known_regions))
 
 # get the coverage per gene
 outdir_call_coverage_per_gene = "%s/cov_per_gene"%testing_outputs_dir
@@ -148,14 +161,6 @@ fun.run_cmd("%s integrate_SV_CNV_calls --threads %i --fraction_available_mem 1.0
 outdir_annotate_SVs = "%s/annotate_SVs"%testing_outputs_dir
 fun.run_cmd("%s annotate_SVs --threads %i --fraction_available_mem 1.0 -o %s --ref %s --min_chromosome_len 10000  --mitochondrial_chromosome mito_C_glabrata_CBS138  --SV_CNV_vcf %s/SV_and_CNV_variant_calling.vcf -gff %s -mcode 3 -gcode 1"%(fun.perSVade_modules, threads, outdir_annotate_SVs, ref_genome, outdir_merged_calling, gff))
 
-# get regions with known SVs
-outdir_known_regions = "%s/known_SVs"%testing_outputs_dir
-fun.run_cmd("%s find_knownSVs_regions --threads %i --fraction_available_mem 1.0 -o %s --ref %s --min_chromosome_len 10000 --mitochondrial_chromosome mito_C_glabrata_CBS138 --SVcalling_parameters default --repeats_file skip --close_shortReads_table %s --skip_marking_duplicates"%(fun.perSVade_modules, threads, outdir_known_regions, ref_genome, close_shortReads_table))
-
-# run parameter optimization on pre-defined regions (knownSVs) and 2 chromosomes
-outdir_parameter_optimization_known = "%s/parameter_optimization_known"%testing_outputs_dir
-fun.run_cmd("%s optimize_parameters --threads %i --fraction_available_mem 1.0 -o %s --ref %s --min_chromosome_len 1000 --sortedbam %s/aligned_reads.bam.sorted --mitochondrial_chromosome mito_C_glabrata_CBS138 --repeats_file skip --regions_SVsimulations %s/knownSVs_breakpoints.bedpe --simulation_ploidies haploid --nsimulations 1 --nvars 5 --simulation_chromosomes ChrA_C_glabrata_CBS138,ChrB_C_glabrata_CBS138"%(fun.perSVade_modules, threads, outdir_parameter_optimization_known, ref_genome, outdir_align_reads_SVs, outdir_known_regions))
-
 
 # get homologous regions in C. albicans
 outdir_homRegions = "%s/find_hom_regions"%testing_outputs_dir
@@ -177,9 +182,6 @@ fun.run_cmd("%s infer_repeats --threads %i --fraction_available_mem 1.0 -o %s --
 outdir_parameter_optimization = "%s/parameter_optimization"%testing_outputs_dir
 fun.run_cmd("%s optimize_parameters --threads %i --fraction_available_mem 1.0 -o %s --ref %s --min_chromosome_len 1000 --sortedbam %s/aligned_reads.bam.sorted --mitochondrial_chromosome mito_C_glabrata_CBS138 --repeats_file %s/combined_repeats.tab --regions_SVsimulations random --simulation_ploidies diploid_hetero --nsimulations 1 --nvars 5"%(fun.perSVade_modules, threads, outdir_parameter_optimization, ref_genome, outdir_align_reads_SVs, outdir_repeats_fast))
 
-# trimming of reads
-outdir_trimmed_reads = "%s/read_trimmingCglab"%testing_outputs_dir
-fun.run_cmd("%s trim_reads_and_QC --threads %i --fraction_available_mem 1.0 -f1 %s -f2 %s -o %s"%(fun.perSVade_modules, threads, cglab_reads1, cglab_reads2, outdir_trimmed_reads))
 
 # align reads
 #outdir_align_reads = "%s/align_reads_Cglab"%testing_outputs_dir

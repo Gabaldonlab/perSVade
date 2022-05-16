@@ -82,6 +82,8 @@ opt = parser.parse_args()
 ########### MAIN CODE ###########
 #################################
 
+error_check_that_the_coverage_is_reasonable_at_the_end
+
 # remove outdir if replace, and set replace to False
 if opt.replace is True: fun.delete_folder(opt.outdir)
 opt.replace = False
@@ -95,6 +97,7 @@ final_file = "%s/perSVade_finished_file.txt"%opt.outdir
 if not fun.file_is_empty(final_file): 
     fun.print_with_runtime("WARNING: %s exists, suggesting that perSVade was already  run in this folder. Remove this file if you want this command to work. Exiting..."%final_file)
     sys.exit(0)
+
 
 # define the start time
 start_time = time.time()

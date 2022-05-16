@@ -232,7 +232,8 @@ if len(unnanotated_vars)>0:
 # raise ValueError if there are more than 10% of unannotated vars
 n_all_vars = len(all_variants)
 n_unnanotated_vars = len(unnanotated_vars)
-if n_unnanotated_vars/n_all_vars>0.1: raise ValueError("There are more than 10 perecent of unannotated variants by VEP")
+#if n_unnanotated_vars/n_all_vars>0.1: raise ValueError("There are more than 10 perecent of unannotated variants by VEP")
+if (n_unnanotated_vars/n_all_vars)>0.1: print("WARNING: There are more than 10 pct of unannotated variants by VEP in this chunk (%s). This could be due to errors or because there is no annotations in this chromosome."%opt.input_vcf)
 
 ########################################################
 

@@ -36,6 +36,7 @@ df_coverage = read.table(opt$coverage_table, sep="\t", header=TRUE)
 # get the default parameters to run HMMsegment
 params_HMMsegment = HMMsegment(df_coverage, getparam = TRUE)
 
+
 # define the parameters according to the inputs
 params_HMMsegment$strength = as.numeric(opt$strength)
 params_HMMsegment$e = opt$e
@@ -47,6 +48,11 @@ params_HMMsegment$m = as.numeric(strsplit(opt$m, ",")[[1]])
 params_HMMsegment$eta = opt$eta
 params_HMMsegment$gamma = opt$gamma
 params_HMMsegment$S = opt$S
+
+
+# defbug
+if (any(df_coverage$start>df_coverage$end)){stop("There are some rows were the start > end")}
+if (any(df_coverage$start==df_coverage$end)){print("WARNING : There are some rows were the start == end. They will be discarded")}
 
 # classify into copy number variation even
 CN_segments = HMMsegment(df_coverage, params_HMMsegment)

@@ -56,6 +56,8 @@ ProcessedDataDir = "%s/processed_data"%PlotsDir; fun.make_folder(ProcessedDataDi
 
 #%% GET PROCESSED DFs
 
+# get cross accuracy benchmarking changnig coverage
+df_cross_accuracy_benchmark_changing_coverage = test_fun.get_df_cross_accuracy_benchmark_changing_coverage(CurDir, outdir_testing, outdir_testing_human, genomes_and_annotations_dir, threads)
 
 # load used parameters (this already includes the human hg38)
 df_parameters_used = test_fun.get_used_parameters_testing_several_species(outdir_testing, outdir_testing_human)
@@ -72,11 +74,38 @@ df_cross_accuracy_benchmark_realSVs_onlyHuman = test_fun.get_cross_accuracy_df_r
 # get cross-accuracy measurements testing on simulations (it already includes the human hg38 as testing)
 df_cross_accuracy_benchmark = test_fun.get_cross_accuracy_df_several_perSVadeSimulations(outdir_testing, outdir_testing_human, genomes_and_annotations_dir, replace=False)
 
+
 # load golden set df that comes from the testing (it does not include the human testing)
 df_goldenSetAccuracy = test_fun.get_accuracy_df_goldenSet(outdir_testing_GoldenSet)
 
 # get an integrated df of how each parameters affects each simulation
 #df_all_parameters_benchmarking = test_fun.get_df_all_parameters_benchmarking_simulations(outdir_testing, outdir_testing_human, df_parameters_used)
+
+# get cross-accuracy of each sample within sample
+df_cross_benchmarking_each_sample = test_fun.get_df_cross_benchmarking_within_each_sample(outdir_testing, outdir_testing_human)
+
+#%% PLOT COVERGAE STATS 
+
+threads = 48
+test_fun.print_coverage_stats_simulations(CurDir, ProcessedDataDir, PlotsDir, threads)
+
+#%% PRINT THE FRACTION OF THE GENOME WITH DIFFERENT TYPES OF REPEATS
+test_fun.print_fraction_genome_repeats(CurDir, outdir_testing_human, ProcessedDataDir)
+
+#%% PLOT HOW IMPORTANT IT IS TO OPTIMIZE FOR EACH SINGLE PARAMETER
+
+g = test_fun.plot_importance_of_optimizing_each_single_parameter(df_cross_benchmarking_each_sample, PlotsDir)
+
+#%% CROSS-ACCURACY CHANGING COVERAGE
+
+# define the cross accuracy field
+accuracy_f = "Fvalue"
+fileprefix = "%s/changing_coverage_all_cross_accuracy"%PlotsDir
+test_fun.generate_heatmap_accuracy_of_parameters_on_test_samples_changing_coverage(df_cross_accuracy_benchmark_changing_coverage, df_cross_accuracy_benchmark, fileprefix, threads=threads, accuracy_f=accuracy_f, svtype="integrated", col_cluster = False, row_cluster = False, multiplier_width_colorbars=3)
+
+
+
+
 
 #%% CROSS-ACCURACY SINGLE PARAMETERE CHANGES
 
@@ -86,7 +115,7 @@ accuracy_f = "relative_Fvalue"; # Fvalue relative to the optimal Fvalue
 
 # all data
 fileprefix = "%s/changing_single_parms_all_cross_accuracy"%PlotsDir
-test_fun.generate_heatmap_accuracy_of_parameters_on_test_samples_changing_single_parameters(df_cross_accuracy_benchmark_changeSingleParameters, df_parameters_used, df_cross_accuracy_benchmark, fileprefix, replace=False, threads=4, accuracy_f=accuracy_f, svtype="integrated", col_cluster = False, row_cluster = False, show_only_species_and_simType=True)
+ticklabel = test_fun.generate_heatmap_accuracy_of_parameters_on_test_samples_changing_single_parameters(df_cross_accuracy_benchmark_changeSingleParameters, df_parameters_used, df_cross_accuracy_benchmark, fileprefix, replace=False, threads=4, accuracy_f=accuracy_f, svtype="integrated", col_cluster = False, row_cluster = False, show_only_species_and_simType=True)
 
 
 #%% PLOT USED RESOURCES
@@ -94,6 +123,9 @@ test_fun.generate_heatmap_accuracy_of_parameters_on_test_samples_changing_single
 # it plots the used memory and time in the testing on simulations
 threads = 48
 test_fun.plot_used_resources_testing_on_simulations(CurDir, ProcessedDataDir, PlotsDir, threads)
+
+
+
 
 #%% PLOT USED PARAMETERS
 

@@ -532,8 +532,8 @@ def get_df_accuracy_of_parameters_on_test_samples(parameters_df, test_df, outdir
 
             # submit to the cluster
             #fun.run_jobarray_file_MN4_greasy(jobs_filename, "getting_crossAccuracy", time="02:00:00", queue="debug", threads_per_job=threads, nodes=16) # max 16 nodes (often ran on 6 nodes)
-            #fun.run_jobarray_file_MN4_greasy(jobs_filename, "getting_crossAccuracy", time="10:00:00", queue="bsc_ls", threads_per_job=threads, nodes=3)
-            fun.run_jobarray_file_MN4_greasy(jobs_filename, "getting_crossAccuracy", time="16:00:00", queue="bsc_ls", threads_per_job=threads, nodes=15) # max 16 nodes (often ran on 6 nodes)
+            fun.run_jobarray_file_MN4_greasy(jobs_filename, "getting_crossAccuracy", time="12:00:00", queue="bsc_ls", threads_per_job=threads, nodes=16)
+            #fun.run_jobarray_file_MN4_greasy(jobs_filename, "getting_crossAccuracy", time="16:00:00", queue="bsc_ls", threads_per_job=threads, nodes=15) # max 16 nodes (often ran on 6 nodes)
 
             # exit before it starts
             print("You need to run all the jobs from %s"%jobs_filename)
@@ -767,6 +767,147 @@ def plot_goldenSet_accuracy_barplots(df, fileprefix, accuracy_f="Fvalue", svtype
     fig.savefig(filename, bbox_inches='tight')
 
 
+
+def get_df_cross_benchmarking_within_each_sample(outdir_testing, outdir_testing_human):
+
+    """Stacks all the cross-accuracy calculations of each sample"""
+
+    # init df
+    df_cross_benchmarking_each_sample = pd.DataFrame()
+
+
+    # map each species to a type of simulations and to outdir_species_simulations
+    spName_to_typeSimulations_to_outdir_species_simulations = {spName : {typeSimulations : "%s/%s_%s/testing_Accuracy/%s"%(outdir_testing, taxID, spName, typeSimulations) for typeSimulations in ["arroundHomRegions", "uniform", "realSVs", "fast"]} for (taxID, spName, ploidy, mitochondrial_chromosome, max_coverage_sra_reads) in species_Info}
+
+    spName_to_typeSimulations_to_outdir_species_simulations["Homo_sapiens"] = {typeSimulations : "%s/testing_Accuracy/%s"%(outdir_testing_human, typeSimulations) for typeSimulations in ["uniform", "realSVs", "fast"]}
+
+    # keep appending data
+    for spName, typeSimulations_to_outdir_species_simulations in spName_to_typeSimulations_to_outdir_species_simulations.items(): 
+        #print(spName)
+        #if spName!="Candida_albicans": continue
+
+        for typeSimulations, outdir_species_simulations in typeSimulations_to_outdir_species_simulations.items():
+            if typeSimulations=="fast": continue
+
+            # define samples
+            all_sampleIDs = [x for x in os.listdir(outdir_species_simulations) if not x.startswith(".")]
+
+            # go through each sampleID
+            for sampleID in all_sampleIDs:
+                print(spName, typeSimulations, sampleID)
+
+                # get the df with the cross accuracy benchmark
+                outdir_sample = "%s/%s"%(outdir_species_simulations, sampleID)
+                df_fields = ["Fvalue", "precision", "recall", "train_genomeID", "train_svtype", 'test_genomeID', 'test_svtype', "nevents"]
+                df_benchmark = fun.load_object("%s/SVdetection_output/parameter_optimisation/benchmarking_all_filters_for_all_genomes_and_ploidies/df_cross_benchmark.py"%outdir_sample)[df_fields]
+
+                df_benchmark_chosen = fun.get_tab_as_df_or_empty_df("%s/SVdetection_output/parameter_optimisation/benchmarking_all_filters_for_all_genomes_and_ploidies/df_cross_benchmark_best.tab"%outdir_sample)[df_fields] # chosen parameters
+
+                # add the unique identifier
+                id_fields = ["train_genomeID", "train_svtype", 'test_genomeID', 'test_svtype']
+                df_benchmark["unique_ID"] = df_benchmark[id_fields].agg('-'.join, axis=1)
+                df_benchmark_chosen["unique_ID"] = df_benchmark_chosen[id_fields].agg('-'.join, axis=1)
+
+                df_benchmark["train_ID"] = df_benchmark[["train_genomeID", "train_svtype"]].agg('-'.join, axis=1)
+                df_benchmark_chosen["train_ID"] = df_benchmark_chosen[["train_genomeID", "train_svtype"]].agg('-'.join, axis=1)
+
+                df_benchmark["test_ID"] = df_benchmark[["test_genomeID", "test_svtype"]].agg('-'.join, axis=1)
+                df_benchmark_chosen["test_ID"] = df_benchmark_chosen[["test_genomeID", "test_svtype"]].agg('-'.join, axis=1)
+
+                # remove remaining
+                df_benchmark = df_benchmark[(df_benchmark.train_svtype!="remaining") & (df_benchmark.test_svtype!="remaining")]
+                df_benchmark_chosen = df_benchmark_chosen[(df_benchmark_chosen.train_svtype!="remaining") & (df_benchmark_chosen.test_svtype!="remaining")]
+
+                # keep only parms that have a nevents above a number
+                #df_benchmark = df_benchmark[df_benchmark.nevents>=5]
+                #df_benchmark_chosen = df_benchmark_chosen[df_benchmark_chosen.nevents>=5]
+
+                # checks
+                for df in [df_benchmark, df_benchmark_chosen]:
+                    if len(df)!=len(set(df.unique_ID)): raise ValueError("the combinations are not unique")
+                if len(set(df_benchmark_chosen.train_ID))!=1: raise ValueError("df_benchmark_chosen train_ID should be the same in all")
+
+                # add whether the accuracy is the one from the chosen df
+                df_benchmark["training_parms_are_chosen"] = (df_benchmark.train_ID==(df_benchmark_chosen.train_ID.iloc[0]))
+
+                # add the accuracy values of the chosen of df_benchmark
+                for accuracy_f in ["Fvalue", "precision", "recall"]:
+
+                    # map each testID to the accuracy of the chosen parms
+                    testID_to_accuracy_chosen = dict(df_benchmark[df_benchmark.training_parms_are_chosen].set_index("test_ID")[accuracy_f])
+                    df_benchmark["%s_chosenParms"%accuracy_f] = df_benchmark.test_ID.apply(lambda x: testID_to_accuracy_chosen[x])
+
+                
+                # add to df
+                df_benchmark["species"] = spName
+                df_benchmark["typeSimulations"] = typeSimulations
+                df_benchmark["sampleID"] = sampleID
+
+                df_cross_benchmarking_each_sample = df_cross_benchmarking_each_sample.append(df_benchmark)
+
+    return df_cross_benchmarking_each_sample
+
+
+def plot_importance_of_optimizing_each_single_parameter(df_cross_benchmarking_each_sample, PlotsDir):
+
+    """Plots the correlation between the accuracy when optimizing on each parameter or using a single parameter optimization for all."""
+
+    # to plot, keep all the tetsing instancew here the training and testing parameters are the same, but they are different from the actually chosen training parameters
+    df_plot = df_cross_benchmarking_each_sample[(df_cross_benchmarking_each_sample.train_ID==df_cross_benchmarking_each_sample.test_ID) & ~(df_cross_benchmarking_each_sample.training_parms_are_chosen)]
+    df_plot["type simulation"] = df_plot.typeSimulations.map({"arroundHomRegions":"homologous", "realSVs":"known", "uniform":"random"})
+    df_plot["SV type"] = df_plot.test_svtype.map({"deletions":"deletion", "tandemDuplications":"t. duplication", "inversions":"inversion", "insertions":"insertion", "translocations":"translocation", "integrated":"all"})
+
+    df_plot["F-value (SV type-specific parameters)"] = df_plot.Fvalue
+    #df_plot["SV type"] = df_plot.test_svtype
+    df_plot["F-value (global parameters)"] = df_plot.Fvalue_chosenParms
+    df_plot["species"] = df_plot.species.apply(lambda s: "%s. %s"%(s.split("_")[0][0], s.split("_")[1]))
+
+    # make the plot
+    print("plotting")
+    xfield = "F-value (SV type-specific parameters)"
+    yfield = "F-value (global parameters)"
+    sorted_species =  ["C. glabrata", "C. albicans", "C. neoformans", "A. thaliana", "D. melanogaster", "H. sapiens"]
+    sorted_svtypes = ["deletion", "t. duplication", "inversion", "insertion", "translocation", "all"]
+
+    #sns.set(font_scale=1.5)
+    g = sns.relplot(x=xfield, y=yfield, hue="type simulation", data=df_plot, col="species", row="SV type", kind="scatter", palette={"homologous":"black", "known":"red", "random":"blue"}, style="type simulation", alpha=.7, aspect=1, height=1.4, row_order=sorted_svtypes, col_order=sorted_species)
+    
+    # adjust legend
+    fontsize = 13
+    plt.setp(g._legend.get_texts(), fontsize=fontsize)
+    g._legend.set_bbox_to_anchor([1.1, 0.5])
+
+
+    for ax in g.axes.flat:
+
+        # define the values
+        row_val, col_val = [v.split("=")[1].rstrip().lstrip() for v in ax.get_title().split("|")]
+
+        # set title
+        ax.set_title("")
+
+        # set axes
+        if ax.colNum==0 and ax.rowNum==2: ax.set_ylabel("%s\n\n%s"%(yfield, row_val), fontsize=fontsize)
+        elif ax.colNum==0: ax.set_ylabel(row_val, fontsize=fontsize)
+        else: ax.set_ylabel("")
+
+        if ax.rowNum==5 and ax.colNum==2: ax.set_xlabel("%s\n\n%s"%(col_val, xfield), fontsize=fontsize)
+        elif ax.rowNum==5: ax.set_xlabel(col_val, fontsize=fontsize)
+        else: ax.set_xlabel("")
+
+        # lims
+        ax.set_xlim([0, 1.05])
+        ax.set_ylim([0, 1.05])
+
+        # add the line
+        ax.plot([0, 1], [0, 1], linestyle="--", color="gray", linewidth=.7)
+
+
+    plt.show()
+    g.savefig("%s/Fvalue_optimized_for_each_SV_vs_optimized_for_all_SVs.pdf"%PlotsDir)
+
+    return g
+  
 
 def get_df_all_parameters_benchmarking_simulations(outdir_testing, outdir_testing_human, df_parameters_used):
 
@@ -1274,6 +1415,196 @@ def get_cross_accuracy_df_several_perSVadeSimulations_changing_single_parameters
 
     df_cross_accuracy_benchmark = fun.get_tab_as_df_or_empty_df(df_benchmark_all_file)
     return df_cross_accuracy_benchmark
+
+
+def get_df_cross_accuracy_benchmark_changing_coverage(CurDir, outdir_testing, outdir_testing_human, genomes_and_annotations_dir, threads):
+  
+    """Tests how different parameters work on samples of a given species with different coverages"""
+
+    # deifine dur
+    outdir_cross_accuracy = "%s/cross_accuracy_calculations_changing_coverage"%outdir_testing
+    fun.make_folder(outdir_cross_accuracy)
+    df_benchmark_all_file = "%s/cross_benchmarking_parameters.tab"%outdir_cross_accuracy
+
+    if fun.file_is_empty(df_benchmark_all_file):
+
+
+        ###### GET PARAMETERS DF DF #######
+
+        # the parameters_df. The first cols are metadata (like sampleID, runID and optimisation type) and the others are things necessary for runnning gridss: and the path to the parameters_json
+        parameters_df_dict = {}
+
+        # map each species to a type of simulations and to outdir_species_simulations
+        spName_to_typeSimulations_to_outdir_species_simulations = {spName : {typeSimulations : "%s/%s_%s/testing_Accuracy/%s"%(outdir_testing, taxID, spName, typeSimulations) for typeSimulations in ["arroundHomRegions", "uniform", "realSVs"]} for (taxID, spName, ploidy, mitochondrial_chromosome, max_coverage_sra_reads) in species_Info}
+
+        spName_to_typeSimulations_to_outdir_species_simulations["Homo_sapiens"] = {typeSimulations : "%s/testing_Accuracy/%s"%(outdir_testing_human, typeSimulations) for typeSimulations in ["uniform", "realSVs"]}
+
+        # create the used parameters df
+        for taxID, spName, ploidy, mitochondrial_chromosome, max_coverage_sra_reads in species_Info_WithHumanHg38:
+            for typeSimulations in ["arroundHomRegions", "uniform", "realSVs"]:
+
+                # skip the human arroundHomRegions
+                if spName=="Homo_sapiens" and typeSimulations=="arroundHomRegions": continue
+
+                # define the outdir
+                outdir_species_simulations = spName_to_typeSimulations_to_outdir_species_simulations[spName][typeSimulations]
+                 
+                # define samples and runs
+                all_sampleIDs = [x for x in os.listdir(outdir_species_simulations) if not x.startswith(".")]
+
+                # go through each sampleID
+                for sampleID in all_sampleIDs:
+
+                    # define the outdir of the run
+                    sampleID_simulations_files = "%s/%s/simulations_files_and_parameters"%(outdir_species_simulations, sampleID)
+                    if not os.path.isdir(sampleID_simulations_files): raise ValueError("%s does not exist"%sampleID_simulations_files)
+
+                    # keep parameters
+                    parameters_json = "%s/final_parameters.json"%sampleID_simulations_files
+                    parameters_df_dict[(spName, sampleID, typeSimulations)] = {"species":spName, "typeSimulations":typeSimulations, "sampleID":sampleID, "parameters_json":parameters_json}
+
+        # add the fast parameters
+        parameters_json_fast = "%s/5478_Candida_glabrata/testing_Accuracy/fast/BG2_ANI/simulations_files_and_parameters/final_parameters.json"%outdir_testing
+        parameters_df_dict[("none", "fast", "fast")] = {"species":"none", "typeSimulations":"fast", "sampleID":"fast", "parameters_json":parameters_json_fast}
+
+        # get the dfs
+        parameters_df = pd.DataFrame(parameters_df_dict).transpose()[["species", "sampleID", "typeSimulations", "parameters_json"]]
+
+        ###################################
+
+        ########## GET THE TESTING DF #################
+
+        # iinit dict
+        test_df_dict = {}
+
+        # create the used parameters df
+        for taxID, spName, ploidy, mitochondrial_chromosome, max_coverage_sra_reads in species_Info_WithHumanHg38:
+            for typeSimulations in ["arroundHomRegions", "uniform", "realSVs"]:
+
+                # skip the human arroundHomRegions
+                if spName=="Homo_sapiens" and typeSimulations=="arroundHomRegions": continue
+
+                # only consider C. glabrata
+                if spName!="Candida_glabrata": continue
+                #if typeSimulations!="uniform": continue
+
+                # define the outdir
+                outdir_species_simulations = spName_to_typeSimulations_to_outdir_species_simulations[spName][typeSimulations]
+                 
+                # define samples and runs
+                all_sampleIDs = [x for x in os.listdir(outdir_species_simulations) if not x.startswith(".")]
+
+                # go through each sampleID
+                for sampleID in all_sampleIDs:
+
+                    # define the outdir of the run
+                    sampleID_simulations_files = "%s/%s/simulations_files_and_parameters"%(outdir_species_simulations, sampleID)
+                    if not os.path.isdir(sampleID_simulations_files): raise ValueError("%s does not exist"%sampleID_simulations_files)
+
+                    # define the reference genome (note that it has to be the hg38 for human)
+                    if spName=="Homo_sapiens": reference_genome = "%s/../data/hg38.fa.corrected.fasta"%outdir_testing_human
+                    else: reference_genome = "%s/%s.fasta"%(genomes_and_annotations_dir, spName)
+                    if fun.file_is_empty(reference_genome): raise ValueError("%s does not exist"%reference_genome)
+
+                    # change the window length to be adapted to any genome
+                    fun.window_l = fun.get_perSVade_window_l(reference_genome, mitochondrial_chromosome, 100000)
+
+                    # get the median coverage of the bam
+                    #sorted_bam_real = "%s/%s/aligned_reads.bam.sorted"%(outdir_species_simulations, sampleID)
+                    #coverage_field_real =  "%s/%s/aligned_reads.bam.sorted.coverage_calculated.tab"%(outdir_species_simulations, sampleID)
+                    #df_cov_real = fun.get_tab_as_df_or_empty_df(coverage_field_real)
+                    #median_coverage_real = fun.get_median_coverage(df_cov_real, mitochondrial_chromosome)
+                    #read_length = fun.get_read_length(sorted_bam_real, threads=4, replace=False)
+                    #total_nread_pairs = fun.count_number_read_pairs(sorted_bam_real, replace=False, threads=4)
+                    #expected_coverage_per_bp = int((total_nread_pairs*read_length) / sum(fun.get_chr_to_len(reference_genome).values())) +  1 # the expected coverage per position with pseudocount (it should be *2)
+   
+        
+                    # define simulation ploidies
+                    if ploidy==1: simulation_ploidy = "haploid"
+                    elif ploidy==2: simulation_ploidy = "diploid_hetero"
+
+                    # go through each 
+                    for simName in ["sim1", "sim2"]:
+
+                        # define things
+                        sorted_bam_all = "%s/reads_%s_%s.bam"%(sampleID_simulations_files, simName, simulation_ploidy)
+                        #gridss_vcf_all = "%s/gridss_vcf_%s_%s.vcf"%(sampleID_simulations_files, simName, simulation_ploidy)
+                        svtables_prefix_all =  "%s/SVs_%s"%(sampleID_simulations_files, simName) # this is the same for all
+                 
+                        # define the coverage of this simulated bam
+                        calculate_cov_dir_all = "%s.calculating_coverage"%sorted_bam_all
+                        coverage_file_all = "%s/coverage_windows_%ibp.tab"%(calculate_cov_dir_all, fun.window_l)
+
+                        if fun.file_is_empty(coverage_file_all): fun.generate_coverage_per_window_file_parallel(reference_genome, calculate_cov_dir_all, sorted_bam_all, windows_file="none", replace=False, run_in_parallel=True, delete_bams=True, threads=threads)
+       
+                        median_coverage_all = fun.get_median_coverage(fun.get_tab_as_df_or_empty_df(coverage_file_all), mitochondrial_chromosome, coverage_field="mediancov_1")
+
+                        # go through each coverage
+                        for cov in [10, 30, 50, 100, 200, 300]:
+                            print(spName, typeSimulations, sampleID, simName, cov)
+
+                            # define the fraction of bam
+                            fraction_bam = cov/median_coverage_all
+                            if fraction_bam>1: raise ValueError("fraction can't be above 2")
+
+                            # get the downsampled bam
+                            sorted_bam = "%s.downsampled_to_%ix.bam"%(sorted_bam_all, cov)
+
+                            if fun.file_is_empty(sorted_bam):
+                                print("generating %s"%sorted_bam)
+
+                                sorted_bam_tmp = "%s.tmp"%sorted_bam
+                                fun.downsample_bamfile_keeping_pairs(sorted_bam_all, fraction_reads=fraction_bam, threads=threads, name="sampleX", sampled_bamfile=sorted_bam_tmp)
+
+                                # index
+                                fun.index_bam(sorted_bam_tmp, threads=threads)
+
+                                # renames
+                                os.rename(sorted_bam_tmp+".bai", sorted_bam+".bai")
+                                os.rename(sorted_bam_tmp, sorted_bam)
+
+                            # check that the coverage is correct
+                            calculate_cov_dir = "%s.calculating_windowcoverage"%sorted_bam
+                            coverage_file = "%s/coverage_windows_%ibp.tab"%(calculate_cov_dir, fun.window_l)
+
+                            if fun.file_is_empty(coverage_file): fun.generate_coverage_per_window_file_parallel(reference_genome, calculate_cov_dir, sorted_bam, windows_file="none", replace=False, run_in_parallel=True, delete_bams=True, threads=threads)
+                            median_coverage = fun.get_median_coverage(fun.get_tab_as_df_or_empty_df(coverage_file), mitochondrial_chromosome, coverage_field="mediancov_1")
+
+                            ratio_cov = median_coverage/cov
+                            if ratio_cov<0.9 or ratio_cov>1.1: raise ValueError("the coverage is different. median_coverage=%s, cov=%s"%(median_coverage, cov))
+
+                            # run SV calling to get the gridss df (with default parameters)
+                            outdir_SV_calls = "%s.call_SVs"%sorted_bam
+                            gridss_vcf = "%s/gridss_output.raw.vcf"%outdir_SV_calls
+                            if fun.file_is_empty(gridss_vcf):
+                                print("running call SVs")
+
+                                fun.run_cmd("%s call_SVs -o %s -r %s -sbam %s --SVcalling_parameters default -mchr %s --repeats_file skip --fraction_available_mem 1.0 --threads %i --fractionRAM_to_dedicate 0.75"%(fun.perSVade_modules, outdir_SV_calls, reference_genome, sorted_bam, mitochondrial_chromosome, threads), env="perSVade_env")
+
+                            for f in os.listdir(outdir_SV_calls):
+                                if f!=fun.get_file(gridss_vcf): fun.remove_file("%s/%s"%(outdir_SV_calls, f))
+
+                            # get the sorted_ban.CollectInsertSizeMetrics.out
+                            fun.get_insert_size_distribution(sorted_bam, replace=False, threads=threads)
+
+                            # add to dict
+                            test_df_dict[(spName, sampleID, typeSimulations, simName, cov)] = {"species":spName, "sampleID":sampleID, "typeSimulations":typeSimulations, "simName":simName, "coverage":str(cov), "sorted_bam":sorted_bam, "gridss_vcf":gridss_vcf, "reference_genome":reference_genome, "mitochondrial_chromosome":mitochondrial_chromosome, "svtables_prefix":svtables_prefix_all}
+
+        ###############################################
+
+
+        # get the test df
+        test_df = pd.DataFrame(test_df_dict).transpose()[["species", "sampleID", "typeSimulations", "simName", "coverage", "sorted_bam", "gridss_vcf", "reference_genome", "mitochondrial_chromosome", "svtables_prefix"]]
+
+        # get the benchmarking df
+        print("getting cross-accuracy df")
+        df_cross_accuracy_benchmark = get_df_accuracy_of_parameters_on_test_samples(parameters_df, test_df, outdir_cross_accuracy, replace=False)
+
+    df_cross_accuracy_benchmark = fun.get_tab_as_df_or_empty_df(df_benchmark_all_file)
+
+    return df_cross_accuracy_benchmark
+
+
 
 def get_cross_accuracy_df_several_perSVadeSimulations(outdir_testing, outdir_testing_human, genomes_and_annotations_dir, replace=False):
 
@@ -1993,6 +2324,128 @@ def get_cross_accuracy_df_realSVs_onlyHuman(CurDir, ProcessedDataDir, threads=4,
 
 
 
+def generate_heatmap_accuracy_of_parameters_on_test_samples_changing_coverage(df_cross_accuracy_benchmark_changing_coverage, df_cross_accuracy_benchmark, fileprefix, replace=False, threads=4, accuracy_f="Fvalue", svtype="integrated", col_cluster = False, row_cluster = False, multiplier_width_colorbars=3):
+
+    """PLots how each of the parameters works on different coverages"""
+
+    # keep some df
+    df_cov = df_cross_accuracy_benchmark_changing_coverage[(df_cross_accuracy_benchmark_changing_coverage.test_species=="Candida_glabrata") & (df_cross_accuracy_benchmark_changing_coverage.svtype==svtype)]
+    
+    """
+    # check that the coverage 300x is the same as the used one
+    df_cov_300 = df_cov[df_cov.test_coverage==300]
+    df_cross_accuracy_benchmark_cglab = df_cross_accuracy_benchmark[(df_cross_accuracy_benchmark.test_species=="Candida_glabrata") & (df_cross_accuracy_benchmark.svtype==svtype)]
+    unique_field_IDs = ["parms_species", "parms_typeSimulations", "parms_sampleID", "test_sampleID", "test_typeSimulations", "test_simName"]
+    df_cov_300 = df_cov_300.merge(df_cross_accuracy_benchmark_cglab[unique_field_IDs + [accuracy_f]], on=unique_field_IDs, validate="one_to_one", how="left", suffixes=("", "_perSVade_run"))
+    ax = sns.scatterplot(data=df_cov_300, x=accuracy_f, y="%s_perSVade_run"%accuracy_f, alpha=.5)
+    plt.plot([0, 1], [0, 1], color="black", linestyle="--")
+    ax.set_xlim([-0.05, 1.05])
+    ax.set_ylim([-0.05, 1.05])
+    ax.set_title("%s 300x is correct"%svtype)
+    """
+
+    # define the df to plot
+    df_plot = df_cov
+ 
+    # define graphics
+    species_to_color = {'none': 'gray', 'Drosophila_melanogaster': 'darkorange', 'Arabidopsis_thaliana': 'olive', 'Cryptococcus_neoformans': 'lightcoral', 'Candida_albicans': 'magenta', 'Candida_glabrata': 'lightseagreen', "Homo_sapiens":"brown"}
+    typeSimulations_to_color = {"uniform":"blue", "realSVs":"red", "arroundHomRegions":"black", "fast":"gray"}
+
+    all_sampleIDs = sorted(set(df_plot.parms_sampleID).union(set(df_plot.test_sampleID)))
+    sampleID_to_color = get_value_to_color(all_sampleIDs)[0]
+
+
+    cathegory_to_colors_dict = {"parms_species" : species_to_color,
+                                "parms_typeSimulations" : typeSimulations_to_color,
+                                "test_species" : species_to_color,
+                                "parms_sampleID":sampleID_to_color,
+                                "test_typeSimulations" : typeSimulations_to_color,
+                                "test_sampleID":sampleID_to_color,
+                                "test_simName":{"sim1":"black", "sim2":"gray"},
+                                "test_coverage":{'10': 'white', '30': 'coral', '50': 'lightcoral', '100': 'rosybrown', '200': 'darkgray', '300': 'black'}}
+
+    # define square df
+    parms_keys = ["parms_species", "parms_typeSimulations", "parms_sampleID"]
+    test_keys = ["test_typeSimulations", "test_coverage", "test_species", "test_sampleID", "test_simName"]
+
+
+    # debug
+    #df_plot = df_plot[df_plot.test_coverage==300]
+
+    # define df
+    df_plot["parms_idx"] = df_plot.apply(lambda r: "||||".join([str(r[k]) for k in parms_keys]), axis=1)
+    df_plot["test_idx"] = df_plot.apply(lambda r: "||||".join([str(r[k]) for k in test_keys]), axis=1)
+    df_square = df_plot[["parms_idx", "test_idx", accuracy_f]].pivot(index='parms_idx', columns='test_idx', values=accuracy_f)
+
+    # check no nans
+    for k in df_square.columns: 
+        if any(pd.isna(df_square[k])): raise ValueError("nans in %s"%k)
+
+
+    # define the sorted index by species
+    species_to_order =  {'none': 0, "Candida_glabrata":1, "Candida_albicans":2, "Cryptococcus_neoformans":3, "Arabidopsis_thaliana":4, "Drosophila_melanogaster":5, "Homo_sapiens":6}
+    index_to_order = {c : species_to_order[c.split("||||")[0]]  for c in df_square.index}
+
+    sorted_index = sorted(df_square.index, key=(lambda x: index_to_order[x]))
+
+    # define the sorted cols by the coverage
+    typeSimulations_to_order = {"arroundHomRegions":0, "realSVs":1, "uniform":2}
+    sorted_cols = sorted(df_square.columns, key=(lambda x: (typeSimulations_to_order[x.split("||||")[0]], int(x.split("||||")[1]))))
+
+    # get the sorted df
+    df_square = df_square.loc[sorted_index, sorted_cols]
+
+    # get the label
+    df_annotations = None
+
+    # define dicts mapping objects
+    type_keys_to_keys = {"parms":parms_keys, "test":test_keys}
+
+    # generate the cols colors df
+    def get_colors_series(idx, type_keys="parms"):
+        # type_keys can be parms or test
+
+        # get the color dicts
+        keys = type_keys_to_keys[type_keys]
+
+        # get the content
+        idx_content = idx.split("||||")
+
+        # define the series
+        field_to_color = {keys[I] : cathegory_to_colors_dict[keys[I]][c] for I,c in enumerate(idx_content)}
+
+        return pd.Series(field_to_color)
+    
+    row_colors_df = pd.Series(df_square.index, index=df_square.index).apply(lambda x: get_colors_series(x, type_keys="parms"))
+    col_colors_df = pd.Series(df_square.columns, index=df_square.columns).apply(lambda x: get_colors_series(x, type_keys="test"))
+
+    # keep only some colors
+    row_colors_df = row_colors_df[["parms_species", "parms_typeSimulations"]]
+    col_colors_df = col_colors_df[["test_typeSimulations", "test_coverage"]]
+
+
+
+    # get the plot
+    figsize = (int(len(df_square.columns)*0.03), int(len(df_square)*0.03))
+
+    cm = fun.plot_clustermap_with_annotation(df_square, row_colors_df, col_colors_df, None, title="cross accuracy", col_cluster=col_cluster, row_cluster=row_cluster, colorbar_label=accuracy_f, adjust_position=True, legend=True, idxs_separator_pattern="||||", texts_to_strip={"L001"}, default_label_legend="control", df_annotations=df_annotations, cmap=sns.color_palette("RdBu_r", 50), ylabels_graphics_df=None, grid_lines=False, figsize=figsize, multiplier_width_colorbars=multiplier_width_colorbars, vmax=1.0, vmin=0.0, size_annot=12, color_bar_x0_position_add=-1)
+
+    # change axes
+    cm.ax_col_colors.set_yticklabels([])
+    cm.ax_row_colors.set_xticklabels([])
+    cm.ax_heatmap.set_xlabel("")
+    cm.ax_heatmap.set_ylabel("")
+    cm.ax_col_dendrogram.set_title("")
+
+    #sys.exit(0)
+
+    # save
+    filename = "%s_cross_accuracy_%s_%s_%s_%s.pdf"%(fileprefix, accuracy_f, svtype, col_cluster, row_cluster)
+    print("getting %s"%filename)
+    cm.savefig(filename)
+
+
+
 def generate_heatmap_accuracy_of_parameters_on_test_samples_changing_single_parameters(df_cross_accuracy_benchmark_changeSingleParameters, df_parameters_used, df_cross_accuracy_benchmark, fileprefix, replace=False, threads=4, accuracy_f="Fvalue", svtype="integrated", col_cluster = False, row_cluster = False, show_only_species_and_simType=False, multiplier_width_colorbars=3, show_only_species=False):
 
     """Plots a heatmap showing how different changes in the parameters (as compared to default) generate one or another data"""
@@ -2089,8 +2542,10 @@ def generate_heatmap_accuracy_of_parameters_on_test_samples_changing_single_para
     # define graphics
     species_to_color = {'none': 'gray', 'Drosophila_melanogaster': 'darkorange', 'Arabidopsis_thaliana': 'olive', 'Cryptococcus_neoformans': 'lightcoral', 'Candida_albicans': 'magenta', 'Candida_glabrata': 'lightseagreen', "Homo_sapiens":"brown"}
     typeSimulations_to_color = {"uniform":"blue", "realSVs":"red", "arroundHomRegions":"black", "fast":"gray"}
-    changing_parm_to_color = get_value_to_color(parameters_fields, palette="tab20", n=len(parameters_fields), type_color="hex", center=None)[0]
-
+    #changing_parm_to_color = get_value_to_color(parameters_fields, palette=sns.color_palette("tab10", 3), n=len(parameters_fields), type_color="hex", center=None)[0]
+    
+    all_colors = ["navy", "brown", "olive"]*10
+    changing_parm_to_color = {p : all_colors[I] for I,p in enumerate(parameters_fields)}
 
     cathegory_to_colors_dict = {"parms_changing_parameter" : changing_parm_to_color,
                                 "parms_type_parm_default" : {"default":"gray", "non_default":"red"},
@@ -2100,6 +2555,9 @@ def generate_heatmap_accuracy_of_parameters_on_test_samples_changing_single_para
     # define square df
     parms_keys = ["parms_changing_parameter", "parms_changing_parameter_value", "parms_type_parm_default"]
     test_keys = ["test_species", "test_typeSimulations", "test_sampleID", "test_simName"]
+
+    # debug
+    #df_plot = df_plot[df_plot.test_species=="Candida_glabrata"]
 
     # define df
     df_plot["parms_idx"] = df_plot.apply(lambda r: "||||".join([str(r[k]) for k in parms_keys]), axis=1)
@@ -2134,8 +2592,8 @@ def generate_heatmap_accuracy_of_parameters_on_test_samples_changing_single_para
 
 
     # define dicts mapping objects
-    type_keys_to_keys = {"parms":["parms_changing_parameter", "parms_type_parm_default"], "test":["test_species", "test_typeSimulations"]}
-    type_keys_to_indices = {"parms":{0, 2}, "test":{0, 1}}
+    type_keys_to_keys = {"parms":["parms_changing_parameter"], "test":["test_species", "test_typeSimulations"]}
+    type_keys_to_indices = {"parms":{0}, "test":{0, 1}}
 
     # generate the cols colors df
     def get_colors_series(idx, type_keys="parms"):
@@ -2194,6 +2652,16 @@ def generate_heatmap_accuracy_of_parameters_on_test_samples_changing_single_para
     yticks = [I+0.5 for I in range(len(ticklabels))]
     cm.ax_row_colors.set_yticks(yticks)
     cm.ax_row_colors.set_yticklabels(ticklabels, fontsize=14)
+
+    # change the color squeme
+    for I, ticklabel in enumerate(cm.ax_row_colors.get_yticklabels()):
+        parm_name, parm_val, d = df_square.index[I].split("||||")
+
+        # set color
+        ticklabel.set_color(changing_parm_to_color[parm_name])
+
+        # set the weith
+        if d=="default": ticklabel.set_fontweight("bold")
 
     # add lines sepparating all parms
     cm.ax_heatmap.hlines(yline_sepparators, *cm.ax_heatmap.get_xlim(), color="black", linestyle="--", linewidth=1.8)
@@ -3500,9 +3968,108 @@ def get_df_resources_simulations(CurDir, threads):
 
     df_resources["mapped pairs"] = df_resources.outdir_task.apply(get_number_pairs_from_outdir_task)
 
+    # add the read lenfth
+    def get_read_len(r):
+        
+        # skip non uniform
+        if r.type_simulation!="uniform": return -1
+
+        # get read len
+        sorted_bam = "%s/aligned_reads.bam.sorted"%r.outdir_task
+        return fun.get_read_length(sorted_bam, threads=threads)
+
+    df_resources["read_length"] = df_resources.apply(get_read_len, axis=1)
+
+    # add the coverage
+    def get_median_coverage_r(r):
+
+        # only for uniform 
+        if r.type_simulation!="uniform": return -1
+ 
+        # make a dir
+        destination_dir = "%s/calculating_coverage"%r.outdir_task; 
+        fun.make_folder(destination_dir)
+
+        # define the referenc genome there
+        ref_genome = "%s/genome.fasta"%destination_dir
+        if r.species!="Homo_sapiens": origin_genome = "%s/genomes_and_annotations/%s.fasta"%(CurDir, r.species)
+        else: origin_genome = "%s/outdirs_testing_humanGoldenSet/data/hg38.fa.corrected.fasta"%(CurDir)
+
+        fun.soft_link_files(origin_genome, ref_genome)
+        fun.soft_link_files(origin_genome+".fai", ref_genome+".fai")
+
+        # define mtDNA
+        mitochondrial_chromosome = [x[3] for x in species_Info_WithHumanHg38 if x[1]==r.species][0]
+
+        # change the window length
+        fun.window_l = fun.get_perSVade_window_l(ref_genome, mitochondrial_chromosome, 100000)
+
+        # calculate the coverage
+        sorted_bam = "%s/aligned_reads.bam.sorted"%r.outdir_task
+        coverage_file = "%s.coverage_calculated.tab"%sorted_bam
+        if fun.file_is_empty(coverage_file):
+
+            coverage_file_raw = fun.generate_coverage_per_window_file_parallel(ref_genome, "%s/coverage_calc"%destination_dir, sorted_bam, windows_file="none", replace=False, run_in_parallel=True, delete_bams=True, threads=threads)
+            os.rename(coverage_file_raw, coverage_file)
+
+        median_coverage = fun.get_median_coverage(fun.get_tab_as_df_or_empty_df(coverage_file), mitochondrial_chromosome, coverage_field="mediancov_1")
+
+        return median_coverage
+
+    df_resources["median_coverage"] = df_resources.apply(get_median_coverage_r, axis=1)
+
+    # add the insert size
+    def get_r_with_insert_size_stats_added(r):
+
+        #  get insert sizes, only for uniform
+        if r.type_simulation!="uniform": median_insert_size, median_insert_size_sd = (-1, -1)
+        else:
+            sorted_bam = "%s/aligned_reads.bam.sorted"%r.outdir_task
+            median_insert_size, median_insert_size_sd  = fun.get_insert_size_distribution(sorted_bam, replace=False, threads=threads)
+
+        # add to r
+        r["median_insert_size"] = median_insert_size
+        r["median_insert_size_sd"] = median_insert_size_sd
+
+        return r
+
+    df_resources = df_resources.apply(get_r_with_insert_size_stats_added, axis=1)
+
     #########################################
 
     return df_resources
+
+def print_coverage_stats_simulations(CurDir, ProcessedDataDir, PlotsDir, threads):
+
+    """prints the used resources"""
+
+    ########## GET THE DATASET WITH THE USED RESOURCES ########
+
+    df_resources_file = "%s/used_resources_simulations_print_coverage.py"%ProcessedDataDir    
+    if fun.file_is_empty(df_resources_file):
+
+        print("getting resources df")
+        df_resources = get_df_resources_simulations(CurDir, threads)
+
+        fun.save_object(df_resources, df_resources_file)
+
+    df_resources = fun.load_object(df_resources_file)
+
+    ###########################################################
+
+    # print stats
+    df_resources = df_resources[df_resources.type_simulation=="uniform"]
+    def get_sID(r):
+        if r.species=="Candida_glabrata": return r.sampleID.split("_")[0]
+        elif r.species=="Homo_sapiens": return r.sampleID
+        else: return r.sampleID.split("_")[1]
+
+    df_resources["sID"] = df_resources.species.apply(lambda x: x.split("_")[1]) + "-" + df_resources.apply(get_sID, axis=1)
+    print(df_resources.set_index("sID")[["median_coverage", "median_insert_size", "read_length"]])
+
+
+    adjhgdhaghg
+
 
 def plot_used_resources_testing_on_simulations(CurDir, ProcessedDataDir, PlotsDir, threads):
 
@@ -3661,6 +4228,86 @@ def get_sv_dict_without_simple_repeats(sv_dict, repeats_file, outdir, reference_
     return filt_sv_dict
 
 
+def print_fraction_genome_repeats(CurDir, outdir_testing_human, ProcessedDataDir):
+
+
+    """Prints the fraction of the genome with repeats"""
+
+    #sorted_species = ["Candida_glabrata", "Candida_albicans", "Cryptococcus_neoformans", "Arabidopsis_thaliana", "Drosophila_melanogaster", "Homo_sapiens"]
+    sorted_species = ["Candida_glabrata", "Cryptococcus_neoformans"]
+
+    # define the tmp dir
+    outdir = "%s/print_fraction_genome_repeats"%ProcessedDataDir; fun.make_folder(outdir)
+
+    # map each species to the repeats df
+    spp_to_genome = {}
+    spp_to_repeats_df = {}
+    for species in sorted_species:
+
+        # load repeats df
+        if species!="Homo_sapiens": genome_file = "%s/genomes_and_annotations/%s.fasta"%(CurDir, species)
+        else: genome_file = "%s/outdirs_testing_humanGoldenSet/data/hg38.fa.corrected.fasta"%(CurDir)
+
+        spp_to_genome[species] = genome_file
+        spp_to_repeats_df[species] = fun.get_tab_as_df_or_empty_df("%s.repeats.tab"%genome_file)
+
+    # define types repeats
+    repeats_all_species = set.intersection(*[set(df["type"]) for spp, df in spp_to_repeats_df.items()])
+    repeats_all_species_union = set.union(*[set(df["type"]) for spp, df in spp_to_repeats_df.items()])
+
+    # define the interator of repeats
+    #iterator_repeats = [("simple_repeats", {"Simple_repeat", "Low_complexity"}), ("all_repeats", set(repeats_df["type"]))]
+    #iterator_repeats = [(x,{x}) for x in sorted(set(repeats_df["type"]))]
+    #iterator_repeats = [(x, {x}) for x in ["Simple_repeat", "Low_complexity"]]
+    #iterator_repeats = [("all_repeats", set(repeats_df["type"]))]
+    #iterator_repeats = [("simple_repeats", {"Simple_repeat", "Low_complexity"})]
+    #iterator_repeats = [(x,{x}) for x in sorted(repeats_all_species)]
+    iterator_repeats = [(x,{x}) for x in sorted(repeats_all_species_union)]
+
+
+
+    # go through repeats of different types 
+    for type_name, repeats_types in iterator_repeats:
+        print("\n"+type_name+":")
+
+        for species in sorted_species:
+
+            # define bed files
+            bed_repeats = "%s/%s_%s_all.bed"%(outdir, species, type_name.replace("/", "_"))
+            bed_repeats_merged = "%s.merged.bed"%bed_repeats
+            bed_fields = ["chromosome", "begin_repeat", "end_repeat"]
+
+            if fun.file_is_empty(bed_repeats_merged):
+
+                # load repeats df
+                repeats_df = spp_to_repeats_df[species]
+
+                # write repeats to a bed
+                repeats_df[repeats_df["type"].isin(repeats_types)][bed_fields].drop_duplicates().sort_values(by=bed_fields).to_csv(bed_repeats, sep="\t", header=False, index=False)
+
+                # create a merged bed
+                bed_repeats_merged_tmp = "%s.tmp"%bed_repeats_merged
+                fun.run_cmd("bedtools merge -i %s > %s"%(bed_repeats, bed_repeats_merged_tmp))
+                os.rename(bed_repeats_merged_tmp, bed_repeats_merged)
+
+            # clean
+            fun.remove_file(bed_repeats)
+
+            # print the fraction of the genome
+            df_bed_repeats_merged = pd.read_csv(bed_repeats_merged, sep="\t", header=-1, names=bed_fields)
+            df_bed_repeats_merged["len_repeat"] = df_bed_repeats_merged.end_repeat - df_bed_repeats_merged.begin_repeat
+            if any(df_bed_repeats_merged.len_repeat<=0): raise ValueError("negative values in df_bed_repeats_merged")
+
+            fraction_genome_repeats = sum(df_bed_repeats_merged.len_repeat) / sum(fun.get_chr_to_len(spp_to_genome[species]).values())
+            print("%s; pct genome %s"%(species, fraction_genome_repeats*100))
+
+    # print the Ns
+    for species in sorted_species:
+
+        n_non_actg = sum(list(map(lambda c: len(c) - sum(map(lambda nt: str(c.seq).upper().count(nt), ["A", "C", "G", "T"])), fun.SeqIO.parse(spp_to_genome[species], "fasta"))))
+
+        fraction_n_non_actg = n_non_actg / sum(fun.get_chr_to_len(spp_to_genome[species]).values())
+        print("%s; pct genome non-ACTG %.4f"%(species, fraction_n_non_actg*100))
 
 def plot_effect_of_parameters_on_simulations(df_all_parameters_benchmarking, df_cross_accuracy_benchmark, df_parameters_used, PlotsDir, ProcessedDataDir, accuracy_f="Fvalue"):
 

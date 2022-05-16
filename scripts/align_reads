@@ -122,6 +122,9 @@ fun.print_with_runtime("Running perSVade %s into %s with %.3f Gb of RAM and %i c
 if opt.tmpdir is not None:
     if not os.path.isdir(opt.tmpdir): raise ValueError("The folder that you specified with --tmpdir does not exist")
 
+# check that the reads are compressed
+fun.check_that_reads_are_compressed(opt.fastq1, opt.fastq2)
+
 # prepare the reference genome and the window length
 opt.ref, reference_genome_dir = fun.prepare_reference_genome_for_perSVade(opt.ref, opt.outdir, "no_mitochondria", None, opt.replace)
 fun.window_l = fun.get_perSVade_window_l(opt.ref, "no_mitochondria", opt.min_chromosome_len)

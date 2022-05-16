@@ -122,6 +122,9 @@ dest_fastq2 = "%s/raw_reads2.fastq.gz"%reads_dir
 # log
 fun.print_with_runtime("Running trimmomatic")
 
+# check that the reads are compressed
+fun.check_that_reads_are_compressed(opt.fastq1, opt.fastq2)
+
 # get the reads under reads_dir
 fun.soft_link_files(opt.fastq1, dest_fastq1)
 fun.soft_link_files(opt.fastq2, dest_fastq2)
