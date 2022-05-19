@@ -2,7 +2,7 @@
 
 ######### define environment ##########
 
-fun.print_with_runtime("Running the test_installation_modules.py script...")
+print("Running the test_installation_modules.py script...")
 
 # this is to test that perSVade was properly installed. It takes ~45 minutes on a system of 4 cores, 32Gb of RAM
 
