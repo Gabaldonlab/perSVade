@@ -10048,7 +10048,7 @@ def get_best_parameters_for_GridssClove_run(sorted_bam, reference_genome, outdir
 
     # count total number of reads
     total_nread_pairs = count_number_read_pairs(sorted_bam, replace=replace, threads=threads)
-    #expected_coverage_per_bp = int((total_nread_pairs*read_length*2) / sum(chr_to_len.values())) +  1 # the expected coverage per position with pseudocount. It used to be set without the 2, which inflated the coverage of the simulations
+    #expected_coverage_per_bp = int((total_nread_pairs*read_length*2) / sum(chr_to_len.values())) +  1 # the expected coverage per position with pseudocount. This was the initial way, which is less efficient
     expected_coverage_per_bp = get_median_coverage(df_coverage_train, mitochondrial_chromosome) # this is the coverage of the gDNA
 
     print_if_verbose("There are %i read pairs in your library. The observed median coverage of the nuclear genome is %ix"%(total_nread_pairs, expected_coverage_per_bp))
@@ -10170,7 +10170,12 @@ def get_best_parameters_for_GridssClove_run(sorted_bam, reference_genome, outdir
                 ploidy_merged_bam_outdir_coverage_calc = "%s.calculate_cov"%ploidy_merged_bam
                 ploidy_merged_bam_median_coverage = get_median_coverage(pd.read_csv(generate_coverage_per_window_file_parallel(reference_genome, ploidy_merged_bam_outdir_coverage_calc, ploidy_merged_bam, windows_file="none", replace=replace, threads=threads), sep="\t"), mitochondrial_chromosome)
 
-                print_if_verbose("The observed median coverage of the nuclear genome is %ix. For %s-%s, the median coverage of the nuclear genome is %ix"%(expected_coverage_per_bp, genomeID, ploidy, ploidy_merged_bam_median_coverage))
+                # print a warning if the coverage is not as expected
+                ratio_coverage = ploidy_merged_bam_median_coverage/expected_coverage_per_bp
+
+                if ratio_coverage>=1.1 or ratio_coverage<=0.9:
+                    print("WARNING: The real median coverage of the nuclear genome is %ix. For %s-%s, the median coverage of the nuclear genome is %ix. Coverage differences are expected, since there are SVs in the simulated genomes and there may be noisy alignments around repetitive regions that inflate coverage. You should only worry if the difference between the real and the simulated coverage are very large."%(expected_coverage_per_bp, genomeID, ploidy, ploidy_merged_bam_median_coverage))
+
 
                 # calculate the expected fraction of reads comming from each genome
                 fraction_var, fraction_ref = get_fractions_reads_for_ploidy(ploidy)

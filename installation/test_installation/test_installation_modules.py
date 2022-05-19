@@ -2,6 +2,8 @@
 
 ######### define environment ##########
 
+fun.print_with_runtime("Running the test_installation_modules.py script...")
+
 # this is to test that perSVade was properly installed. It takes ~45 minutes on a system of 4 cores, 32Gb of RAM
 
 # module imports
@@ -135,7 +137,7 @@ fun.run_cmd("%s align_reads --threads %i --fraction_available_mem 1.0 -f1 %s -f2
 
 # run CNV calling for the previous reads
 outdir_CNVcalling_cglab = "%s/call_CNVs_Cglab_subsampledReads"%testing_outputs_dir
-fun.run_cmd("%s call_CNVs --threads %i --fraction_available_mem 1.0 -o %s --ref %s --min_chromosome_len 10000 -sbam %s/aligned_reads.bam.sorted --mitochondrial_chromosome mito_C_glabrata_CBS138 -p 1 --cnv_calling_algs AneuFinder --window_size_CNVcalling 100000"%(fun.perSVade_modules, threads, outdir_CNVcalling_cglab, Cglabrata_genome, outdir_align_reads))
+fun.run_cmd("%s call_CNVs --threads %i --fraction_available_mem 1.0 -o %s --ref %s --min_chromosome_len 10000 -sbam %s/aligned_reads.bam.sorted --mitochondrial_chromosome mito_C_glabrata_CBS138 -p 1 --cnv_calling_algs AneuFinder --window_size_CNVcalling 10000"%(fun.perSVade_modules, threads, outdir_CNVcalling_cglab, Cglabrata_genome, outdir_align_reads))
 
 # call small variants
 outdir_small_vars = "%s/calling_small_vars"%testing_outputs_dir

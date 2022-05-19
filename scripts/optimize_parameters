@@ -82,8 +82,6 @@ opt = parser.parse_args()
 ########### MAIN CODE ###########
 #################################
 
-error_check_that_the_coverage_is_reasonable_at_the_end
-
 # remove outdir if replace, and set replace to False
 if opt.replace is True: fun.delete_folder(opt.outdir)
 opt.replace = False
