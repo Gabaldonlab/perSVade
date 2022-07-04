@@ -1,0 +1,7 @@
+channels:
+  - conda-forge
+  - anaconda
+  - plotly
+  - bioconda
+dependencies:
+  - wgsim=1.0

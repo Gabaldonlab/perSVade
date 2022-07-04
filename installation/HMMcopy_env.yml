@@ -1,0 +1,8 @@
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  - bioconductor-hmmcopy=1.32.0
+  - r-argparser=0.6
+  - r-kernsmooth=2.23
+

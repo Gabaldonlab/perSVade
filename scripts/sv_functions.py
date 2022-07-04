@@ -19977,6 +19977,75 @@ def get_whetherCNVcalling_was_performed(VarCallOutdirs, samples_to_run):
 
     return all(existing_cnv_files)
 
+
+def get_tab_as_df_and_add_sampleID(sampleID, file):
+
+    """returns the variant calling df as a df"""
+    print("getting small vars for sample %s"%sampleID)
+
+    # get df
+    df = get_tab_as_df_or_empty_df(file)
+    df["sampleID"] = str(sampleID)
+
+    return df
+
+def integrate_call_small_variants_several_samples(sample_to_outdir, filename, threads, ploidy):
+
+    """Generates a call set that includes all the stacked results of call_small_variants into filename"""
+
+    if file_is_empty(filename):
+        print("running integrate_call_small_variants_several_samples")
+
+        # integrate in parallel
+        with multiproc.Pool(threads) as pool:
+            small_vars_df = pd.concat(pool.starmap(get_tab_as_df_and_add_sampleID, [(s, "%s/variant_calling_ploidy%i.tab"%(o, ploidy)) for s, o in sample_to_outdir.items()])) 
+            pool.close()
+            pool.terminate()
+
+        # save
+        print("saving")
+        save_df_as_tab(small_vars_df, filename)
+
+def integrate_get_cov_genes_several_samples(sample_to_outdir, filename, threads):
+
+    """Generates a call set that includes all the stacked results of get_cov_genes into filename"""
+
+    if file_is_empty(filename):
+        print("running integrate_get_cov_genes_several_samples")
+
+        # integrate in parallel
+        with multiproc.Pool(threads) as pool:
+            coverage_df = pd.concat(pool.starmap(get_tab_as_df_and_add_sampleID, [(s, "%s/genes_and_regions_coverage.tab"%o) for s, o in sample_to_outdir.items()])) 
+            pool.close()
+            pool.terminate()
+
+        # save
+        print("saving")
+        save_df_as_tab(coverage_df, filename)
+
+def integrate_annotate_vars_several_samples(sample_to_outdir, filename, threads, gff):
+
+    """Integrate the annotations of VEP into one file"""
+
+    if file_is_empty(filename):
+        print("running integrate_annotate_vars_several_samples")
+
+        # integrate in parallel
+        with multiproc.Pool(threads) as pool:
+            annot_df = pd.concat(pool.starmap(get_tab_as_df_or_empty_df, [("%s/annotated_variants.tab"%o,) for o in sample_to_outdir.values()])).drop_duplicates()
+            pool.close()
+            pool.terminate()
+
+        # make sure that hene and feature match in the gff
+        print_if_verbose("getting Gene and Feature matching the gff")
+        annot_df = get_annotation_df_with_GeneFeature_as_gff(annot_df, gff)
+
+        # save
+        print("saving")
+        save_df_as_tab(annot_df, filename)
+
+
+
 def get_integrated_SV_CNV_smallVars_df_from_run_perSVade_severalSamples(paths_df, cwd, ploidy, pct_overlap, tol_bp, gff, reference_genome, run_ploidy2_ifHaploid=False, generate_integrated_gridss_dataset=False, SV_CNV_called=True, threads=4):
 
     """Takes the same input as run_perSVade_severalSamples and writes the integrated dfs under cwd, adding to the integrated SV_CNV datasets some added fields that indicate that the SVs and CNV are shared among several samples.

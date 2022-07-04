@@ -119,6 +119,15 @@ reads_dir = "%s/reads"%opt.outdir; fun.make_folder(reads_dir)
 dest_fastq1 = "%s/raw_reads1.fastq.gz"%reads_dir
 dest_fastq2 = "%s/raw_reads2.fastq.gz"%reads_dir
 
+# if the trimmed reads exist, with the final name rename them to be trimmed_reads1 and trimmed_reads2
+for rID in [1, 2]:
+    origin_final_trimmed_reads = "%s/trimmed_reads%i.fastq.gz"%(opt.outdir, rID)
+    dest_trimmed_reads = "%s.trimmed.fastq.gz"%({1:dest_fastq1, 2:dest_fastq2}[rID])
+    if not fun.file_is_empty(origin_final_trimmed_reads):
+        fun.print_with_runtime("WARNING: The final trimmed reads '%s' exist, suggesting that this module was already ran. Renaming to '%s' to allow not repeating the read trimming step..."%(origin_final_trimmed_reads, dest_trimmed_reads))
+        if not fun.file_is_empty(dest_trimmed_reads): raise ValueError("%s should not exist"%dest_trimmed_reads)
+        os.rename(origin_final_trimmed_reads, dest_trimmed_reads)
+
 # log
 fun.print_with_runtime("Running trimmomatic")
 
@@ -151,8 +160,9 @@ fastqc_report_2 = fun.run_fastqc(trimmed_reads2, opt.replace, opt.threads)
 ##################################
 
 # move the reads into outdir
-for origin_path, dest_file in [(trimmed_reads1, "trimmed_reads1.fastq.gz"), (trimmed_reads2, "trimmed_reads2.fastq.gz"), (fastqc_report_1, "trimmed_reads1_fastqcReport.html"), (fastqc_report_2, "trimmed_reads2_fastqcReport.html")]:
-	os.rename(origin_path, "%s/%s"%(opt.outdir, dest_file))
+def get_zip_from_html(x): return "%s.zip"%(x.rstrip(".html"))
+for origin_path, dest_file in [(trimmed_reads1, "trimmed_reads1.fastq.gz"), (trimmed_reads2, "trimmed_reads2.fastq.gz"), (fastqc_report_1, "trimmed_reads1_fastqcReport.html"), (fastqc_report_2, "trimmed_reads2_fastqcReport.html"), (get_zip_from_html(fastqc_report_1), "trimmed_reads1_fastqc.zip"), (get_zip_from_html(fastqc_report_2), "trimmed_reads2_fastqc.zip")]:
+    os.rename(origin_path, "%s/%s"%(opt.outdir, dest_file))
 
 # clean
 fun.delete_folder(reads_dir)

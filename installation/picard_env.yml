@@ -1,0 +1,6 @@
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  - r-base=4.0.2
+  - picard=2.18.26

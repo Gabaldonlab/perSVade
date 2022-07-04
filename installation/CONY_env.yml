@@ -1,0 +1,8 @@
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  - bioconductor-iranges=2.8.2
+  - bioconductor-exomecopy=1.22.0
+  - r-snow=0.4
+  - r-argparser=0.4

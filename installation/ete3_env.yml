@@ -1,0 +1,7 @@
+channels:
+  - conda-forge
+  - etetoolkit
+dependencies:
+  - wgsim=1.0
+  - python=3.6
+  - ete3=3.1.2

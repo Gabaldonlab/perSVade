@@ -1,0 +1,11 @@
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  - r-base=4.0.2
+  - r-argparser=0.6
+  - bioconductor-rsvsim=1.28
+  - r-emdbook=1.3.12
+  - bioconductor-rtracklayer=1.48.0
+  - r-r.utils=2.9.2
+  - bioconductor-structuralvariantannotation=1.4.0

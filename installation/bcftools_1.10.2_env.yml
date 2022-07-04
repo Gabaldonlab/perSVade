@@ -1,0 +1,6 @@
+channels:
+  - bioconda
+  - anaconda
+dependencies:
+  - bcftools=1.10.2
+  - libopenblas=0.3.20

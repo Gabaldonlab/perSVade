@@ -1,0 +1,6 @@
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  - bioconductor-aneufinder=1.18.0
+  - r-argparser=0.6

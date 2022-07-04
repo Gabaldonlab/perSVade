@@ -1,0 +1,10 @@
+channels:
+  - conda-forge
+  - anaconda
+  - bioconda
+dependencies:
+  - r-base=4.0.2
+  - samtools=1.10
+  - bwa=0.7.17
+  - openjdk=8.0.152
+
