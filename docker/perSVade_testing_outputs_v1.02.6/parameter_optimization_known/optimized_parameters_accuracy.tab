@@ -1,0 +1,2 @@
+simulation_genome	simulation_ploidy	SV_type	precision	recall	Fvalue	nevents	TP	FP	FN
+simulation_1	haploid	integrated	0.5	0.5555555555555556	0.5263157894736842	9	5	5	4

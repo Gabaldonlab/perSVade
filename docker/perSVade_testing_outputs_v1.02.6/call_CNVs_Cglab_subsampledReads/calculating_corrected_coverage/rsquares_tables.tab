@@ -1,0 +1,16 @@
+rsquare	type_fit	type_genome
+0.0	GCcontent	gDNA
+0.0	median_mappability	gDNA
+0.0	raw_distance_to_telomere	gDNA
+-0.0009241772152936978	no_prediction	gDNA
+0.0	final_rsquare_round1_from_GCcontent	gDNA
+0.0	final_rsquare_round2_from_median_mappability	gDNA
+0.0	final_rsquare_round3_from_raw_distance_to_telomere	gDNA
+0.0	GCcontent	mtDNA
+0.0	median_mappability	mtDNA
+0.0	raw_distance_to_telomere	mtDNA
+-0.07142857142857162	no_prediction	mtDNA
+0.0	final_rsquare_round1_from_GCcontent	mtDNA
+0.0	final_rsquare_round2_from_median_mappability	mtDNA
+0.0	final_rsquare_round3_from_raw_distance_to_telomere	mtDNA
+0.0	final_rsquare_round4_from_raw_distance_to_telomere	mtDNA

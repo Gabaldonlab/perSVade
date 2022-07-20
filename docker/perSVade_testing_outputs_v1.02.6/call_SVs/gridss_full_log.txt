@@ -1,0 +1,528 @@
+Mon Jul  4 10:56:52 UTC 2022: Full log file is: /perSVade/installation/test_installation/testing_outputs/call_SVs/SVdetection_output/final_gridss_running/gridss_tmp/gridss.full.20220704_105652.f906658f32ce.21421.log
+Mon Jul  4 10:56:52 UTC 2022: Not found /usr/bin/time
+Mon Jul  4 10:56:52 UTC 2022: Using reference genome "/perSVade/installation/test_installation/testing_outputs/call_SVs/reference_genome_dir/reference_genome.fasta"
+Mon Jul  4 10:56:52 UTC 2022: Using assembly bam /perSVade/installation/test_installation/testing_outputs/call_SVs/SVdetection_output/final_gridss_running/gridss_assembly.bam
+Mon Jul  4 10:56:52 UTC 2022: Using output VCF /perSVade/installation/test_installation/testing_outputs/call_SVs/SVdetection_output/final_gridss_running/gridss_output.vcf
+Mon Jul  4 10:56:52 UTC 2022: Using 1 worker threads.
+Mon Jul  4 10:56:52 UTC 2022: Using blacklist /perSVade/installation/test_installation/testing_outputs/call_SVs/SVdetection_output/final_gridss_running/empty_regions.bed
+Mon Jul  4 10:56:52 UTC 2022: Using JVM maximum heap size of 12g for assembly and variant calling.
+Mon Jul  4 10:56:52 UTC 2022: Using input file /perSVade/installation/test_installation/testing_outputs/call_SVs/SVdetection_output/final_gridss_running/aligned_reads.sorted.bam
+Mon Jul  4 10:56:52 UTC 2022: Found /opt/conda/envs/perSVade_env_gridss_env/bin/Rscript
+Mon Jul  4 10:56:52 UTC 2022: Found /opt/conda/envs/perSVade_env_gridss_env/bin/samtools
+Mon Jul  4 10:56:52 UTC 2022: Found /opt/conda/envs/perSVade_env_gridss_env/bin/java
+Mon Jul  4 10:56:52 UTC 2022: samtools version: 1.10+htslib-1.10.2
+Mon Jul  4 10:56:52 UTC 2022: R version: R scripting front-end version 4.0.2 (2020-06-22)
+Mon Jul  4 10:56:53 UTC 2022: bwa Version: 0.7.17-r1188
+Mon Jul  4 10:56:53 UTC 2022: bash version: GNU bash, version 5.0.3(1)-release (x86_64-pc-linux-gnu)
+Mon Jul  4 10:56:53 UTC 2022: java version: openjdk version "1.8.0_152-release"
+OpenJDK Runtime Environment (build 1.8.0_152-release-1056-b12)
+OpenJDK 64-Bit Server VM (build 25.152-b12, mixed mode)
+Mon Jul  4 10:56:53 UTC 2022: Max file handles: 1048576
+Mon Jul  4 10:56:53 UTC 2022: Running GRIDSS steps: setupreference, preprocess, assemble, call,
+Mon Jul  4 10:56:53 UTC 2022: Running	bwa index	(once-off setup for reference genome)
+[bwa_index] Pack FASTA... 0.00 sec
+[bwa_index] Construct BWT for the packed sequence...
+[bwa_index] 0.01 seconds elapse.
+[bwa_index] Update BWT... 0.00 sec
+[bwa_index] Pack forward-only FASTA... 0.00 sec
+[bwa_index] Construct SA from BWT and Occ... 0.01 sec
+[main] Version: 0.7.17-r1188
+[main] CMD: bwa index /perSVade/installation/test_installation/testing_outputs/call_SVs/reference_genome_dir/reference_genome.fasta
+[main] Real time: 0.074 sec; CPU: 0.031 sec
+Mon Jul  4 10:56:53 UTC 2022: Running	PrepareReference	(once-off setup for reference genome)
+INFO	2022-07-04 10:56:53	PrepareReference	
+
+********** NOTE: Picard's command line syntax is changing.
+**********
+********** For more information, please see:
+********** https://github.com/broadinstitute/picard/wiki/Command-Line-Syntax-Transition-For-Users-(Pre-Transition)
+**********
+********** The command line looks like this in the new syntax:
+**********
+**********    PrepareReference -REFERENCE_SEQUENCE /perSVade/installation/test_installation/testing_outputs/call_SVs/reference_genome_dir/reference_genome.fasta
+**********
+
+
+10:56:53.559 INFO  NativeLibraryLoader - Loading libgkl_compression.so from jar:file:/perSVade/installation/external_software/gridss-2.9.2-gridss-jar-with-dependencies.jar!/com/intel/gkl/native/libgkl_compression.so
+[Mon Jul 04 10:56:53 UTC 2022] PrepareReference REFERENCE_SEQUENCE=/perSVade/installation/test_installation/testing_outputs/call_SVs/reference_genome_dir/reference_genome.fasta    CREATE_SEQUENCE_DICTIONARY=true CREATE_GRIDSS_REFERENCE_CACHE=true CREATE_BWA_INDEX_IMAGE=true VERBOSITY=INFO QUIET=false VALIDATION_STRINGENCY=STRICT COMPRESSION_LEVEL=5 MAX_RECORDS_IN_RAM=500000 CREATE_INDEX=false CREATE_MD5_FILE=false GA4GH_CLIENT_SECRETS=client_secrets.json USE_JDK_DEFLATER=false USE_JDK_INFLATER=false
+[Mon Jul 04 10:56:53 UTC 2022] Executing as root@f906658f32ce on Linux 5.3.18-lp152.87-default amd64; OpenJDK 64-Bit Server VM 1.8.0_152-release-1056-b12; Deflater: Intel; Inflater: Intel; Provider GCS is not available; Picard version: 2.9.2-gridss
+INFO	2022-07-04 10:56:53	PrepareReference	Sequence dictionary found.
+INFO	2022-07-04 10:56:53	PrepareReference	Creating GRIDSS reference cache file /perSVade/installation/test_installation/testing_outputs/call_SVs/reference_genome_dir/reference_genome.fasta.gridsscache
+INFO	2022-07-04 10:56:53	TwoBitBufferedReferenceSequenceFile	Caching reference genome contig mito_C_glabrata_CBS138
+INFO	2022-07-04 10:56:53	TwoBitBufferedReferenceSequenceFile	Caching reference genome contig ChrA_C_glabrata_CBS138
+INFO	2022-07-04 10:56:53	TwoBitBufferedReferenceSequenceFile	Caching reference genome contig ChrB_C_glabrata_CBS138
+INFO	2022-07-04 10:56:53	PrepareReference	Creating BWA index image file /perSVade/installation/test_installation/testing_outputs/call_SVs/reference_genome_dir/reference_genome.fasta.gridsscache
+WARNING	2022-07-04 10:56:53	BwaAligner	Unable to find /perSVade/installation/test_installation/testing_outputs/call_SVs/reference_genome_dir/reference_genome.fasta.img. Attempting to create.
+WARNING	2022-07-04 10:56:53	BwaAligner	Found bwa index files. Attempting to create image from bwa index files
+[M::bwa_idx_load_from_disk] read 0 ALT contigs
+INFO	2022-07-04 10:56:53	BwaAligner	Index creation successful
+[Mon Jul 04 10:56:53 UTC 2022] gridss.PrepareReference done. Elapsed time: 0.00 minutes.
+Runtime.totalMemory()=502792192
+Mon Jul  4 10:56:53 UTC 2022: Start pre-processing	/perSVade/installation/test_installation/testing_outputs/call_SVs/SVdetection_output/final_gridss_running/aligned_reads.sorted.bam
+Mon Jul  4 10:56:53 UTC 2022: Running	CollectInsertSizeMetrics	/perSVade/installation/test_installation/testing_outputs/call_SVs/SVdetection_output/final_gridss_running/aligned_reads.sorted.bam	first 10000000 records
+INFO	2022-07-04 10:56:53	CollectGridssMetrics	
+
+********** NOTE: Picard's command line syntax is changing.
+**********
+********** For more information, please see:
+********** https://github.com/broadinstitute/picard/wiki/Command-Line-Syntax-Transition-For-Users-(Pre-Transition)
+**********
+********** The command line looks like this in the new syntax:
+**********
+**********    CollectGridssMetrics -TMP_DIR /perSVade/installation/test_installation/testing_outputs/call_SVs/SVdetection_output/final_gridss_running/gridss_tmp/aligned_reads.sorted.bam.gridss.working -ASSUME_SORTED true -I /perSVade/installation/test_installation/testing_outputs/call_SVs/SVdetection_output/final_gridss_running/aligned_reads.sorted.bam -O /perSVade/installation/test_installation/testing_outputs/call_SVs/SVdetection_output/final_gridss_running/gridss_tmp/aligned_reads.sorted.bam.gridss.working/tmp.aligned_reads.sorted.bam -THRESHOLD_COVERAGE 50000 -FILE_EXTENSION null -GRIDSS_PROGRAM null -PROGRAM null -PROGRAM CollectInsertSizeMetrics -STOP_AFTER 10000000
+**********
+
+
+10:56:53.980 INFO  NativeLibraryLoader - Loading libgkl_compression.so from jar:file:/perSVade/installation/external_software/gridss-2.9.2-gridss-jar-with-dependencies.jar!/com/intel/gkl/native/libgkl_compression.so
+[Mon Jul 04 10:56:54 UTC 2022] CollectGridssMetrics GRIDSS_PROGRAM=[] THRESHOLD_COVERAGE=50000 INPUT=/perSVade/installation/test_installation/testing_outputs/call_SVs/SVdetection_output/final_gridss_running/aligned_reads.sorted.bam ASSUME_SORTED=true STOP_AFTER=10000000 OUTPUT=/perSVade/installation/test_installation/testing_outputs/call_SVs/SVdetection_output/final_gridss_running/gridss_tmp/aligned_reads.sorted.bam.gridss.working/tmp.aligned_reads.sorted.bam FILE_EXTENSION=null PROGRAM=[CollectInsertSizeMetrics] TMP_DIR=[/perSVade/installation/test_installation/testing_outputs/call_SVs/SVdetection_output/final_gridss_running/gridss_tmp/aligned_reads.sorted.bam.gridss.working]    METRIC_ACCUMULATION_LEVEL=[ALL_READS] INCLUDE_UNPAIRED=false VERBOSITY=INFO QUIET=false VALIDATION_STRINGENCY=STRICT COMPRESSION_LEVEL=5 MAX_RECORDS_IN_RAM=500000 CREATE_INDEX=false CREATE_MD5_FILE=false GA4GH_CLIENT_SECRETS=client_secrets.json USE_JDK_DEFLATER=false USE_JDK_INFLATER=false
+[Mon Jul 04 10:56:54 UTC 2022] Executing as root@f906658f32ce on Linux 5.3.18-lp152.87-default amd64; OpenJDK 64-Bit Server VM 1.8.0_152-release-1056-b12; Deflater: Intel; Inflater: Intel; Provider GCS is not available; Picard version: 2.9.2-gridss
+INFO	2022-07-04 10:56:54	RExecutor	Executing R script via command: Rscript /perSVade/installation/test_installation/testing_outputs/call_SVs/SVdetection_output/final_gridss_running/gridss_tmp/aligned_reads.sorted.bam.gridss.working/script8215527833781462299.R /perSVade/installation/test_installation/testing_outputs/call_SVs/SVdetection_output/final_gridss_running/gridss_tmp/aligned_reads.sorted.bam.gridss.working/tmp.aligned_reads.sorted.bam.insert_size_metrics /perSVade/installation/test_installation/testing_outputs/call_SVs/SVdetection_output/final_gridss_running/gridss_tmp/aligned_reads.sorted.bam.gridss.working/tmp.aligned_reads.sorted.bam.insert_size_histogram.pdf aligned_reads.sorted.bam
+INFO	2022-07-04 10:56:54	ProcessExecutor	null device 
+INFO	2022-07-04 10:56:54	ProcessExecutor	          1 
+[Mon Jul 04 10:56:54 UTC 2022] gridss.analysis.CollectGridssMetrics done. Elapsed time: 0.01 minutes.
+Runtime.totalMemory()=634388480
+Mon Jul  4 10:56:54 UTC 2022: Running	CollectGridssMetricsAndExtractSVReads|samtools	/perSVade/installation/test_installation/testing_outputs/call_SVs/SVdetection_output/final_gridss_running/aligned_reads.sorted.bam
+INFO	2022-07-04 10:56:54	CollectGridssMetricsAndExtractSVReads	
+
+********** NOTE: Picard's command line syntax is changing.
+**********
+********** For more information, please see:
+********** https://github.com/broadinstitute/picard/wiki/Command-Line-Syntax-Transition-For-Users-(Pre-Transition)
+**********
+********** The command line looks like this in the new syntax:
+**********
+**********    CollectGridssMetricsAndExtractSVReads -TMP_DIR /perSVade/installation/test_installation/testing_outputs/call_SVs/SVdetection_output/final_gridss_running/gridss_tmp/aligned_reads.sorted.bam.gridss.working -ASSUME_SORTED true -I /perSVade/installation/test_installation/testing_outputs/call_SVs/SVdetection_output/final_gridss_running/aligned_reads.sorted.bam -O /perSVade/installation/test_installation/testing_outputs/call_SVs/SVdetection_output/final_gridss_running/gridss_tmp/aligned_reads.sorted.bam.gridss.working/aligned_reads.sorted.bam -THRESHOLD_COVERAGE 50000 -FILE_EXTENSION null -GRIDSS_PROGRAM null -GRIDSS_PROGRAM CollectCigarMetrics -GRIDSS_PROGRAM CollectMapqMetrics -GRIDSS_PROGRAM CollectTagMetrics -GRIDSS_PROGRAM CollectIdsvMetrics -GRIDSS_PROGRAM ReportThresholdCoverage -PROGRAM null -PROGRAM CollectInsertSizeMetrics -SV_OUTPUT /dev/stdout -COMPRESSION_LEVEL 0 -METRICS_OUTPUT /perSVade/installation/test_installation/testing_outputs/call_SVs/SVdetection_output/final_gridss_running/gridss_tmp/aligned_reads.sorted.bam.gridss.working/aligned_reads.sorted.bam.sv_metrics -INSERT_SIZE_METRICS /perSVade/installation/test_installation/testing_outputs/call_SVs/SVdetection_output/final_gridss_running/gridss_tmp/aligned_reads.sorted.bam.gridss.working/tmp.aligned_reads.sorted.bam.insert_size_metrics -UNMAPPED_READS false -MIN_CLIP_LENGTH 5 -INCLUDE_DUPLICATES true
+**********
+
+
+10:56:55.143 INFO  NativeLibraryLoader - Loading libgkl_compression.so from jar:file:/perSVade/installation/external_software/gridss-2.9.2-gridss-jar-with-dependencies.jar!/com/intel/gkl/native/libgkl_compression.so
+[Mon Jul 04 10:56:55 UTC 2022] CollectGridssMetricsAndExtractSVReads MIN_CLIP_LENGTH=5 INSERT_SIZE_METRICS=/perSVade/installation/test_installation/testing_outputs/call_SVs/SVdetection_output/final_gridss_running/gridss_tmp/aligned_reads.sorted.bam.gridss.working/tmp.aligned_reads.sorted.bam.insert_size_metrics UNMAPPED_READS=false INCLUDE_DUPLICATES=true METRICS_OUTPUT=/perSVade/installation/test_installation/testing_outputs/call_SVs/SVdetection_output/final_gridss_running/gridss_tmp/aligned_reads.sorted.bam.gridss.working/aligned_reads.sorted.bam.sv_metrics SV_OUTPUT=/dev/stdout GRIDSS_PROGRAM=[CollectCigarMetrics, CollectMapqMetrics, CollectTagMetrics, CollectIdsvMetrics, ReportThresholdCoverage] THRESHOLD_COVERAGE=50000 INPUT=/perSVade/installation/test_installation/testing_outputs/call_SVs/SVdetection_output/final_gridss_running/aligned_reads.sorted.bam ASSUME_SORTED=true OUTPUT=/perSVade/installation/test_installation/testing_outputs/call_SVs/SVdetection_output/final_gridss_running/gridss_tmp/aligned_reads.sorted.bam.gridss.working/aligned_reads.sorted.bam FILE_EXTENSION=null PROGRAM=[CollectInsertSizeMetrics] TMP_DIR=[/perSVade/installation/test_installation/testing_outputs/call_SVs/SVdetection_output/final_gridss_running/gridss_tmp/aligned_reads.sorted.bam.gridss.working] COMPRESSION_LEVEL=0    MIN_INDEL_SIZE=1 CLIPPED=true INDELS=true SPLIT=true SINGLE_MAPPED_PAIRED=true DISCORDANT_READ_PAIRS=true STOP_AFTER=0 METRIC_ACCUMULATION_LEVEL=[ALL_READS] INCLUDE_UNPAIRED=false VERBOSITY=INFO QUIET=false VALIDATION_STRINGENCY=STRICT MAX_RECORDS_IN_RAM=500000 CREATE_INDEX=false CREATE_MD5_FILE=false GA4GH_CLIENT_SECRETS=client_secrets.json USE_JDK_DEFLATER=false USE_JDK_INFLATER=false
+[Mon Jul 04 10:56:55 UTC 2022] Executing as root@f906658f32ce on Linux 5.3.18-lp152.87-default amd64; OpenJDK 64-Bit Server VM 1.8.0_152-release-1056-b12; Deflater: Intel; Inflater: Intel; Provider GCS is not available; Picard version: 2.9.2-gridss
+INFO	2022-07-04 10:56:55	SAMFileWriterFactory	Unknown file extension, assuming BAM format when writing file: file:///dev/stdout
+INFO	2022-07-04 10:56:56	ExtractSVReads	Extracted 14103 reads from /perSVade/installation/test_installation/testing_outputs/call_SVs/SVdetection_output/final_gridss_running/aligned_reads.sorted.bam
+INFO	2022-07-04 10:56:56	RExecutor	Executing R script via command: Rscript /perSVade/installation/test_installation/testing_outputs/call_SVs/SVdetection_output/final_gridss_running/gridss_tmp/aligned_reads.sorted.bam.gridss.working/script5891999245678727497.R /perSVade/installation/test_installation/testing_outputs/call_SVs/SVdetection_output/final_gridss_running/gridss_tmp/aligned_reads.sorted.bam.gridss.working/aligned_reads.sorted.bam.insert_size_metrics /perSVade/installation/test_installation/testing_outputs/call_SVs/SVdetection_output/final_gridss_running/gridss_tmp/aligned_reads.sorted.bam.gridss.working/aligned_reads.sorted.bam.insert_size_histogram.pdf aligned_reads.sorted.bam
+INFO	2022-07-04 10:56:56	ProcessExecutor	null device 
+INFO	2022-07-04 10:56:56	ProcessExecutor	          1 
+[Mon Jul 04 10:56:56 UTC 2022] gridss.CollectGridssMetricsAndExtractSVReads done. Elapsed time: 0.02 minutes.
+Runtime.totalMemory()=634388480
+Mon Jul  4 10:56:56 UTC 2022: Running	PreprocessForBreakendAssembly|samtools	/perSVade/installation/test_installation/testing_outputs/call_SVs/SVdetection_output/final_gridss_running/aligned_reads.sorted.bam
+INFO	2022-07-04 10:56:56	PreprocessForBreakendAssembly	
+
+********** NOTE: Picard's command line syntax is changing.
+**********
+********** For more information, please see:
+********** https://github.com/broadinstitute/picard/wiki/Command-Line-Syntax-Transition-For-Users-(Pre-Transition)
+**********
+********** The command line looks like this in the new syntax:
+**********
+**********    PreprocessForBreakendAssembly -TMP_DIR /perSVade/installation/test_installation/testing_outputs/call_SVs/SVdetection_output/final_gridss_running/gridss_tmp/aligned_reads.sorted.bam.gridss.working -WORKING_DIR /perSVade/installation/test_installation/testing_outputs/call_SVs/SVdetection_output/final_gridss_running/gridss_tmp -REFERENCE_SEQUENCE /perSVade/installation/test_installation/testing_outputs/call_SVs/reference_genome_dir/reference_genome.fasta -COMPRESSION_LEVEL 0 -I /perSVade/installation/test_installation/testing_outputs/call_SVs/SVdetection_output/final_gridss_running/gridss_tmp/aligned_reads.sorted.bam.gridss.working/tmp.aligned_reads.sorted.bam.namedsorted.bam -O /dev/stdout -WORKER_THREADS 1 -ALIGNER BWAMEM -ALIGNER_BATCH_SIZE 10000
+**********
+
+
+10:56:56.771 INFO  NativeLibraryLoader - Loading libgkl_compression.so from jar:file:/perSVade/installation/external_software/gridss-2.9.2-gridss-jar-with-dependencies.jar!/com/intel/gkl/native/libgkl_compression.so
+[Mon Jul 04 10:56:56 UTC 2022] PreprocessForBreakendAssembly ALIGNER=BWAMEM ALIGNER_BATCH_SIZE=10000 INPUT=/perSVade/installation/test_installation/testing_outputs/call_SVs/SVdetection_output/final_gridss_running/gridss_tmp/aligned_reads.sorted.bam.gridss.working/tmp.aligned_reads.sorted.bam.namedsorted.bam OUTPUT=/dev/stdout WORKER_THREADS=1 WORKING_DIR=/perSVade/installation/test_installation/testing_outputs/call_SVs/SVdetection_output/final_gridss_running/gridss_tmp TMP_DIR=[/perSVade/installation/test_installation/testing_outputs/call_SVs/SVdetection_output/final_gridss_running/gridss_tmp/aligned_reads.sorted.bam.gridss.working] COMPRESSION_LEVEL=0 REFERENCE_SEQUENCE=/perSVade/installation/test_installation/testing_outputs/call_SVs/reference_genome_dir/reference_genome.fasta    MIN_CLIP_LENGTH=15 MIN_CLIP_QUAL=5.0 ASSUME_SORTED=false TAGS=[R2, MQ, SA, MC, NM] IGNORE_DUPLICATES=true VERBOSITY=INFO QUIET=false VALIDATION_STRINGENCY=STRICT MAX_RECORDS_IN_RAM=500000 CREATE_INDEX=false CREATE_MD5_FILE=false GA4GH_CLIENT_SECRETS=client_secrets.json USE_JDK_DEFLATER=false USE_JDK_INFLATER=false
+[Mon Jul 04 10:56:56 UTC 2022] Executing as root@f906658f32ce on Linux 5.3.18-lp152.87-default amd64; OpenJDK 64-Bit Server VM 1.8.0_152-release-1056-b12; Deflater: Intel; Inflater: Intel; Provider GCS is not available; Picard version: 2.9.2-gridss
+INFO	2022-07-04 10:56:56	BwaAligner	Loading bwa mem index image from /perSVade/installation/test_installation/testing_outputs/call_SVs/reference_genome_dir/reference_genome.fasta.img
+INFO	2022-07-04 10:56:56	SAMFileWriterFactory	Unknown file extension, assuming BAM format when writing file: file:///dev/stdout
+INFO	2022-07-04 10:56:57	StreamingSplitReadRealigner	Seen many non-increasing record positions. Printing Read-names as well.
+[Mon Jul 04 10:56:57 UTC 2022] gridss.PreprocessForBreakendAssembly done. Elapsed time: 0.01 minutes.
+Runtime.totalMemory()=634388480
+Mon Jul  4 10:56:57 UTC 2022: Complete pre-processing	/perSVade/installation/test_installation/testing_outputs/call_SVs/SVdetection_output/final_gridss_running/aligned_reads.sorted.bam
+Mon Jul  4 10:56:57 UTC 2022: Start assembly	/perSVade/installation/test_installation/testing_outputs/call_SVs/SVdetection_output/final_gridss_running/gridss_assembly.bam
+Mon Jul  4 10:56:57 UTC 2022: Running	AssembleBreakends	/perSVade/installation/test_installation/testing_outputs/call_SVs/SVdetection_output/final_gridss_running/gridss_assembly.bam	job 0	total jobs 1
+INFO	2022-07-04 10:56:57	AssembleBreakends	
+
+********** NOTE: Picard's command line syntax is changing.
+**********
+********** For more information, please see:
+********** https://github.com/broadinstitute/picard/wiki/Command-Line-Syntax-Transition-For-Users-(Pre-Transition)
+**********
+********** The command line looks like this in the new syntax:
+**********
+**********    AssembleBreakends -JOB_INDEX 0 -JOB_NODES 1 -TMP_DIR /perSVade/installation/test_installation/testing_outputs/call_SVs/SVdetection_output/final_gridss_running/gridss_tmp -WORKING_DIR /perSVade/installation/test_installation/testing_outputs/call_SVs/SVdetection_output/final_gridss_running/gridss_tmp -REFERENCE_SEQUENCE /perSVade/installation/test_installation/testing_outputs/call_SVs/reference_genome_dir/reference_genome.fasta -WORKER_THREADS 1 -O /perSVade/installation/test_installation/testing_outputs/call_SVs/SVdetection_output/final_gridss_running/gridss_assembly.bam -INPUT /perSVade/installation/test_installation/testing_outputs/call_SVs/SVdetection_output/final_gridss_running/aligned_reads.sorted.bam -BLACKLIST /perSVade/installation/test_installation/testing_outputs/call_SVs/SVdetection_output/final_gridss_running/empty_regions.bed
+**********
+
+
+10:56:58.109 INFO  NativeLibraryLoader - Loading libgkl_compression.so from jar:file:/perSVade/installation/external_software/gridss-2.9.2-gridss-jar-with-dependencies.jar!/com/intel/gkl/native/libgkl_compression.so
+[Mon Jul 04 10:56:58 UTC 2022] AssembleBreakends OUTPUT=/perSVade/installation/test_installation/testing_outputs/call_SVs/SVdetection_output/final_gridss_running/gridss_assembly.bam JOB_INDEX=0 JOB_NODES=1 INPUT=[/perSVade/installation/test_installation/testing_outputs/call_SVs/SVdetection_output/final_gridss_running/aligned_reads.sorted.bam] BLACKLIST=/perSVade/installation/test_installation/testing_outputs/call_SVs/SVdetection_output/final_gridss_running/empty_regions.bed WORKER_THREADS=1 WORKING_DIR=/perSVade/installation/test_installation/testing_outputs/call_SVs/SVdetection_output/final_gridss_running/gridss_tmp TMP_DIR=[/perSVade/installation/test_installation/testing_outputs/call_SVs/SVdetection_output/final_gridss_running/gridss_tmp] REFERENCE_SEQUENCE=/perSVade/installation/test_installation/testing_outputs/call_SVs/reference_genome_dir/reference_genome.fasta    READ_PAIR_CONCORDANT_PERCENT=0.995 IGNORE_DUPLICATES=true VERBOSITY=INFO QUIET=false VALIDATION_STRINGENCY=STRICT COMPRESSION_LEVEL=5 MAX_RECORDS_IN_RAM=500000 CREATE_INDEX=false CREATE_MD5_FILE=false GA4GH_CLIENT_SECRETS=client_secrets.json USE_JDK_DEFLATER=false USE_JDK_INFLATER=false
+[Mon Jul 04 10:56:58 UTC 2022] Executing as root@f906658f32ce on Linux 5.3.18-lp152.87-default amd64; OpenJDK 64-Bit Server VM 1.8.0_152-release-1056-b12; Deflater: Intel; Inflater: Intel; Provider GCS is not available; Picard version: 2.9.2-gridss
+INFO	2022-07-04 10:56:58	GridssConfiguration	maxCoverage=25000
+INFO	2022-07-04 10:56:58	GridssConfiguration	minMapq=20
+INFO	2022-07-04 10:56:58	GridssConfiguration	fallbackMapq=20
+INFO	2022-07-04 10:56:58	GridssConfiguration	fallbackBaseq=20
+INFO	2022-07-04 10:56:58	GridssConfiguration	minAnchorShannonEntropy=0.5
+INFO	2022-07-04 10:56:58	GridssConfiguration	dovetailMargin=4
+INFO	2022-07-04 10:56:58	GridssConfiguration	softclip.minAverageQual=5.0
+INFO	2022-07-04 10:56:58	GridssConfiguration	softclip.minLength=5
+INFO	2022-07-04 10:56:58	GridssConfiguration	softclip.minAnchorIdentity=0.95
+INFO	2022-07-04 10:56:58	GridssConfiguration	softclip.realignSplitReads=false
+INFO	2022-07-04 10:56:58	GridssConfiguration	useReadGroupSampleNameCategoryLabel=true
+INFO	2022-07-04 10:56:58	GridssConfiguration	chunkSize=10000000
+INFO	2022-07-04 10:56:58	GridssConfiguration	chunkSequenceChangePenalty=250000
+INFO	2022-07-04 10:56:58	GridssConfiguration	hashEvidenceID=true
+INFO	2022-07-04 10:56:58	GridssConfiguration	adapter=AGATCGGAAGAG
+INFO	2022-07-04 10:56:58	GridssConfiguration	adapter=ATGGAATTCTCG
+INFO	2022-07-04 10:56:58	GridssConfiguration	adapter=CTGTCTCTTATA
+INFO	2022-07-04 10:56:58	GridssConfiguration	scoring.model=FastEmpiricalReferenceLikelihood
+INFO	2022-07-04 10:56:58	GridssConfiguration	assembly.k=25
+INFO	2022-07-04 10:56:58	GridssConfiguration	assembly.minReads=3
+INFO	2022-07-04 10:56:58	GridssConfiguration	assembly.includePairAnchors=true
+INFO	2022-07-04 10:56:58	GridssConfiguration	assembly.pairAnchorMismatchIgnoreEndBases=5
+INFO	2022-07-04 10:56:58	GridssConfiguration	assembly.writeFiltered=false
+INFO	2022-07-04 10:56:58	GridssConfiguration	assembly.anchorLength=300
+INFO	2022-07-04 10:56:58	GridssConfiguration	assembly.removeMisassembledPartialContigsDuringAssembly=true
+INFO	2022-07-04 10:56:58	GridssConfiguration	assembly.maxExpectedBreakendLengthMultiple=1.5
+INFO	2022-07-04 10:56:58	GridssConfiguration	assembly.errorCorrection.collapseBubblesOnly=true
+INFO	2022-07-04 10:56:58	GridssConfiguration	assembly.errorCorrection.maxBaseMismatchForCollapse=2
+INFO	2022-07-04 10:56:58	GridssConfiguration	assembly.errorCorrection.maxPathCollapseLengthMultiple=2.0
+INFO	2022-07-04 10:56:58	GridssConfiguration	assembly.realignContigs=true
+INFO	2022-07-04 10:56:58	GridssConfiguration	assembly.recoverAfterError=true
+INFO	2022-07-04 10:56:58	GridssConfiguration	assembly.downsample.acceptDensityPortion=0.1
+INFO	2022-07-04 10:56:58	GridssConfiguration	assembly.downsample.targetEvidenceDensity=1
+INFO	2022-07-04 10:56:58	GridssConfiguration	assembly.downsample.minimumDensityWindowSize=1000
+INFO	2022-07-04 10:56:58	GridssConfiguration	assembly.positional.maxPathLengthMultiple=1.1
+INFO	2022-07-04 10:56:58	GridssConfiguration	assembly.positional.retainWidthMultiple=2.0
+INFO	2022-07-04 10:56:58	GridssConfiguration	assembly.positional.flushWidthMultiple=1.0
+INFO	2022-07-04 10:56:58	GridssConfiguration	assembly.positional.maximumNodeDensity=2.0
+INFO	2022-07-04 10:56:58	GridssConfiguration	assembly.positional.trimSelfIntersectingReads=true
+INFO	2022-07-04 10:56:58	GridssConfiguration	assembly.positional.forceFullMemoizationRecalculationAt=0.8
+INFO	2022-07-04 10:56:58	GridssConfiguration	assembly.positional.safetyModePathCountThreshold=50000
+INFO	2022-07-04 10:56:58	GridssConfiguration	assembly.positional.safetyModeContigsToCall=3
+INFO	2022-07-04 10:56:58	GridssConfiguration	assembly.contigNamePrefix=asm%d-
+INFO	2022-07-04 10:56:58	GridssConfiguration	variantcalling.minReads=2
+INFO	2022-07-04 10:56:58	GridssConfiguration	variantcalling.minScore=50.0
+INFO	2022-07-04 10:56:58	GridssConfiguration	variantcalling.minSize=10
+INFO	2022-07-04 10:56:58	GridssConfiguration	variantcalling.breakpointLowQuality=500.0
+INFO	2022-07-04 10:56:58	GridssConfiguration	variantcalling.breakendLowQuality=1500.0
+INFO	2022-07-04 10:56:58	GridssConfiguration	variantcalling.callUnassembledBreakpoints=true
+INFO	2022-07-04 10:56:58	GridssConfiguration	variantcalling.callUnassembledBreakends=false
+INFO	2022-07-04 10:56:58	GridssConfiguration	variantcalling.breakendMargin=10
+INFO	2022-07-04 10:56:58	GridssConfiguration	variantcalling.writeFiltered=false
+INFO	2022-07-04 10:56:58	GridssConfiguration	variantcalling.simplecalls=false
+INFO	2022-07-04 10:56:58	GridssConfiguration	variantcalling.maxBreakendHomologyLength=300
+INFO	2022-07-04 10:56:58	GridssConfiguration	variantcalling.breakendHomologyAlignmentMargin=10
+INFO	2022-07-04 10:56:58	GridssConfiguration	variantcalling.requireAssemblyCategorySupport=true
+INFO	2022-07-04 10:56:58	GridssConfiguration	variantcalling.callBreakends=true
+INFO	2022-07-04 10:56:58	GridssConfiguration	variantcalling.includeSupportingReadNames=false
+INFO	2022-07-04 10:56:58	GridssConfiguration	terminateOnFirstError=true
+INFO	2022-07-04 10:56:58	GridssConfiguration	visualisation.directory=visualisation
+INFO	2022-07-04 10:56:58	GridssConfiguration	visualisation.buffers=false
+INFO	2022-07-04 10:56:58	GridssConfiguration	visualisation.bufferTrackingItervalInSeconds=60
+INFO	2022-07-04 10:56:58	GridssConfiguration	visualisation.timeouts=false
+INFO	2022-07-04 10:56:58	GridssConfiguration	visualisation.evidenceAllocation=false
+INFO	2022-07-04 10:56:58	GridssConfiguration	visualisation.assemblyProgress=false
+INFO	2022-07-04 10:56:58	GridssConfiguration	visualisation.assemblyTelemetry=false
+INFO	2022-07-04 10:56:58	GridssConfiguration	visualisation.maxCliqueTelemetry=false
+INFO	2022-07-04 10:56:58	GridssConfiguration	visualisation.assemblyGraph=false
+INFO	2022-07-04 10:56:58	GridssConfiguration	visualisation.assemblyGraphFullSize=false
+INFO	2022-07-04 10:56:58	GridssConfiguration	visualisation.assemblyContigMemoization=false
+INFO	2022-07-04 10:56:58	TwoBitBufferedReferenceSequenceFile	Loading reference genome from cache /perSVade/installation/test_installation/testing_outputs/call_SVs/reference_genome_dir/reference_genome.fasta.gridsscache
+INFO	2022-07-04 10:56:58	TwoBitBufferedReferenceSequenceFile	Loading reference genome complete
+INFO	2022-07-04 10:56:58	MultipleSamFileCommandLineProgram	Loading aligner
+ERROR	2022-07-04 10:56:58	AlignerFactory	Unable to use Intel GKL library for accelerated Smith-Waterman alignment
+INFO	2022-07-04 10:56:58	AlignerFactory	sswjni library loading successful.
+INFO	2022-07-04 10:56:58	MultipleSamFileCommandLineProgram	Using 1 worker threads
+INFO	2022-07-04 10:56:58	MultipleSamFileCommandLineProgram	Using Read Group sample name SAMPLE for file /perSVade/installation/test_installation/testing_outputs/call_SVs/SVdetection_output/final_gridss_running/aligned_reads.sorted.bam
+INFO	2022-07-04 10:56:58	AssemblyEvidenceSource	Starting assembly on chunk 0 (mito_C_glabrata_CBS138:1-ChrB_C_glabrata_CBS138:26687)
+INFO	2022-07-04 10:57:08	AssemblyEvidenceSource	Completed assembly on chunk 0 (mito_C_glabrata_CBS138:1-ChrB_C_glabrata_CBS138:26687) in 10s (10.42 s)
+INFO	2022-07-04 10:57:08	SAMFileUtil	Sorting /perSVade/installation/test_installation/testing_outputs/call_SVs/SVdetection_output/final_gridss_running/gridss_tmp/gridss_assembly.bam.gridss.working/gridss.tmp.gridss_assembly.bam.assembly.chunk0.bam
+INFO	2022-07-04 10:57:08	AssemblyEvidenceSource	Breakend assembly complete.
+INFO	2022-07-04 10:57:08	AssemblyEvidenceSource	Breakend assembly complete (node 0, 1 total)
+INFO	2022-07-04 10:57:08	AssemblyEvidenceSource	Merging assembly files
+INFO	2022-07-04 10:57:08	GatherBamFiles	
+
+********** NOTE: Picard's command line syntax is changing.
+**********
+********** For more information, please see:
+********** https://github.com/broadinstitute/picard/wiki/Command-Line-Syntax-Transition-For-Users-(Pre-Transition)
+**********
+********** The command line looks like this in the new syntax:
+**********
+**********    GatherBamFiles -INPUT /perSVade/installation/test_installation/testing_outputs/call_SVs/SVdetection_output/final_gridss_running/gridss_tmp/gridss_assembly.bam.gridss.working/gridss_assembly.bam.assembly.chunk0.bam -OUTPUT /perSVade/installation/test_installation/testing_outputs/call_SVs/SVdetection_output/final_gridss_running/gridss_assembly.bam -COMPRESSION_LEVEL 5 -CREATE_INDEX false -CREATE_MD5_FILE false -GA4GH_CLIENT_SECRETS client_secrets.json -MAX_RECORDS_IN_RAM 500000 -QUIET false -REFERENCE_SEQUENCE /perSVade/installation/test_installation/testing_outputs/call_SVs/reference_genome_dir/reference_genome.fasta -VALIDATION_STRINGENCY STRICT -VERBOSITY INFO -TMP_DIR /perSVade/installation/test_installation/testing_outputs/call_SVs/SVdetection_output/final_gridss_running/gridss_tmp
+**********
+
+
+[Mon Jul 04 10:57:08 UTC 2022] GatherBamFiles INPUT=[/perSVade/installation/test_installation/testing_outputs/call_SVs/SVdetection_output/final_gridss_running/gridss_tmp/gridss_assembly.bam.gridss.working/gridss_assembly.bam.assembly.chunk0.bam] OUTPUT=/perSVade/installation/test_installation/testing_outputs/call_SVs/SVdetection_output/final_gridss_running/gridss_assembly.bam TMP_DIR=[/perSVade/installation/test_installation/testing_outputs/call_SVs/SVdetection_output/final_gridss_running/gridss_tmp] VERBOSITY=INFO QUIET=false VALIDATION_STRINGENCY=STRICT COMPRESSION_LEVEL=5 MAX_RECORDS_IN_RAM=500000 CREATE_INDEX=false CREATE_MD5_FILE=false REFERENCE_SEQUENCE=/perSVade/installation/test_installation/testing_outputs/call_SVs/reference_genome_dir/reference_genome.fasta GA4GH_CLIENT_SECRETS=client_secrets.json    USE_JDK_DEFLATER=false USE_JDK_INFLATER=false
+[Mon Jul 04 10:57:08 UTC 2022] Executing as root@f906658f32ce on Linux 5.3.18-lp152.87-default amd64; OpenJDK 64-Bit Server VM 1.8.0_152-release-1056-b12; Deflater: Intel; Inflater: Intel; Provider GCS is not available; Picard version: 2.9.2-gridss
+INFO	2022-07-04 10:57:08	BamFileIoUtils	Block copying /perSVade/installation/test_installation/testing_outputs/call_SVs/SVdetection_output/final_gridss_running/gridss_tmp/gridss_assembly.bam.gridss.working/gridss_assembly.bam.assembly.chunk0.bam ...
+[Mon Jul 04 10:57:08 UTC 2022] picard.sam.GatherBamFiles done. Elapsed time: 0.00 minutes.
+Runtime.totalMemory()=2360868864
+[Mon Jul 04 10:57:08 UTC 2022] gridss.AssembleBreakends done. Elapsed time: 0.18 minutes.
+Runtime.totalMemory()=2360868864
+Mon Jul  4 10:57:09 UTC 2022: Running	CollectGridssMetrics	/perSVade/installation/test_installation/testing_outputs/call_SVs/SVdetection_output/final_gridss_running/gridss_assembly.bam
+INFO	2022-07-04 10:57:09	CollectGridssMetrics	
+
+********** NOTE: Picard's command line syntax is changing.
+**********
+********** For more information, please see:
+********** https://github.com/broadinstitute/picard/wiki/Command-Line-Syntax-Transition-For-Users-(Pre-Transition)
+**********
+********** The command line looks like this in the new syntax:
+**********
+**********    CollectGridssMetrics -I /perSVade/installation/test_installation/testing_outputs/call_SVs/SVdetection_output/final_gridss_running/gridss_assembly.bam -O /perSVade/installation/test_installation/testing_outputs/call_SVs/SVdetection_output/final_gridss_running/gridss_tmp/gridss_assembly.bam.gridss.working//gridss_assembly.bam -REFERENCE_SEQUENCE /perSVade/installation/test_installation/testing_outputs/call_SVs/reference_genome_dir/reference_genome.fasta -THRESHOLD_COVERAGE 50000 -TMP_DIR /perSVade/installation/test_installation/testing_outputs/call_SVs/SVdetection_output/final_gridss_running/gridss_tmp -FILE_EXTENSION null -GRIDSS_PROGRAM null -GRIDSS_PROGRAM CollectCigarMetrics -GRIDSS_PROGRAM CollectMapqMetrics -GRIDSS_PROGRAM CollectTagMetrics -GRIDSS_PROGRAM CollectIdsvMetrics -GRIDSS_PROGRAM ReportThresholdCoverage -PROGRAM null -PROGRAM QualityScoreDistribution
+**********
+
+
+10:57:09.310 INFO  NativeLibraryLoader - Loading libgkl_compression.so from jar:file:/perSVade/installation/external_software/gridss-2.9.2-gridss-jar-with-dependencies.jar!/com/intel/gkl/native/libgkl_compression.so
+[Mon Jul 04 10:57:09 UTC 2022] CollectGridssMetrics GRIDSS_PROGRAM=[CollectCigarMetrics, CollectMapqMetrics, CollectTagMetrics, CollectIdsvMetrics, ReportThresholdCoverage] THRESHOLD_COVERAGE=50000 INPUT=/perSVade/installation/test_installation/testing_outputs/call_SVs/SVdetection_output/final_gridss_running/gridss_assembly.bam OUTPUT=/perSVade/installation/test_installation/testing_outputs/call_SVs/SVdetection_output/final_gridss_running/gridss_tmp/gridss_assembly.bam.gridss.working//gridss_assembly.bam FILE_EXTENSION=null PROGRAM=[QualityScoreDistribution] TMP_DIR=[/perSVade/installation/test_installation/testing_outputs/call_SVs/SVdetection_output/final_gridss_running/gridss_tmp] REFERENCE_SEQUENCE=/perSVade/installation/test_installation/testing_outputs/call_SVs/reference_genome_dir/reference_genome.fasta    ASSUME_SORTED=true STOP_AFTER=0 METRIC_ACCUMULATION_LEVEL=[ALL_READS] INCLUDE_UNPAIRED=false VERBOSITY=INFO QUIET=false VALIDATION_STRINGENCY=STRICT COMPRESSION_LEVEL=5 MAX_RECORDS_IN_RAM=500000 CREATE_INDEX=false CREATE_MD5_FILE=false GA4GH_CLIENT_SECRETS=client_secrets.json USE_JDK_DEFLATER=false USE_JDK_INFLATER=false
+[Mon Jul 04 10:57:09 UTC 2022] Executing as root@f906658f32ce on Linux 5.3.18-lp152.87-default amd64; OpenJDK 64-Bit Server VM 1.8.0_152-release-1056-b12; Deflater: Intel; Inflater: Intel; Provider GCS is not available; Picard version: 2.9.2-gridss
+INFO	2022-07-04 10:57:09	RExecutor	Executing R script via command: Rscript /perSVade/installation/test_installation/testing_outputs/call_SVs/SVdetection_output/final_gridss_running/gridss_tmp/script3574329679427399934.R /perSVade/installation/test_installation/testing_outputs/call_SVs/SVdetection_output/final_gridss_running/gridss_tmp/gridss_assembly.bam.gridss.working/gridss_assembly.bam.quality_distribution_metrics /perSVade/installation/test_installation/testing_outputs/call_SVs/SVdetection_output/final_gridss_running/gridss_tmp/gridss_assembly.bam.gridss.working/gridss_assembly.bam.quality_distribution.pdf gridss_assembly.bam 
+INFO	2022-07-04 10:57:09	ProcessExecutor	null device 
+INFO	2022-07-04 10:57:09	ProcessExecutor	          1 
+[Mon Jul 04 10:57:09 UTC 2022] gridss.analysis.CollectGridssMetrics done. Elapsed time: 0.01 minutes.
+Runtime.totalMemory()=502792192
+Mon Jul  4 10:57:09 UTC 2022: Running	SoftClipsToSplitReads|samtools	/perSVade/installation/test_installation/testing_outputs/call_SVs/SVdetection_output/final_gridss_running/gridss_assembly.bam
+INFO	2022-07-04 10:57:09	SoftClipsToSplitReads	
+
+********** NOTE: Picard's command line syntax is changing.
+**********
+********** For more information, please see:
+********** https://github.com/broadinstitute/picard/wiki/Command-Line-Syntax-Transition-For-Users-(Pre-Transition)
+**********
+********** The command line looks like this in the new syntax:
+**********
+**********    SoftClipsToSplitReads -TMP_DIR /perSVade/installation/test_installation/testing_outputs/call_SVs/SVdetection_output/final_gridss_running/gridss_tmp/gridss_assembly.bam.gridss.working/ -WORKING_DIR /perSVade/installation/test_installation/testing_outputs/call_SVs/SVdetection_output/final_gridss_running/gridss_tmp -REFERENCE_SEQUENCE /perSVade/installation/test_installation/testing_outputs/call_SVs/reference_genome_dir/reference_genome.fasta -WORKER_THREADS 1 -I /perSVade/installation/test_installation/testing_outputs/call_SVs/SVdetection_output/final_gridss_running/gridss_assembly.bam -O /dev/stdout -ALIGNER BWAMEM -ALIGNER_BATCH_SIZE 100000 -REALIGN_ANCHORING_BASES true -READJUST_PRIMARY_ALIGNMENT_POSITON true -COMPRESSION_LEVEL 0
+**********
+
+
+10:57:10.023 INFO  NativeLibraryLoader - Loading libgkl_compression.so from jar:file:/perSVade/installation/external_software/gridss-2.9.2-gridss-jar-with-dependencies.jar!/com/intel/gkl/native/libgkl_compression.so
+[Mon Jul 04 10:57:10 UTC 2022] SoftClipsToSplitReads INPUT=/perSVade/installation/test_installation/testing_outputs/call_SVs/SVdetection_output/final_gridss_running/gridss_assembly.bam OUTPUT=/dev/stdout REALIGN_ANCHORING_BASES=true READJUST_PRIMARY_ALIGNMENT_POSITON=true WORKER_THREADS=1 ALIGNER=BWAMEM ALIGNER_BATCH_SIZE=100000 WORKING_DIR=/perSVade/installation/test_installation/testing_outputs/call_SVs/SVdetection_output/final_gridss_running/gridss_tmp TMP_DIR=[/perSVade/installation/test_installation/testing_outputs/call_SVs/SVdetection_output/final_gridss_running/gridss_tmp/gridss_assembly.bam.gridss.working] COMPRESSION_LEVEL=0 REFERENCE_SEQUENCE=/perSVade/installation/test_installation/testing_outputs/call_SVs/reference_genome_dir/reference_genome.fasta    MIN_CLIP_LENGTH=15 MIN_CLIP_QUAL=5.0 PROCESS_SECONDARY_ALIGNMENTS=false REALIGN_EXISTING_SPLIT_READS=false REALIGN_ENTIRE_READ=false WRITE_OA=true ALIGNER_STREAMING=false ALIGNER_COMMAND_LINE=[bwa, mem, -L, 0,0, -t, %3$d, %2$s, %1$s] IGNORE_DUPLICATES=true VERBOSITY=INFO QUIET=false VALIDATION_STRINGENCY=STRICT MAX_RECORDS_IN_RAM=500000 CREATE_INDEX=false CREATE_MD5_FILE=false GA4GH_CLIENT_SECRETS=client_secrets.json USE_JDK_DEFLATER=false USE_JDK_INFLATER=false
+[Mon Jul 04 10:57:10 UTC 2022] Executing as root@f906658f32ce on Linux 5.3.18-lp152.87-default amd64; OpenJDK 64-Bit Server VM 1.8.0_152-release-1056-b12; Deflater: Intel; Inflater: Intel; Provider GCS is not available; Picard version: 2.9.2-gridss
+INFO	2022-07-04 10:57:10	BwaAligner	Loading bwa mem index image from /perSVade/installation/test_installation/testing_outputs/call_SVs/reference_genome_dir/reference_genome.fasta.img
+INFO	2022-07-04 10:57:10	SAMFileWriterFactory	Unknown file extension, assuming BAM format when writing file: file:///dev/stdout
+INFO	2022-07-04 10:57:10	TwoBitBufferedReferenceSequenceFile	Caching reference genome contig ChrA_C_glabrata_CBS138
+INFO	2022-07-04 10:57:10	TwoBitBufferedReferenceSequenceFile	Caching reference genome contig mito_C_glabrata_CBS138
+INFO	2022-07-04 10:57:10	TwoBitBufferedReferenceSequenceFile	Caching reference genome contig ChrB_C_glabrata_CBS138
+[Mon Jul 04 10:57:10 UTC 2022] gridss.SoftClipsToSplitReads done. Elapsed time: 0.00 minutes.
+Runtime.totalMemory()=502792192
+Mon Jul  4 10:57:10 UTC 2022: Complete assembly	/perSVade/installation/test_installation/testing_outputs/call_SVs/SVdetection_output/final_gridss_running/gridss_assembly.bam
+Mon Jul  4 10:57:10 UTC 2022: Start calling	/perSVade/installation/test_installation/testing_outputs/call_SVs/SVdetection_output/final_gridss_running/gridss_output.vcf
+Mon Jul  4 10:57:10 UTC 2022: Running	IdentifyVariants	/perSVade/installation/test_installation/testing_outputs/call_SVs/SVdetection_output/final_gridss_running/gridss_output.vcf
+INFO	2022-07-04 10:57:10	IdentifyVariants	
+
+********** NOTE: Picard's command line syntax is changing.
+**********
+********** For more information, please see:
+********** https://github.com/broadinstitute/picard/wiki/Command-Line-Syntax-Transition-For-Users-(Pre-Transition)
+**********
+********** The command line looks like this in the new syntax:
+**********
+**********    IdentifyVariants -TMP_DIR /perSVade/installation/test_installation/testing_outputs/call_SVs/SVdetection_output/final_gridss_running/gridss_tmp -WORKING_DIR /perSVade/installation/test_installation/testing_outputs/call_SVs/SVdetection_output/final_gridss_running/gridss_tmp -REFERENCE_SEQUENCE /perSVade/installation/test_installation/testing_outputs/call_SVs/reference_genome_dir/reference_genome.fasta -WORKER_THREADS 1 -INPUT /perSVade/installation/test_installation/testing_outputs/call_SVs/SVdetection_output/final_gridss_running/aligned_reads.sorted.bam -BLACKLIST /perSVade/installation/test_installation/testing_outputs/call_SVs/SVdetection_output/final_gridss_running/empty_regions.bed -ASSEMBLY /perSVade/installation/test_installation/testing_outputs/call_SVs/SVdetection_output/final_gridss_running/gridss_assembly.bam -OUTPUT_VCF /perSVade/installation/test_installation/testing_outputs/call_SVs/SVdetection_output/final_gridss_running/gridss_tmp/gridss_output.vcf.gridss.working/gridss_output.vcf.unallocated.vcf
+**********
+
+
+10:57:10.621 INFO  NativeLibraryLoader - Loading libgkl_compression.so from jar:file:/perSVade/installation/external_software/gridss-2.9.2-gridss-jar-with-dependencies.jar!/com/intel/gkl/native/libgkl_compression.so
+[Mon Jul 04 10:57:10 UTC 2022] IdentifyVariants OUTPUT_VCF=/perSVade/installation/test_installation/testing_outputs/call_SVs/SVdetection_output/final_gridss_running/gridss_tmp/gridss_output.vcf.gridss.working/gridss_output.vcf.unallocated.vcf ASSEMBLY=/perSVade/installation/test_installation/testing_outputs/call_SVs/SVdetection_output/final_gridss_running/gridss_assembly.bam INPUT=[/perSVade/installation/test_installation/testing_outputs/call_SVs/SVdetection_output/final_gridss_running/aligned_reads.sorted.bam] BLACKLIST=/perSVade/installation/test_installation/testing_outputs/call_SVs/SVdetection_output/final_gridss_running/empty_regions.bed WORKER_THREADS=1 WORKING_DIR=/perSVade/installation/test_installation/testing_outputs/call_SVs/SVdetection_output/final_gridss_running/gridss_tmp TMP_DIR=[/perSVade/installation/test_installation/testing_outputs/call_SVs/SVdetection_output/final_gridss_running/gridss_tmp] REFERENCE_SEQUENCE=/perSVade/installation/test_installation/testing_outputs/call_SVs/reference_genome_dir/reference_genome.fasta    READ_PAIR_CONCORDANT_PERCENT=0.995 IGNORE_DUPLICATES=true VERBOSITY=INFO QUIET=false VALIDATION_STRINGENCY=STRICT COMPRESSION_LEVEL=5 MAX_RECORDS_IN_RAM=500000 CREATE_INDEX=false CREATE_MD5_FILE=false GA4GH_CLIENT_SECRETS=client_secrets.json USE_JDK_DEFLATER=false USE_JDK_INFLATER=false
+[Mon Jul 04 10:57:10 UTC 2022] Executing as root@f906658f32ce on Linux 5.3.18-lp152.87-default amd64; OpenJDK 64-Bit Server VM 1.8.0_152-release-1056-b12; Deflater: Intel; Inflater: Intel; Provider GCS is not available; Picard version: 2.9.2-gridss
+INFO	2022-07-04 10:57:10	GridssConfiguration	maxCoverage=25000
+INFO	2022-07-04 10:57:10	GridssConfiguration	minMapq=20
+INFO	2022-07-04 10:57:10	GridssConfiguration	fallbackMapq=20
+INFO	2022-07-04 10:57:10	GridssConfiguration	fallbackBaseq=20
+INFO	2022-07-04 10:57:10	GridssConfiguration	minAnchorShannonEntropy=0.5
+INFO	2022-07-04 10:57:10	GridssConfiguration	dovetailMargin=4
+INFO	2022-07-04 10:57:10	GridssConfiguration	softclip.minAverageQual=5.0
+INFO	2022-07-04 10:57:10	GridssConfiguration	softclip.minLength=5
+INFO	2022-07-04 10:57:10	GridssConfiguration	softclip.minAnchorIdentity=0.95
+INFO	2022-07-04 10:57:10	GridssConfiguration	softclip.realignSplitReads=false
+INFO	2022-07-04 10:57:10	GridssConfiguration	useReadGroupSampleNameCategoryLabel=true
+INFO	2022-07-04 10:57:10	GridssConfiguration	chunkSize=10000000
+INFO	2022-07-04 10:57:10	GridssConfiguration	chunkSequenceChangePenalty=250000
+INFO	2022-07-04 10:57:10	GridssConfiguration	hashEvidenceID=true
+INFO	2022-07-04 10:57:10	GridssConfiguration	adapter=AGATCGGAAGAG
+INFO	2022-07-04 10:57:10	GridssConfiguration	adapter=ATGGAATTCTCG
+INFO	2022-07-04 10:57:10	GridssConfiguration	adapter=CTGTCTCTTATA
+INFO	2022-07-04 10:57:10	GridssConfiguration	scoring.model=FastEmpiricalReferenceLikelihood
+INFO	2022-07-04 10:57:10	GridssConfiguration	assembly.k=25
+INFO	2022-07-04 10:57:10	GridssConfiguration	assembly.minReads=3
+INFO	2022-07-04 10:57:10	GridssConfiguration	assembly.includePairAnchors=true
+INFO	2022-07-04 10:57:10	GridssConfiguration	assembly.pairAnchorMismatchIgnoreEndBases=5
+INFO	2022-07-04 10:57:10	GridssConfiguration	assembly.writeFiltered=false
+INFO	2022-07-04 10:57:10	GridssConfiguration	assembly.anchorLength=300
+INFO	2022-07-04 10:57:10	GridssConfiguration	assembly.removeMisassembledPartialContigsDuringAssembly=true
+INFO	2022-07-04 10:57:10	GridssConfiguration	assembly.maxExpectedBreakendLengthMultiple=1.5
+INFO	2022-07-04 10:57:10	GridssConfiguration	assembly.errorCorrection.collapseBubblesOnly=true
+INFO	2022-07-04 10:57:10	GridssConfiguration	assembly.errorCorrection.maxBaseMismatchForCollapse=2
+INFO	2022-07-04 10:57:10	GridssConfiguration	assembly.errorCorrection.maxPathCollapseLengthMultiple=2.0
+INFO	2022-07-04 10:57:10	GridssConfiguration	assembly.realignContigs=true
+INFO	2022-07-04 10:57:10	GridssConfiguration	assembly.recoverAfterError=true
+INFO	2022-07-04 10:57:10	GridssConfiguration	assembly.downsample.acceptDensityPortion=0.1
+INFO	2022-07-04 10:57:10	GridssConfiguration	assembly.downsample.targetEvidenceDensity=1
+INFO	2022-07-04 10:57:10	GridssConfiguration	assembly.downsample.minimumDensityWindowSize=1000
+INFO	2022-07-04 10:57:10	GridssConfiguration	assembly.positional.maxPathLengthMultiple=1.1
+INFO	2022-07-04 10:57:10	GridssConfiguration	assembly.positional.retainWidthMultiple=2.0
+INFO	2022-07-04 10:57:10	GridssConfiguration	assembly.positional.flushWidthMultiple=1.0
+INFO	2022-07-04 10:57:10	GridssConfiguration	assembly.positional.maximumNodeDensity=2.0
+INFO	2022-07-04 10:57:10	GridssConfiguration	assembly.positional.trimSelfIntersectingReads=true
+INFO	2022-07-04 10:57:10	GridssConfiguration	assembly.positional.forceFullMemoizationRecalculationAt=0.8
+INFO	2022-07-04 10:57:10	GridssConfiguration	assembly.positional.safetyModePathCountThreshold=50000
+INFO	2022-07-04 10:57:10	GridssConfiguration	assembly.positional.safetyModeContigsToCall=3
+INFO	2022-07-04 10:57:10	GridssConfiguration	assembly.contigNamePrefix=asm%d-
+INFO	2022-07-04 10:57:10	GridssConfiguration	variantcalling.minReads=2
+INFO	2022-07-04 10:57:10	GridssConfiguration	variantcalling.minScore=50.0
+INFO	2022-07-04 10:57:10	GridssConfiguration	variantcalling.minSize=10
+INFO	2022-07-04 10:57:10	GridssConfiguration	variantcalling.breakpointLowQuality=500.0
+INFO	2022-07-04 10:57:10	GridssConfiguration	variantcalling.breakendLowQuality=1500.0
+INFO	2022-07-04 10:57:10	GridssConfiguration	variantcalling.callUnassembledBreakpoints=true
+INFO	2022-07-04 10:57:10	GridssConfiguration	variantcalling.callUnassembledBreakends=false
+INFO	2022-07-04 10:57:10	GridssConfiguration	variantcalling.breakendMargin=10
+INFO	2022-07-04 10:57:10	GridssConfiguration	variantcalling.writeFiltered=false
+INFO	2022-07-04 10:57:10	GridssConfiguration	variantcalling.simplecalls=false
+INFO	2022-07-04 10:57:10	GridssConfiguration	variantcalling.maxBreakendHomologyLength=300
+INFO	2022-07-04 10:57:10	GridssConfiguration	variantcalling.breakendHomologyAlignmentMargin=10
+INFO	2022-07-04 10:57:10	GridssConfiguration	variantcalling.requireAssemblyCategorySupport=true
+INFO	2022-07-04 10:57:10	GridssConfiguration	variantcalling.callBreakends=true
+INFO	2022-07-04 10:57:10	GridssConfiguration	variantcalling.includeSupportingReadNames=false
+INFO	2022-07-04 10:57:10	GridssConfiguration	terminateOnFirstError=true
+INFO	2022-07-04 10:57:10	GridssConfiguration	visualisation.directory=visualisation
+INFO	2022-07-04 10:57:10	GridssConfiguration	visualisation.buffers=false
+INFO	2022-07-04 10:57:10	GridssConfiguration	visualisation.bufferTrackingItervalInSeconds=60
+INFO	2022-07-04 10:57:10	GridssConfiguration	visualisation.timeouts=false
+INFO	2022-07-04 10:57:10	GridssConfiguration	visualisation.evidenceAllocation=false
+INFO	2022-07-04 10:57:10	GridssConfiguration	visualisation.assemblyProgress=false
+INFO	2022-07-04 10:57:10	GridssConfiguration	visualisation.assemblyTelemetry=false
+INFO	2022-07-04 10:57:10	GridssConfiguration	visualisation.maxCliqueTelemetry=false
+INFO	2022-07-04 10:57:10	GridssConfiguration	visualisation.assemblyGraph=false
+INFO	2022-07-04 10:57:10	GridssConfiguration	visualisation.assemblyGraphFullSize=false
+INFO	2022-07-04 10:57:10	GridssConfiguration	visualisation.assemblyContigMemoization=false
+INFO	2022-07-04 10:57:10	TwoBitBufferedReferenceSequenceFile	Loading reference genome from cache /perSVade/installation/test_installation/testing_outputs/call_SVs/reference_genome_dir/reference_genome.fasta.gridsscache
+INFO	2022-07-04 10:57:10	TwoBitBufferedReferenceSequenceFile	Loading reference genome complete
+INFO	2022-07-04 10:57:10	MultipleSamFileCommandLineProgram	Loading aligner
+ERROR	2022-07-04 10:57:10	AlignerFactory	Unable to use Intel GKL library for accelerated Smith-Waterman alignment
+INFO	2022-07-04 10:57:10	AlignerFactory	sswjni library loading successful.
+INFO	2022-07-04 10:57:10	MultipleSamFileCommandLineProgram	Using 1 worker threads
+INFO	2022-07-04 10:57:10	MultipleSamFileCommandLineProgram	Using Read Group sample name SAMPLE for file /perSVade/installation/test_installation/testing_outputs/call_SVs/SVdetection_output/final_gridss_running/aligned_reads.sorted.bam
+INFO	2022-07-04 10:57:10	VariantCaller	Identifying Breakpoints
+INFO	2022-07-04 10:57:11	VariantCaller	Start calling maximal cliques in chunk 0 (mito_C_glabrata_CBS138:1-ChrB_C_glabrata_CBS138:26687)
+INFO	2022-07-04 10:57:11	VariantCaller	Complete calling maximal cliques in chunk 0 (mito_C_glabrata_CBS138:1-ChrB_C_glabrata_CBS138:26687)
+INFO	2022-07-04 10:57:11	VariantCaller	Merging identified breakpoints
+INFO	2022-07-04 10:57:11	VariantCaller	Sorting identified breakpoints
+INFO	2022-07-04 10:57:11	VcfFileUtil	Sorting to /perSVade/installation/test_installation/testing_outputs/call_SVs/SVdetection_output/final_gridss_running/gridss_tmp/gridss_output.vcf.gridss.working/gridss_output.vcf.unallocated.vcf
+INFO	2022-07-04 10:57:11	IdentifyVariants	Raw variant calls written to /perSVade/installation/test_installation/testing_outputs/call_SVs/SVdetection_output/final_gridss_running/gridss_tmp/gridss_output.vcf.gridss.working/gridss_output.vcf.unallocated.vcf
+[Mon Jul 04 10:57:11 UTC 2022] gridss.IdentifyVariants done. Elapsed time: 0.02 minutes.
+Runtime.totalMemory()=634388480
+Mon Jul  4 10:57:11 UTC 2022: Running	AnnotateVariants	/perSVade/installation/test_installation/testing_outputs/call_SVs/SVdetection_output/final_gridss_running/gridss_output.vcf
+INFO	2022-07-04 10:57:11	AnnotateVariants	
+
+********** NOTE: Picard's command line syntax is changing.
+**********
+********** For more information, please see:
+********** https://github.com/broadinstitute/picard/wiki/Command-Line-Syntax-Transition-For-Users-(Pre-Transition)
+**********
+********** The command line looks like this in the new syntax:
+**********
+**********    AnnotateVariants -TMP_DIR /perSVade/installation/test_installation/testing_outputs/call_SVs/SVdetection_output/final_gridss_running/gridss_tmp -WORKING_DIR /perSVade/installation/test_installation/testing_outputs/call_SVs/SVdetection_output/final_gridss_running/gridss_tmp -REFERENCE_SEQUENCE /perSVade/installation/test_installation/testing_outputs/call_SVs/reference_genome_dir/reference_genome.fasta -WORKER_THREADS 1 -INPUT /perSVade/installation/test_installation/testing_outputs/call_SVs/SVdetection_output/final_gridss_running/aligned_reads.sorted.bam -BLACKLIST /perSVade/installation/test_installation/testing_outputs/call_SVs/SVdetection_output/final_gridss_running/empty_regions.bed -ASSEMBLY /perSVade/installation/test_installation/testing_outputs/call_SVs/SVdetection_output/final_gridss_running/gridss_assembly.bam -INPUT_VCF /perSVade/installation/test_installation/testing_outputs/call_SVs/SVdetection_output/final_gridss_running/gridss_tmp/gridss_output.vcf.gridss.working/gridss_output.vcf.unallocated.vcf -OUTPUT_VCF /perSVade/installation/test_installation/testing_outputs/call_SVs/SVdetection_output/final_gridss_running/gridss_tmp/gridss_output.vcf.gridss.working/gridss_output.vcf.allocated.vcf
+**********
+
+
+10:57:12.129 INFO  NativeLibraryLoader - Loading libgkl_compression.so from jar:file:/perSVade/installation/external_software/gridss-2.9.2-gridss-jar-with-dependencies.jar!/com/intel/gkl/native/libgkl_compression.so
+[Mon Jul 04 10:57:12 UTC 2022] AnnotateVariants INPUT_VCF=/perSVade/installation/test_installation/testing_outputs/call_SVs/SVdetection_output/final_gridss_running/gridss_tmp/gridss_output.vcf.gridss.working/gridss_output.vcf.unallocated.vcf OUTPUT_VCF=/perSVade/installation/test_installation/testing_outputs/call_SVs/SVdetection_output/final_gridss_running/gridss_tmp/gridss_output.vcf.gridss.working/gridss_output.vcf.allocated.vcf ASSEMBLY=/perSVade/installation/test_installation/testing_outputs/call_SVs/SVdetection_output/final_gridss_running/gridss_assembly.bam INPUT=[/perSVade/installation/test_installation/testing_outputs/call_SVs/SVdetection_output/final_gridss_running/aligned_reads.sorted.bam] BLACKLIST=/perSVade/installation/test_installation/testing_outputs/call_SVs/SVdetection_output/final_gridss_running/empty_regions.bed WORKER_THREADS=1 WORKING_DIR=/perSVade/installation/test_installation/testing_outputs/call_SVs/SVdetection_output/final_gridss_running/gridss_tmp TMP_DIR=[/perSVade/installation/test_installation/testing_outputs/call_SVs/SVdetection_output/final_gridss_running/gridss_tmp] REFERENCE_SEQUENCE=/perSVade/installation/test_installation/testing_outputs/call_SVs/reference_genome_dir/reference_genome.fasta    READ_PAIR_CONCORDANT_PERCENT=0.995 IGNORE_DUPLICATES=true VERBOSITY=INFO QUIET=false VALIDATION_STRINGENCY=STRICT COMPRESSION_LEVEL=5 MAX_RECORDS_IN_RAM=500000 CREATE_INDEX=false CREATE_MD5_FILE=false GA4GH_CLIENT_SECRETS=client_secrets.json USE_JDK_DEFLATER=false USE_JDK_INFLATER=false
+[Mon Jul 04 10:57:12 UTC 2022] Executing as root@f906658f32ce on Linux 5.3.18-lp152.87-default amd64; OpenJDK 64-Bit Server VM 1.8.0_152-release-1056-b12; Deflater: Intel; Inflater: Intel; Provider GCS is not available; Picard version: 2.9.2-gridss
+INFO	2022-07-04 10:57:12	GridssConfiguration	maxCoverage=25000
+INFO	2022-07-04 10:57:12	GridssConfiguration	minMapq=20
+INFO	2022-07-04 10:57:12	GridssConfiguration	fallbackMapq=20
+INFO	2022-07-04 10:57:12	GridssConfiguration	fallbackBaseq=20
+INFO	2022-07-04 10:57:12	GridssConfiguration	minAnchorShannonEntropy=0.5
+INFO	2022-07-04 10:57:12	GridssConfiguration	dovetailMargin=4
+INFO	2022-07-04 10:57:12	GridssConfiguration	softclip.minAverageQual=5.0
+INFO	2022-07-04 10:57:12	GridssConfiguration	softclip.minLength=5
+INFO	2022-07-04 10:57:12	GridssConfiguration	softclip.minAnchorIdentity=0.95
+INFO	2022-07-04 10:57:12	GridssConfiguration	softclip.realignSplitReads=false
+INFO	2022-07-04 10:57:12	GridssConfiguration	useReadGroupSampleNameCategoryLabel=true
+INFO	2022-07-04 10:57:12	GridssConfiguration	chunkSize=10000000
+INFO	2022-07-04 10:57:12	GridssConfiguration	chunkSequenceChangePenalty=250000
+INFO	2022-07-04 10:57:12	GridssConfiguration	hashEvidenceID=true
+INFO	2022-07-04 10:57:12	GridssConfiguration	adapter=AGATCGGAAGAG
+INFO	2022-07-04 10:57:12	GridssConfiguration	adapter=ATGGAATTCTCG
+INFO	2022-07-04 10:57:12	GridssConfiguration	adapter=CTGTCTCTTATA
+INFO	2022-07-04 10:57:12	GridssConfiguration	scoring.model=FastEmpiricalReferenceLikelihood
+INFO	2022-07-04 10:57:12	GridssConfiguration	assembly.k=25
+INFO	2022-07-04 10:57:12	GridssConfiguration	assembly.minReads=3
+INFO	2022-07-04 10:57:12	GridssConfiguration	assembly.includePairAnchors=true
+INFO	2022-07-04 10:57:12	GridssConfiguration	assembly.pairAnchorMismatchIgnoreEndBases=5
+INFO	2022-07-04 10:57:12	GridssConfiguration	assembly.writeFiltered=false
+INFO	2022-07-04 10:57:12	GridssConfiguration	assembly.anchorLength=300
+INFO	2022-07-04 10:57:12	GridssConfiguration	assembly.removeMisassembledPartialContigsDuringAssembly=true
+INFO	2022-07-04 10:57:12	GridssConfiguration	assembly.maxExpectedBreakendLengthMultiple=1.5
+INFO	2022-07-04 10:57:12	GridssConfiguration	assembly.errorCorrection.collapseBubblesOnly=true
+INFO	2022-07-04 10:57:12	GridssConfiguration	assembly.errorCorrection.maxBaseMismatchForCollapse=2
+INFO	2022-07-04 10:57:12	GridssConfiguration	assembly.errorCorrection.maxPathCollapseLengthMultiple=2.0
+INFO	2022-07-04 10:57:12	GridssConfiguration	assembly.realignContigs=true
+INFO	2022-07-04 10:57:12	GridssConfiguration	assembly.recoverAfterError=true
+INFO	2022-07-04 10:57:12	GridssConfiguration	assembly.downsample.acceptDensityPortion=0.1
+INFO	2022-07-04 10:57:12	GridssConfiguration	assembly.downsample.targetEvidenceDensity=1
+INFO	2022-07-04 10:57:12	GridssConfiguration	assembly.downsample.minimumDensityWindowSize=1000
+INFO	2022-07-04 10:57:12	GridssConfiguration	assembly.positional.maxPathLengthMultiple=1.1
+INFO	2022-07-04 10:57:12	GridssConfiguration	assembly.positional.retainWidthMultiple=2.0
+INFO	2022-07-04 10:57:12	GridssConfiguration	assembly.positional.flushWidthMultiple=1.0
+INFO	2022-07-04 10:57:12	GridssConfiguration	assembly.positional.maximumNodeDensity=2.0
+INFO	2022-07-04 10:57:12	GridssConfiguration	assembly.positional.trimSelfIntersectingReads=true
+INFO	2022-07-04 10:57:12	GridssConfiguration	assembly.positional.forceFullMemoizationRecalculationAt=0.8
+INFO	2022-07-04 10:57:12	GridssConfiguration	assembly.positional.safetyModePathCountThreshold=50000
+INFO	2022-07-04 10:57:12	GridssConfiguration	assembly.positional.safetyModeContigsToCall=3
+INFO	2022-07-04 10:57:12	GridssConfiguration	assembly.contigNamePrefix=asm%d-
+INFO	2022-07-04 10:57:12	GridssConfiguration	variantcalling.minReads=2
+INFO	2022-07-04 10:57:12	GridssConfiguration	variantcalling.minScore=50.0
+INFO	2022-07-04 10:57:12	GridssConfiguration	variantcalling.minSize=10
+INFO	2022-07-04 10:57:12	GridssConfiguration	variantcalling.breakpointLowQuality=500.0
+INFO	2022-07-04 10:57:12	GridssConfiguration	variantcalling.breakendLowQuality=1500.0
+INFO	2022-07-04 10:57:12	GridssConfiguration	variantcalling.callUnassembledBreakpoints=true
+INFO	2022-07-04 10:57:12	GridssConfiguration	variantcalling.callUnassembledBreakends=false
+INFO	2022-07-04 10:57:12	GridssConfiguration	variantcalling.breakendMargin=10
+INFO	2022-07-04 10:57:12	GridssConfiguration	variantcalling.writeFiltered=false
+INFO	2022-07-04 10:57:12	GridssConfiguration	variantcalling.simplecalls=false
+INFO	2022-07-04 10:57:12	GridssConfiguration	variantcalling.maxBreakendHomologyLength=300
+INFO	2022-07-04 10:57:12	GridssConfiguration	variantcalling.breakendHomologyAlignmentMargin=10
+INFO	2022-07-04 10:57:12	GridssConfiguration	variantcalling.requireAssemblyCategorySupport=true
+INFO	2022-07-04 10:57:12	GridssConfiguration	variantcalling.callBreakends=true
+INFO	2022-07-04 10:57:12	GridssConfiguration	variantcalling.includeSupportingReadNames=false
+INFO	2022-07-04 10:57:12	GridssConfiguration	terminateOnFirstError=true
+INFO	2022-07-04 10:57:12	GridssConfiguration	visualisation.directory=visualisation
+INFO	2022-07-04 10:57:12	GridssConfiguration	visualisation.buffers=false
+INFO	2022-07-04 10:57:12	GridssConfiguration	visualisation.bufferTrackingItervalInSeconds=60
+INFO	2022-07-04 10:57:12	GridssConfiguration	visualisation.timeouts=false
+INFO	2022-07-04 10:57:12	GridssConfiguration	visualisation.evidenceAllocation=false
+INFO	2022-07-04 10:57:12	GridssConfiguration	visualisation.assemblyProgress=false
+INFO	2022-07-04 10:57:12	GridssConfiguration	visualisation.assemblyTelemetry=false
+INFO	2022-07-04 10:57:12	GridssConfiguration	visualisation.maxCliqueTelemetry=false
+INFO	2022-07-04 10:57:12	GridssConfiguration	visualisation.assemblyGraph=false
+INFO	2022-07-04 10:57:12	GridssConfiguration	visualisation.assemblyGraphFullSize=false
+INFO	2022-07-04 10:57:12	GridssConfiguration	visualisation.assemblyContigMemoization=false
+INFO	2022-07-04 10:57:12	TwoBitBufferedReferenceSequenceFile	Loading reference genome from cache /perSVade/installation/test_installation/testing_outputs/call_SVs/reference_genome_dir/reference_genome.fasta.gridsscache
+INFO	2022-07-04 10:57:12	TwoBitBufferedReferenceSequenceFile	Loading reference genome complete
+INFO	2022-07-04 10:57:12	MultipleSamFileCommandLineProgram	Loading aligner
+ERROR	2022-07-04 10:57:12	AlignerFactory	Unable to use Intel GKL library for accelerated Smith-Waterman alignment
+INFO	2022-07-04 10:57:12	AlignerFactory	sswjni library loading successful.
+INFO	2022-07-04 10:57:12	MultipleSamFileCommandLineProgram	Using 1 worker threads
+INFO	2022-07-04 10:57:12	VcfTransformCommandLineProgram	Annotating variants in /perSVade/installation/test_installation/testing_outputs/call_SVs/SVdetection_output/final_gridss_running/gridss_tmp/gridss_output.vcf.gridss.working/gridss_output.vcf.unallocated.vcf
+INFO	2022-07-04 10:57:12	MultipleSamFileCommandLineProgram	Using Read Group sample name SAMPLE for file /perSVade/installation/test_installation/testing_outputs/call_SVs/SVdetection_output/final_gridss_running/aligned_reads.sorted.bam
+INFO	2022-07-04 10:57:12	AllocateEvidence	Allocating evidence
+WARNING	2022-07-04 10:57:13	AsyncBufferedIterator	Thread interrupt received whilst closing underlying iterator
+INFO	2022-07-04 10:57:13	SequentialEvidenceAllocator	Seen many non-increasing record positions. Printing Read-names as well.
+INFO	2022-07-04 10:57:13	VcfTransformCommandLineProgram	Annotated variants written to /perSVade/installation/test_installation/testing_outputs/call_SVs/SVdetection_output/final_gridss_running/gridss_tmp/gridss_output.vcf.gridss.working/gridss_output.vcf.allocated.vcf
+[Mon Jul 04 10:57:13 UTC 2022] gridss.AnnotateVariants done. Elapsed time: 0.03 minutes.
+Runtime.totalMemory()=943718400
+Mon Jul  4 10:57:14 UTC 2022: Running	AnnotateInsertedSequence	/perSVade/installation/test_installation/testing_outputs/call_SVs/SVdetection_output/final_gridss_running/gridss_output.vcf
+INFO	2022-07-04 10:57:14	AnnotateInsertedSequence	
+
+********** NOTE: Picard's command line syntax is changing.
+**********
+********** For more information, please see:
+********** https://github.com/broadinstitute/picard/wiki/Command-Line-Syntax-Transition-For-Users-(Pre-Transition)
+**********
+********** The command line looks like this in the new syntax:
+**********
+**********    AnnotateInsertedSequence -TMP_DIR /perSVade/installation/test_installation/testing_outputs/call_SVs/SVdetection_output/final_gridss_running/gridss_tmp -WORKING_DIR /perSVade/installation/test_installation/testing_outputs/call_SVs/SVdetection_output/final_gridss_running/gridss_tmp -REFERENCE_SEQUENCE /perSVade/installation/test_installation/testing_outputs/call_SVs/reference_genome_dir/reference_genome.fasta -WORKER_THREADS 1 -INPUT /perSVade/installation/test_installation/testing_outputs/call_SVs/SVdetection_output/final_gridss_running/gridss_tmp/gridss_output.vcf.gridss.working/gridss_output.vcf.allocated.vcf -OUTPUT /perSVade/installation/test_installation/testing_outputs/call_SVs/SVdetection_output/final_gridss_running/gridss_output.vcf
+**********
+
+
+10:57:14.347 INFO  NativeLibraryLoader - Loading libgkl_compression.so from jar:file:/perSVade/installation/external_software/gridss-2.9.2-gridss-jar-with-dependencies.jar!/com/intel/gkl/native/libgkl_compression.so
+[Mon Jul 04 10:57:14 UTC 2022] AnnotateInsertedSequence WORKER_THREADS=1 INPUT=/perSVade/installation/test_installation/testing_outputs/call_SVs/SVdetection_output/final_gridss_running/gridss_tmp/gridss_output.vcf.gridss.working/gridss_output.vcf.allocated.vcf OUTPUT=/perSVade/installation/test_installation/testing_outputs/call_SVs/SVdetection_output/final_gridss_running/gridss_output.vcf WORKING_DIR=/perSVade/installation/test_installation/testing_outputs/call_SVs/SVdetection_output/final_gridss_running/gridss_tmp TMP_DIR=[/perSVade/installation/test_installation/testing_outputs/call_SVs/SVdetection_output/final_gridss_running/gridss_tmp] REFERENCE_SEQUENCE=/perSVade/installation/test_installation/testing_outputs/call_SVs/reference_genome_dir/reference_genome.fasta    ALIGNER_BATCH_SIZE=500000 ALIGNMENT=REPLACE IGNORE_DUPLICATES=true VERBOSITY=INFO QUIET=false VALIDATION_STRINGENCY=STRICT COMPRESSION_LEVEL=5 MAX_RECORDS_IN_RAM=500000 CREATE_INDEX=false CREATE_MD5_FILE=false GA4GH_CLIENT_SECRETS=client_secrets.json USE_JDK_DEFLATER=false USE_JDK_INFLATER=false
+[Mon Jul 04 10:57:14 UTC 2022] Executing as root@f906658f32ce on Linux 5.3.18-lp152.87-default amd64; OpenJDK 64-Bit Server VM 1.8.0_152-release-1056-b12; Deflater: Intel; Inflater: Intel; Provider GCS is not available; Picard version: 2.9.2-gridss
+INFO	2022-07-04 10:57:14	AnnotateInsertedSequence	Annotating inserted sequences in /perSVade/installation/test_installation/testing_outputs/call_SVs/SVdetection_output/final_gridss_running/gridss_tmp/gridss_output.vcf.gridss.working/gridss_output.vcf.allocated.vcf
+INFO	2022-07-04 10:57:14	AnnotateInsertedSequence	Using in-process bwa alignment
+INFO	2022-07-04 10:57:14	BwaAligner	Loading bwa mem index image from /perSVade/installation/test_installation/testing_outputs/call_SVs/reference_genome_dir/reference_genome.fasta.img
+INFO	2022-07-04 10:57:14	AnnotateInsertedSequence	Annotated variants written to /perSVade/installation/test_installation/testing_outputs/call_SVs/SVdetection_output/final_gridss_running/gridss_output.vcf
+[Mon Jul 04 10:57:14 UTC 2022] gridss.AnnotateInsertedSequence done. Elapsed time: 0.01 minutes.
+Runtime.totalMemory()=502792192
+Mon Jul  4 10:57:14 UTC 2022: Complete calling	/perSVade/installation/test_installation/testing_outputs/call_SVs/SVdetection_output/final_gridss_running/gridss_output.vcf
+Mon Jul  4 10:57:14 UTC 2022: Run complete with 3 warnings and 3 errors.
