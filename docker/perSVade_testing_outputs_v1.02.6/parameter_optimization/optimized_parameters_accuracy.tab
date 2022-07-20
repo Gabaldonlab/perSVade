@@ -1,6 +1,0 @@
-simulation_genome	simulation_ploidy	SV_type	precision	recall	Fvalue	nevents	TP	FP	FN
-simulation_1	diploid_hetero	insertions	1.0	1.0	1.0	6	6	0	0
-simulation_1	diploid_hetero	deletions	1.0	0.3333333333333333	0.5	6	2	0	4
-simulation_1	diploid_hetero	tandemDuplications	1.0	0.6666666666666666	0.8	6	4	0	2
-simulation_1	diploid_hetero	inversions	1.0	0.8333333333333334	0.9090909090909092	6	5	0	1
-simulation_1	diploid_hetero	integrated	0.8181818181818182	0.6923076923076923	0.7500000000000001	26	18	4	8

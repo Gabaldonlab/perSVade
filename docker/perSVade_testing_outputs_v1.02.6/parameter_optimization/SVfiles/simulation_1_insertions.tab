@@ -1,7 +1,0 @@
-ChrA	StartA	EndA	ChrB	StartB	EndB	Copied	ID
-mito_C_glabrata_CBS138	1217	1415	mito_C_glabrata_CBS138	4534	4742	FALSE	insertion_1_sim_mtDNA
-ChrA_C_glabrata_CBS138	4150	4357	ChrA_C_glabrata_CBS138	27938	28155	FALSE	insertion_1_sim_gDNA
-ChrA_C_glabrata_CBS138	23345	23739	ChrB_C_glabrata_CBS138	16910	17314	FALSE	insertion_3_sim_gDNA
-ChrB_C_glabrata_CBS138	16455	16549	ChrB_C_glabrata_CBS138	14105	14209	FALSE	insertion_4_sim_gDNA
-ChrA_C_glabrata_CBS138	14206	16075	ChrA_C_glabrata_CBS138	16260	18139	TRUE	insertion_2_sim_gDNA
-ChrA_C_glabrata_CBS138	12280	12474	ChrB_C_glabrata_CBS138	16607	16811	TRUE	insertion_5_sim_gDNA
