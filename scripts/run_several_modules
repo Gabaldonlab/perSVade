@@ -1,0 +1,250 @@
+#!/usr/bin/env python
+
+######################################
+############# DEFINE ENV #############
+######################################
+
+# general module imports
+import argparse, os
+from argparse import RawTextHelpFormatter
+import copy as cp
+import pickle
+import string
+import shutil 
+import random
+import sys
+from shutil import copyfile
+import time
+
+# get the cwd were all the scripts are 
+CWD = "/".join(__file__.split("/")[0:-1]); sys.path.insert(0, CWD)
+
+
+# define the module name
+module_name = __file__.split("/")[-1]
+
+# define the EnvDir where the environment is defined
+EnvDir = "/".join(sys.executable.split("/")[0:-2])
+
+# import functions
+import sv_functions as fun
+
+# import perSVade-specific modules
+
+######################################
+######################################
+######################################
+
+
+#################################### 
+############## ARGS ################
+####################################
+
+description = """
+This is a workflow that runs various variant calling / annotation modules in a sequential manner. Currently, the supported modules are 'call_SVs', 'call_CNVs', 'integrate_SV_CNV_calls', 'annotate_SVs', 'call_small_variants', 'annotate_small_vars' and 'get_cov_genes'. They will be run in this order. Since the outputs of these modules are interdependent, note the following:
+
+- If you run 'call_CNVs' and 'call_small_variants', the small variants will get the CN information annotated.
+- 'annotate_SVs' and 'annotate_small_vars' can only be run if their corresponding variant calling modules ('call_small_variants' and 'integrate_SV_CNV_calls') are specified.
+- You can't run both 'call_CNVs' and pass --outdir_callCNVs as an argument, as these are redundant
+- You can't run both 'call_SVs' and pass --outdir_callSVs as an argument, as these are redundant
+
+To run this workflow you should execute the following:
+
+perSVade run_several_modules <modules> <outdir> <arguments>
+
+The arguments passed to this workflow will be passed to their corresponding perSVade modules. Type perSVade <module_name> -h for more information. For instance, you may run this workflow that runs small variant calling and coverage per gene calculation with:
+
+perSVade run_several_modules call_small_variants,get_cov_genes <outdir> --threads 12 -r <genome> -sbam <sorted bam> -p 1 --window_freebayes_bp 3000 --callers HaplotypeCaller,bcftools,freebayes --min_AF 0.9 -c 15 -gff <gff>
+"""
+
+# parse args
+all_args = sys.argv[1:]
+
+# print help
+if len(all_args)==0 or (len(all_args)==1 and all_args[0] in {"-h", "--help", "-help", "--h"}): 
+    print(description)
+    sys.exit(0)
+
+# debug
+if len(all_args)<3: raise ValueError("The arguments %s are incorrect. Type perSVade run_several_modules -h for help."%(" ".join(all_args)))
+
+# define arguments
+provided_modules = set(all_args[0].split(","))
+outdir_all = all_args[1]
+modules_args = all_args[2:]
+
+####################################
+####################################
+####################################
+
+#################################
+########### MAIN CODE ###########
+#################################
+
+# exit if the final file exists
+final_file = "%s/perSVade_finished_file.txt"%outdir_all
+
+if not fun.file_is_empty(final_file): 
+    fun.print_with_runtime("WARNING: %s exists, suggesting that perSVade was already  run in this folder. Remove this file if you want this command to work. Exiting..."%final_file)
+    sys.exit(0)
+
+# define the start time
+start_time = time.time()
+
+# define a file that will contain all the cmds ran
+fun.log_file_all_cmds = "%s/all_cmds.txt"%outdir_all
+if fun.file_is_empty(fun.log_file_all_cmds): open(fun.log_file_all_cmds, "w").write("# These are all the cmds:\n")
+
+# define the arguments to run
+all_modules = ['call_SVs', 'call_CNVs', 'integrate_SV_CNV_calls', 'annotate_SVs', 'call_small_variants', 'annotate_small_vars', 'get_cov_genes']
+modules_to_run = [m for m in all_modules if m in provided_modules]
+for m in provided_modules:
+    if m not in all_modules: raise ValueError("invalid module: %s"%m)
+
+
+
+# make the outdir
+fun.print_with_runtime("Running modules %s into output folder '%s'"%(",".join(modules_to_run), outdir_all))
+fun.make_folder(outdir_all)
+
+# check that you are not providing illegitimate args
+for arg in modules_args:
+    if arg in {"-o", "--outdir", "-h", "--help", "-help", "--merged_vcf", "--SV_CNV_vcf"}: raise ValueError("You can't provide the %s as module arguments. This is an arguments that defies the multi-modular concept of the workflow. For instance, you can't specify output folders as arguments, as outdirs of individual modules are specified within each module."%arg)
+
+# map each module to the list of arguments
+module_to_args = {m : fun.get_set_args_for_perSVade_module(m, CWD)  for m in modules_to_run}
+
+
+# check that the intersecting args are the expected ones
+expected_intersecting_args = {('-thr', '--threads'), ('-sbam', '--sortedbam'), ('-r', '--ref'), ('--replace',), ('-mchr', '--mitochondrial_chromosome'), ('--verbose',), ('--fractionRAM_to_dedicate',), ('-o', '--outdir'), ('-h', '--help'), ('--fraction_available_mem',), ('--min_chromosome_len',), ('--repeats_file',), ('-p', '--ploidy'), ('--outdir_callCNVs',), ('-mcode', '--mitochondrial_code'), ('-gff', '--gff-file'), ('-gcode', '--gDNA_code')}
+
+for m1, args1 in module_to_args.items():
+    for m2, args2 in module_to_args.items():
+        if m1==m2: continue
+        intersecting_args = args1.intersection(args2)
+        strange_intersecting_args = intersecting_args.difference(expected_intersecting_args)
+        if len(strange_intersecting_args)>0: raise ValueError("There are some strange intersecting args (%s) btw %s and %s"%(strange_intersecting_args, m1, m2))
+
+
+
+# check that the provied args modules_args correspond to some arg
+all_possible_args = set.union(*module_to_args.values())
+for a in modules_args:
+    if not a.startswith("-"): continue
+    if not any([a in x for x in all_possible_args]):  raise ValueError("argument %s is not valid for the specified modules %s. Run perSVade <module_name> -h to understand how to set these arguments."%(a, ",".join(modules_to_run)))
+
+# check that some combinations of modules are run
+if "annotate_SVs" in modules_to_run and not "integrate_SV_CNV_calls" in modules_to_run: raise ValueError("If you want to run annotate_SVs, you should also run integrate_SV_CNV_calls")
+if "annotate_small_vars" in modules_to_run and not "call_small_variants" in modules_to_run: raise ValueError("If you want to run annotate_small_vars, you should also run call_small_variants")
+
+if 'call_CNVs' in modules_to_run and '--outdir_callCNVs' in modules_args: raise ValueError("If you specify --outdir_callCNVs, you can't also run call_CNVs, as these are redundant")
+if 'call_SVs' in modules_to_run and '--outdir_callSVs' in modules_args: raise ValueError("If you specify --outdir_callSVs, you can't also run call_SVs, as these are redundant")
+
+# run each module in test mode to check that all args are properly formatted
+module_to_cmd = {}
+fun.print_with_runtime("Checking that the arguments for all modules are correct...")
+for module in modules_to_run:
+
+    # define outdir
+    outdir_module = "%s/%s"%(outdir_all, module); fun.make_folder(outdir_module)
+
+    # define the args
+    possible_arg_tuples = module_to_args[module]
+    final_args = ""
+    for I, a in enumerate(modules_args):
+        if a.startswith("-") and any([a in x for x in possible_arg_tuples]): 
+
+            if I==(len(modules_args)-1): final_args += " %s"%a
+            elif modules_args[I+1].startswith("-"): final_args += " %s"%a
+            else: final_args += " %s %s"%(a, modules_args[I+1])
+
+    # add extra args depending on the module which depend on previously-ran modules
+    if module=="annotate_small_vars": 
+
+        specified_ploidies = [int(modules_args[I+1]) for I,a in enumerate(modules_args) if a in {"-p", "--ploidy"}]
+        if len(specified_ploidies)!=1: raise ValueError("There should be an argument -p/--ploidy")
+        merged_vcf = "%s/call_small_variants/merged_vcfs_allVars_ploidy%i.vcf"%(outdir_all, specified_ploidies[0])
+        final_args += " --merged_vcf %s"%merged_vcf
+
+    if module=="annotate_SVs":
+
+        SV_CNV_vcf = "%s/integrate_SV_CNV_calls/SV_and_CNV_variant_calling.vcf"%outdir_all
+        final_args += " --SV_CNV_vcf %s"%SV_CNV_vcf
+
+    if module=="integrate_SV_CNV_calls":
+
+        # add arguments of each module
+        for m in ["call_CNVs", "call_SVs"]:
+            if m in modules_to_run:  final_args += " --outdir_%s %s/%s"%(m.replace("_", ""), outdir_all, m)
+
+        # check that at least one argument is specifed
+        outdirs_specified = []
+        for arg_m in ["--outdir_callCNVs", "--outdir_callSVs"]:
+            final_args_split = final_args.split()
+            if arg_m in final_args_split: outdirs_specified_m = [(final_args_split[I+1]) for I,a in enumerate(final_args_split) if a==arg_m]
+            else: outdirs_specified_m = []
+            if len(outdirs_specified_m)>1: raise ValueError("there has to be only one outdir specified for %s"%arg_m)
+            outdirs_specified += outdirs_specified_m
+
+        if len(outdirs_specified)==0: raise ValueError("You should provide SVs and/or CNVs for integrate_SV_CNV_calls")
+
+    if module=="call_small_variants":
+
+        if "call_CNVs" in modules_to_run: final_args += "--outdir_callCNVs %s/call_CNVs"%outdir_all
+        if "--outdir_callCNVs" not in final_args: print("WARNING: Running call_small_variants with no CNV information.")
+
+
+    # init the cmd
+    cmd_module_backbone = "%s/perSVade %s %s"%(CWD, module, final_args)
+
+    # run the test by creating the finish file
+    fun.print_with_runtime("Testing that cmd for module %s is correct. The cmd is '%s -o %s'"%(module, cmd_module_backbone, outdir_module))
+    outdir_module_test = "%s_test_cmd"%outdir_module
+    fun.delete_folder(outdir_module_test); fun.make_folder(outdir_module_test)
+    open("%s/perSVade_finished_file.txt"%outdir_module_test, "w").write("perSVade finished testing module")
+    stdout_try = "%s/stdout.txt"%outdir_module_test 
+    stderr_try = "%s/stderr.txt"%outdir_module_test 
+    try: fun.run_cmd("%s -o %s > %s 2>%s"%(cmd_module_backbone, outdir_module_test, stdout_try, stderr_try))
+    except: raise ValueError("Error with arguments of module %s. This is the error log:\n%s"%(module, "".join(open(stderr_try, "r").readlines())))
+    fun.delete_folder(outdir_module_test)
+
+    # keep cmd
+    module_to_cmd[module] = "%s -o %s"%(cmd_module_backbone, outdir_module)
+
+print("The arguments for all modules are properly distributed. Running commands...")
+
+# running cmds
+for module, cmd in module_to_cmd.items():
+
+    # run with log
+    #outdir_module = "%s/%s"%(outdir_all, module)
+    #std_module = "%s/log.txt"%outdir_module
+    #print("Running %s. The log of this module is in '%s'..."%(module, std_module))
+    #fun.run_cmd("%s > %s 2>&1"%(cmd, std_module))
+
+    # run directly
+    print("\n")
+    fun.print_with_runtime("Running %s..."%(module))
+    fun.run_cmd("%s"%(cmd))
+
+
+#################################
+#################################
+#################################
+
+
+##################################
+########## CLEAN OUTPUT ##########
+##################################
+
+# clean
+
+# wite final file
+fun.generate_final_file_report_one_module(final_file, start_time, time.time())
+
+# print the message
+fun.print_with_runtime("perSVade %s finished correctly"%module_name)
+
+##################################
+##################################
+##################################

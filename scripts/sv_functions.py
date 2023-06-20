@@ -1086,7 +1086,7 @@ def get_available_threads(outdir):
         available_threads = 4
 
     # BSC machine
-    elif str(subprocess.check_output("uname -a", shell=True)).startswith("b'Linux bscls063 4.12.14-lp150.12.48-default"): 
+    elif str(subprocess.check_output("uname -a", shell=True)).startswith("b'Linux bscls063 5.3.18-lp152.87-default"): 
 
         available_threads = 4
 
@@ -18751,7 +18751,7 @@ def run_jobarray_file_MN4_greasy(jobs_filename, name, time="12:00:00", queue="bs
                   "#SBATCH --output=%s"%stdout_file,
                   "#SBATCH --job-name=%s"%name, 
                   "#SBATCH --get-user-env",
-                  "#SBATCH --workdir=%s"%outdir,
+                  #"#SBATCH --workdir=%s"%outdir,
                   "#SBATCH --time=%s"%time,
                   "#SBATCH --qos=%s"%queue,
                   "#SBATCH --cpus-per-task=%i"%threads_per_job,
@@ -21238,12 +21238,12 @@ def prepare_reference_genome_for_perSVade(perSVade_ref, perSVade_outdir, mitocho
     # returna set of things
     return new_reference_genome_file, reference_genome_dir
 
-def get_sorted_bam_in_outdir(perSVade_sorted_bam, perSVade_outdir):
+def get_sorted_bam_in_outdir(perSVade_sorted_bam, perSVade_outdir, prefix_name=""):
 
     """Gets a sorted bam and puts it under the outdir"""
 
     # define files
-    sorted_bam = "%s/aligned_reads.bam.sorted"%perSVade_outdir
+    sorted_bam = "%s/%saligned_reads.bam.sorted"%(perSVade_outdir, prefix_name)
     index_bam = "%s.bai"%sorted_bam
 
     # link
@@ -21373,3 +21373,93 @@ def check_that_reads_are_compressed(r1, r2):
 
         if file_is_empty(f): raise ValueError("The reads %s do not exist"%f)
         if not f.endswith(".gz"): raise ValueError("the filename of %s does not end with .gz. PerSVade only works with .gz compressed files. You can compress your reads with 'gzip <reads>'"%f)
+
+
+
+
+
+def get_set_args_for_perSVade_module(module_name, scripts_dir):
+
+    """Gets a set with the arguments of a given module"""
+
+    # define tmpdir
+    if "PERSVADE_TMPDIR" in os.environ: tmpdir = os.environ["PERSVADE_TMPDIR"]
+    else: tmpdir = "%s/.perSVade_tmp"%(os.environ["HOME"])
+    make_folder(tmpdir)
+
+    # execute the module's help
+    help_std = "%s/moudule_%s_help.txt"%(tmpdir, module_name)
+    run_cmd("%s/perSVade %s -h > %s 2>&1"%(scripts_dir, module_name, help_std))
+    lines_help = [l.rstrip().lstrip() for l in open(help_std, "r").readlines()]
+
+    set_args = {tuple([x.split()[0] for x in l.split(",")]) for l in lines_help if l.startswith("-")}
+    if len(set_args)==0: raise ValueError("to few args")
+
+    return set_args
+
+
+
+def get_sequencing_parameters_dict_one_sampleID(sampleID, input_sorted_bam, tmpdir_bams, replace, threads, max_median_insert_size, reference_genome, mitochondrial_chromosome):
+
+    """Calculates seq parameters for one sampleID. It returns them as a dict"""
+
+    print_if_verbose("Getting sequencing parameters for %s..."%sampleID)
+
+    # sync bam file to tmpdir
+    sorted_bam, index_bam = get_sorted_bam_in_outdir(input_sorted_bam, tmpdir_bams, prefix_name="%s_"%sampleID)
+
+    # get insert size and debug
+    median_insert_size, median_insert_size_sd  = get_insert_size_distribution(sorted_bam, replace=replace, threads=threads)
+    if median_insert_size>max_median_insert_size: raise ValueError("The median insert size is very high (%s). Maybe there was an error with the bam file generation."%(median_insert_size))
+
+    # get read length
+    read_length = get_read_length(sorted_bam, threads=threads, replace=replace)
+
+
+    # init dict
+    parms_dict = {"sampleID":sampleID, "median_insert_size":median_insert_size, "median_insert_size_sd":median_insert_size_sd, "read_length":read_length}
+
+    # get coverage
+    outdir_coverage_calculation = "%s/%s_coverage_per_regions%ibp"%(tmpdir_bams, sampleID, window_l); make_folder(outdir_coverage_calculation)
+    df_coverage = pd.read_csv(generate_coverage_per_window_file_parallel(reference_genome, outdir_coverage_calculation, sorted_bam, windows_file="none", replace=replace, threads=threads), sep="\t")
+    median_coverage_all = get_median_coverage(df_coverage, mitochondrial_chromosome)
+
+    # define the set of each type of chromosomes
+    all_chromosomes = set(df_coverage["#chrom"])
+    if mitochondrial_chromosome!="no_mitochondria": mtDNA_chromosomes = set(mitochondrial_chromosome.split(","))
+    else: mtDNA_chromosomes = set()
+    gDNA_chromosomes = all_chromosomes.difference(mtDNA_chromosomes)
+
+    for type_genome, chroms in [("mtDNA", mtDNA_chromosomes), ("gDNA", gDNA_chromosomes)]:
+
+        # define the coverage of the genome
+        if len(chroms)==0: median_coverage_genome = 0
+        else:
+            df_cov = df_coverage[(df_coverage["#chrom"].isin(chroms)) & (df_coverage.mediancov_1>0)]
+            if len(df_cov)>0: median_coverage_genome = get_median_coverage(df_cov, mitochondrial_chromosome)
+            else: median_coverage_genome = median_coverage_all
+
+        # save
+        parms_dict["%s_median_coverage"%type_genome] = median_coverage_genome
+
+    return parms_dict
+
+
+def get_samples_are_similar_by_seq_parameters(s1_row, s2_row, field_to_overlapping_distance):
+
+    """Takes rows from two samples and defines if they are similar by all parameters. The distances are percentage of the maximum of the two"""
+
+    # init list of booleans
+    list_bools = []
+
+    # add a True if the distance is low
+    for f, pct_distance in field_to_overlapping_distance.items():
+        if pct_distance==0 or pct_distance>=100: raise ValueError("pct_distance should be a value between 1 and 99")
+
+        val_1 = s1_row[f]
+        val_2 = s2_row[f]
+
+        max_distance = (max([val_1, val_2])*pct_distance)/100
+        list_bools.append(abs(val_1-val_2)<=max_distance)
+
+    return all(list_bools)
