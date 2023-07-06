@@ -173,6 +173,10 @@ fun.print_with_runtime("write annotations")
 variantAnnotation_table = "%s/annotated_variants.tab"%opt.outdir
 df_vep[varSpec_fields].drop_duplicates().to_csv(variantAnnotation_table, sep="\t", header=True, index=False)
 
+# write vars with upmost parent of the gff as Gene
+df_vep = fun.get_annotation_df_with_Gene_as_upmost_parent_in_gff(df_vep[varSpec_fields], opt.gff)
+df_vep.drop_duplicates().to_csv("%s/annotated_variants_corrrectedGene.tab"%opt.outdir, sep="\t", header=True, index=False)
+
 #################################
 #################################
 #################################
@@ -186,7 +190,7 @@ df_vep[varSpec_fields].drop_duplicates().to_csv(variantAnnotation_table, sep="\t
 fun.print_with_runtime("Cleaning")
 
 # clean
-files_folder_to_keep = {"all_cmds.txt", "annotated_variants.tab"}
+files_folder_to_keep = {"all_cmds.txt", "annotated_variants.tab", "annotated_variants_corrrectedGene.tab"}
 for f in os.listdir(opt.outdir): 
     file_path = "%s/%s"%(opt.outdir, f)
     if f not in files_folder_to_keep: fun.delete_file_or_folder(file_path)

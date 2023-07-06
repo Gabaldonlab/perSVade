@@ -141,6 +141,19 @@ correct_gff, gff_with_biotype = fun.get_correct_gff_and_gff_with_biotype(opt.gff
 fun.print_with_runtime("Running VEP to annotate variants")
 SV_CNV_vcf_annotated = fun.annotate_SVs_inHouse(opt.SV_CNV_vcf, gff_with_biotype, opt.ref, replace=opt.replace, threads=opt.threads, mitochondrial_chromosome=opt.mitochondrial_chromosome, mito_code=opt.mitochondrial_code, gDNA_code=opt.gDNA_code)
 
+# generate a df that has the Genes as upmost parent of the gff (and some added fields)
+annot_df = fun.get_tab_as_df_or_empty_df(SV_CNV_vcf_annotated)
+annot_df = fun.get_annotation_df_with_Gene_as_upmost_parent_in_gff(annot_df, opt.gff)
+if len(annot_df)!=len(fun.get_tab_as_df_or_empty_df(SV_CNV_vcf_annotated)): raise ValueError("the lines should have not changed")
+
+gff_df = fun.load_gff3_intoDF(opt.gff, replace=False)
+all_protein_coding_genes = set(gff_df[gff_df.feature.isin({"CDS", "mRNA"})].upmost_parent)
+annot_df["is_protein_coding_gene"] = annot_df.Gene.isin(all_protein_coding_genes)
+annot_df["is_transcript_disrupting"] = annot_df.Consequence.apply(fun.get_is_transcript_disrupting_consequence_SV)
+
+annot_df.drop_duplicates().to_csv("%s/annotated_variants_corrrectedGene.tab"%opt.outdir, sep="\t", header=True, index=False)
+
+
 #################################
 #################################
 #################################
@@ -151,14 +164,14 @@ SV_CNV_vcf_annotated = fun.annotate_SVs_inHouse(opt.SV_CNV_vcf, gff_with_biotype
 ##################################
 
 # clean
-fun.print_with_runtime("Cleaning")
+fun.print_with_runtime("Cleaning...")
 
 # rename
-for origin, target in [("SV_and_CNV_variant_calling.vcf_annotated_VEP.tab", "annotated_variants.tab"), ("SV_and_CNV_variant_calling.vcf_annotated_VEP.tab.raw.tbl.tmp_summary.html", "annotated_variants_before_GeneticCode_correction.html")]:
+for origin, target in [("%s_annotated_VEP.tab"%(fun.get_file(opt.SV_CNV_vcf)), "annotated_variants.tab"), ("%s_annotated_VEP.tab.raw.tbl.tmp_summary.html"%(fun.get_file(opt.SV_CNV_vcf)), "annotated_variants_before_GeneticCode_correction.html")]:
 	os.rename("%s/%s"%(opt.outdir, origin), "%s/%s"%(opt.outdir, target))
 
 # clean
-files_folder_to_keep = {"all_cmds.txt", "annotated_variants.tab", "annotated_variants_before_GeneticCode_correction.html"}
+files_folder_to_keep = {"all_cmds.txt", "annotated_variants.tab", "annotated_variants_before_GeneticCode_correction.html", "annotated_variants_corrrectedGene.tab"}
 for f in os.listdir(opt.outdir): 
     file_path = "%s/%s"%(opt.outdir, f)
     if f not in files_folder_to_keep: fun.delete_file_or_folder(file_path)

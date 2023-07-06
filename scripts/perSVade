@@ -47,6 +47,7 @@ if len(sys.argv)==1 or sys.argv[1] in help_args:
         get_cov_genes               Calculate the coverage for each gene of the genome
         run_several_modules         Workflow to run several modules in a sequential manner for one sample
         get_stats_optimization      Generate table with insert size, median coverage and read length for various bam files
+        integrate_several_samples   Integrates the variant calls of several samples
 
     Usage:
 
@@ -57,7 +58,7 @@ if len(sys.argv)==1 or sys.argv[1] in help_args:
 else:
 
     # define the modules
-    available_modules = {"trim_reads_and_QC", "align_reads", "infer_repeats", "find_homologous_regions", "call_SVs", "find_knownSVs_regions", "optimize_parameters", "call_CNVs", "integrate_SV_CNV_calls", "annotate_SVs", "call_small_variants", "annotate_small_vars", "get_cov_genes", "run_several_modules", "get_stats_optimization"}
+    available_modules = {"trim_reads_and_QC", "align_reads", "infer_repeats", "find_homologous_regions", "call_SVs", "find_knownSVs_regions", "optimize_parameters", "call_CNVs", "integrate_SV_CNV_calls", "annotate_SVs", "call_small_variants", "annotate_small_vars", "get_cov_genes", "run_several_modules", "get_stats_optimization", "integrate_several_samples"}
     module = sys.argv[1]
 
     # define script of this module

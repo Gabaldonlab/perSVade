@@ -2804,7 +2804,9 @@ def generate_coverage_per_window_file_parallel(reference_genome, destination_dir
         make_folder(destination_dir)
 
         # first generate the windows file
-        windows_file = "%s.windows%ibp.bed"%(reference_genome, window_l)
+        #windows_file = "%s.windows%ibp.bed"%(reference_genome, window_l) # old, all accessing the same
+        windows_file = "%s/genome.windows%ibp.bed"%(destination_dir, window_l) # new, create one file for each
+
         windows_file_stderr = "%s.generating.stderr"%windows_file
         print_if_verbose("genearting windows_file. The stderr is in %s"%windows_file_stderr)
         run_cmd("%s makewindows -g %s.fai -w %i > %s 2>%s"%(bedtools, reference_genome, window_l, windows_file, windows_file_stderr))
@@ -19371,7 +19373,7 @@ def load_gff3_intoDF(gff_path, replace=False):
         gff_fields = ["chromosome", "source", "feature", "start", "end", "blank1", "strand", "blank2", "annotation"]
 
         # load
-        print("loading gff")
+        #print("loading gff")
         gff = pd.read_csv(gff_lines, header=None, names=gff_fields, sep="\t")
 
         # set all possible annotations
@@ -19427,7 +19429,7 @@ def load_gff3_intoDF(gff_path, replace=False):
         all_unique_IDs = set(gff.index)
 
         # add the upmost_parent (which should be the geneID)
-        print("getting upmost parent")
+        #print("getting upmost parent")
         def get_utmost_parent(row, gff_df):
 
             """Takes a row and the gff_df and returns the highest parent. The index has to be the ID of the GFF"""
@@ -19978,18 +19980,19 @@ def get_whetherCNVcalling_was_performed(VarCallOutdirs, samples_to_run):
     return all(existing_cnv_files)
 
 
-def get_tab_as_df_and_add_sampleID(sampleID, file):
+def get_tab_as_df_and_add_sampleID(sampleID, file, fields="all"):
 
     """returns the variant calling df as a df"""
     print("getting small vars for sample %s"%sampleID)
 
     # get df
     df = get_tab_as_df_or_empty_df(file)
+    if fields!="all": df = df[fields]
     df["sampleID"] = str(sampleID)
 
     return df
 
-def integrate_call_small_variants_several_samples(sample_to_outdir, filename, threads, ploidy):
+def integrate_call_small_variants_several_samples(sample_to_outdir, filename, threads, ploidy, fields_small_variants="all"):
 
     """Generates a call set that includes all the stacked results of call_small_variants into filename"""
 
@@ -19998,7 +20001,7 @@ def integrate_call_small_variants_several_samples(sample_to_outdir, filename, th
 
         # integrate in parallel
         with multiproc.Pool(threads) as pool:
-            small_vars_df = pd.concat(pool.starmap(get_tab_as_df_and_add_sampleID, [(s, "%s/variant_calling_ploidy%i.tab"%(o, ploidy)) for s, o in sample_to_outdir.items()])) 
+            small_vars_df = pd.concat(pool.starmap(get_tab_as_df_and_add_sampleID, [(s, "%s/variant_calling_ploidy%i.tab"%(o, ploidy), fields_small_variants) for s, o in sample_to_outdir.items()])) 
             pool.close()
             pool.terminate()
 
@@ -20454,6 +20457,9 @@ def get_other_samples_with_variant_series_writeFile(varsDF, sampleID, small_vars
 
     return final_file
 
+
+
+
 def get_integrated_small_vars_df_severalSamples(paths_df, outdir, ploidy, gff, run_ploidy2_ifHaploid=False, threads=4, replace=False, fields_varCall="all", fields_varAnnot="all", add_overlapping_samples=False):
 
     """
@@ -20687,8 +20693,13 @@ def write_df_CN_one_sample_noHeader(Is, nsamples, sampleID, perSVade_outdir, tmp
 
     if file_is_empty(df_CN_file) or replace is True:
 
+
+        if "CNV_calling" in os.listdir(perSVade_outdir): call_CNVs_outdir = "%s/CNV_calling"%perSVade_outdir
+        elif "final_df_coverage.tab" in os.listdir(perSVade_outdir): call_CNVs_outdir = perSVade_outdir
+        else: raise ValueError("invalid paths_df")
+
         # get df
-        df_CN_sample = get_tab_as_df_or_empty_df("%s/CNV_calling/final_df_coverage.tab"%(perSVade_outdir))
+        df_CN_sample = get_tab_as_df_or_empty_df("%s/final_df_coverage.tab"%(call_CNVs_outdir))
         df_CN_sample["sampleID"] = sampleID
 
         # write with no header
@@ -20729,8 +20740,13 @@ def get_integrated_CNperWindow_df_severalSamples(paths_df, outdir, threads=4, re
         delete_folder(tmpdir)
         make_folder(tmpdir)
 
+        # define the perSVade_outdir field
+        if "perSVade_outdir" in paths_df.keys(): perSVade_outdir_f = "perSVade_outdir"
+        elif "call_CNVs_outdir" in paths_df.keys(): perSVade_outdir_f = "call_CNVs_outdir"
+        else: raise ValueError("invalid paths_df")
+
         # run in write_df_CN_one_sample_noHeader 
-        inputs_fn = [(Is, len(paths_df), sampleID, perSVade_outdir, tmpdir, fields, replace) for Is, (sampleID, perSVade_outdir) in enumerate(paths_df[["sampleID", "perSVade_outdir"]].values)]
+        inputs_fn = [(Is, len(paths_df), sampleID, perSVade_outdir, tmpdir, fields, replace) for Is, (sampleID, perSVade_outdir) in enumerate(paths_df[["sampleID", perSVade_outdir_f]].values)]
 
         with multiproc.Pool(threads) as pool:
             list_CN_files = pool.starmap(write_df_CN_one_sample_noHeader, inputs_fn) 
@@ -20758,8 +20774,12 @@ def get_df_gridss_and_df_bedpe_for_integratedSV_CNV(Is, nsamples, sampleID, perS
 
     if file_is_empty(final_df_gridss_file) or file_is_empty(final_df_bedpe_file) or replace is True:
 
-        # get the outdir
-        outdir_gridss = "%s/SVdetection_output/final_gridss_running"%(perSVade_outdir)
+
+        # get the outdir, depending on the type of perSVade run
+        if "SVdetection_output" in os.listdir(perSVade_outdir): outdir_gridss = "%s/SVdetection_output/final_gridss_running"%(perSVade_outdir)
+        elif "gridss_output.raw.vcf" in os.listdir(perSVade_outdir): outdir_gridss = perSVade_outdir
+        else: raise ValueError("unaccounted perSVade_outdir %s"%perSVade_outdir)
+
 
         # define the filenames original
         origin_gridss_vcf_raw_file = "%s/gridss_output.raw.vcf"%outdir_gridss
@@ -20815,7 +20835,6 @@ def get_df_gridss_and_df_bedpe_for_integratedSV_CNV(Is, nsamples, sampleID, perS
         # write files
         gridss_vcf_raw[gridss_fields].to_csv(final_df_gridss_file_tmp, sep="\t", index=False, header=False)
         bedpe_raw[bedpe_fields].to_csv(final_df_bedpe_file_tmp, sep="\t", index=False, header=False)
-
 
         os.rename(final_df_gridss_file_tmp, final_df_gridss_file)
         os.rename(final_df_bedpe_file_tmp, final_df_bedpe_file)
@@ -21463,3 +21482,390 @@ def get_samples_are_similar_by_seq_parameters(s1_row, s2_row, field_to_overlappi
         list_bools.append(abs(val_1-val_2)<=max_distance)
 
     return all(list_bools)
+
+def get_INFO_with_end_or_point(end_val):
+
+    """gets infor end with val"""
+
+    if pd.isna(end_val): return "."
+    elif float(end_val)==int(end_val): return "END=%i"%(int(end_val))
+    else: raise ValueError("invalid INFO_END: %s"%end_val)
+
+def convert_tab_variant_file_to_vcf_for_annotation(input_tab_file, vcf_file):
+
+    """Generates vcf files for variant annotation from tab files"""
+
+    print_if_verbose("Generating vcf for variant annotation")
+    if file_is_empty(vcf_file):
+
+        # load vars df and keep some fields
+        df_vars = get_tab_as_df_or_empty_df(input_tab_file).rename(columns={"#Uploaded_variation":"ID"})
+
+        # change pos
+        df_vars["POS"] = df_vars.POS.apply(int)
+
+        # check fields
+        for f in ["#CHROM", "POS", "ID", "REF", "ALT"]:
+            if f not in df_vars.keys(): raise ValueError("%s should be in df"%f)
+
+        # keep vcf fields
+        vcf_fields = ["#CHROM", "POS", "ID", "REF", "ALT", "QUAL", "FILTER", "INFO", "FORMAT", "DATA"]
+        for f in ["QUAL", "DATA", "FORMAT", "FILTER"]: df_vars[f] = "."
+
+        # define the INFO
+        if "INFO_END" in df_vars.keys(): df_vars["INFO"] = df_vars.INFO_END.apply(get_INFO_with_end_or_point)
+        else: df_vars["INFO"] = "."
+
+        # keep vcf fields
+        df_vars = df_vars[vcf_fields].drop_duplicates(subset=["#CHROM", "POS", "REF", "ALT", "ID"], keep="first")
+
+        # check
+        for f in df_vars.keys():
+            if any(pd.isna(df_vars[f])): raise ValueError("nans in %s"%f)
+
+        # write vcf
+        print("writing vcf")
+        vcf_file_tmp = "%s.tmp"%vcf_file
+        vcf_lines = df_vars[vcf_fields].to_csv(sep="\t", header=False, index=False)
+        header_lines = "\n".join(["##fileformat=VCFv4.2", "\t".join(vcf_fields)])
+        open(vcf_file_tmp, "w").write(header_lines + "\n" + vcf_lines)
+        os.rename(vcf_file_tmp, vcf_file)
+
+
+def load_SV_CNV_df_from_vcf_one_sample_keep_fields(sampleID, SV_CNV_vcf, fields_SV_CNVs="all"):
+
+    """Gets a SV_CNV_vcf as a df, formats INFO fields and adds sampleID. Onlu keeps fields_SV_CNVs. Inspired by get_integrated_SV_CNV_df_severalSamples (initial part)"""
+
+    # load vcf as df
+    vcf_df = get_vcf_df_with_INFO_as_single_fields(get_df_and_header_from_vcf(SV_CNV_vcf)[0])
+
+    # keep some fields
+    if fields_SV_CNVs!="all": vcf_df = vcf_df[fields_SV_CNVs]
+
+    # add sampleID
+    vcf_df["sampleID"] = sampleID
+
+    return vcf_df
+
+def get_SV_vcf_with_overlaps_all_samples(SV_df, tmpdir, tol_bp, pct_overlap, reference_genome, threads, df_bedpe_all):
+
+    """Takes an SV df formated as the vcf and returns it with fields that indicate whether it overlaps other SVs by breakpoints in all other samples of df_bedpe_all. Inspired by get_SV_CNV_df_with_overlaps_with_all_samples"""
+
+    # define the initial fields
+    initial_fields = list(SV_df.keys())
+
+    # get dir
+    make_folder(tmpdir)
+
+    # keep
+    SV_df = cp.deepcopy(SV_df)
+
+    # define a file
+    SV_df_with_added_overlaps_file = "%s/SV_df_with_added_overlaps.tab"%tmpdir
+
+    if file_is_empty(SV_df_with_added_overlaps_file):
+
+        # add things to the SV df
+        if any(SV_df.INFO_variantID.apply(lambda ID: ID.startswith("coverage"))): raise ValueError("there can't be coverageCNVs")
+        SV_df["INFO_BREAKPOINTIDs_set"] = SV_df.INFO_BREAKPOINTIDs.apply(lambda x: set(str(x).split(",")).difference({"nan"}))
+        if any(SV_df.INFO_BREAKPOINTIDs_set.apply(len)==0): raise ValueError("The bpID is not always defined ")
+        SV_df["INFO_BREAKPOINTIDs_set_withSampleID"] = SV_df.apply(lambda r: {"%s_%s"%(r.sampleID, x) for x in r.INFO_BREAKPOINTIDs_set}, axis=1)
+        SV_df["sampleID_and_variantID"] = SV_df.sampleID.apply(str) + "_" + SV_df.INFO_variantID
+
+        ###### ADD FIELDS TO DF BEDPE ABOUT THE OVERLAP BETWEEN BREAKPOINTS ######
+
+        # change the name so that it is as in clove
+        df_bedpe_all["name"] = df_bedpe_all.name.apply(lambda x: x[0:-1]) + "o"
+
+        # get the df bedpe with the breakpoints that are overlapping across several samples
+        print_if_verbose("running get_overlapping_df_bedpe_multiple_samples")
+        df_bedpe_all = get_overlapping_df_bedpe_multiple_samples(df_bedpe_all, tmpdir, tol_bp, pct_overlap, threads).set_index("unique_bpID", drop=False)
+        print_if_verbose("get_overlapping_df_bedpe_multiple_samples ran")
+
+        # add the overlapping breakpoints PASS
+        print_if_verbose("running get_only_PASSbps")
+        pass_breakpoints = set(df_bedpe_all[df_bedpe_all.PASSed_filters].unique_bpID)
+        def get_only_PASSbps(all_bps): return all_bps.intersection(pass_breakpoints)
+        df_bedpe_all["overlapping_bpoints_final_PASS"] = df_bedpe_all.overlapping_bpoints_final.apply(get_only_PASSbps)
+
+        # add the samples that have that have the breakpoint
+        print_if_verbose("running get_sampleIDs_from_bpIDs")
+        bpID_to_SID = dict(df_bedpe_all.sampleID)
+        def get_sampleIDs_from_bpIDs(bpIDs): return set(map(lambda x: bpID_to_SID[x], bpIDs))
+        df_bedpe_all["overlapping_samples_called"] = df_bedpe_all.overlapping_bpoints_final.apply(get_sampleIDs_from_bpIDs)
+        df_bedpe_all["overlapping_samples_PASS"] = df_bedpe_all.overlapping_bpoints_final_PASS.apply(get_sampleIDs_from_bpIDs)
+
+        ##########################################################################
+
+        ###########  add the overlapping samples by breakpoint ###########
+
+        # check that each variant ID has the same breakpoints
+        print_if_verbose("checking that each varID has the same breakpoints")
+        for varID, bps in dict(SV_df.groupby("sampleID_and_variantID").apply(lambda df_v: set(df_v.INFO_BREAKPOINTIDs))).items():
+            if len(bps)!=1: 
+                for idx, r in SV_df[SV_df.INFO_variantID==varID][["sampleID_and_variantID", "ID", "INFO_BREAKPOINTIDs", "sampleID"]].iterrows():
+                    print(r["sampleID"], r["sampleID_and_variantID"], r["ID"], r["INFO_BREAKPOINTIDs"])
+                raise ValueError("%s has more than 1 (%s) bpIDs"%(varID, bps))
+
+        # add an index
+        nrows_SV_df = len(SV_df)
+        SV_df["rowID"] = list(range(nrows_SV_df))
+
+        # define functions that returns the string with the overlapping samples
+        def get_overlapping_samples_byBreakPoints_set(r, bpTo_overlappingSamples_series):
+
+            # progres
+            if (r.rowID%2000)==0: print_if_verbose("getting var %i/%i"%(r.rowID, nrows_SV_df))
+
+            # get dfs
+            return set.union(*bpTo_overlappingSamples_series[r.INFO_BREAKPOINTIDs_set_withSampleID])
+
+        def get_map_of_strings_from_set(set_obj): return map(str, set_obj)
+
+        def get_joined_by_comma_list(list_obj): return ",".join(list_obj)
+
+        for SV_field, overlapping_samples_f in [("overlapping_samples_byBreakPoints_allCalled", "overlapping_samples_called"), ("overlapping_samples_byBreakPoints_PASS", "overlapping_samples_PASS")]:
+
+            print_if_verbose("adding %s to SV_CNV"%SV_field)
+            SV_df[SV_field] = SV_df[["rowID", "INFO_BREAKPOINTIDs_set_withSampleID"]].apply(get_overlapping_samples_byBreakPoints_set, bpTo_overlappingSamples_series=df_bedpe_all[overlapping_samples_f], axis=1).apply(get_map_of_strings_from_set).apply(sorted).apply(get_joined_by_comma_list)
+
+        # init the interesting fields
+        final_interesting_fields = initial_fields + ["overlapping_samples_byBreakPoints_allCalled", "overlapping_samples_byBreakPoints_PASS"]
+
+        ##################################################################
+
+        # save
+        save_df_as_tab(SV_df[final_interesting_fields], SV_df_with_added_overlaps_file)
+
+    return get_tab_as_df_or_empty_df(SV_df_with_added_overlaps_file)
+
+
+
+def generate_table_changing_CNVs_vs_background(paths_df, comparisons_df, outdir, tmpdir, tol_bp, pct_overlap, threads, reference_genome, mitochondrial_chromosome, repeats_file, ploidy, min_chromosome_len, fraction_available_mem, fractionRAM_to_dedicate):
+
+    """Generates a table with the changing CNVs across samples. Inspired by get_integrated_SV_CNV_df_severalSamples and generate_table_changing_SVs_vs_background"""
+
+    print_if_verbose("Generating changing CNVs...")
+
+    changing_CNVs_file = "%s/CNVs_changing.tab"%outdir
+    if file_is_empty(changing_CNVs_file):
+
+        # define all samples
+        all_samples = sorted(set(comparisons_df.sampleID).union(set.union(*comparisons_df.background_sampleIDs)))
+
+        # get as index
+        paths_df = cp.deepcopy(paths_df).set_index("sampleID", drop=False)
+        comparisons_df = cp.deepcopy(comparisons_df).set_index("sampleID", drop=False)
+
+        # get the CN per window
+        integrated_CNperWindow_df_all =  get_tab_as_df_or_empty_df(get_integrated_CNperWindow_df_severalSamples(paths_df[paths_df.sampleID.isin(all_samples)], "%s/generating_CN_per_window"%tmpdir, threads=threads, replace=False, fields=["sampleID", "chromosome", "start", "end", "merged_relative_CN"]))
+
+        #### GET CNVs VCF THAT ARE CHANGING BETWEEN SAMPLES ######
+
+        # inspired 
+
+        # init df and keep adding
+        df_changing_CNVs_all = pd.DataFrame()
+        for sampleID in comparisons_df.sampleID:
+            print()
+            print_if_verbose("Getting changing CNVs for %s"%sampleID)
+
+            # define interesting samples for comparisons
+            bg_samples = comparisons_df.loc[sampleID, "background_sampleIDs"]
+            interesting_samples = {sampleID}.union(bg_samples)
+
+            # get the CNV df
+            CNV_df = pd.DataFrame()
+
+            print_if_verbose("getting vcf...")
+            for sID in sorted(interesting_samples):
+
+                # run integrate_SV_CNV_calls to generate the single dfs for each sample
+                outdir_integrate_CNVs_all = "%s/generating_CNVs"%tmpdir; make_folder(outdir_integrate_CNVs_all)
+                outdir_integrate_CNVs = "%s/%s"%(outdir_integrate_CNVs_all, sID)
+                r_sID = paths_df.loc[sID]
+                if file_is_empty("%s/perSVade_finished_file.txt"%outdir_integrate_CNVs): run_cmd("%s/perSVade integrate_SV_CNV_calls -o %s -r %s -sbam %s -mchr %s --repeats_file %s -p %i --outdir_callCNVs %s --min_chromosome_len %i --fraction_available_mem %.2f --threads %i --fractionRAM_to_dedicate %.2f"%(CWD, outdir_integrate_CNVs, reference_genome,  r_sID.sorted_bam, mitochondrial_chromosome, repeats_file, ploidy, r_sID.call_CNVs_outdir, min_chromosome_len, fraction_available_mem, threads, fractionRAM_to_dedicate), env=EnvName)
+
+                # load SV_CNV as a dataframe amd keep
+                CNV_df_s = get_vcf_df_with_INFO_as_single_fields(get_df_and_header_from_vcf("%s/SV_and_CNV_variant_calling.vcf"%outdir_integrate_CNVs)[0])
+                CNV_df_s["sampleID"] = sID
+                CNV_df = CNV_df.append(CNV_df_s).reset_index(drop=True)
+
+            # get CN per window df of all
+            integrated_CNperWindow_df = integrated_CNperWindow_df_all[integrated_CNperWindow_df_all.sampleID.isin(interesting_samples)]
+
+            print(integrated_CNperWindow_df)
+
+            dadagagjdagjdagjdahg
+
+            # get df with overlaping samples
+            print_if_verbose("adding ovelaps...")
+            CNV_df = get_CNV_vcf_with_overlaps_all_samples(CNV_df, "%s/getting_CNVs_various_samples_overlaps_%s"%(tmpdir, sampleID), tol_bp, pct_overlap, reference_genome, threads, integrated_CNperWindow_df)
+
+        ##########################################################
+
+        KAHGAHFGAJDFGHA
+
+def generate_table_changing_SVs_vs_background(paths_df, comparisons_df, outdir, tmpdir, tol_bp, pct_overlap, threads, reference_genome, mitochondrial_chromosome, repeats_file, ploidy, min_chromosome_len, fraction_available_mem, fractionRAM_to_dedicate):
+
+    """Generates a table with the changing SVs across samples. Inspired by get_integrated_SV_CNV_df_severalSamples."""
+
+    print_if_verbose("Generating changing SVs...")
+
+    changing_SVs_file = "%s/SVs_changing.tab"%outdir
+    if file_is_empty(changing_SVs_file):
+
+        # define all samples
+        all_samples = sorted(set(comparisons_df.sampleID).union(set.union(*comparisons_df.background_sampleIDs)))
+
+        # get as index
+        paths_df = cp.deepcopy(paths_df).set_index("sampleID", drop=False)
+        comparisons_df = cp.deepcopy(comparisons_df).set_index("sampleID", drop=False)
+
+        ###### GET INTEGRATED BREAKPOINT FILES #######
+
+        # create files with all breakpoints. Inspired by get_integrated_SV_CNV_df_severalSamples
+        integrated_gridss_df_file = "%s/integrated_gridss_df.tab"%(outdir)
+        integrated_bedpe_df_file = "%s/integrated_bedpe_df.tab"%(outdir)
+
+        print_if_verbose("getting integrated breakpoints...")
+        if file_is_empty(integrated_gridss_df_file) or file_is_empty(integrated_bedpe_df_file):
+
+            # make a folder to integrate the gridss df
+            outdir_integrating_gridss_df = "%s/intergrating_gridss_df"%tmpdir
+            delete_folder(outdir_integrating_gridss_df); make_folder(outdir_integrating_gridss_df)
+
+            # define fields
+            gridss_fields = ['PASSed_filters', '#CHROM', 'ALT', 'FILTER', 'ID', 'PASSed_filters', 'POS', 'QUAL', 'REF', 'sampleID'] # INFO, FORMAT, DATA are missing
+            bedpe_fields = ['PASSed_filters', 'chrom1', 'chrom2', 'end1', 'end2', 'name', 'sampleID', 'score', 'start1', 'start2', 'strand1', 'strand2']
+
+            # run in parallel the obtention of gridss and bedpe dfs
+            inputs_fn = [(Is, len(all_samples), sampleID, paths_df.loc[sampleID, "call_SVs_outdir"], outdir_integrating_gridss_df, False, gridss_fields, bedpe_fields) for Is,  sampleID in enumerate(all_samples)]
+
+            # get files in parallel
+            with multiproc.Pool(threads) as pool:
+                list_gridss_bedpe_files = pool.starmap(get_df_gridss_and_df_bedpe_for_integratedSV_CNV, inputs_fn) 
+                    
+                pool.close()
+                pool.terminate()
+
+            # write the dfs
+            concatenate_list_headerLess_files_into_tab_file([x[0] for x in list_gridss_bedpe_files], integrated_gridss_df_file, gridss_fields, replace=False)
+            concatenate_list_headerLess_files_into_tab_file([x[1] for x in list_gridss_bedpe_files], integrated_bedpe_df_file, bedpe_fields, replace=False)
+            
+            # clean
+            delete_folder(outdir_integrating_gridss_df)
+
+
+        df_gridss_all = get_tab_as_df_or_empty_df(integrated_gridss_df_file)
+        df_bedpe_all = get_tab_as_df_or_empty_df(integrated_bedpe_df_file)
+
+        ##############################################
+
+        #### GET SVs VCF THAT ARE CHANGING BETWEEN SAMPLES ######
+
+        # init df and keep adding
+        df_changing_SVs_all = pd.DataFrame()
+        for sampleID in comparisons_df.sampleID:
+            print()
+            print_if_verbose("Getting changing SVs for %s"%sampleID)
+
+            # define interesting samples for comparisons
+            bg_samples = comparisons_df.loc[sampleID, "background_sampleIDs"]
+            interesting_samples = {sampleID}.union(bg_samples)
+
+            # get the SVs df
+            SV_df = pd.DataFrame()
+
+            print_if_verbose("getting vcf...")
+            for sID in sorted(interesting_samples):
+
+                # run integrate_SV_CNV_calls to generate the single dfs for each sample
+                outdir_integrate_SVs_all = "%s/generating_SVs"%tmpdir; make_folder(outdir_integrate_SVs_all)
+                outdir_integrate_SVs = "%s/%s"%(outdir_integrate_SVs_all, sID)
+                r_sID = paths_df.loc[sID]
+                if file_is_empty("%s/perSVade_finished_file.txt"%outdir_integrate_SVs): run_cmd("%s/perSVade integrate_SV_CNV_calls -o %s -r %s -sbam %s -mchr %s --repeats_file %s -p %i --outdir_callSVs %s --min_chromosome_len %i --fraction_available_mem %.2f --threads %i --fractionRAM_to_dedicate %.2f"%(CWD, outdir_integrate_SVs, reference_genome,  r_sID.sorted_bam, mitochondrial_chromosome, repeats_file, ploidy, r_sID.call_SVs_outdir, min_chromosome_len, fraction_available_mem, threads, fractionRAM_to_dedicate), env=EnvName)
+
+                # load SV_CNV as a dataframe amd keep
+                SV_df_s = get_vcf_df_with_INFO_as_single_fields(get_df_and_header_from_vcf("%s/SV_and_CNV_variant_calling.vcf"%outdir_integrate_SVs)[0])
+                SV_df_s["sampleID"] = sID
+                SV_df = SV_df.append(SV_df_s).reset_index(drop=True)
+
+            # load the bedpe for all samples to compare
+            df_bedpe = df_bedpe_all[df_bedpe_all.sampleID.isin(interesting_samples)]
+
+            # get df with overlaping samples
+            print_if_verbose("adding ovelaps...")
+            SV_df = get_SV_vcf_with_overlaps_all_samples(SV_df, "%s/getting_SVs_various_samples_overlaps_%s"%(tmpdir, sampleID), tol_bp, pct_overlap, reference_genome, threads, df_bedpe)
+
+            # add the 
+            outdir_common_variantID_acrossSamples = "%s/%s_getting_SV_id_across_samples"%(tmpdir, sampleID); make_folder(outdir_common_variantID_acrossSamples)
+            SV_df = get_SV_CNV_df_with_common_variantID_acrossSamples(SV_df, outdir_common_variantID_acrossSamples, pct_overlap, tol_bp, threads)
+
+            # add types
+            for f in ["INFO_real_AF_min", "INFO_QUAL_mean"]:
+                SV_df[f] = SV_df[f].apply(float)
+                if any(pd.isna(SV_df[f])): raise ValueError("can't be nans in %s"%f)
+
+            # go through different types of backgrrounds
+            print_if_verbose("generating final table...")
+            for type_background, field_overlaps in [("low_confidence", "overlapping_samples_byBreakPoints_allCalled"), ("high_confidence", "overlapping_samples_byBreakPoints_PASS")]:
+
+                # add field_overlaps as a set
+                def get_as_set_considering_nans(x):
+                    if pd.isna(x): return set()
+                    else: return set(x.split(","))
+
+                field_overlaps_set = "%s_set"%field_overlaps
+                SV_df[field_overlaps_set] = SV_df[field_overlaps].apply(get_as_set_considering_nans)
+
+                # checks
+                strange_samples = set.union(*SV_df[field_overlaps_set]).difference(interesting_samples)
+                if len(strange_samples)>0: raise ValueError("strange samples: %s"%strange_samples)
+
+                # go through different types of variant
+                for type_differetial_variant in ["gained", "lost"]:
+
+                    # define the df_changing_SV depending on the type_differetial_variant
+                    if type_differetial_variant=="gained":
+                        df_changing_SV = SV_df[SV_df.sampleID==sampleID]
+                        df_changing_SV = df_changing_SV[df_changing_SV[field_overlaps_set].apply(lambda o_samples: o_samples.intersection(bg_samples)).apply(len)==0]
+
+                    elif type_differetial_variant=="lost":
+
+                        # define variants that are in all bg samples and do not overlap any breakpoints of sampleID
+                        vars_sample = set(SV_df[SV_df.sampleID==sampleID].variantID_across_samples)
+                        SV_df_bgs = SV_df[(SV_df.sampleID.isin(bg_samples)) & ~(SV_df.variantID_across_samples.isin(vars_sample)) & ~(SV_df[field_overlaps_set].apply(lambda x: sampleID in x))]
+                        var_to_samples = SV_df_bgs[["variantID_across_samples", "sampleID"]].drop_duplicates().groupby("variantID_across_samples").apply(lambda df_v: set(df_v.sampleID))
+                        lost_vars = set(var_to_samples[var_to_samples==bg_samples].index)
+
+                        # define the variants of the bg samples
+                        def get_df_one_variant_multiple_samples(df_v):
+                            if set(df_v.sampleID)!=bg_samples: raise ValueError("samples are not equal")
+                            rep_sampleID = df_v.sort_values(by=["INFO_real_AF_min", "INFO_QUAL_mean", "sampleID"], ascending=[False, False, True]).iloc[0].sampleID
+                            df_v = df_v[df_v.sampleID==rep_sampleID]
+                            return df_v
+
+                        df_changing_SV = (SV_df[(SV_df.sampleID.isin(bg_samples)) & (SV_df.variantID_across_samples.isin(lost_vars)) & ~(SV_df[field_overlaps_set].apply(lambda x: sampleID in x))].groupby("variantID_across_samples").apply(get_df_one_variant_multiple_samples)).reset_index(drop=True)
+
+                        # checks
+                        if len(set(df_changing_SV.variantID_across_samples))!=len(df_changing_SV[["variantID_across_samples", "sampleID"]].drop_duplicates()): raise ValueError("There should be one sampleID for each variantID_across_samples")
+                        if set(df_changing_SV.variantID_across_samples)!=lost_vars: raise ValueError("not all lost vars accounted for")
+
+                    else: raise ValueError("invalid")
+
+                    # keep
+                    df_changing_SV["target_sampleID"] = sampleID
+                    df_changing_SV["background_sampleIDs"] = ",".join(sorted(bg_samples))
+                    df_changing_SV["type_differetial_variant"] = type_differetial_variant
+                    df_changing_SV["type_background"] = type_background
+                    df_changing_SV["calling_sampleID"] = df_changing_SV.sampleID
+
+                    interesting_fields = ["#CHROM", "POS", "ID", "REF", "ALT", "INFO_BPS_TYPE", "INFO_BREAKENDIDs", "INFO_BREAKEND_FILTER", "INFO_BREAKEND_QUAL", "INFO_BREAKEND_coordinates", "INFO_BREAKEND_has_poly16GC", "INFO_BREAKEND_len_inserted_sequence", "INFO_BREAKEND_length_inexactHomology", "INFO_BREAKEND_length_microHomology", "INFO_BREAKEND_overlaps_repeats", "INFO_BREAKEND_real_AF", "INFO_BREAKPOINTID", "INFO_BREAKPOINTIDs", "INFO_END", "INFO_FILTER", "INFO_QUAL", "INFO_QUAL_max", "INFO_QUAL_mean", "INFO_QUAL_min", "INFO_RELCOVERAGE", "INFO_RELCOVERAGE_TO_3", "INFO_RELCOVERAGE_TO_5", "INFO_SVTYPE", "INFO_all_FILTERs", "INFO_any_has_poly16GC", "INFO_any_overlaps_repeats", "INFO_best_FILTER", "INFO_bpIDs", "INFO_has_poly16GC", "INFO_len_inserted_sequence_max", "INFO_len_inserted_sequence_mean", "INFO_len_inserted_sequence_min", "INFO_length_event_max", "INFO_length_event_mean", "INFO_length_event_min", "INFO_length_inexactHomology", "INFO_length_inexactHomology_max", "INFO_length_inexactHomology_mean", "INFO_length_inexactHomology_min", "INFO_length_microHomology", "INFO_length_microHomology_max", "INFO_length_microHomology_mean", "INFO_length_microHomology_min", "INFO_misc", "INFO_overlaps_repeats", "INFO_real_AF", "INFO_real_AF_max", "INFO_real_AF_mean", "INFO_real_AF_min", "INFO_variantID", "INFO_worse_FILTER", "calling_sampleID", "target_sampleID", "background_sampleIDs", "type_differetial_variant", "type_background"]
+
+                    df_changing_SVs_all = df_changing_SVs_all.append(df_changing_SV).reset_index(drop=True)[interesting_fields]
+
+        #########################################################
+
+        save_df_as_tab(df_changing_SVs_all, changing_SVs_file)
+

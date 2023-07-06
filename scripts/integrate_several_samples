@@ -1,0 +1,335 @@
+#!/usr/bin/env python
+
+######################################
+############# DEFINE ENV #############
+######################################
+
+# general module imports
+import argparse, os
+from argparse import RawTextHelpFormatter
+import copy as cp
+import pickle
+import string
+import shutil 
+import random
+import sys
+from shutil import copyfile
+import time
+import pandas as pd
+import multiprocessing as multiproc
+
+# get the cwd were all the scripts are 
+CWD = "/".join(__file__.split("/")[0:-1]); sys.path.insert(0, CWD)
+
+# define the module name
+module_name = __file__.split("/")[-1]
+
+# define the EnvDir where the environment is defined
+EnvDir = "/".join(sys.executable.split("/")[0:-2])
+
+# import functions
+import sv_functions as fun
+
+# import perSVade-specific modules
+
+######################################
+######################################
+######################################
+
+
+#################################### 
+############## ARGS ################
+####################################
+
+description = """
+Takes a .csv table (tab-sepparated) with the paths to the output folders of the modules 'call_small_variants', 'integrate_SV_CNV_calls', 'call_CNVs' and/or 'call_SVs' (as --paths_table) for several samples. This table should have the columns 'sampleID', 'sorted_bam', (mandatory) and either 'call_small_variants_p1_outdir', 'call_small_variants_p2_outdir', integrate_SV_CNV_calls_outdir', 'call_CNVs_outdir' and/or 'call_SVs_outdir'. Depending on the intput, this pipeline will perform the following operations:
+
+- If 'call_small_variants_p1_outdir' or 'call_small_variants_p2_outdir' are provided, it will generate the file 'integrated_small_variants.tab', containing the concatenated unfiltered variants. This table will contain the 'calling_ploidy' field for each ploidy.
+
+- If 'integrate_SV_CNV_calls_outdir' is provided, it will generate the file 'integrated_SVs_CNVs.tab', containing the concatenated variants across all samples. This table will also contain the column 'variantID_across_samples', which can be used as a unique variant identifier. Note that, due to inaccuracies in SV/CNV calling, a given variant can have slightly different coordinates across samples. To solve this and enable comparisons, this module clusters together variants that are <50bp and overlap by >75% (by default, tunable with --tol_bp and --pct_overlap), and 'variantID_across_samples' represents these unique cluster IDs. This 'variantID_across_samples' can be useful to compare SVs across samples, but it may be inaccurate to define variants that appeared over very short evolutionary timepoints, as it does not consider the fact that some SV/CNVs may not be detected in some cases.
+
+- If 'call_SVs_outdir' is provided, this module will generate the table SVs_changing.tab, indicating SVs that were gained / lost in a given sampleID (i.e. after in vitro-evolution) vs a set of background samples (i.e. in WT samples). This file has the same format as the output of 'integrate_SV_CNV_calls', but it .tab format has various extra columns: 'type_differetial_variant' (which can be 'gained' or 'lost') and 'type_background' (which can be 'high_confidence' or 'low_confidence'). If type_background is 'high_confidence' it means that 'gained' SVs are those where none of the corresponding breakpoints overlap a breakpoint that passed the gridss filters in at least one of the background samples. Similarly, 'lost' SVs when type_background is 'high_confidence' are those that are found in all background samples (according to the 'variantID_across_samples' definition), but where none of the breakpoints can be found when considering filtered breakpoints in the sample of interest. Conversely, if type_background is 'low_confidence' it means that the breakpoints considered for overlaps are those output by gridss, without filtering. Note that using such a 'low_confidence' background will yield less changing SVs, so that they will be more trustable (although some true gained/lost SVs may be missed). On another line, there are other new columns that refer to the samples in which the variants were called: 'calling_sampleID' (where the variant is called), 'target_sampleID' (the sample where the variant is gained/lost) and 'background_sampleIDs' (the comma-sepparated samples used for background).
+
+- If 'call_CNVs_outdir' is provided, this module will generate the table CNVs_changing.tab, which is equivalent to SVs_changing.tab, but for CNVs. The columns of this folder are 'calling_sampleID' (where the variant is called), 'target_sampleID' (the sample where the variant is gained/lost) and 'background_sampleIDs' (the comma-sepparated samples used for background), 'type_differetial_variant' (which can be 'gained' or 'lost') and 'type_overlap_background' (which can be '95pct_overlap' or '75pct_overlap', '50pct_overlap' and '25pct_overlap'). 
+
+ indicating CNVs that were gained / lost in a given sampleID (i.e. after in vitro-evolution) vs a set of background samples (i.e. in WT samples). 
+
+Note that this module also creates 'integrated_small_variants_annotation_fields.vcf' and 'integrated_SVs_CNVs_annotation_fields.vcf', which are the vcf versions with minimal information, which can be passed to the annotation modules.
+
+Note that if 'call_SVs_outdir' or 'call_CNVs_outdir' are given you'll also need to provide a table (with --table_comparisons) with the columns 'sampleID' and 'background_sampleIDs'. Note that 'background_sampleIDs' should be a comma-separated set of sampleIDs (i.e. 'sample1,sample2') to use as background for these comparisons. Note that the outputs of call_SVs and call_CNVs are not directly integrated into a single file because this is redundant with the integration of integrate_SV_CNV_calls.
+
+
+"""
+
+# mandatory
+parser = argparse.ArgumentParser(description=description, formatter_class=RawTextHelpFormatter)
+parser.add_argument("-o", "--outdir", dest="outdir", action="store", required=True, help="Output directory.")
+parser.add_argument("--paths_table", dest="paths_table", type=str, action="store", required=True, help="Table with paths")
+parser.add_argument("-r", "--ref", dest="ref", required=True, help="Reference genome. It has to end with .fasta.")
+parser.add_argument("-mchr", "--mitochondrial_chromosome", dest="mitochondrial_chromosome", required=True, type=str, help="The name of the mitochondrial chromosome. If there is no mitochondria just put 'no_mitochondria'. If there is more than one mitochindrial scaffold, provide them as comma-sepparated IDs, like '--mitochondrial_chromosome chr_mito_1,chr_mito_2'.")
+parser.add_argument("--repeats_file", dest="repeats_file", required=True, help="A file with the repeats of the reference genome, such as the file 'combined_repeats.tab' generated by perSVade infer_repeats. You may set '--repeats_file skip' if you don't want to consider repeats.")
+parser.add_argument("-p", "--ploidy", dest="ploidy", required=True, type=int, help="Ploidy, can be 1 or 2.")
+
+# optional
+parser.add_argument("--table_comparisons", dest="table_comparisons", type=str, action="store", default=None, help="Table with comparisons of samples.")
+parser.add_argument("--fields_small_variants", dest="fields_small_variants", type=str, action="store", default="all", help="File with the fields to keep from the small variant calling. One field in each line. Default: all")
+parser.add_argument("--fields_SV_CNVs", dest="fields_SV_CNVs", type=str, action="store", default="all", help="Same as --fields_small_variants, but for SV_CNVs vcf. Default: all")
+parser.add_argument("--tol_bp", dest="tol_bp", default=50, type=int, help="Maximum number of distance in bp to consider that two breakends are the same. Default: 50")
+parser.add_argument("--pct_overlap", dest="pct_overlap", default=75, type=int, help="Minimum percentage of reciprocal overlap to consider that two SV regions are the same: Default: 75")
+parser.add_argument("--min_chromosome_len", dest="min_chromosome_len", default=100000, type=int, help="The minimum length to consider chromosomes from the provided fasta for calculating the window length (used in may steps of perSVade to parallelize across fractions of the genome).")
+
+parser.add_argument("--replace", dest="replace", action="store_true", help="Re-run all the steps by deleting the output directory.")
+parser.add_argument("--verbose", dest="verbose", action="store_true", default=False, help="Print a verbose log.")
+
+# resources
+parser.add_argument("--fraction_available_mem", dest="fraction_available_mem", default=None, type=float, help="This pipeline calculates the available RAM for several steps, and it may not work well in some systems (i.e. HPC clusters). This parameter allows you to correct possible errors. If --fraction_available_mem is not provided (default behavior), this pipeline will calculate the available RAM by filling the memory, which may give errors. If you want to use all the available memory you should specify --fraction_available_mem 1.0. See the FAQ 'How does the --fraction_available_mem work?' from https://github.com/Gabaldonlab/perSVade/wiki/8.-FAQs for more info.")
+
+parser.add_argument("-thr", "--threads", dest="threads", default=16, type=int, help="Number of threads, Default: 16")
+parser.add_argument("--fractionRAM_to_dedicate", dest="fractionRAM_to_dedicate", type=float,  default=0.5, help="This is the fraction of the available memory that will be used by several java programs that require a heap size. By default we set this to 0.5 to not overload the system.")
+
+opt = parser.parse_args()
+
+####################################
+####################################
+####################################
+
+#################################
+########### MAIN CODE ###########
+#################################
+
+# remove outdir if replace, and set replace to False
+if opt.replace is True: fun.delete_folder(opt.outdir)
+opt.replace = False
+
+# make the outdir
+fun.make_folder(opt.outdir)
+
+# exit if the final file exists
+final_file = "%s/perSVade_finished_file.txt"%opt.outdir
+
+if not fun.file_is_empty(final_file): 
+    fun.print_with_runtime("WARNING: %s exists, suggesting that perSVade was already  run in this folder. Remove this file if you want this command to work. Exiting..."%final_file)
+    sys.exit(0)
+
+# define the start time
+start_time = time.time()
+
+# define the verbosity. If opt.verbose is False, none of the 'print' statements of sv_functions will have an effect
+fun.printing_verbose_mode = opt.verbose
+
+# define a file that will contain all the cmds ran
+fun.log_file_all_cmds = "%s/all_cmds.txt"%opt.outdir
+if fun.file_is_empty(fun.log_file_all_cmds): open(fun.log_file_all_cmds, "w").write("# These are all the cmds:\n")
+
+# get sample name
+sample_name = fun.get_sampleName_from_perSVade_outdir(opt.outdir)
+
+###### DEBUG INPUTS #######
+
+# debug the table fields
+allowed_fields = {'sampleID', 'call_small_variants_p2_outdir', 'call_small_variants_p1_outdir', 'integrate_SV_CNV_calls_outdir', 'call_CNVs_outdir', 'call_SVs_outdir', 'sorted_bam'}
+paths_df = fun.get_tab_as_df_or_empty_df(opt.paths_table)
+fields_paths_df = set(paths_df.keys())
+strange_fiels = fields_paths_df.difference(allowed_fields)
+if len(strange_fiels)>0: raise ValueError("strange fields in --paths_table: %s"%strange_fiels)
+if "sampleID" not in fields_paths_df: raise ValueError("sampleID should be in --paths_table")
+if "sorted_bam" not in fields_paths_df: raise ValueError("sorted_bam should be in --paths_table")
+for f in fields_paths_df.difference({"sampleID"}): paths_df[f] = paths_df[f].apply(fun.get_fullpath)
+paths_df["sampleID"] = paths_df.sampleID.apply(str)
+
+# debug the comparisons fields
+if opt.table_comparisons is not None:
+    comparisons_df =  fun.get_tab_as_df_or_empty_df(opt.table_comparisons)
+    if set(comparisons_df.keys())!={"sampleID", "background_sampleIDs"}: raise ValueError("--table_comparisons should have only the columns sampleID and background_sampleIDs.")
+    comparisons_df["sampleID"] = comparisons_df.sampleID.apply(str)
+    comparisons_df["background_sampleIDs"] = comparisons_df.background_sampleIDs.apply(lambda x: set(map(str, x.split(","))))
+    allowed_samples = set(paths_df.sampleID)
+    samples_in_comparisons_df = set.union(*comparisons_df.background_sampleIDs).union(set(comparisons_df.sampleID))
+    strange_samples = samples_in_comparisons_df.difference(allowed_samples)
+    if len(strange_samples)>0: raise ValueError("strange samples in --table_comparisons: %s"%strange_samples)
+    if len({'call_CNVs_outdir', 'call_SVs_outdir'}.intersection(fields_paths_df))==0: raise ValueError("--table_comparisons is only applicable to SVs and CNVs. You should provide 'call_CNVs_outdir', 'call_SVs_outdir' in --paths_table")
+
+# debug situation where 'call_CNVs_outdir', 'call_SVs_outdir' and no table comparisons
+else:
+    for f in ['call_CNVs_outdir', 'call_SVs_outdir']:
+        if f in fields_paths_df: raise ValueError("If you provide %s in --paths_table you should also provide --table_comparisons"%f)
+
+# check unputs
+if opt.pct_overlap>100: raise ValueError("You are requiring %s pct overlap. 100 is maximum"%opt.pct_overlap)
+
+###########################
+
+####### SET RESOURCES ########
+
+# define the fraction of RAM to dedicate
+if opt.fractionRAM_to_dedicate>0.95: raise ValueError("You are using >95 pct of the systems RAM, which is dangerous")
+fun.fractionRAM_to_dedicate = opt.fractionRAM_to_dedicate
+
+# define the fraction of available mem
+fun.fraction_available_mem = opt.fraction_available_mem
+if opt.fraction_available_mem is None: fun.print_with_runtime("WARNING: You did not specify how much RAM should be used through --fraction_available_mem. perSVade will calculate this by filling the memory, which may be dangerous. If you want to use all the allocated memory you should specify --fraction_available_mem 1.0")
+
+# print the available resources
+real_available_threads = fun.get_available_threads(opt.outdir)
+if opt.threads>real_available_threads:  fun.print_with_runtime("WARNING: There are %i available threads, and you required %i."%(real_available_threads, opt.threads))
+
+available_Gb_RAM = fun.get_availableGbRAM(opt.outdir)
+fun.print_with_runtime("Running perSVade %s into %s with %.3f Gb of RAM and %i cores"%(module_name, opt.outdir, available_Gb_RAM, opt.threads))
+
+##############################
+
+#### PREPARE INPUTS ####
+
+# prepare the reference genome
+opt.ref, reference_genome_dir = fun.prepare_reference_genome_for_perSVade(opt.ref, opt.outdir, opt.mitochondrial_chromosome, None, opt.replace)
+fun.window_l = fun.get_perSVade_window_l(opt.ref, opt.mitochondrial_chromosome, opt.min_chromosome_len)
+
+# prepare the repeats file
+fun.prepare_repeats_file_for_perSVade(opt.repeats_file, opt.ref)
+
+########################
+
+##### CODE FOR DIFFERENT INPUTS ######
+
+# define tmpdir
+tmpdir = "%s/tmp"%opt.outdir; fun.make_folder(tmpdir)
+
+# integrate small vars into a single file
+if "call_small_variants_p1_outdir" in fields_paths_df or "call_small_variants_p2_outdir" in fields_paths_df:
+    fun.print_with_runtime("integrating small variants...")
+
+    # define file
+    small_vars_file = "%s/integrated_small_variants.tab"%opt.outdir
+    if fun.file_is_empty(small_vars_file):
+
+        # init
+        small_vars_df_all = pd.DataFrame()
+
+        # keep adding dfs for each ploidy
+        for p, ploidy_f in [(1, "call_small_variants_p1_outdir"), (2, "call_small_variants_p2_outdir")]:
+
+            if ploidy_f in fields_paths_df:
+
+                # define fields to keep
+                if opt.fields_small_variants=="all": 
+                    fields_small_variants = "all"
+                    print("WARNING: You are keeping all small variant fields (columns), which is not optimal. You may tune this with --fields_small_variants")
+
+                else: fields_small_variants = list(map(lambda l: l.strip(), open(opt.fields_small_variants).readlines()))
+
+                # get variants
+                file_vars = "%s/integrated_vars_p%i.tab"%(tmpdir, p)
+                sample_to_outdir = dict(paths_df.set_index("sampleID")[ploidy_f])
+                fun.integrate_call_small_variants_several_samples(sample_to_outdir, file_vars, opt.threads, p, fields_small_variants=fields_small_variants)
+                small_vars_df = fun.get_tab_as_df_or_empty_df(file_vars)
+
+                # append
+                small_vars_df["calling_ploidy"] = p
+                small_vars_df_all = small_vars_df_all.append(small_vars_df).reset_index(drop=True)
+
+        # save
+        fun.save_df_as_tab(small_vars_df_all, small_vars_file)
+
+    # save as vcf for variant annotation
+    fun.convert_tab_variant_file_to_vcf_for_annotation(small_vars_file, "%s/integrated_small_variants_annotation_fields.vcf"%opt.outdir)
+
+# integrate SVs and CNVs into a single file with variantID_across_samples
+if "integrate_SV_CNV_calls_outdir" in fields_paths_df:
+    fun.print_with_runtime("integrating SVs and CNVs...")
+
+    SV_CNVs_file = "%s/integrated_SVs_CNVs.tab"%opt.outdir
+    if fun.file_is_empty(SV_CNVs_file):
+
+        # define fields to keep
+        if opt.fields_SV_CNVs=="all": 
+            fields_SV_CNVs = "all"
+            print("WARNING: You are keeping all SV_CNV variant fields (columns), which is not optimal. You may tune this with --fields_SV_CNVs")
+
+        else: fields_SV_CNVs = list(map(lambda l: l.strip(), open(opt.fields_SV_CNVs).readlines()))
+
+        # get the concatenated SVs with 'sampleID'
+        fun.print_with_runtime("Loading vcfs of single samples...")
+        inputs_fn = [(r.sampleID, "%s/SV_and_CNV_variant_calling.vcf"%r.integrate_SV_CNV_calls_outdir, fields_SV_CNVs) for I,r in paths_df.iterrows()]
+
+        with multiproc.Pool(opt.threads) as pool:
+            SV_CNVs_df = pd.concat(pool.starmap(fun.load_SV_CNV_df_from_vcf_one_sample_keep_fields, inputs_fn)) 
+            pool.close()
+            pool.terminate()
+
+        # add common ID
+        fun.print_with_runtime("Add 'variantID_across_samples'...")
+        outdir_common_variantID_acrossSamples = "%s/getting_common_variantID"%tmpdir
+        fun.delete_folder(outdir_common_variantID_acrossSamples)
+        SV_CNVs_df = fun.get_SV_CNV_df_with_common_variantID_acrossSamples(SV_CNVs_df, outdir_common_variantID_acrossSamples, opt.pct_overlap/100, opt.tol_bp, opt.threads)
+
+        # print stats
+        var_to_nsamples = SV_CNVs_df.groupby("variantID_across_samples").apply(lambda x: len(set(x.sampleID)))
+        fun.print_with_runtime("There are %i/%i SVs/CNVs that are in >1 sample"%(len(set(var_to_nsamples[var_to_nsamples>1].index)), len(set(SV_CNVs_df.variantID_across_samples))))
+
+        # remove info
+        SV_CNVs_df = SV_CNVs_df[[k for k in SV_CNVs_df.keys() if k!="INFO"]]
+
+        # save
+        fun.save_df_as_tab(SV_CNVs_df, SV_CNVs_file)
+
+    # save as vcf for variant annotation
+    fun.convert_tab_variant_file_to_vcf_for_annotation(SV_CNVs_file, "%s/integrated_SVs_CNVs_annotation_fields.vcf"%opt.outdir)
+
+# create changing SVs file
+if "call_SVs_outdir" in fields_paths_df:
+    fun.print_with_runtime("Finding differential SVs...")
+
+    # get vars SV
+    fun.generate_table_changing_SVs_vs_background(paths_df, comparisons_df, opt.outdir, tmpdir, opt.tol_bp, opt.pct_overlap/100, opt.threads, opt.ref, opt.mitochondrial_chromosome, opt.repeats_file, opt.ploidy, opt.min_chromosome_len, opt.fraction_available_mem, opt.fractionRAM_to_dedicate)
+
+# create changing CNVs file
+if "call_CNVs_outdir" in fields_paths_df:
+    fun.print_with_runtime("Finding differential SVs...")
+
+    # get vars SV
+    fun.generate_table_changing_CNVs_vs_background(paths_df, comparisons_df, opt.outdir, tmpdir, opt.tol_bp, opt.pct_overlap/100, opt.threads, opt.ref, opt.mitochondrial_chromosome, opt.repeats_file, opt.ploidy, opt.min_chromosome_len, opt.fraction_available_mem, opt.fractionRAM_to_dedicate)
+
+
+
+
+# optional
+
+
+# resources
+
+
+
+    kadgdahgdjhadg
+
+hgdfdf
+# debug
+
+
+print("exiting")
+sys.exit(0)
+
+
+
+######################################
+
+#################################
+#################################
+#################################
+
+
+##################################
+########## CLEAN OUTPUT ##########
+##################################
+
+# clean
+fun.delete_folder(tmpdir)
+
+# wite final file
+fun.generate_final_file_report_one_module(final_file, start_time, time.time())
+
+# print the message
+fun.print_with_runtime("perSVade %s finished correctly"%module_name)
+
+##################################
+##################################
+##################################

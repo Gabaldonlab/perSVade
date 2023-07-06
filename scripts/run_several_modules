@@ -91,6 +91,9 @@ if not fun.file_is_empty(final_file):
 # define the start time
 start_time = time.time()
 
+# make folder
+fun.make_folder(outdir_all)
+
 # define a file that will contain all the cmds ran
 fun.log_file_all_cmds = "%s/all_cmds.txt"%outdir_all
 if fun.file_is_empty(fun.log_file_all_cmds): open(fun.log_file_all_cmds, "w").write("# These are all the cmds:\n")
@@ -190,7 +193,7 @@ for module in modules_to_run:
 
     if module=="call_small_variants":
 
-        if "call_CNVs" in modules_to_run: final_args += "--outdir_callCNVs %s/call_CNVs"%outdir_all
+        if "call_CNVs" in modules_to_run: final_args += " --outdir_callCNVs %s/call_CNVs"%outdir_all
         if "--outdir_callCNVs" not in final_args: print("WARNING: Running call_small_variants with no CNV information.")
 
 
