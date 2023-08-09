@@ -1,6 +1,9 @@
 # perSVade: personalized Structural Variation detection
-
+![Latest Version](https://img.shields.io/github/v/tag/gabaldonlab/perSVade?label=Latest%20Version)
 [![DOI](https://zenodo.org/badge/263600715.svg)](https://zenodo.org/badge/latestdoi/263600715)
+![Docker Pulls](https://img.shields.io/docker/pulls/mikischikora/persvade)
+[![run with docker](https://img.shields.io/badge/run%20with-docker-0db7ed?labelColor=000000&logo=docker)](https://hub.docker.com/repository/docker/cgenomics/redundans)
+[![run with singularity](https://img.shields.io/badge/run%20with-singularity-1d355c.svg?labelColor=000000)](https://sylabs.io/docs/)
 
 perSVade runs structural variation (SV), small variant (SNPs and IN/DELs) and read depth-based Copy Number Variation (CNV) calling and annotation for WGS datasets. The only required input is a set of paired-end short reads and a reference genome. Everything with a few simple commands.
 
