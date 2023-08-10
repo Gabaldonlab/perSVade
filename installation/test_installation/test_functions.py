@@ -168,7 +168,8 @@ def test_bwa_mem_and_get_bam(r1, r2, ref_genome, replace=False):
 
     # run
     fun.print_with_runtime("aligning reads")
-    fun.run_bwa_mem(r1, r2, ref_genome, outdir, bamfile, sorted_bam, index_bam, name_sample, threads=threads, replace=False, MarkDuplicates=True)
+    #fun.run_bwa_mem(r1, r2, ref_genome, outdir, bamfile, sorted_bam, index_bam, name_sample, threads=threads, replace=False, MarkDuplicates=True)
+    fun.align_short_reads(opt.fastq1, opt.fastq2, opt.ref, opt.outdir, bamfile, sorted_bam, index_bam, sample_name, "bwa_mem", threads=opt.threads, replace=opt.replace, tmpdir_writingFiles=opt.tmpdir, MarkDuplicates=bwa_mem_MarkDuplicates)
 
     return sorted_bam
 

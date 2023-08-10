@@ -53,6 +53,7 @@ parser.add_argument("--min_chromosome_len", dest="min_chromosome_len", default=1
 parser.add_argument("--skip_marking_duplicates", dest="skip_marking_duplicates", default=False, action="store_true", help="Don't mark the duplicate reads in the .bam file. This can save you some time.")
 parser.add_argument("--replace", dest="replace", action="store_true", help="Re-run all the steps by deleting the output directory.")
 parser.add_argument("--verbose", dest="verbose", action="store_true", default=False, help="Print a verbose log.")
+parser.add_argument("--aligner", dest="aligner", default='bwa_mem', type=str, help="The aligner algorithm for the short reads. It should map the used to generate the --sortedbam. It can be any of 'hisat2', 'segemehl', 'bowtie2', 'bowtie2_local', 'bwa_mem'. Most of the testing of perSVade was done on bwa_mem. For 'hisat2', 'segemehl', the bam files get the secondary alignments removed. In addition, for segemehl the bam file will not contain unmapped reads, as these create compatibility problems.")
 
 # resources
 parser.add_argument("--fraction_available_mem", dest="fraction_available_mem", default=None, type=float, help="This pipeline calculates the available RAM for several steps, and it may not work well in some systems (i.e. HPC clusters). This parameter allows you to correct possible errors. If --fraction_available_mem is not provided (default behavior), this pipeline will calculate the available RAM by filling the memory, which may give errors. If you want to use all the available memory you should specify --fraction_available_mem 1.0. See the FAQ 'How does the --fraction_available_mem work?' from https://github.com/Gabaldonlab/perSVade/wiki/8.-FAQs for more info.")
@@ -138,12 +139,16 @@ index_bam = "%s.bai"%sorted_bam
 if opt.skip_marking_duplicates is True: bwa_mem_MarkDuplicates = False
 else: bwa_mem_MarkDuplicates = True
 
+# check the aligner
+if opt.aligner not in {"hisat2", "segemehl", "bowtie2", "bwa_mem", "bowtie2_local"}: raise ValueError("invalid aligner %s"%opt.aligner)
+
 # check that the reads are different (this generated errors in the insert size calculation)
 fun.check_that_paired_reads_are_different(opt.fastq1, opt.fastq2, "%s/checking_that_reads_are_different"%opt.outdir)
 
 # align reads and mark duplicates
 fun.print_with_runtime("Aligning reads")
-fun.run_bwa_mem(opt.fastq1, opt.fastq2, opt.ref, opt.outdir, bamfile, sorted_bam, index_bam, sample_name, threads=opt.threads, replace=opt.replace, tmpdir_writingFiles=opt.tmpdir, MarkDuplicates=bwa_mem_MarkDuplicates)
+#fun.run_bwa_mem(opt.fastq1, opt.fastq2, opt.ref, opt.outdir, bamfile, sorted_bam, index_bam, sample_name, threads=opt.threads, replace=opt.replace, tmpdir_writingFiles=opt.tmpdir, MarkDuplicates=bwa_mem_MarkDuplicates)
+fun.align_short_reads(opt.fastq1, opt.fastq2, opt.ref, opt.outdir, bamfile, sorted_bam, index_bam, sample_name, opt.aligner, threads=opt.threads, replace=opt.replace, tmpdir_writingFiles=opt.tmpdir, MarkDuplicates=bwa_mem_MarkDuplicates)
 
 # calculate the coverage
 fun.print_with_runtime("Calculating coverage per window")

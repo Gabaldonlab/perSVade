@@ -164,10 +164,12 @@ EnvName_RepeatMasker = "%s_RepeatMasker_env"%EnvName
 EnvName_CONY = "%s_CONY_env"%EnvName
 EnvName_HMMcopy = "%s_HMMcopy_env"%EnvName
 EnvName_AneuFinder = "%s_AneuFinder_env"%EnvName
+EnvName_aligners = "%s_aligners_env"%EnvName
 
 # define other envDirs
 picard_EnvDir = "%s/envs/%s"%(CondaDir, EnvName_picard)
 RepeatMasker_EnvDir = "%s/envs/%s"%(CondaDir, EnvName_RepeatMasker)
+aligners_EnvDir = "%s/envs/%s"%(CondaDir, EnvName_aligners)
 
 # EnvDir executables. These are all the ones installed with conda
 JAVA = "%s/bin/java"%EnvDir
@@ -211,7 +213,6 @@ gztool = "%s/gztool"%external_software
 
 # executables that are in other environments
 picard_exec = "%s/bin/picard"%picard_EnvDir
-
 repeatmoder_dir = "%s/share/RepeatModeler"%RepeatMasker_EnvDir
 repeat_modeller = "%s/bin/RepeatModeler"%RepeatMasker_EnvDir
 repeatmasker_dir = "%s/share/RepeatMasker"%RepeatMasker_EnvDir
@@ -1379,6 +1380,279 @@ def run_bwa_mem(fastq1, fastq2, ref, outdir, bamfile, sorted_bam, index_bam, nam
         print_if_verbose("indexing bam. The std is in %s"%bam_index_std)
         cmd_indexBam = "%s index -@ %i %s > %s 2>&1"%(samtools, threads, sorted_bam, bam_index_std); run_cmd(cmd_indexBam)   # creates a .bai of sorted_bam
         remove_file(bam_index_std)
+
+
+def convert_sam_to_bam(samfile, bamfile, threads):
+
+    """Converts sam to bam and cleans sam"""
+
+    if file_is_empty(bamfile):
+
+        # define the temporary file
+        bamfile_tmp = "%s.tmp"%bamfile
+
+        bamconversion_stderr = "%s.tmp.stderr"%bamfile
+        print_if_verbose("Converting to bam. The std is in %s"%bamconversion_stderr)
+        cmd_toBAM = "%s view --threads %i -Sbu %s > %s 2>%s"%(samtools, threads, samfile, bamfile_tmp, bamconversion_stderr); run_cmd(cmd_toBAM)
+
+        # remove the sam
+        os.unlink(samfile)
+        remove_file(bamconversion_stderr)
+        os.rename(bamfile_tmp , bamfile)
+
+def generate_unsorted_bam_bwa_mem(ref, fastq1, fastq2, bamfile, samfile, threads, name_sample):
+
+    """Gets the bamfile (unsorted) for a set of reads using bwa mem"""
+
+    #index fasta
+    index_files = ["%s.%s"%(ref, x) for x in ["amb", "ann", "bwt", "pac", "sa"]]
+
+    if any([file_is_empty(x) for x in index_files]):
+
+        # create a branch reference, which will have a tag that is unique to this run. This is important since sometimes you run this pipeline in parallel, and this may give errors in fasta indexing.
+        branch_ref = "%s.%s.fasta"%(ref, id_generator())
+        shutil.copy2(ref, branch_ref)
+
+        # run indexing in the copy
+        indexFasta_std = "%s.std.txt"%branch_ref
+        print_if_verbose("indexing fasta. The std can be found in %s"%indexFasta_std)
+        cmd_indexFasta = "%s index %s > %s 2>&1"%(bwa, branch_ref, indexFasta_std); run_cmd(cmd_indexFasta) # creates a set of indexes of fasta
+        index_files_branch = ["%s.%s"%(branch_ref, x) for x in ["amb", "ann", "bwt", "pac", "sa"]]
+
+        # rename each of the indices so that it matches the ref format
+        for branchIDX, realIDX in dict(zip(index_files_branch, index_files)).items(): os.rename(branchIDX, realIDX)
+
+        # rm the branch
+        os.unlink(branch_ref)
+        os.unlink(indexFasta_std)
+
+    #BWA MEM --> get .sam
+    if (file_is_empty(samfile) and file_is_empty(bamfile)):
+
+        # define the samfile_tmp
+        samfile_tmp = "%s.tmp"%samfile
+
+        bwa_mem_stderr = "%s.tmp.stderr"%samfile
+        print_if_verbose("running bwa mem. The std is in %s"%bwa_mem_stderr)
+        cmd_bwa = '%s mem -R "@RG\\tID:%s\\tSM:%s" -t %i %s %s %s > %s 2>%s'%(bwa, name_sample, name_sample, threads, ref, fastq1, fastq2, samfile_tmp, bwa_mem_stderr); run_cmd(cmd_bwa)
+
+        remove_file(bwa_mem_stderr)
+        os.rename(samfile_tmp , samfile)
+
+    # get bam and remove sam
+    convert_sam_to_bam(samfile, bamfile, threads)
+
+def convert_sam_to_bam_removing_secondary_alns(samfile, bamfile, threads):
+
+    """Converts sam to bam and cleans sam"""
+
+    if file_is_empty(bamfile):
+
+        # define the temporary file
+        bamfile_tmp = "%s.tmp.bam"%bamfile
+
+        bamconversion_stderr = "%s.tmp.stderr"%bamfile
+        print_if_verbose("Converting to bam and removing secondaries... The std is in %s"%bamconversion_stderr)
+        cmd_toBAM = "%s view -F 0x0100 --threads %i -Sbu %s > %s 2>%s"%(samtools, threads, samfile, bamfile_tmp, bamconversion_stderr); run_cmd(cmd_toBAM) # the -F 0x0100 is usefult to remove secondary alignments
+
+        # remove the sam
+        os.unlink(samfile)
+        remove_file(bamconversion_stderr)
+        os.rename(bamfile_tmp , bamfile)
+
+def generate_unsorted_bam_hisat2(ref, fastq1, fastq2, bamfile, samfile, threads, name_sample):
+
+    """Gets the bamfile (unsorted) for a set of reads using hisat2"""
+
+    # generate samfile
+    if file_is_empty(samfile) and file_is_empty(bamfile):
+
+        # define index
+        index_prefix = "%s.hisat2_index"%ref
+
+        # clean previously-generated files
+        for f in os.listdir(get_dir(ref)): 
+            if get_file(index_prefix) in f: remove_file("%s/%s"%(get_dir(ref), f))
+
+        # get index
+        print_if_verbose("Indexing for hisat2...")
+        indexing_std = "%s.generating_hisat2_index.std"%ref
+        run_cmd("%s/bin/hisat2-build -p %i %s %s > %s 2>&1"%(aligners_EnvDir, threads, ref, index_prefix, indexing_std), env=EnvName_aligners)
+        remove_file(indexing_std)
+
+        # run hisat2
+        print_if_verbose("Aligning reads with hisat2...")
+        samfile_tmp = "%s.tmp.sam"%samfile; remove_file(samfile_tmp)
+        aligning_std = "%s.generating.std"%samfile
+        run_cmd("%s/bin/hisat2 -p %i --score-min L,0.0,-0.2 --mp 6,2 -1 %s -2 %s -x %s -S %s > %s 2>&1"%(aligners_EnvDir, threads, fastq1, fastq2, index_prefix, samfile_tmp, aligning_std), env=EnvName_aligners) # I don't use the '--no-spliced-alignment', as this would remove split reads. The --score-min and --mp parameters are  default
+        remove_file(aligning_std)
+        os.rename(samfile_tmp, samfile)
+
+    # generate bam file with secondary alignments duplicated.
+    convert_sam_to_bam_removing_secondary_alns(samfile, bamfile, threads)
+
+def generate_unsorted_bam_bowtie2(ref, fastq1, fastq2, bamfile, samfile, threads, name_sample, local=False):
+
+    """Gets the bamfile (unsorted) for a set of reads using bowtie2"""
+
+    # generate samfile
+    if file_is_empty(samfile) and file_is_empty(bamfile):
+
+        # define index
+        index_prefix = "%s.bowtie2_index"%ref
+
+        # clean previously-generated files
+        for f in os.listdir(get_dir(ref)): 
+            if get_file(index_prefix) in f: remove_file("%s/%s"%(get_dir(ref), f))
+
+        # get index
+        print_if_verbose("Indexing for bowtie2...")
+        indexing_std = "%s.generating_bowtie2_index.std"%ref
+        run_cmd("%s/bin/bowtie2-build --threads %i %s %s > %s 2>&1"%(aligners_EnvDir, threads, ref, index_prefix, indexing_std), env=EnvName_aligners)
+        remove_file(indexing_std)
+
+        # run bowtie2
+        print_if_verbose("Aligning reads with bowtie2...")
+        samfile_tmp = "%s.tmp.sam"%samfile; remove_file(samfile_tmp)
+        aligning_std = "%s.generating.std"%samfile
+
+        bowtie_cmd = "%s/bin/bowtie2 -p %i -x %s -S %s -1 %s -2 %s"%(aligners_EnvDir, threads, index_prefix, samfile_tmp, fastq1, fastq2)
+        if local is True: bowtie_cmd += " --local"
+        bowtie_cmd +=  " > %s 2>&1"%aligning_std
+
+        run_cmd(bowtie_cmd, env=EnvName_aligners) # --local is for allowing softclipping, which can be interpreted by gridss as split reads.
+        remove_file(aligning_std)
+        os.rename(samfile_tmp, samfile)
+
+    # generate bam file (not removig secondaries because there are none)
+    convert_sam_to_bam(samfile, bamfile, threads)
+
+
+def convert_sam_to_bam_removing_secondary_alns_sorted_by_readname_remove_unmapped(samfile, bamfile, threads):
+
+    """Converts sam to bam and cleans sam"""
+
+    if file_is_empty(bamfile):
+        print_if_verbose("Converting to bam, removing secondaries and sorting by read name...")
+
+        # define the temporary file
+        bamfile_tmp = "%s.tmp.bam"%bamfile
+
+        # define outdir
+        outdir = get_dir(bamfile)
+
+        # remove all temporary files generated previously in samtools sort (they'd make a new sort to be an error)
+        for outdir_file in os.listdir(outdir): 
+            fullfilepath = "%s/%s"%(outdir, outdir_file)
+            if outdir_file.startswith(get_file(bamfile)) and ".tmp." in outdir_file: remove_file(fullfilepath)
+
+        # get the bam
+        bamconversion_stderr = "%s.tmp.stderr"%bamfile
+        print_if_verbose("Converting to bam and removing secondaries... The std is in %s"%bamconversion_stderr)
+        cmd_toBAM = "%s view -F 0x0100 -F 0x4 --threads %i -Sbu %s | %s sort -n --threads %i -o %s > %s 2>&1"%(samtools, threads, samfile, samtools, threads, bamfile_tmp, bamconversion_stderr); run_cmd(cmd_toBAM) # the -F 0x0100 is usefult to remove secondary alignments. -F 0x4 to remove unmapped reads
+
+        # remove the sam
+        os.unlink(samfile)
+        remove_file(bamconversion_stderr)
+        os.rename(bamfile_tmp , bamfile)
+
+def generate_unsorted_bam_segemehl(ref, fastq1, fastq2, bamfile, samfile, threads, name_sample):
+
+    """Gets the bamfile (unsorted) for a set of reads using segemehl"""
+
+    # generate samfile
+    if file_is_empty(samfile) and file_is_empty(bamfile):
+
+        # change all to fullpaths (necessary for segemehl)
+        ref = get_fullpath(ref)
+        fastq1 = get_fullpath(fastq1)
+        fastq2 = get_fullpath(fastq2)
+        bamfile = get_fullpath(bamfile)
+        samfile = get_fullpath(samfile)
+
+        # define index
+        index_file = "%s.segemehl.idx"%ref
+
+        # get index
+        if file_is_empty(index_file):
+            print_if_verbose("Indexing for segemehl...")
+            indexing_std = "%s.generating_segemehl_index.std"%ref
+            index_file_tmp = "%s.tmp.idx"%index_file
+            
+            run_cmd("%s/bin/segemehl.x -x %s -d %s --threads %i > %s 2>&1"%(aligners_EnvDir, index_file_tmp, ref, threads, indexing_std), env=EnvName_aligners)
+            remove_file(indexing_std)
+            os.rename(index_file_tmp, index_file)
+
+        # run segemehl
+        print_if_verbose("Aligning reads with segemehl...")
+        samfile_tmp = "%s.tmp.sam"%samfile; remove_file(samfile_tmp)
+        aligning_std = "%s.generating.std"%samfile
+
+        run_cmd("cd '%s' && %s/bin/segemehl.x -x %s -d %s --threads %i -q %s -p %s --splits --briefcigar > %s 2>%s"%(get_dir(samfile), aligners_EnvDir, index_file, ref, threads, fastq1, fastq2, samfile_tmp, aligning_std),  env=EnvName_aligners) # --splits to allow splits, --briefcigar to enablesimplified cigar ops
+        remove_file(aligning_std)
+        os.rename(samfile_tmp, samfile)
+
+    # generate bam file (not removig secondaries because there are none)
+    convert_sam_to_bam_removing_secondary_alns_sorted_by_readname_remove_unmapped(samfile, bamfile, threads) # note that segemehl does not output reads sorted by read name, while bwa mem, hisat2 and bowtie2 do
+
+def align_short_reads(fastq1, fastq2, ref, outdir, bamfile, sorted_bam, index_bam, name_sample, aligner, threads=1, replace=False, MarkDuplicates=True, tmpdir_writingFiles=None):
+
+    """Takes a set of files and runs one of the mapper algs to getting sorted_bam and index_bam. skip_MarkingDuplicates will not mark duplicates. It'll work with hisat2, segemehl, bowtie2 and bwa_mem. For hisat2, segemehl, bowtie2 it discards secondary alignments."""
+
+    if file_is_empty(sorted_bam) or replace is True:
+
+        # generate unsorted bam with different aligners (it is sorted by read name)
+        samfile = "%s/aligned_reads.sam"%outdir
+        if aligner=="bwa_mem": generate_unsorted_bam_bwa_mem(ref, fastq1, fastq2, bamfile, samfile, threads, name_sample)
+        elif aligner=="hisat2": generate_unsorted_bam_hisat2(ref, fastq1, fastq2, bamfile, samfile, threads, name_sample)
+        elif aligner=="bowtie2": generate_unsorted_bam_bowtie2(ref, fastq1, fastq2, bamfile, samfile, threads, name_sample, local=False)
+        elif aligner=="bowtie2_local": generate_unsorted_bam_bowtie2(ref, fastq1, fastq2, bamfile, samfile, threads, name_sample, local=True)
+        elif aligner=="segemehl": generate_unsorted_bam_segemehl(ref, fastq1, fastq2, bamfile, samfile, threads, name_sample)
+        else: raise ValueError("invalid aligner: %s"%aligner)
+
+        # mark duplicates
+        if MarkDuplicates is True:
+            bamfile_MarkedDuplicates = get_bam_with_duplicatesMarkedSpark(bamfile, threads=threads, replace=replace, tmpdir_writingFiles=tmpdir_writingFiles)
+
+        else: bamfile_MarkedDuplicates = bamfile
+
+        # sort bam
+        if file_is_empty(sorted_bam) or replace is True:
+            print_if_verbose("Sorting bam")
+
+            # define the RAM per core
+            allocated_ram = get_availableGbRAM(get_dir(sorted_bam))*fractionRAM_to_dedicate
+            max_MbRAM_per_thread = int((allocated_ram/threads)*1000)
+
+            # remove all temporary files generated previously in samtools sort (they'd make a new sort to be an error)
+            for outdir_file in os.listdir(outdir): 
+                fullfilepath = "%s/%s"%(outdir, outdir_file)
+                if outdir_file.startswith("aligned_reads") and ".tmp." in outdir_file: delete_file_or_folder(fullfilepath)
+
+            # define the temporary file
+            sorted_bam_tmp = "%s.tmp"%sorted_bam
+
+            # sort
+            bam_sort_std = "%s.generating.txt"%sorted_bam
+            print_if_verbose("the sorting bam std is in %s. Running on %i threads and %iMb RAM/thread"%(bam_sort_std, threads, max_MbRAM_per_thread))
+            cmd_sort = "%s sort --threads %i -m %iM -o %s %s > %s 2>&1"%(samtools, threads, max_MbRAM_per_thread, sorted_bam_tmp, bamfile_MarkedDuplicates, bam_sort_std); run_cmd(cmd_sort)
+
+            # check that the sorted bam has correct insert sizes
+            check_sorted_bam_has_correct_insert_sizes(sorted_bam_tmp, replace, threads)
+
+            # remove files
+            for f in [bam_sort_std, bamfile_MarkedDuplicates, bamfile]: remove_file(f)
+
+            # rename
+            os.rename(sorted_bam_tmp, sorted_bam)
+
+    if file_is_empty(index_bam) or replace is True:
+
+        bam_index_std = "%s.indexingBam_std.txt"%sorted_bam
+        print_if_verbose("indexing bam. The std is in %s"%bam_index_std)
+        cmd_indexBam = "%s index -@ %i %s > %s 2>&1"%(samtools, threads, sorted_bam, bam_index_std); run_cmd(cmd_indexBam)   # creates a .bai of sorted_bam
+        remove_file(bam_index_std)
+
 
 def run_picard_ValidateSamFile(sorted_bam, reference_genome, replace=False):
 
@@ -8230,7 +8504,7 @@ def simulate_readPairs_per_window(df_windows, genome, npairs, outdir, read_lengt
     # return the simulated reads
     return (all_fastqgz_1_correct, all_fastqgz_2_correct) 
 
-def simulate_and_align_PairedReads_perWindow(df_windows, genome_interest, reference_genome, npairs, read_length, outdir, median_insert_size, median_insert_size_sd, replace=False, threads=4, tmpdir=None):
+def simulate_and_align_PairedReads_perWindow(df_windows, genome_interest, reference_genome, npairs, read_length, outdir, median_insert_size, median_insert_size_sd, aligner, replace=False, threads=4, tmpdir=None):
 
     """Takes a dataframe with windows of the genome, which also has a predicted_relative_coverage (which indicates by how much should the coverage be multiplied in this window). This function generates a fastq (and deletes it at the end), aligns it and returns the bam. All files are written under outdir. It returns the aligned bamfile. All the chromosomes are simulated as linear."""
 
@@ -8257,7 +8531,11 @@ def simulate_and_align_PairedReads_perWindow(df_windows, genome_interest, refere
         ######################################################
 
         ##### align the reads and retun the bam ######
-        run_bwa_mem(read1_fastqgz, read2_fastqgz, reference_genome, outdir, sim_bamfile, sim_sorted_bam, sim_index_bam, name_sample="simulations_reference_genome", threads=threads, replace=replace, MarkDuplicates=False, tmpdir_writingFiles=tmpdir)
+        #run_bwa_mem(read1_fastqgz, read2_fastqgz, reference_genome, outdir, sim_bamfile, sim_sorted_bam, sim_index_bam, name_sample="simulations_reference_genome", threads=threads, replace=replace, MarkDuplicates=False, tmpdir_writingFiles=tmpdir)
+        align_short_reads(read1_fastqgz, read2_fastqgz, reference_genome, outdir, sim_bamfile, sim_sorted_bam, sim_index_bam, "simulations_reference_genome", aligner, threads=threads, replace=replace, MarkDuplicates=False, tmpdir_writingFiles=tmpdir)
+
+
+
 
         # remove the fastq files
         print_if_verbose("deleting reads")
@@ -9968,7 +10246,7 @@ def get_sorted_bam_subsetChroms(sorted_bam, chromosomes_set, replace=False, thre
     return subset_sorted_bam
 
 
-def get_best_parameters_for_GridssClove_run(sorted_bam, reference_genome, outdir, threads=4, replace=False, n_simulated_genomes=2, mitochondrial_chromosome="mito_C_glabrata_CBS138", simulation_ploidies=["haploid", "diploid_homo", "diploid_hetero", "ref:2_var:1", "ref:3_var:1", "ref:4_var:1", "ref:5_var:1", "ref:9_var:1", "ref:19_var:1", "ref:99_var:1"], range_filtering_benchmark="theoretically_meaningful", nvars=100, real_bedpe_breakpoints=None, median_insert_size=250, median_insert_size_sd=0, tmpdir=None, simulation_chromosomes=None):
+def get_best_parameters_for_GridssClove_run(sorted_bam, reference_genome, outdir, aligner, threads=4, replace=False, n_simulated_genomes=2, mitochondrial_chromosome="mito_C_glabrata_CBS138", simulation_ploidies=["haploid", "diploid_homo", "diploid_hetero", "ref:2_var:1", "ref:3_var:1", "ref:4_var:1", "ref:5_var:1", "ref:9_var:1", "ref:19_var:1", "ref:99_var:1"], range_filtering_benchmark="theoretically_meaningful", nvars=100, real_bedpe_breakpoints=None, median_insert_size=250, median_insert_size_sd=0, tmpdir=None, simulation_chromosomes=None):
 
     """This finds the optimum parameters for running GRIDSS clove and returns them. The parameters are equivalent to the run_GridssClove_optimising_parameters function"""
 
@@ -10073,7 +10351,7 @@ def get_best_parameters_for_GridssClove_run(sorted_bam, reference_genome, outdir
         df_REFgenome_info = get_windows_infoDF_with_predictedFromFeatures_coverage(reference_genome, distToTel_chrom_GC_to_coverage_fn, expected_coverage_per_bp, replace=replace, threads=threads)
 
         outdir_ref = "%s/simulation_reference_genome_%ibp_windows"%(outdir, window_l)
-        simulated_reference_bam_file = simulate_and_align_PairedReads_perWindow(df_REFgenome_info, reference_genome, reference_genome, total_nread_pairs, read_length, outdir_ref, median_insert_size, median_insert_size_sd, replace=replace, threads=threads, tmpdir=tmpdir)
+        simulated_reference_bam_file = simulate_and_align_PairedReads_perWindow(df_REFgenome_info, reference_genome, reference_genome, total_nread_pairs, read_length, outdir_ref, median_insert_size, median_insert_size_sd, aligner, replace=replace, threads=threads, tmpdir=tmpdir)
 
     else: simulated_reference_bam_file = None
 
@@ -10148,7 +10426,7 @@ def get_best_parameters_for_GridssClove_run(sorted_bam, reference_genome, outdir
             df_genome_info = get_windows_infoDF_with_predictedFromFeatures_coverage(rearranged_genome, distToTel_chrom_GC_to_coverage_fn, expected_coverage_per_bp, replace=replace, threads=threads)
 
             # get the aligned reads to the reference
-            simulation_bam_file = simulate_and_align_PairedReads_perWindow(df_genome_info, rearranged_genome, reference_genome, total_nread_pairs, read_length, simulation_outdir, median_insert_size, median_insert_size_sd, replace=replace, threads=threads, tmpdir=tmpdir)
+            simulation_bam_file = simulate_and_align_PairedReads_perWindow(df_genome_info, rearranged_genome, reference_genome, total_nread_pairs, read_length, simulation_outdir, median_insert_size, median_insert_size_sd, aligner, replace=replace, threads=threads, tmpdir=tmpdir)
 
             # define a path to the known SVs (know_SV_dict should be changed to sim_svtype_to_svfile)
 
@@ -10318,7 +10596,7 @@ def get_parameters_from_json(json_file):
 
     return gridss_blacklisted_regions, gridss_maxcoverage, gridss_filters_dict, max_rel_coverage_to_consider_del, min_rel_coverage_to_consider_dup
 
-def run_GridssClove_optimising_parameters(sorted_bam, reference_genome, outdir, threads=4, replace=False, n_simulated_genomes=2, mitochondrial_chromosome="mito_C_glabrata_CBS138", simulation_ploidies=["haploid", "diploid_homo", "diploid_hetero", "ref:2_var:1", "ref:3_var:1", "ref:4_var:1", "ref:5_var:1", "ref:9_var:1", "ref:19_var:1", "ref:99_var:1"], range_filtering_benchmark="theoretically_meaningful", nvars=100, fast_SVcalling=False, real_bedpe_breakpoints=None, gridss_VCFoutput="", replace_FromGridssRun_final_perSVade_run=False, tmpdir=None, simulation_chromosomes=None):
+def run_GridssClove_optimising_parameters(sorted_bam, reference_genome, outdir, aligner, threads=4, replace=False, n_simulated_genomes=2, mitochondrial_chromosome="mito_C_glabrata_CBS138", simulation_ploidies=["haploid", "diploid_homo", "diploid_hetero", "ref:2_var:1", "ref:3_var:1", "ref:4_var:1", "ref:5_var:1", "ref:9_var:1", "ref:19_var:1", "ref:99_var:1"], range_filtering_benchmark="theoretically_meaningful", nvars=100, fast_SVcalling=False, real_bedpe_breakpoints=None, gridss_VCFoutput="", replace_FromGridssRun_final_perSVade_run=False, tmpdir=None, simulation_chromosomes=None):
 
     """
     Takes some aligned reads and runs the GridssPipeline optimising the parameters of GRIDSS filtering. These are the different parameters of the function:
@@ -10373,7 +10651,7 @@ def run_GridssClove_optimising_parameters(sorted_bam, reference_genome, outdir, 
 
             parameter_optimisation_dir = "%s/parameter_optimisation"%outdir; make_folder(parameter_optimisation_dir)
 
-            gridss_blacklisted_regions, gridss_maxcoverage, gridss_filters_dict, max_rel_coverage_to_consider_del, min_rel_coverage_to_consider_dup, df_cross_benchmark_best = get_best_parameters_for_GridssClove_run(sorted_bam, reference_genome, parameter_optimisation_dir, threads=threads, replace=replace, n_simulated_genomes=n_simulated_genomes, mitochondrial_chromosome=mitochondrial_chromosome, simulation_ploidies=simulation_ploidies, range_filtering_benchmark=range_filtering_benchmark, nvars=nvars, real_bedpe_breakpoints=real_bedpe_breakpoints, median_insert_size=median_insert_size, median_insert_size_sd=median_insert_size_sd, tmpdir=tmpdir, simulation_chromosomes=simulation_chromosomes)
+            gridss_blacklisted_regions, gridss_maxcoverage, gridss_filters_dict, max_rel_coverage_to_consider_del, min_rel_coverage_to_consider_dup, df_cross_benchmark_best = get_best_parameters_for_GridssClove_run(sorted_bam, reference_genome, parameter_optimisation_dir, aligner, threads=threads, replace=replace, n_simulated_genomes=n_simulated_genomes, mitochondrial_chromosome=mitochondrial_chromosome, simulation_ploidies=simulation_ploidies, range_filtering_benchmark=range_filtering_benchmark, nvars=nvars, real_bedpe_breakpoints=real_bedpe_breakpoints, median_insert_size=median_insert_size, median_insert_size_sd=median_insert_size_sd, tmpdir=tmpdir, simulation_chromosomes=simulation_chromosomes)
 
         # get the parameters from an optimisation
         else: 
@@ -11361,7 +11639,7 @@ def get_simulated_bamFile(outdir, reference_genome, replace=False, threads=4, to
     outdir_sim = "%s/simulatingReadsFromReference"%outdir; make_folder(outdir_sim)
 
     # get the simulated bam
-    simulated_sorted_bam = simulate_and_align_PairedReads_perWindow(df_genome_info, reference_genome, reference_genome, total_nread_pairs, read_length, outdir_sim, median_insert_size, median_insert_size_sd, replace=replace, threads=threads)
+    simulated_sorted_bam = simulate_and_align_PairedReads_perWindow(df_genome_info, reference_genome, reference_genome, total_nread_pairs, read_length, outdir_sim, median_insert_size, median_insert_size_sd, aligner, replace=replace, threads=threads)
 
     # define the index of this bam
     index_bam = "%s.bai"%simulated_sorted_bam
@@ -21521,7 +21799,9 @@ def convert_tab_variant_file_to_vcf_for_annotation(input_tab_file, vcf_file):
 
         # check
         for f in df_vars.keys():
-            if any(pd.isna(df_vars[f])): raise ValueError("nans in %s"%f)
+            if any(pd.isna(df_vars[f])): 
+                print(df_vars[pd.isna(df_vars[f])])
+                raise ValueError("nans in %s"%f)
 
         # write vcf
         print("writing vcf")

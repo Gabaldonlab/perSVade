@@ -50,7 +50,7 @@ Takes a .csv table (tab-sepparated) with the paths to the output folders of the 
 
 - If 'call_SVs_outdir' is provided, this module will generate the table SVs_changing.tab, indicating SVs that were gained / lost in a given sampleID (i.e. after in vitro-evolution) vs a set of background samples (i.e. in WT samples). This file has the same format as the output of 'integrate_SV_CNV_calls', but it .tab format has various extra columns: 'type_differetial_variant' (which can be 'gained' or 'lost') and 'type_background' (which can be 'high_confidence' or 'low_confidence'). If type_background is 'high_confidence' it means that 'gained' SVs are those where none of the corresponding breakpoints overlap a breakpoint that passed the gridss filters in at least one of the background samples. Similarly, 'lost' SVs when type_background is 'high_confidence' are those that are found in all background samples (according to the 'variantID_across_samples' definition), but where none of the breakpoints can be found when considering filtered breakpoints in the sample of interest. Conversely, if type_background is 'low_confidence' it means that the breakpoints considered for overlaps are those output by gridss, without filtering. Note that using such a 'low_confidence' background will yield less changing SVs, so that they will be more trustable (although some true gained/lost SVs may be missed). On another line, there are other new columns that refer to the samples in which the variants were called: 'calling_sampleID' (where the variant is called), 'target_sampleID' (the sample where the variant is gained/lost) and 'background_sampleIDs' (the comma-sepparated samples used for background).
 
-- If 'call_CNVs_outdir' is provided, this module will generate the table CNVs_changing.tab, which is equivalent to SVs_changing.tab, but for CNVs. The columns of this folder are 'calling_sampleID' (where the variant is called), 'target_sampleID' (the sample where the variant is gained/lost) and 'background_sampleIDs' (the comma-sepparated samples used for background), 'type_differetial_variant' (which can be 'gained' or 'lost') and 'type_overlap_background' (which can be '95pct_overlap' or '75pct_overlap', '50pct_overlap' and '25pct_overlap'). 
+- If 'call_CNVs_outdir' is provided, this module will generate the table CNVs_changing.tab, which is equivalent to SVs_changing.tab, but for CNVs. The columns of this folder are 'calling_sampleID' (where the variant is called), 'target_sampleID' (the sample where the variant is gained/lost) and 'background_sampleIDs' (the comma-sepparated samples used for background), 'type_differetial_variant' (which can be 'gained' or 'lost') and 'type_overlap_background' (which can be '95pct_overlap' or '75pct_overlap', '50pct_overlap' and '25pct_overlap'). IMPORTANT NOTE: 'call_CNVs_outdir' is not functional because it may yield missleading results.
 
  indicating CNVs that were gained / lost in a given sampleID (i.e. after in vitro-evolution) vs a set of background samples (i.e. in WT samples). 
 
@@ -286,29 +286,10 @@ if "call_SVs_outdir" in fields_paths_df:
 if "call_CNVs_outdir" in fields_paths_df:
     fun.print_with_runtime("Finding differential SVs...")
 
+    raise ValueError("The CNV calling integration is not developed yet")
+
     # get vars SV
     fun.generate_table_changing_CNVs_vs_background(paths_df, comparisons_df, opt.outdir, tmpdir, opt.tol_bp, opt.pct_overlap/100, opt.threads, opt.ref, opt.mitochondrial_chromosome, opt.repeats_file, opt.ploidy, opt.min_chromosome_len, opt.fraction_available_mem, opt.fractionRAM_to_dedicate)
-
-
-
-
-# optional
-
-
-# resources
-
-
-
-    kadgdahgdjhadg
-
-hgdfdf
-# debug
-
-
-print("exiting")
-sys.exit(0)
-
-
 
 ######################################
 

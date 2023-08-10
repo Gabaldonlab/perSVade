@@ -23,6 +23,10 @@ ARG R_env_name="$env_name"_R_env
 ARG CONY_env_name="$env_name"_CONY_env
 ARG AneuFinder_env_name="$env_name"_AneuFinder_env
 ARG HMMcopy_env_name="$env_name"_HMMcopy_env
+ARG aligners_env_name="$env_name"_aligners_env
+
+# create aligners env
+RUN mamba create -y --name $aligners_env_name -c bioconda segemehl=0.3.4 bowtie2=2.5.1 hisat2=2.2.1
 
 # create bcftools environment
 RUN mamba create -y --name $bcftools_env_name -c bioconda bcftools=1.10.2

@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-# This script sets up the environment to adjust the RepeatMasker libraries
+# This script sets up the environment to adjust the RepeatMasker libraries. It is deprecated since version 1.02.6 in favour of the wiki page
 
 # define the path to the conda environment
 env_path=$(which python | sed 's/\/bin\/python//g');
@@ -200,6 +200,10 @@ echo 'NINJA is installed successfully in your system'
 
 # activate the normal env
 source $conda_dir/etc/profile.d/conda.sh && conda activate $env_name
+
+# create the environment with the aligners
+aligners_env_name="$env_name"_aligners_env
+mamba create -y --name $aligners_env_name -c bioconda segemehl=0.3.4 bowtie2=2.5.1 hisat2=2.2.1
 
 # create a subenvironment that has bctools=1.10.2
 bcftools_env_name="$env_name"_bcftools_1.10.2_env

@@ -112,36 +112,81 @@ fun.print_with_runtime("Running modules")
 
 # trimming of reads
 outdir_trimmed_reads = "%s/read_trimmingCglab"%testing_outputs_dir
-fun.run_cmd("%s trim_reads_and_QC --threads %i --fraction_available_mem 1.0 -f1 %s -f2 %s -o %s"%(fun.perSVade_modules, threads, cglab_reads1, cglab_reads2, outdir_trimmed_reads))
+if fun.file_is_empty("%s/perSVade_finished_file.txt"%outdir_trimmed_reads): fun.run_cmd("%s trim_reads_and_QC --threads %i --fraction_available_mem 1.0 -f1 %s -f2 %s -o %s"%(fun.perSVade_modules, threads, cglab_reads1, cglab_reads2, outdir_trimmed_reads))
 
+# align reads with SVs with different mappers
+aligner_to_outdir_align_reads_SVs = {}
+for aligner in ["segemehl", "bwa_mem"]:
+	outdir_aln = "%s/align_reads_sim_SVs_%s"%(testing_outputs_dir, aligner)
+	if fun.file_is_empty("%s/perSVade_finished_file.txt"%outdir_aln): fun.run_cmd("%s align_reads --threads %i --fraction_available_mem 1.0 -f1 %s -f2 %s -o %s --ref %s --min_chromosome_len 100 --aligner %s"%(fun.perSVade_modules, threads, sim_reads1, sim_reads2, outdir_aln, ref_genome, aligner))
+	aligner_to_outdir_align_reads_SVs[aligner] = outdir_aln
 
-# align reads with SVs
-outdir_align_reads_SVs = "%s/align_reads_sim_SVs"%testing_outputs_dir
-fun.run_cmd("%s align_reads --threads %i --fraction_available_mem 1.0 -f1 %s -f2 %s -o %s --ref %s --min_chromosome_len 100"%(fun.perSVade_modules, threads, sim_reads1, sim_reads2, outdir_align_reads_SVs, ref_genome))
+# get repeats small genome
+outdir_repeats_fast = "%s/repeats_infer_Cglab"%testing_outputs_dir
+if fun.file_is_empty("%s/perSVade_finished_file.txt"%outdir_repeats_fast): fun.run_cmd("%s infer_repeats --threads %i --fraction_available_mem 1.0 -o %s --ref %s --min_chromosome_len 100"%(fun.perSVade_modules, threads, outdir_repeats_fast, ref_genome))
+
+# run parameter optimisation based on random regions
+for aligner in ["segemehl",  "bwa_mem"]:
+	outdir_parameter_optimization = "%s/parameter_optimization_%s"%(testing_outputs_dir, aligner)
+	if fun.file_is_empty("%s/perSVade_finished_file.txt"%outdir_parameter_optimization): fun.run_cmd("%s optimize_parameters --threads %i --fraction_available_mem 1.0 -o %s --ref %s --min_chromosome_len 1000 --sortedbam %s/aligned_reads.bam.sorted --mitochondrial_chromosome mito_C_glabrata_CBS138 --repeats_file %s/combined_repeats.tab --regions_SVsimulations random --simulation_ploidies diploid_hetero --nsimulations 1 --nvars 5 --aligner %s"%(fun.perSVade_modules, threads, outdir_parameter_optimization, ref_genome, aligner_to_outdir_align_reads_SVs[aligner], outdir_repeats_fast, aligner))
+
+# define the dir for bwa mem for most operations
+outdir_align_reads_SVs = aligner_to_outdir_align_reads_SVs["bwa_mem"] # default
 
 # get regions with known SVs
 outdir_known_regions = "%s/known_SVs"%testing_outputs_dir
-fun.run_cmd("%s find_knownSVs_regions --threads %i --fraction_available_mem 1.0 -o %s --ref %s --min_chromosome_len 10000 --mitochondrial_chromosome mito_C_glabrata_CBS138 --SVcalling_parameters default --repeats_file skip --close_shortReads_table %s --skip_marking_duplicates"%(fun.perSVade_modules, threads, outdir_known_regions, ref_genome, close_shortReads_table))
+if fun.file_is_empty("%s/perSVade_finished_file.txt"%outdir_known_regions): fun.run_cmd("%s find_knownSVs_regions --threads %i --fraction_available_mem 1.0 -o %s --ref %s --min_chromosome_len 10000 --mitochondrial_chromosome mito_C_glabrata_CBS138 --SVcalling_parameters default --repeats_file skip --close_shortReads_table %s --skip_marking_duplicates"%(fun.perSVade_modules, threads, outdir_known_regions, ref_genome, close_shortReads_table))
 
 # run parameter optimization on pre-defined regions (knownSVs) and 2 chromosomes
 outdir_parameter_optimization_known = "%s/parameter_optimization_known"%testing_outputs_dir
-fun.run_cmd("%s optimize_parameters --threads %i --fraction_available_mem 1.0 -o %s --ref %s --min_chromosome_len 1000 --sortedbam %s/aligned_reads.bam.sorted --mitochondrial_chromosome mito_C_glabrata_CBS138 --repeats_file skip --regions_SVsimulations %s/knownSVs_breakpoints.bedpe --simulation_ploidies haploid --nsimulations 1 --nvars 5 --simulation_chromosomes ChrA_C_glabrata_CBS138,ChrB_C_glabrata_CBS138"%(fun.perSVade_modules, threads, outdir_parameter_optimization_known, ref_genome, outdir_align_reads_SVs, outdir_known_regions))
+if fun.file_is_empty("%s/perSVade_finished_file.txt"%outdir_parameter_optimization_known): fun.run_cmd("%s optimize_parameters --threads %i --fraction_available_mem 1.0 -o %s --ref %s --min_chromosome_len 1000 --sortedbam %s/aligned_reads.bam.sorted --mitochondrial_chromosome mito_C_glabrata_CBS138 --repeats_file skip --regions_SVsimulations %s/knownSVs_breakpoints.bedpe --simulation_ploidies haploid --nsimulations 1 --nvars 5 --simulation_chromosomes ChrA_C_glabrata_CBS138,ChrB_C_glabrata_CBS138"%(fun.perSVade_modules, threads, outdir_parameter_optimization_known, ref_genome, outdir_align_reads_SVs, outdir_known_regions))
 
 # get the coverage per gene
 outdir_call_coverage_per_gene = "%s/cov_per_gene"%testing_outputs_dir
-fun.run_cmd("%s get_cov_genes --threads %i --fraction_available_mem 1.0  -o %s --ref %s --min_chromosome_len 100 -gff %s -sbam %s/aligned_reads.bam.sorted"%(fun.perSVade_modules, threads, outdir_call_coverage_per_gene, ref_genome, gff, outdir_align_reads_SVs))
+if fun.file_is_empty("%s/perSVade_finished_file.txt"%outdir_call_coverage_per_gene): fun.run_cmd("%s get_cov_genes --threads %i --fraction_available_mem 1.0  -o %s --ref %s --min_chromosome_len 100 -gff %s -sbam %s/aligned_reads.bam.sorted"%(fun.perSVade_modules, threads, outdir_call_coverage_per_gene, ref_genome, gff, outdir_align_reads_SVs))
 
-# align subsampled 100k reads of C. glabrata
-outdir_align_reads = "%s/align_reads_Cglab_subsampledReads"%testing_outputs_dir
-fun.run_cmd("%s align_reads --threads %i --fraction_available_mem 1.0 -f1 %s -f2 %s -o %s --ref %s --min_chromosome_len 100"%(fun.perSVade_modules, threads, cglab_reads1, cglab_reads2, outdir_align_reads, Cglabrata_genome))
+# perform various normal varcall ops per alignment
+sorted_aligners = ["segemehl", "bowtie2_local", "bowtie2", "hisat2", "bwa_mem"]
+for aligner in sorted_aligners:
+	print("testing variant calling for %s..."%aligner)
 
-# run CNV calling for the previous reads
-outdir_CNVcalling_cglab = "%s/call_CNVs_Cglab_subsampledReads"%testing_outputs_dir
-fun.run_cmd("%s call_CNVs --threads %i --fraction_available_mem 1.0 -o %s --ref %s --min_chromosome_len 10000 -sbam %s/aligned_reads.bam.sorted --mitochondrial_chromosome mito_C_glabrata_CBS138 -p 1 --cnv_calling_algs AneuFinder --window_size_CNVcalling 10000"%(fun.perSVade_modules, threads, outdir_CNVcalling_cglab, Cglabrata_genome, outdir_align_reads))
+	# align subsampled 100k reads of C. glabrata
+	outdir_align_reads = "%s/align_reads_Cglab_subsampledReads_%s"%(testing_outputs_dir, aligner)
+	if fun.file_is_empty("%s/perSVade_finished_file.txt"%outdir_align_reads): fun.run_cmd("%s align_reads --threads %i --fraction_available_mem 1.0 -f1 %s -f2 %s -o %s --ref %s --min_chromosome_len 100 --aligner %s"%(fun.perSVade_modules, threads, cglab_reads1, cglab_reads2, outdir_align_reads, Cglabrata_genome, aligner))
 
-# call small variants
-outdir_small_vars = "%s/calling_small_vars"%testing_outputs_dir
-fun.run_cmd("%s call_small_variants --threads %i --fraction_available_mem 1.0 --min_chromosome_len 100 -o %s -r %s -sbam %s/aligned_reads.bam.sorted --repeats_file skip -p 1 --callers bcftools,freebayes,HaplotypeCaller --min_AF 0.9 --min_coverage 0 --outdir_callCNVs %s"%(fun.perSVade_modules, threads, outdir_small_vars, Cglabrata_genome, outdir_align_reads, outdir_CNVcalling_cglab))
+	# run CNV calling for the previous reads
+	outdir_CNVcalling_cglab = "%s/call_CNVs_Cglab_subsampledReads_%s"%(testing_outputs_dir, aligner)
+	if aligner==sorted_aligners[0]: fun.run_cmd("%s call_CNVs --threads %i --fraction_available_mem 1.0 -o %s --ref %s --min_chromosome_len 10000 -sbam %s/aligned_reads.bam.sorted --mitochondrial_chromosome mito_C_glabrata_CBS138 -p 1 --cnv_calling_algs AneuFinder --window_size_CNVcalling 10000"%(fun.perSVade_modules, threads, outdir_CNVcalling_cglab, Cglabrata_genome, outdir_align_reads))
+
+	# call small variants
+	outdir_small_vars = "%s/calling_small_vars_%s"%(testing_outputs_dir, aligner)
+	if fun.file_is_empty("%s/perSVade_finished_file.txt"%outdir_small_vars): fun.run_cmd("%s call_small_variants --threads %i --fraction_available_mem 1.0 --min_chromosome_len 100 -o %s -r %s -sbam %s/aligned_reads.bam.sorted --repeats_file skip -p 1 --callers bcftools,freebayes,HaplotypeCaller --min_AF 0.9 --min_coverage 0 --outdir_callCNVs %s"%(fun.perSVade_modules, threads, outdir_small_vars, Cglabrata_genome, outdir_align_reads, "%s/call_CNVs_Cglab_subsampledReads_%s"%(testing_outputs_dir, sorted_aligners[0])))
+
+dakhgdgajgad
+
+
+# print the overlaps in variants 
+comparisons = {}
+for aln1 in sorted_aligners:
+	for aln2 in sorted_aligners:
+		if aln1==aln2: continue
+		comparison_tuple = tuple(sorted(aln1, aln2))
+		if comparison_tuple in comparisons: continue
+
+		# load vars
+		min_nPASS = 2
+		vars1 = set(fun.get_df_and_header_from_vcf("%s/calling_small_vars_%s/.vcf"%(testing_outputs_dir, aln1))[0].ID)
+		vars2 = set(fun.get_df_and_header_from_vcf("%s/calling_small_vars_%s/.vcf"%(testing_outputs_dir, aln2))[0].ID)
+
+		# report
+		all_vars = vars1.union(vars2)
+		overlap_vars = vars1.intersection(vars2)
+		print("NPASS>=%i. %s-vs-%s. %i/%i, %.2f%s"%(min_nPASS, aln1, aln2, len(overlap_vars), len(all_vars), (len(overlap_vars)/len(all_vars))*100, "%"))
+		comparisons.add(comparison_tuple)
+
+		adkjagdajdakgd
+
+HGFHGFHFHG
 
 # annotate small variants
 outdir_annotate_small_vars = "%s/annotate_small_vars"%testing_outputs_dir
@@ -175,15 +220,6 @@ if fun.file_is_empty(repeat_masker_db): raise ValueError("%s is missing. Check t
 # get repeats for a large genome
 #outdir_repeats = "%s/repeats_infer_Calbicans"%testing_outputs_dir
 #fun.run_cmd("%s infer_repeats --threads %i --fraction_available_mem 1.0 -o %s --ref %s --min_chromosome_len 1000"%(fun.perSVade_modules, threads, outdir_repeats, Calbicans_chr1_2_6))
-
-# get repeats small genome
-outdir_repeats_fast = "%s/repeats_infer_Cglab"%testing_outputs_dir
-fun.run_cmd("%s infer_repeats --threads %i --fraction_available_mem 1.0 -o %s --ref %s --min_chromosome_len 100"%(fun.perSVade_modules, threads, outdir_repeats_fast, ref_genome))
-
-# run parameter optimisation based on random regions
-outdir_parameter_optimization = "%s/parameter_optimization"%testing_outputs_dir
-fun.run_cmd("%s optimize_parameters --threads %i --fraction_available_mem 1.0 -o %s --ref %s --min_chromosome_len 1000 --sortedbam %s/aligned_reads.bam.sorted --mitochondrial_chromosome mito_C_glabrata_CBS138 --repeats_file %s/combined_repeats.tab --regions_SVsimulations random --simulation_ploidies diploid_hetero --nsimulations 1 --nvars 5"%(fun.perSVade_modules, threads, outdir_parameter_optimization, ref_genome, outdir_align_reads_SVs, outdir_repeats_fast))
-
 
 # align reads
 #outdir_align_reads = "%s/align_reads_Cglab"%testing_outputs_dir

@@ -1,0 +1,6 @@
+channels:
+  - bioconda
+dependencies:
+  - segemehl=0.3.4
+  - bowtie2=2.5.1
+  - hisat2=2.2.1
