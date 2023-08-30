@@ -71,6 +71,7 @@ parser.add_argument("-c", "--min_coverage", dest="min_coverage", required=True, 
 parser.add_argument("--pooled_sequencing", dest="pooled_sequencing", action="store_true", default=False, help="It runs variant calling assuming that the input is a pool of different strains (i.e. a population). If provided, the only caller used will be 'freebayes'. In addition, note that the only positions considered for variant calling will be those with at least one allele with more reads than --min_coverage.")
 parser.add_argument("--stop_before_VariantIntegration", dest="stop_before_VariantIntegration", action="store_true", default=False, help="It stops the execution after the 'Variant calling' step.")
 parser.add_argument("--window_freebayes_bp", dest="window_freebayes_bp", default=10000, type=int, help="The window (in bp) in which freebayes regions are split to run in parallel. If you increase this number the splitting will be in larger chunks of the genome.")
+parser.add_argument("--fb_use_best_n_alleles", dest="fb_use_best_n_alleles", default=20, type=int, help="The maximum number of alleles considered by freebayes in pooled mode. Default is 20.")
 parser.add_argument("--min_chromosome_len", dest="min_chromosome_len", default=100000, type=int, help="The minimum length to consider chromosomes from the provided fasta for calculating the window length (used in may steps of perSVade to parallelize across fractions of the genome).")
 parser.add_argument("--outdir_callCNVs", dest="outdir_callCNVs", default=None, help="The path to the output directory of the 'call_CNVs' module. If provided, this module will add a 'relative_CN' column to the file 'variant_calling_ploidy<ploidy>.tab', which includes the relative copy number of the region in which each variant is found. This may be used to filter out variants that are in certain regions (i.e. duplicated or deleted).")
 parser.add_argument("--replace", dest="replace", action="store_true", help="Re-run all the steps by deleting the output directory.")
@@ -251,7 +252,7 @@ if "freebayes" in callers:
     outdir_freebayes = "%s/freebayes_ploidy%i_out"%(opt.outdir, opt.ploidy)
 
     # run freebayes in normal configuratiom, in parallel for each chromosome
-    freebayes_filtered = fun.run_freebayes_parallel_regions(outdir_freebayes, opt.ref, sorted_bam, opt.ploidy, opt.min_coverage, replace=opt.replace, threads=opt.threads, pooled_sequencing=opt.pooled_sequencing, window_fb=opt.window_freebayes_bp) 
+    freebayes_filtered = fun.run_freebayes_parallel_regions(outdir_freebayes, opt.ref, sorted_bam, opt.ploidy, opt.min_coverage, replace=opt.replace, threads=opt.threads, pooled_sequencing=opt.pooled_sequencing, window_fb=opt.window_freebayes_bp, fb_use_best_n_alleles=opt.fb_use_best_n_alleles) 
 
     # keep
     filtered_vcf_results.append(freebayes_filtered)

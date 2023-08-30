@@ -41,7 +41,7 @@ import sv_functions as fun
 ####################################
 
 description = """
-This is a workflow that runs various variant calling / annotation modules in a sequential manner. Currently, the supported modules are 'call_SVs', 'call_CNVs', 'integrate_SV_CNV_calls', 'annotate_SVs', 'call_small_variants', 'annotate_small_vars' and 'get_cov_genes'. They will be run in this order. Since the outputs of these modules are interdependent, note the following:
+This is a workflow that runs various variant calling / annotation modules in a sequential manner. Currently, the supported modules are 'align_reads', 'call_SVs', 'call_CNVs', 'integrate_SV_CNV_calls', 'annotate_SVs', 'call_small_variants', 'annotate_small_vars' and 'get_cov_genes'. They will be run in this order. Since the outputs of these modules are interdependent, note the following:
 
 - If you run 'call_CNVs' and 'call_small_variants', the small variants will get the CN information annotated.
 - 'annotate_SVs' and 'annotate_small_vars' can only be run if their corresponding variant calling modules ('call_small_variants' and 'integrate_SV_CNV_calls') are specified.
@@ -99,7 +99,7 @@ fun.log_file_all_cmds = "%s/all_cmds.txt"%outdir_all
 if fun.file_is_empty(fun.log_file_all_cmds): open(fun.log_file_all_cmds, "w").write("# These are all the cmds:\n")
 
 # define the arguments to run
-all_modules = ['call_SVs', 'call_CNVs', 'integrate_SV_CNV_calls', 'annotate_SVs', 'call_small_variants', 'annotate_small_vars', 'get_cov_genes']
+all_modules = ['align_reads', 'call_SVs', 'call_CNVs', 'integrate_SV_CNV_calls', 'annotate_SVs', 'call_small_variants', 'annotate_small_vars', 'get_cov_genes']
 modules_to_run = [m for m in all_modules if m in provided_modules]
 for m in provided_modules:
     if m not in all_modules: raise ValueError("invalid module: %s"%m)
@@ -117,7 +117,6 @@ for arg in modules_args:
 # map each module to the list of arguments
 module_to_args = {m : fun.get_set_args_for_perSVade_module(m, CWD)  for m in modules_to_run}
 
-
 # check that the intersecting args are the expected ones
 expected_intersecting_args = {('-thr', '--threads'), ('-sbam', '--sortedbam'), ('-r', '--ref'), ('--replace',), ('-mchr', '--mitochondrial_chromosome'), ('--verbose',), ('--fractionRAM_to_dedicate',), ('-o', '--outdir'), ('-h', '--help'), ('--fraction_available_mem',), ('--min_chromosome_len',), ('--repeats_file',), ('-p', '--ploidy'), ('--outdir_callCNVs',), ('-mcode', '--mitochondrial_code'), ('-gff', '--gff-file'), ('-gcode', '--gDNA_code')}
 
@@ -127,8 +126,6 @@ for m1, args1 in module_to_args.items():
         intersecting_args = args1.intersection(args2)
         strange_intersecting_args = intersecting_args.difference(expected_intersecting_args)
         if len(strange_intersecting_args)>0: raise ValueError("There are some strange intersecting args (%s) btw %s and %s"%(strange_intersecting_args, m1, m2))
-
-
 
 # check that the provied args modules_args correspond to some arg
 all_possible_args = set.union(*module_to_args.values())
@@ -142,6 +139,8 @@ if "annotate_small_vars" in modules_to_run and not "call_small_variants" in modu
 
 if 'call_CNVs' in modules_to_run and '--outdir_callCNVs' in modules_args: raise ValueError("If you specify --outdir_callCNVs, you can't also run call_CNVs, as these are redundant")
 if 'call_SVs' in modules_to_run and '--outdir_callSVs' in modules_args: raise ValueError("If you specify --outdir_callSVs, you can't also run call_SVs, as these are redundant")
+if 'align_reads' in modules_to_run and '-sbam' in modules_args: raise ValueError("If you specify --sbam, you can't also run align_reads, as these are redundant")
+
 
 # run each module in test mode to check that all args are properly formatted
 module_to_cmd = {}
@@ -196,6 +195,9 @@ for module in modules_to_run:
         if "call_CNVs" in modules_to_run: final_args += " --outdir_callCNVs %s/call_CNVs"%outdir_all
         if "--outdir_callCNVs" not in final_args: print("WARNING: Running call_small_variants with no CNV information.")
 
+    # if you provided align reads, pass them to others
+    if "align_reads" in modules_to_run and module in {"call_SVs", "call_small_variants", "get_cov_genes", "call_CNVs", "integrate_SV_CNV_calls"}:
+        final_args += " -sbam %s/align_reads/aligned_reads.bam.sorted"%outdir_all
 
     # init the cmd
     cmd_module_backbone = "%s/perSVade %s %s"%(CWD, module, final_args)
@@ -204,7 +206,7 @@ for module in modules_to_run:
     fun.print_with_runtime("Testing that cmd for module %s is correct. The cmd is '%s -o %s'"%(module, cmd_module_backbone, outdir_module))
     outdir_module_test = "%s_test_cmd"%outdir_module
     fun.delete_folder(outdir_module_test); fun.make_folder(outdir_module_test)
-    open("%s/perSVade_finished_file.txt"%outdir_module_test, "w").write("perSVade finished testing module")
+    open("%s/perSVade_finished_file.txt"%outdir_module_test, "w").write("perSVade finished testing module") # this is to make it run fast, only test
     stdout_try = "%s/stdout.txt"%outdir_module_test 
     stderr_try = "%s/stderr.txt"%outdir_module_test 
     try: fun.run_cmd("%s -o %s > %s 2>%s"%(cmd_module_backbone, outdir_module_test, stdout_try, stderr_try))

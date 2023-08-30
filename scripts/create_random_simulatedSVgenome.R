@@ -26,6 +26,8 @@ argp = add_argument(argp, "--number_Tra", default=0, help="The number of translo
 argp = add_argument(argp, "--number_Dup", default=0, help="The number of duplications to generate")
 
 argp = add_argument(argp, "--len_shortest_chr", default=1000, help="Len of the shortest chrom")
+argp = add_argument(argp, "--max_max_time_rearrangement", default=100000, help="Maximum max_time_rearrangement tried")
+argp = add_argument(argp, "--max_fraction_shortest_chr_to_consider", default=1.0, help="Maximum fraction tried")
 argp = add_argument(argp, "--percCopiedIns", default=0.5, help="The fraction of INS that are copy-and-paste")
 argp = add_argument(argp, "--percBalancedTrans", default=1, help="The fraction of TRA that are balanced")
 #argp = add_argument(argp, "--replace", flag=TRUE, default=FALSE, help="Replace genomes that a")
@@ -54,14 +56,16 @@ rearranged_genome_generated = FALSE # a tag that defines that the rearranged gen
 
 # define the fraction of longest chromosome that will be considered
 all_fraction_shortest_chr_to_consider = c(0.1, 0.07, 0.05, 0.03, 0.02, 0.01, 0.005)
+all_fraction_shortest_chr_to_consider = all_fraction_shortest_chr_to_consider[all_fraction_shortest_chr_to_consider <= argv$max_fraction_shortest_chr_to_consider]
 #all_fraction_shortest_chr_to_consider = c(0.005)
 
 # define the fraction of nevents that will be considered
 all_fraction_n_events = c(1, 0.8, 0.7, 0.5, 0.3, 0.2, 0.1, 0.05, 0.01, 0.05)
 #all_fraction_n_events = c(1)
 
-# define the max_time_rearrangement
-all_max_time_rearrangement = c(200, 300, 400, 500, 600, 700, 800, 900, 1000, 2000, 3000, 4000, 5000, 10000)
+# define the max_time_rearrangement and filter
+all_max_time_rearrangement = c(100, 200, 300, 400, 500, 600, 700, 800, 900, 1000, 2000, 3000, 4000, 5000, 10000)
+all_max_time_rearrangement = all_max_time_rearrangement[all_max_time_rearrangement <= argv$max_max_time_rearrangement]
 
 # first iterate through the number of events. It is more important to get as much events as possible
 for (fraction_n_events in all_fraction_n_events) {
@@ -112,7 +116,7 @@ for (fraction_n_events in all_fraction_n_events) {
   if (class(rearranged_genome)[1]=="DNAStringSet"){ break }
 
 }
-  
+
 # at the end check that the genome has been created 
 if (!rearranged_genome_generated){stop("It has not been possible to generate the rearranged genome. You may try different combinations of fraction_shortest_chr_to_consider")}
   

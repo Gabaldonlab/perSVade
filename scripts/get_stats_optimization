@@ -50,11 +50,11 @@ parser.add_argument("-o", "--outdir", dest="outdir", action="store", required=Tr
 parser.add_argument("--samples_file", dest="samples_file", action="store", required=True, help="Tab-sepparated csv-file with 'sampleID' and 'sorted_bam' columns. The 'sorted_bam' column should have the paths to the bam files to analyze.")
 parser.add_argument("-r", "--ref", dest="ref", required=True, help="Reference genome. It has to end with .fasta.")
 parser.add_argument("-mchr", "--mitochondrial_chromosome", dest="mitochondrial_chromosome", required=True, type=str, help="The name of the mitochondrial chromosome. If there is no mitochondria just put 'no_mitochondria'. If there is more than one mitochindrial scaffold, provide them as comma-sepparated IDs, like '--mitochondrial_chromosome chr_mito_1,chr_mito_2'.")
-
-parser.add_argument("--overlap_coverage", dest="overlap_coverage", default=10, type=int, help="The maximum difference in coverage, in %, to say that two samples have the same coverage.")
-parser.add_argument("--overlap_insert_size", dest="overlap_insert_size", default=10, type=int, help="The maximum difference in insert size, in %, to say that two samples have the same insert size.")
-parser.add_argument("--overlap_insert_size_sd", dest="overlap_insert_size_sd", default=10, type=int, help="The maximum difference in insert size, in %, SD to say that two samples have the same insert size SD.")
-parser.add_argument("--overlap_read_len", dest="overlap_read_len", default=10, type=int, help="The maximum difference in read length, in %, to say that two samples have the same read length.")
+parser.add_argument("--overlap_coverage", dest="overlap_coverage", default=10, type=int, help="The maximum difference in coverage, in percentage, to say that two samples have the same coverage.")
+parser.add_argument("--overlap_coverage_mtDNA", dest="overlap_coverage_mtDNA", default=None, type=int, help="The maximum difference in coverage, in percentage, to say that two samples have the same coverage in terms of mtDNA. By default it's None, meaning that its the same as overlap_coverage, but it can be set.")
+parser.add_argument("--overlap_insert_size", dest="overlap_insert_size", default=10, type=int, help="The maximum difference in insert size, in percentage, to say that two samples have the same insert size.")
+parser.add_argument("--overlap_insert_size_sd", dest="overlap_insert_size_sd", default=10, type=int, help="The maximum difference in insert size, in percentage, SD to say that two samples have the same insert size SD.")
+parser.add_argument("--overlap_read_len", dest="overlap_read_len", default=10, type=int, help="The maximum difference in read length, in percentage, to say that two samples have the same read length.")
 
 # optional args
 parser.add_argument("--replace", dest="replace", action="store_true", help="Re-run all the steps by deleting the output directory.")
@@ -163,7 +163,8 @@ df_parameters = df_parameters.sort_values(by=["gDNA_median_coverage", "mtDNA_med
 
 # define the pairs of similar samples according to the overlapping distances parameters
 fun.print_with_runtime("Calculating pairs of strains that have similar parameters")
-field_to_overlapping_distance = {"gDNA_median_coverage":opt.overlap_coverage, "mtDNA_median_coverage":opt.overlap_coverage, "read_length":opt.overlap_read_len, "median_insert_size":opt.overlap_insert_size, "median_insert_size_sd":opt.overlap_insert_size_sd,}
+if opt.overlap_coverage_mtDNA is None: opt.overlap_coverage_mtDNA = opt.overlap_coverage
+field_to_overlapping_distance = {"gDNA_median_coverage":opt.overlap_coverage, "mtDNA_median_coverage":opt.overlap_coverage_mtDNA, "read_length":opt.overlap_read_len, "median_insert_size":opt.overlap_insert_size, "median_insert_size_sd":opt.overlap_insert_size_sd,}
 
 pairs_similar_samples = set()
 for s1 in sorted_samples:
@@ -205,7 +206,7 @@ for s in sorted_samples:
 
 # create final file with all data
 df_parameters["representative_sampleID"] = df_parameters.sampleID.apply(lambda x: sampleID_to_repSample[x])
-fun.save_df_as_tab(df_parameters[["sampleID", "representative_sampleID", "gDNA_median_coverage", "mtDNA_median_coverage", "read_length", "median_insert_size", "median_insert_size_sd"]], "%s/samples_parameter_optimization.tab"%opt.outdir)
+fun.save_df_as_tab(df_parameters.reset_index(drop=True)[["representative_sampleID", "sampleID", "gDNA_median_coverage", "mtDNA_median_coverage", "read_length", "median_insert_size", "median_insert_size_sd"]].sort_values(by=["representative_sampleID", "gDNA_median_coverage", "mtDNA_median_coverage", "read_length", "median_insert_size", "median_insert_size_sd", "sampleID"]), "%s/samples_parameter_optimization.tab"%opt.outdir)
 fun.print_with_runtime("There are %i/%i representative samples"%(len(set(df_parameters.representative_sampleID)), len(sorted_samples)))
 
 #################################

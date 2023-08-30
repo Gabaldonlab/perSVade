@@ -69,7 +69,7 @@ cglab_reads2 = "%s/Cglabrata_reads/sampled_readsR2_first100k.fq.gz"%testing_inpu
 
 # redefine the gff
 gff = "%s/reduced_annotations.gff"%testing_outputs_dir
-if fun.file_is_empty(gff): fun.run_cmd("cp %s %s"%(test_gff, gff))
+if fun.file_is_empty(gff): fun.run_cmd("rsync %s %s"%(test_gff, gff))
 
 # redefine the mutated genome location
 mut_genome = "%s/mutated_genome.fasta"%testing_outputs_dir
@@ -146,7 +146,7 @@ outdir_call_coverage_per_gene = "%s/cov_per_gene"%testing_outputs_dir
 if fun.file_is_empty("%s/perSVade_finished_file.txt"%outdir_call_coverage_per_gene): fun.run_cmd("%s get_cov_genes --threads %i --fraction_available_mem 1.0  -o %s --ref %s --min_chromosome_len 100 -gff %s -sbam %s/aligned_reads.bam.sorted"%(fun.perSVade_modules, threads, outdir_call_coverage_per_gene, ref_genome, gff, outdir_align_reads_SVs))
 
 # perform various normal varcall ops per alignment
-sorted_aligners = ["segemehl", "bowtie2_local", "bowtie2", "hisat2", "bwa_mem"]
+sorted_aligners = ["segemehl", "bowtie2", "hisat2", "bwa_mem"] # bowtie2_local, hisat2_no_spliced
 for aligner in sorted_aligners:
 	print("testing variant calling for %s..."%aligner)
 
@@ -162,31 +162,24 @@ for aligner in sorted_aligners:
 	outdir_small_vars = "%s/calling_small_vars_%s"%(testing_outputs_dir, aligner)
 	if fun.file_is_empty("%s/perSVade_finished_file.txt"%outdir_small_vars): fun.run_cmd("%s call_small_variants --threads %i --fraction_available_mem 1.0 --min_chromosome_len 100 -o %s -r %s -sbam %s/aligned_reads.bam.sorted --repeats_file skip -p 1 --callers bcftools,freebayes,HaplotypeCaller --min_AF 0.9 --min_coverage 0 --outdir_callCNVs %s"%(fun.perSVade_modules, threads, outdir_small_vars, Cglabrata_genome, outdir_align_reads, "%s/call_CNVs_Cglab_subsampledReads_%s"%(testing_outputs_dir, sorted_aligners[0])))
 
-dakhgdgajgad
-
-
 # print the overlaps in variants 
-comparisons = {}
+comparisons = set()
 for aln1 in sorted_aligners:
 	for aln2 in sorted_aligners:
 		if aln1==aln2: continue
-		comparison_tuple = tuple(sorted(aln1, aln2))
+		comparison_tuple = tuple(sorted([aln1, aln2]))
 		if comparison_tuple in comparisons: continue
 
 		# load vars
-		min_nPASS = 2
-		vars1 = set(fun.get_df_and_header_from_vcf("%s/calling_small_vars_%s/.vcf"%(testing_outputs_dir, aln1))[0].ID)
-		vars2 = set(fun.get_df_and_header_from_vcf("%s/calling_small_vars_%s/.vcf"%(testing_outputs_dir, aln2))[0].ID)
+		min_nPASS = 3
+		vars1 = set(fun.get_df_and_header_from_vcf("%s/calling_small_vars_%s/variants_atLeast%iPASS_ploidy1.vcf"%(testing_outputs_dir, aln1, min_nPASS))[0].ID)
+		vars2 = set(fun.get_df_and_header_from_vcf("%s/calling_small_vars_%s/variants_atLeast%iPASS_ploidy1.vcf"%(testing_outputs_dir, aln2, min_nPASS))[0].ID)
 
 		# report
 		all_vars = vars1.union(vars2)
 		overlap_vars = vars1.intersection(vars2)
-		print("NPASS>=%i. %s-vs-%s. %i/%i, %.2f%s"%(min_nPASS, aln1, aln2, len(overlap_vars), len(all_vars), (len(overlap_vars)/len(all_vars))*100, "%"))
+		#print("NPASS>=%i. %s-vs-%s. %i/%i, %.2f%s"%(min_nPASS, aln1, aln2, len(overlap_vars), len(all_vars), (len(overlap_vars)/len(all_vars))*100, "%"))
 		comparisons.add(comparison_tuple)
-
-		adkjagdajdakgd
-
-HGFHGFHFHG
 
 # annotate small variants
 outdir_annotate_small_vars = "%s/annotate_small_vars"%testing_outputs_dir
@@ -206,8 +199,10 @@ fun.run_cmd("%s integrate_SV_CNV_calls --threads %i --fraction_available_mem 1.0
 
 # annotate SVs
 outdir_annotate_SVs = "%s/annotate_SVs"%testing_outputs_dir
-fun.run_cmd("%s annotate_SVs --threads %i --fraction_available_mem 1.0 -o %s --ref %s --min_chromosome_len 10000  --mitochondrial_chromosome mito_C_glabrata_CBS138  --SV_CNV_vcf %s/SV_and_CNV_variant_calling.vcf -gff %s -mcode 3 -gcode 1"%(fun.perSVade_modules, threads, outdir_annotate_SVs, ref_genome, outdir_merged_calling, gff))
-
+gff_all_Cglab_input = "%s/annots_ABmito.gff"%testing_inputs_dir
+gff_all_Cglab = "%s/annots_ABmito.gff"%testing_outputs_dir
+if fun.file_is_empty(gff_all_Cglab): fun.rsync_file(gff_all_Cglab_input, gff_all_Cglab)
+fun.run_cmd("%s annotate_SVs --threads %i --fraction_available_mem 1.0 -o %s --ref %s --min_chromosome_len 10000  --mitochondrial_chromosome mito_C_glabrata_CBS138  --SV_CNV_vcf %s/SV_and_CNV_variant_calling.vcf -gff %s -mcode 3 -gcode 1 --replace"%(fun.perSVade_modules, threads, outdir_annotate_SVs, ref_genome, outdir_merged_calling, gff_all_Cglab))
 
 # get homologous regions in C. albicans
 outdir_homRegions = "%s/find_hom_regions"%testing_outputs_dir
