@@ -52,8 +52,6 @@ Takes a .csv table (tab-sepparated) with the paths to the output folders of the 
 
 - If 'call_CNVs_outdir' is provided, this module will generate the table CNVs_changing.tab, which is equivalent to SVs_changing.tab, but for CNVs. The columns of this folder are 'calling_sampleID' (where the variant is called), 'target_sampleID' (the sample where the variant is gained/lost) and 'background_sampleIDs' (the comma-sepparated samples used for background), 'type_differetial_variant' (which can be 'gained' or 'lost') and 'type_overlap_background' (which can be '95pct_overlap' or '75pct_overlap', '50pct_overlap' and '25pct_overlap'). IMPORTANT NOTE: 'call_CNVs_outdir' is not functional because it may yield missleading results.
 
- indicating CNVs that were gained / lost in a given sampleID (i.e. after in vitro-evolution) vs a set of background samples (i.e. in WT samples). 
-
 Note that this module also creates 'integrated_small_variants_annotation_fields.vcf' and 'integrated_SVs_CNVs_annotation_fields.vcf', which are the vcf versions with minimal information, which can be passed to the annotation modules.
 
 Note that if 'call_SVs_outdir' or 'call_CNVs_outdir' are given you'll also need to provide a table (with --table_comparisons) with the columns 'sampleID' and 'background_sampleIDs'. Note that 'background_sampleIDs' should be a comma-separated set of sampleIDs (i.e. 'sample1,sample2') to use as background for these comparisons. Note that the outputs of call_SVs and call_CNVs are not directly integrated into a single file because this is redundant with the integration of integrate_SV_CNV_calls.

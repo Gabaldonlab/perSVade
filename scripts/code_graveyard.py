@@ -19675,3 +19675,177 @@ def get_filtered_SV_CNV_df(SV_CNV, SV_CNV_annot, SV_CNV_filt_file, replace=False
 
     return SV_CNV_filt
 
+
+
+
+def get_df_windows_with_median_mappability(df_windows, reference_genome, mappability_outfile, replace, threads):
+
+    """Takes a df windws and returns it with a field called median_mappability, which is the median mappability for each position of the region. Mappability for a position i is 1 / (how often a 30-mer starting at i occurs in the genome), with up to 2 mismatches."""
+    
+    print_if_verbose("Getting mappability")
+
+    if file_is_empty(mappability_outfile) or replace is True:
+
+        # define the initial index
+        initial_index = list(df_windows.index)
+        initial_cols = list(df_windows.columns)
+
+        # resort
+        df_windows = df_windows.sort_values(by=["chromosome", "start", "end"])
+        print_if_verbose("getting mappability for %i new windows"%len(df_windows))
+
+        # get the mappability per position into map_df
+        mappability_per_position_file = generate_genome_mappability_file(reference_genome, replace=replace, threads=threads)
+        map_df = pd.read_csv(mappability_per_position_file, sep="\t")
+
+        # add the ID
+        print_if_verbose("adding fields...")
+        map_df["ID"] =  list(range(0, len(map_df)))
+
+        # add the end for bedmap
+        map_df["position_plus1"] = map_df.position + 1
+
+        # generate a bed with the map positions and the unique_map_score
+        mappability_bed = "%s.mappability.bed"%mappability_outfile
+        map_df.sort_values(by=["chromosome", "position"])[["chromosome", "position", "position_plus1", "ID", "unique_map_score"]].to_csv(mappability_bed, sep="\t", header=None, index=False)
+
+        # generate the bed with the windows
+        target_windows_bed = "%s.target_windows.bed"%mappability_outfile
+        df_windows["IDwindow"] = list(range(0, len(df_windows)))
+        df_windows[["chromosome", "start", "end", "IDwindow"]].to_csv(target_windows_bed, sep="\t", header=None, index=False)
+
+        # run bedmap to get a file where each line corresponds to the regions to which each target_windows_bed
+        bedmap_outfile = "%s.bedmap.target_windows_overlappingMappability.txt"%mappability_outfile
+        bedmap_stderr = "%s.stderr"%bedmap_outfile
+
+        print_if_verbose("running bedmap. The stderr is in %s"%bedmap_stderr)
+        run_cmd("%s --fraction-map 1.0 --median --delim '\t' %s %s > %s 2>%s"%(bedmap, target_windows_bed, mappability_bed, bedmap_outfile, bedmap_stderr))
+
+        # load bedmap df into df
+        df_windows["median_mappability"] = open(bedmap_outfile, "r").readlines()
+        df_windows["median_mappability"] = df_windows.median_mappability.apply(float)
+
+        # debug
+        if any(pd.isna(df_windows.median_mappability)) or any(df_windows.median_mappability>1): 
+
+            print("These are the NaN regions")
+            print(df_windows[pd.isna(df_windows.median_mappability)][["chromosome", "start", "end"]])
+
+            raise ValueError("Something went went wrong with the mappability calculation")
+
+        # remove files
+        for f in [mappability_bed, target_windows_bed, bedmap_outfile, bedmap_stderr]: remove_file(f)
+
+        # at the end save the df windows
+        df_windows.index = initial_index
+        df_windows = df_windows[initial_cols + ["median_mappability"]]
+        save_df_as_tab(df_windows, mappability_outfile)
+
+    # load
+    df_windows = get_tab_as_df_or_empty_df(mappability_outfile)
+
+    return df_windows
+
+
+
+
+
+def generate_genome_mappability_file(genome, replace=False, threads=4):
+
+    """Takes a genome in fasta and generates a file indicating the mappability of each position of the genome.
+    This writes a file (output) that contains, for each position (i) in the genome, the value of 1/ (number of 30-mers equal to the one that starts in i, allowing 2 missmatches). If it is 1 it is a uniquely mapped position """
+
+    # if already generated, return it
+    previously_generated_map_outfile_long = "%s.mappability_per_position.bed"%genome
+    if not file_is_empty(previously_generated_map_outfile_long): 
+        print_if_verbose("mappability per position file already generated.")
+        return previously_generated_map_outfile_long
+
+    # first create the index
+    genome_dir = "/".join(genome.split("/")[0:-1])
+    genome_name = genome.split("/")[-1]
+    idx_folder = "%s/%s_genmap_idx"%(genome_dir, genome_name.split(".")[0])
+    genmap_std_file = "%s.genmap.std"%genome
+
+    # define expected files
+    expected_idx_files = ["index.info.concat", "index.lf.drv.sbl", "index.sa.val", "index.txt.limits", "index.lf.drv", "index.info.limits", "index.rev.lf.drp"]
+    if any([file_is_empty("%s/%s"%(idx_folder, x)) for x in expected_idx_files]) or replace is True:
+
+        # remove previously generated indices
+        if os.path.isdir(idx_folder): shutil.rmtree(idx_folder)
+        run_cmd("%s index -F %s -I %s -v > %s 2>&1"%(genmap, genome, idx_folder, genmap_std_file))
+
+    # generate map
+    map_folder = "%s/%s_genmap_map"%(genome_dir, genome_name.split(".")[0])
+    map_outfile = "%s/%s.genmap.bed"%(map_folder, genome_name.split(".")[0])
+    if file_is_empty(map_outfile) or replace is True:
+
+        if not os.path.isdir(map_folder): os.mkdir(map_folder)
+        run_cmd("%s map -E 2 -K 30 -I %s -O %s -b --threads %i -v > %s 2>&1"%(genmap, idx_folder, map_folder, threads, genmap_std_file))
+
+    # clean
+    remove_file(genmap_std_file)
+
+    error_before_mappability_calc
+
+    # deine the long file
+    map_outfile_long = "%s.long.bed"%map_outfile
+
+    if file_is_empty(map_outfile_long) or replace is True:
+
+        # convert to a file where each position in the genome appears. This is important because genmap generates a file that has only ranges
+        df_map = pd.read_csv(map_outfile, sep="\t", header=None, names=["chromosome", "start", "end", "strand", "map_idx"])
+        df_map["chromosome"] = df_map.chromosome.apply(str)
+        df_map["chromosome_real"] = df_map.chromosome.apply(lambda x: x.split()[0])
+
+        # define a list with the positions and the scores for that window
+        df_map["positions_list"] = df_map[["start", "end"]].apply(lambda r: list(range(r["start"], r["end"])), axis=1)
+        df_map["length_range"] = df_map.positions_list.apply(len)
+        df_map["map_idx_list"] = df_map[["length_range", "map_idx"]].apply(lambda r: [r["map_idx"]]*int(r["length_range"]), axis=1)
+        df_map["chromosome_list"] = df_map[["length_range", "chromosome_real"]].apply(lambda r: [r["chromosome_real"]]*int(r["length_range"]), axis=1)
+
+        # get chr_to_len
+        chr_to_len = get_chr_to_len(genome)
+
+        # initialize a dictionary that will store chromosome, position and mappability_score as lists
+        expanded_data_dict = {"chromosome":[], "position":[], "unique_map_score":[]}
+
+        # go through each row of the dataframe and append the lists
+        for chromosome_list, positions_list, map_idx_list in df_map[["chromosome_list", "positions_list", "map_idx_list"]].values:
+
+            expanded_data_dict["chromosome"] += chromosome_list
+            expanded_data_dict["position"] += positions_list
+            expanded_data_dict["unique_map_score"] += map_idx_list
+
+        df_long = pd.DataFrame(expanded_data_dict)
+
+        # add the missing positions with the last windows score
+        for chrom, length_chrom in get_chr_to_len(genome).items():
+
+            # get the df_chrom
+            df_chrom = df_long[df_long.chromosome==chrom]
+
+            # define the missing positions
+            all_positions = set(range(0, length_chrom))
+            missing_positions = sorted(all_positions.difference(set(df_chrom.position)))
+            n_missing_positions = len(missing_positions)
+
+            # add to df_long
+            if n_missing_positions>0:
+
+                # add them with 0 mappability
+                df_missing = pd.DataFrame({"chromosome":[chrom]*n_missing_positions, "position":missing_positions, "unique_map_score":[0.0]*n_missing_positions})
+
+                df_long = df_long.append(df_missing)
+        
+        # sort by chromosome and position
+        df_long = df_long.sort_values(by=["chromosome", "position"])
+
+        # add whether it is uniquely mappable
+        df_long["is_uniquely_mappable"] = (df_long.unique_map_score>=1.0).apply(int)
+
+        # save
+        save_df_as_tab(df_long, map_outfile_long)
+
+    return map_outfile_long
+

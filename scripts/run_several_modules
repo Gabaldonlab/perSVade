@@ -55,6 +55,8 @@ perSVade run_several_modules <modules> <outdir> <arguments>
 The arguments passed to this workflow will be passed to their corresponding perSVade modules. Type perSVade <module_name> -h for more information. For instance, you may run this workflow that runs small variant calling and coverage per gene calculation with:
 
 perSVade run_several_modules call_small_variants,get_cov_genes <outdir> --threads 12 -r <genome> -sbam <sorted bam> -p 1 --window_freebayes_bp 3000 --callers HaplotypeCaller,bcftools,freebayes --min_AF 0.9 -c 15 -gff <gff>
+
+IMPORTANT NOTE: You should only pass arguments that are related to the modules to run. If you provide extra arguments it will raise an error.
 """
 
 # parse args
@@ -104,8 +106,6 @@ modules_to_run = [m for m in all_modules if m in provided_modules]
 for m in provided_modules:
     if m not in all_modules: raise ValueError("invalid module: %s"%m)
 
-
-
 # make the outdir
 fun.print_with_runtime("Running modules %s into output folder '%s'"%(",".join(modules_to_run), outdir_all))
 fun.make_folder(outdir_all)
@@ -127,12 +127,6 @@ for m1, args1 in module_to_args.items():
         strange_intersecting_args = intersecting_args.difference(expected_intersecting_args)
         if len(strange_intersecting_args)>0: raise ValueError("There are some strange intersecting args (%s) btw %s and %s"%(strange_intersecting_args, m1, m2))
 
-# check that the provied args modules_args correspond to some arg
-all_possible_args = set.union(*module_to_args.values())
-for a in modules_args:
-    if not a.startswith("-"): continue
-    if not any([a in x for x in all_possible_args]):  raise ValueError("argument %s is not valid for the specified modules %s. Run perSVade <module_name> -h to understand how to set these arguments."%(a, ",".join(modules_to_run)))
-
 # check that some combinations of modules are run
 if "annotate_SVs" in modules_to_run and not "integrate_SV_CNV_calls" in modules_to_run: raise ValueError("If you want to run annotate_SVs, you should also run integrate_SV_CNV_calls")
 if "annotate_small_vars" in modules_to_run and not "call_small_variants" in modules_to_run: raise ValueError("If you want to run annotate_small_vars, you should also run call_small_variants")
@@ -141,6 +135,11 @@ if 'call_CNVs' in modules_to_run and '--outdir_callCNVs' in modules_args: raise 
 if 'call_SVs' in modules_to_run and '--outdir_callSVs' in modules_args: raise ValueError("If you specify --outdir_callSVs, you can't also run call_SVs, as these are redundant")
 if 'align_reads' in modules_to_run and '-sbam' in modules_args: raise ValueError("If you specify --sbam, you can't also run align_reads, as these are redundant")
 
+# check that the provied args modules_args correspond to some arg
+all_possible_args = set.union(*module_to_args.values())
+for a in modules_args:
+    if not a.startswith("-"): continue
+    if not any([a in x for x in all_possible_args]):  raise ValueError("argument %s is not valid for the specified modules %s. Run perSVade <module_name> -h to understand how to set these arguments."%(a, ",".join(modules_to_run)))
 
 # run each module in test mode to check that all args are properly formatted
 module_to_cmd = {}

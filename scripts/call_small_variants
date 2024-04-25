@@ -76,6 +76,8 @@ parser.add_argument("--min_chromosome_len", dest="min_chromosome_len", default=1
 parser.add_argument("--outdir_callCNVs", dest="outdir_callCNVs", default=None, help="The path to the output directory of the 'call_CNVs' module. If provided, this module will add a 'relative_CN' column to the file 'variant_calling_ploidy<ploidy>.tab', which includes the relative copy number of the region in which each variant is found. This may be used to filter out variants that are in certain regions (i.e. duplicated or deleted).")
 parser.add_argument("--replace", dest="replace", action="store_true", help="Re-run all the steps by deleting the output directory.")
 parser.add_argument("--verbose", dest="verbose", action="store_true", default=False, help="Print a verbose log.")
+parser.add_argument("--skip_PASS_generation", dest="skip_PASS_generation", action="store_true", help="Do not generate the PASS files.")
+
 
 # resources
 parser.add_argument("--fraction_available_mem", dest="fraction_available_mem", default=None, type=float, help="This pipeline calculates the available RAM for several steps, and it may not work well in some systems (i.e. HPC clusters). This parameter allows you to correct possible errors. If --fraction_available_mem is not provided (default behavior), this pipeline will calculate the available RAM by filling the memory, which may give errors. If you want to use all the available memory you should specify --fraction_available_mem 1.0. See the FAQ 'How does the --fraction_available_mem work?' from https://github.com/Gabaldonlab/perSVade/wiki/8.-FAQs for more info.")
@@ -141,13 +143,16 @@ fun.print_with_runtime("Running perSVade %s into %s with %.3f Gb of RAM and %i c
 ##############################
 
 # prepare the reference genome
+fun.print_if_verbose("Preparing ref. genome")
 opt.ref, reference_genome_dir = fun.prepare_reference_genome_for_perSVade(opt.ref, opt.outdir, "no_mitochondria", None, opt.replace)
 fun.window_l = fun.get_perSVade_window_l(opt.ref, "no_mitochondria", opt.min_chromosome_len)
 
 # get the bam file under output
+fun.print_if_verbose("Linking bam")
 sorted_bam, index_bam = fun.get_sorted_bam_in_outdir(opt.sortedbam, opt.outdir)
 
 # prepare the repeats file
+fun.print_if_verbose("Preparing repeats")
 fun.prepare_repeats_file_for_perSVade(opt.repeats_file, opt.ref)
 repeats_table = opt.ref+".repeats.tab"
 
@@ -196,24 +201,9 @@ if "bcftools" in callers:
     filtered_output = "%s/output.filt.vcf"%outdir_bcftools;     
     if fun.file_is_empty(filtered_output) or opt.replace is True:
 
-        # look for the mpileup bcf in sister directories, as it is the same for any other ploidy
-        mpileup_output = "%s/output.mpileup.bcf"%outdir_bcftools; mpileup_output_tmp = "%s.tmp"%mpileup_output
-        for folder in os.listdir(opt.outdir):
-            if folder.startswith("bcftools_ploidy") and folder.endswith("_out"):
-
-                # look for the potential previously calculated mpielup outputs
-                potential_previosuly_calculated_mpileup_output = "%s/%s/output.mpileup.bcf"%(opt.outdir, folder)
-                if not fun.file_is_empty(potential_previosuly_calculated_mpileup_output): 
-                    print("taking %s from previous run"%potential_previosuly_calculated_mpileup_output)
-                    mpileup_output = potential_previosuly_calculated_mpileup_output; break
-
-        # if there is no previous run
-        if fun.file_is_empty(mpileup_output) or opt.replace is True:
-
-            print("Running mpileup...")
-            cmd_bcftools_mpileup = '%s mpileup -a "AD,DP" -O b -f %s -o %s --threads %i %s'%(bcftools, opt.ref, mpileup_output_tmp, opt.threads, sorted_bam); fun.run_cmd(cmd_bcftools_mpileup)
-            os.rename(mpileup_output_tmp, mpileup_output)
-
+        # get mpileup output
+        mpileup_output = "%s/output.mpileup.bcf"%outdir_bcftools; 
+        fun.get_bcftools_mpileup_output(opt.ref, mpileup_output, opt.threads, sorted_bam)
 
         # run bcftools call
         call_output = "%s/output.raw.vcf"%outdir_bcftools; call_output_tmp = "%s.tmp"%call_output
@@ -234,13 +224,16 @@ if "bcftools" in callers:
             os.rename(call_output_tmp, call_output)
       
         #As there are no recommendations for bcftools, we decided to apply exclusively the filter for coverage. To apply harder filters please edit this command!
-        
+
         # this generates a filtered, vcf, which only has the PASS ones.
         filtered_output_tmp = "%s.tmp"%filtered_output
         if fun.file_is_empty(filtered_output) or opt.replace is True:
             print("Filtering bcftools ... ")
             cmd_filter = "%s filter -m x -e 'INFO/DP <= %i' -O v --threads %i -o %s %s"%(bcftools, opt.min_coverage, opt.threads, filtered_output_tmp, call_output); fun.run_cmd(cmd_filter)
             os.rename(filtered_output_tmp, filtered_output)
+
+        # remove mpileup
+        fun.remove_file(mpileup_output)
 
         # keep
     filtered_vcf_results.append(filtered_output)
@@ -267,12 +260,28 @@ if opt.stop_before_VariantIntegration is True:
 
 ######## VARIANT INTEGRATION ###########
 
+# define the variants that will be written in a tabular format
+variantInfo_table = "%s/variant_calling_ploidy%i.tab"%(opt.outdir, opt.ploidy)
+
+# debug the case in which there are no variants called by any program (only write an empty table)
+if all([len(fun.get_vcf_as_df_simple_oneSample(v))==0 for v in filtered_vcf_results]):
+    print("WARNING: There are no variants in any vcfs. Writing empty file %s and exiting..."%variantInfo_table)
+
+    # write empty df with some generic fields
+    relevant_fields = ["#Uploaded_variation", "#CHROM", "POS", "REF", "ALT", "QUAL", "INREPEATS", "CALLEDALGS", "PASSALGS", "ISSNP", "NCALLED", "NPASS", "bt_DP4", 'mean_AD', 'mean_DP', 'mean_fractionReadsCov_PASS_algs', 'mean_fractionReadsCov_called_algs', "QUAL", "common_GT"]
+    fun.save_df_as_tab(pd.DataFrame(columns=relevant_fields), variantInfo_table)
+
+    # clean and exit
+    fun.delete_file_or_folder(reference_genome_dir)
+    fun.remove_smallVarsCNV_nonEssentialFiles(opt.outdir, opt.ploidy)
+    fun.generate_final_file_report_one_module(final_file, start_time, time.time())
+    sys.exit(0)
+
 # get the merged vcf records (these are multiallelic)
 fun.print_with_runtime("getting merged vcf without multialleles")
 merged_vcf_all = fun.merge_several_vcfsSameSample_into_oneMultiSample_vcf(filtered_vcf_results, opt.ref, opt.outdir, opt.ploidy, replace=opt.replace, threads=opt.threads, repeats_table=repeats_table)
 
 # get the variants in a tabular format
-variantInfo_table = "%s/variant_calling_ploidy%i.tab"%(opt.outdir, opt.ploidy)
 df_variants = fun.write_variantInfo_table(merged_vcf_all, variantInfo_table, replace=opt.replace)
 
 # define the used programs as a list
@@ -300,7 +309,7 @@ for minPASS_algs in [1, 2, 3]:
     simplified_vcf_PASSalgs_multialleleles = "%s/variants_atLeast%iPASS_ploidy%i.withMultiAlt.vcf"%(opt.outdir, minPASS_algs, opt.ploidy)
     simplified_vcf_PASSalgs_tmp = "%s.tmp"%simplified_vcf_PASSalgs
 
-    if fun.file_is_empty(simplified_vcf_PASSalgs) or opt.replace is True:
+    if (fun.file_is_empty(simplified_vcf_PASSalgs) or opt.replace is True) and (opt.skip_PASS_generation is False):
         fun.print_with_runtime("getting vcf with vars called by >=%i programs"%minPASS_algs)
 
         # define the interesting variants

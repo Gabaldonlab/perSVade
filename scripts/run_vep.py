@@ -220,7 +220,8 @@ for typeGenes, idx_affected_rows in typeGenes_to_idx.items():
 uploaded_variation = set(all_df["#Uploaded_variation"])
 all_variants = set(fun.get_df_and_header_from_vcf(opt.input_vcf)[0]["ID"])
 
-if len(uploaded_variation.difference(all_variants))>0: raise ValueError("There are some uploaded variations that can't be found in all_variants")
+if len(uploaded_variation.difference(all_variants))>0: 
+    raise ValueError("There are some uploaded variations that can't be found in all_variants. This could be because there are multiallelic variants, which are not handled properly by this module. These are the unexpected vars: %s"%(uploaded_variation.difference(all_variants)))
 
 # deinfe the unnanotated vars as those that are not in the VEP output and are also not missing 
 missing_vars = all_variants.difference(uploaded_variation)
