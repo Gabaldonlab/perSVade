@@ -14055,16 +14055,19 @@ def get_df_windows(ref_genome, wsize):
     return df_windows
 
 
-def get_mappability_per_pos_one_window(chromosome, start, end, fields_mappability, mappability_file_window, map_outfile):
+def get_mappability_per_pos_one_chunk(Ic, nchunks, fields_mappability, mappability_file_chunk, chunk_windows, chromosome):
 
-    """gets the mappability for one window """
+    """gets the mappability for one chunk """
 
     # generate the mappability file
-    if file_is_empty(mappability_file_window):
-        print_if_verbose("Generatting map per pos file for %s:%i-%i"%(chromosome, start, end))
+    if file_is_empty(mappability_file_chunk):
+        print_if_verbose("Generatting map per pos file for chunk %i/%i"%(Ic+1, nchunks))
 
-        # convert to a file where each position in the genome appears. This is important because genmap generates a file that has only ranges
-        df_map = pd.read_csv(map_outfile, sep="\t", header=None, names=["chromosome", "start", "end", "strand", "map_idx"]) # strand 
+        # load df
+        df_map = pd.read_csv(chunk_windows, sep="\t", header=None, names=["chromosome", "start", "end", "strand", "map_idx"]) # strand 
+
+        # checks
+        if not all(df_map.strand=="-"): raise ValueError("strand should be always -")
 
         # define a list with the positions and the scores for that window
         df_map["positions_list"] = df_map[["start", "end"]].apply(lambda r: list(range(r["start"], r["end"])), axis=1)
@@ -14079,45 +14082,48 @@ def get_mappability_per_pos_one_window(chromosome, start, end, fields_mappabilit
             expanded_data_dict["position"] += positions_list
             expanded_data_dict["unique_map_score"] += map_idx_list
 
-        df_long = pd.DataFrame(expanded_data_dict)
+        df_long = pd.DataFrame(expanded_data_dict).sort_values(by=["position"])
 
-        # add the missing positions with the last windows score
-        all_positions = set(range(start, end))
-        missing_positions = sorted(all_positions.difference(set(df_long.position)))
-        n_missing_positions = len(missing_positions)
-
-        # add to df_long with 0 mappability
-        if n_missing_positions>0:
-            df_missing = pd.DataFrame({"position":missing_positions, "unique_map_score":[0.0]*n_missing_positions})
-            df_long = df_long.append(df_missing)
+        # checks
+        len_region = df_map.end.iloc[-1] - df_map.start.iloc[0]
+        if df_map.start.iloc[0] != df_long.position.iloc[0]: raise ValueError("start should match")
+        if df_map.end.iloc[-1] != (df_long.position.iloc[-1]+1): raise ValueError("end should match")
+        if len(df_long)!=len_region: raise ValueError("len is not as expected")
+        if len(df_long)!=len(df_long["position"].unique()): raise ValueError("positions should be unique")
 
         # add chromosome
         df_long["chromosome"] = str(df_map.chromosome.iloc[0]).split()[0]
 
-        # sort by chromosome and position
-        df_long = df_long.sort_values(by=["chromosome", "position"])
-
         # add whether it is uniquely mappable
         df_long["is_uniquely_mappable"] = (df_long.unique_map_score>=1.0).apply(int)
 
-        # checks
-        if len(df_long)!=(end-start): raise ValueError("should be one pos per row")
-
         # save
-        df_long[fields_mappability].to_csv(mappability_file_window, sep="\t", header=False, index=False)
+        mappability_file_chunk_tmp = "%s.tmp"%mappability_file_chunk
+        df_long[fields_mappability].to_csv(mappability_file_chunk_tmp, sep="\t", header=False, index=False)
 
         # clean objects
         del df_long
         del df_map
 
-    return mappability_file_window
-
+        # keep
+        os.rename(mappability_file_chunk_tmp, mappability_file_chunk)
 
 def get_nlines_file_no_writing(file_name):
 
     """gets the number of lines"""
 
     return int(str(subprocess.check_output("wc -l %s"%file_name, shell=True)).split()[0].split("'")[1].split("\\n")[0])
+
+def get_int_output_bash_command(cmd):
+
+    """gets the number outputed by a cmd"""
+
+    return int(str(subprocess.check_output(cmd, shell=True)).split()[0].split("'")[1].split("\\n")[0])
+
+
+def check_correct_filename_dots(f, expected_chunks):
+    if len(f.split("."))!=expected_chunks: raise ValueError("file %s is invalid. It is expected to have %i chunks sepparated by '.'"%(f, expected_chunks))
+
 
 def generate_genome_mappability_file(genome, replace=False, threads=4):
 
@@ -14159,8 +14165,7 @@ def generate_genome_mappability_file(genome, replace=False, threads=4):
 
         # get a df with windows of the genome of 0.1Mb
         index_genome(genome)
-        window_size_map = 1000000
-        df_windows = get_df_windows(genome, window_size_map)
+        df_windows = get_df_windows(genome, 1000000)
         df_windows["chromosome"] = df_windows.chromosome.apply(str)
         df_windows = df_windows.sort_values(by=["chromosome", "start", "end"])
 
@@ -14170,7 +14175,8 @@ def generate_genome_mappability_file(genome, replace=False, threads=4):
         # init the map_outfile_long (tmp version)
         map_outfile_long_tmp = "%s.tmp"%map_outfile_long
         fields_mappability = ["chromosome", "position", "unique_map_score", "is_uniquely_mappable"]
-        remove_file(map_outfile_long_tmp); open(map_outfile_long_tmp, "w").write("\t".join(fields_mappability)+"\n")
+        remove_file(map_outfile_long_tmp)
+        open(map_outfile_long_tmp, "w").write("\t".join(fields_mappability)+"\n")
 
         # go through each chromosome
         for chrom in sorted(set(df_windows.chromosome)):
@@ -14180,55 +14186,103 @@ def generate_genome_mappability_file(genome, replace=False, threads=4):
             map_outfile_long_chrom = "%s/mappability_chrom_%s.bed"%(per_chrom_map_files, chrom)
             if file_is_empty(map_outfile_long_chrom):
 
-                # define the tmpdir
-                tmpdir_chrom = "%s/chrom_%s_wsize_%i"%(tmpdir, chrom, window_size_map); make_folder(tmpdir_chrom)
+                # get df
+                df_windows_chrom = df_windows[df_windows.chromosome==chrom].copy()
 
-                # generate the map files sequentially, appending to inputs_fn (to integrate later)
+                # get the mappability per windows file for whole chrom
+                bed_region = "%s/bed_region_%s.bed"%(tmpdir, chrom)
+                pd.DataFrame({"chromosome":[chrom], "start":[df_windows_chrom.start.iloc[0]], "end":[df_windows_chrom.end.iloc[-1]]}).to_csv(bed_region, sep="\t", header=False, index=False)
+
+                # get the mappability per windows file
+                map_outfile_chrom = "%s/map_per_window_%s.bed"%(tmpdir, chrom)
+                genmap_std_file = "%s.map_running.std"%map_outfile_chrom
+
+                if file_is_empty(map_outfile_chrom):
+                    map_outfile_chrom_tmp = "%s.tmp.bed"%map_outfile_chrom
+                    remove_file(map_outfile_chrom_tmp)
+                    run_cmd("%s map -E 2 -K 30 -I %s -O %s -b --threads %i -v --selection %s > %s 2>&1"%(genmap, idx_folder, ".bed".join(map_outfile_chrom_tmp.split(".bed")[0:-1]), threads, bed_region, genmap_std_file))
+                    os.rename(map_outfile_chrom_tmp, map_outfile_chrom)
+
+                # add regions with 0.0 mappability
+                print_if_verbose("getting bed with 0 mappability")
+                map_outfile_chrom_0_map = "%s.0map.bed"%map_outfile_chrom
+                if file_is_empty(map_outfile_chrom_0_map):
+                    map_outfile_chrom_0_map_tmp = "%s.tmp"%map_outfile_chrom_0_map
+                    run_cmd("""%s subtract -a %s -b %s | awk -v OFS='\\t' '{print $1, $2, $3, "-", "0.0"}' > %s"""%(bedtools, bed_region, map_outfile_chrom, map_outfile_chrom_0_map_tmp))
+                    os.rename(map_outfile_chrom_0_map_tmp, map_outfile_chrom_0_map)
+
+                # generate the merged file of both
+                print_if_verbose("get merged bed")
+                map_outfile_chrom_merged = "%s.merged.bed"%map_outfile_chrom
+                if file_is_empty(map_outfile_chrom_merged):
+                    map_outfile_chrom_merged_tmp = "%s.tmp"%map_outfile_chrom_merged
+                    run_cmd("cat %s %s | sort -k1,1 -k2,2n -k3,3n > %s"%(map_outfile_chrom_0_map, map_outfile_chrom, map_outfile_chrom_merged_tmp))
+                    os.rename(map_outfile_chrom_merged_tmp, map_outfile_chrom_merged)
+
+                # split file in chunks
+                print_if_verbose("getting chunks...")
+                chunk_size = 10000
+                tmpdir_chrom = "%s/chrom_%s_csize_%i"%(tmpdir, chrom, chunk_size)
+                make_folder(tmpdir_chrom)
+
+                chunks_dir = "%s/chunks_windows"%tmpdir_chrom
+                if not os.path.isdir(chunks_dir):
+
+                    # log chunks
+                    nlines_merged_bed = get_nlines_file_no_writing(map_outfile_chrom_merged)
+                    nchunks = len(list(chunks(list(range(int(nlines_merged_bed))), chunk_size)))
+
+                    # split reads
+                    chunks_dir_tmp = "%s_tmp"%chunks_dir
+                    delete_folder(chunks_dir_tmp); make_folder(chunks_dir_tmp)
+                    for suffix_len in range(3, 100):
+                        if (24**suffix_len) > nchunks: break
+                    run_cmd("split -a %i -l %i %s %s/chunk."%(suffix_len, chunk_size, map_outfile_chrom_merged, chunks_dir_tmp))
+
+                    # keep
+                    for f in os.listdir(chunks_dir_tmp): check_correct_filename_dots(f, 2)
+                    os.rename(chunks_dir_tmp, chunks_dir)
+
+                # for each chunk, get the mappability per position in parallel
+                print("getting map per pos in parallel...")
+                chunks_dir_map = "%s/mappability_per_pos"%tmpdir_chrom; make_folder(chunks_dir_map)
+                nchunks = len(os.listdir(chunks_dir))
                 inputs_fn = []
-                for I,r in df_windows[df_windows.chromosome==chrom].iterrows():
+                for Ic, chunk_name in enumerate(sorted(os.listdir(chunks_dir))):
+                    mappability_file_chunk = "%s/%s_map_per_pos.bed"%(chunks_dir_map, chunk_name)
+                    inputs_fn.append((Ic, nchunks, fields_mappability, mappability_file_chunk, "%s/%s"%(chunks_dir, chunk_name), chrom))
 
-                    # define the mappability_file_window
-                    mappability_file_window = "%s/%s_%i_%i_map_per_pos.bed"%(tmpdir_chrom, r.chromosome, r.start, r.end)
-
-                    # generate bed file
-                    bed_region = "%s.bed_region.bed"%mappability_file_window
-                    pd.DataFrame({"chromosome":[r.chromosome], "start":[r.start], "end":[r.end]}).to_csv(bed_region, sep="\t", header=False, index=False)
-
-                    # get the mappability per windows file
-                    map_outfile = "%s.map_per_window.bed"%mappability_file_window
-                    genmap_std_file = "%s.map_running.std"%mappability_file_window
-
-                    if file_is_empty(map_outfile):
-                        print_if_verbose("getting map file for %s:%i-%i"%(r.chromosome, r.start, r.end))
-                        run_cmd("%s map -E 2 -K 30 -I %s -O %s -b --threads %i -v --selection %s > %s 2>&1"%(genmap, idx_folder, ".bed".join(map_outfile.split(".bed")[0:-1]), threads, bed_region, genmap_std_file))
-
-                    # add to inputs_fn
-                    inputs_fn.append((r.chromosome, r.start, r.end, fields_mappability, mappability_file_window, map_outfile)) 
-
-                # ge the per position files
-                print_if_verbose("Get the per-position files...")
                 with multiproc.Pool(threads) as pool:
-                    list_files_chrom = pool.starmap(get_mappability_per_pos_one_window, inputs_fn, chunksize=1) 
-
+                    pool.starmap(get_mappability_per_pos_one_chunk, inputs_fn, chunksize=1) 
                     pool.close()
                     pool.terminate()
 
                 # create map_outfile_long_chrom
                 print_if_verbose("appending files for chrom %s..."%chrom)
                 map_outfile_long_chrom_tmp = "%s.tmp"%map_outfile_long_chrom
-                remove_file(map_outfile_long_chrom_tmp); open(map_outfile_long_chrom_tmp, "w").write("\t".join(fields_mappability)+"\n")
-                for f in list_files_chrom:
-                    run_cmd_simple("cat %s >> %s"%(f, map_outfile_long_chrom_tmp))
+                remove_file(map_outfile_long_chrom_tmp)
+                open(map_outfile_long_chrom_tmp, "w").write("\t".join(fields_mappability)+"\n")
+                run_cmd("cat %s/* | sort -k2,2n >> %s"%(chunks_dir_map, map_outfile_long_chrom_tmp))
 
-                # check and keep
-                nlines_file_chrom = get_nlines_file_no_writing(map_outfile_long_chrom_tmp)
-                if (nlines_file_chrom-1)!=(chrom_to_len[chrom]):
-                    raise ValueError("file has %i lines, and chrom is %i"%(nlines_file_chrom-1, chrom_to_len[chrom]))
+                # checks
+                print_if_verbose("checking file...")
+                expected_chrom_len = df_windows_chrom.end.iloc[-1] - df_windows_chrom.start.iloc[0]
+                nlines_chrom = get_int_output_bash_command("wc -l %s"%map_outfile_long_chrom_tmp)
+                if expected_chrom_len!=(nlines_chrom-1): raise ValueError("# lines are not correct")
+                if get_int_output_bash_command("tail -n +2 %s | head -1 | cut -f2"%map_outfile_long_chrom_tmp) != 0: raise ValueError("pos1 should be 0")
+                if get_int_output_bash_command("tail -n1 %s | cut -f2"%map_outfile_long_chrom_tmp) != expected_chrom_len-1: raise ValueError("end should be chrom len")
+                if get_int_output_bash_command("cut -f2 %s | sort | uniq | wc -l"%map_outfile_long_chrom_tmp) != (expected_chrom_len+1): raise ValueError("there should be one pos per line")
 
+                # clean
+                for f in [bed_region, tmpdir_chrom, genmap_std_file, map_outfile_chrom_0_map, map_outfile_chrom_merged, map_outfile_chrom]:
+                    delete_file_or_folder(f)
+
+                # keep
+                print_if_verbose("cleaning....")
                 os.rename(map_outfile_long_chrom_tmp, map_outfile_long_chrom)
 
             # append to the complete file
-            print_if_verbose("appending to file")
+            print_if_verbose("appending to genome file...")
             run_cmd_simple("tail -n +2 %s >> %s"%(map_outfile_long_chrom, map_outfile_long_tmp))
 
         # check and save
