@@ -115,7 +115,7 @@ for arg in modules_args:
     if arg in {"-o", "--outdir", "-h", "--help", "-help", "--merged_vcf", "--SV_CNV_vcf"}: raise ValueError("You can't provide the %s as module arguments. This is an arguments that defies the multi-modular concept of the workflow. For instance, you can't specify output folders as arguments, as outdirs of individual modules are specified within each module."%arg)
 
 # map each module to the list of arguments
-module_to_args = {m : fun.get_set_args_for_perSVade_module(m, CWD)  for m in modules_to_run}
+module_to_args = {m : fun.get_set_args_for_perSVade_module(m, CWD, "%s/testing_args_%s"%(outdir_all, m))  for m in modules_to_run}
 
 # check that the intersecting args are the expected ones
 expected_intersecting_args = {('-thr', '--threads'), ('-sbam', '--sortedbam'), ('-r', '--ref'), ('--replace',), ('-mchr', '--mitochondrial_chromosome'), ('--verbose',), ('--fractionRAM_to_dedicate',), ('-o', '--outdir'), ('-h', '--help'), ('--fraction_available_mem',), ('--min_chromosome_len',), ('--repeats_file',), ('-p', '--ploidy'), ('--outdir_callCNVs',), ('-mcode', '--mitochondrial_code'), ('-gff', '--gff-file'), ('-gcode', '--gDNA_code')}

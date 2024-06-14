@@ -54,6 +54,7 @@ parser.add_argument("--skip_marking_duplicates", dest="skip_marking_duplicates",
 parser.add_argument("--replace", dest="replace", action="store_true", help="Re-run all the steps by deleting the output directory.")
 parser.add_argument("--verbose", dest="verbose", action="store_true", default=False, help="Print a verbose log.")
 parser.add_argument("--aligner", dest="aligner", default='bwa_mem', type=str, help="The aligner algorithm for the short reads. It should map the used to generate the --sortedbam. It can be any of 'hisat2', 'hisat2_no_spliced', 'segemehl', 'bowtie2', 'bowtie2_local', 'bwa_mem'. Most of the testing of perSVade was done on bwa_mem. For 'hisat2', 'hisat2_no_spliced', 'segemehl', the bam files get the secondary alignments removed. In addition, for segemehl the bam file will not contain unmapped reads, as these create compatibility problems.")
+parser.add_argument("--skip_coverage_calculation", dest="skip_coverage_calculation", default=False, action="store_true", help="Don't calc cov")
 
 # resources
 parser.add_argument("--fraction_available_mem", dest="fraction_available_mem", default=None, type=float, help="This pipeline calculates the available RAM for several steps, and it may not work well in some systems (i.e. HPC clusters). This parameter allows you to correct possible errors. If --fraction_available_mem is not provided (default behavior), this pipeline will calculate the available RAM by filling the memory, which may give errors. If you want to use all the available memory you should specify --fraction_available_mem 1.0. See the FAQ 'How does the --fraction_available_mem work?' from https://github.com/Gabaldonlab/perSVade/wiki/8.-FAQs for more info.")
@@ -147,10 +148,20 @@ fun.print_with_runtime("Aligning reads")
 #fun.run_bwa_mem(opt.fastq1, opt.fastq2, opt.ref, opt.outdir, bamfile, sorted_bam, index_bam, sample_name, threads=opt.threads, replace=opt.replace, tmpdir_writingFiles=opt.tmpdir, MarkDuplicates=bwa_mem_MarkDuplicates)
 fun.align_short_reads(opt.fastq1, opt.fastq2, opt.ref, opt.outdir, bamfile, sorted_bam, index_bam, sample_name, opt.aligner, threads=opt.threads, replace=opt.replace, tmpdir_writingFiles=opt.tmpdir, MarkDuplicates=bwa_mem_MarkDuplicates)
 
+# init files to keep
+files_keep = {fun.get_file(sorted_bam), fun.get_file(index_bam), "all_cmds.txt"}
+
 # calculate the coverage
-fun.print_with_runtime("Calculating coverage per window")
-destination_dir = "%s.calculating_windowcoverage"%sorted_bam
-coverage_file = fun.generate_coverage_per_window_file_parallel(opt.ref, destination_dir, sorted_bam, windows_file="none", replace=opt.replace, run_in_parallel=True, delete_bams=True)
+if opt.skip_coverage_calculation is False:
+
+	# run cov
+	fun.print_with_runtime("Calculating coverage per window")
+	destination_dir = "%s.calculating_windowcoverage"%sorted_bam
+	coverage_file = fun.generate_coverage_per_window_file_parallel(opt.ref, destination_dir, sorted_bam, windows_file="none", replace=opt.replace, run_in_parallel=True, delete_bams=True)
+
+	# keep
+	os.rename(coverage_file, "%s/%s"%(opt.outdir, fun.get_file(coverage_file)))
+	files_keep.add(fun.get_file(coverage_file))
 
 #################################
 #################################
@@ -162,9 +173,9 @@ coverage_file = fun.generate_coverage_per_window_file_parallel(opt.ref, destinat
 ##################################
 
 # clean
-os.rename(coverage_file, "%s/%s"%(opt.outdir, fun.get_file(coverage_file)))
+
 for f in os.listdir(opt.outdir):
-    if f not in {fun.get_file(sorted_bam), fun.get_file(index_bam), "all_cmds.txt", fun.get_file(coverage_file)}: fun.delete_file_or_folder("%s/%s"%(opt.outdir, f))
+    if f not in files_keep: fun.delete_file_or_folder("%s/%s"%(opt.outdir, f))
 
 # wite final file
 fun.generate_final_file_report_one_module(final_file, start_time, time.time())

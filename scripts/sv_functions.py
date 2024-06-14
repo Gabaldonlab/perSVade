@@ -1085,9 +1085,8 @@ def get_available_threads(outdir):
 
     """
 
-    # MN4
-    if "BSC_MACHINE" in os.environ and os.environ["BSC_MACHINE"]=="mn4":
-
+    # MN4, MN5
+    if "BSC_MACHINE" in os.environ and os.environ["BSC_MACHINE"] in {"mn4", "mn5"}:
         available_threads = int(os.environ["SLURM_CPUS_PER_TASK"])
 
     # Nord3 interactive nodes
@@ -9849,6 +9848,112 @@ def get_benchmarking_df_for_testSVs_from_trainSV_filterSets(test_SVdict, outdir,
 ################# GRAPHICS FUNCTIONS #################
 ######################################################
 
+def plot_heatmap_analyze_SV_parameters(df_evaluation, filename, accuracy_field):
+
+    """plots the heatmap analyzing SV paramteres for different optimize paramteters sets"""
+
+    ####### GET THE DF ##########
+
+    # keep
+    df_evaluation = df_evaluation.copy()
+    df_evaluation = df_evaluation[df_evaluation.svtype!="remaining"].copy()
+
+    # add test ID
+    testID_fields = ["sampleID", "genomeID", "ploidy", "svtype"]
+    df_evaluation["test_ID"] = df_evaluation[testID_fields].apply(lambda r: "|".join(r), axis=1)
+
+    # check that the IDs of SVs are consistent with different samples
+    for sID_A in sorted(set(df_evaluation.sampleID)):
+        for sID_B in sorted(set(df_evaluation.sampleID)):
+
+            ID_to_setIDs = {ID : set.union(*df_evaluation[df_evaluation.sampleID==ID].true_positives_predictedIDs.apply(lambda x: set(x.split("||")))) for ID in [IDs_A, IDs_B]}
+
+            dakjdahadgadhjadgjagdjhdg
+
+            print(ID_to_setIDs)
+
+            adkahghjdga
+
+
+    #'TP_predictedIDs',
+    #'false_negatives_knownIDs'
+
+    print(df_evaluation, df_evaluation.keys())
+
+    adjhgjdahgadd
+
+    # get squared dataframe
+
+    df = df_evaluation.sort_values(by=["parameterID"] + testID_fields).pivot(index="parameterID", columns="test_ID", values=accuracy_field)
+    sorted_testID = sorted(df.columns)
+
+
+    # define visual mappings
+    sorted_samples = sorted(set(df_evaluation.sampleID))
+    sampleID_to_color = get_value_to_color(sorted_samples, n=len(sorted_samples), palette="tab20")[0]
+
+    ploidy_to_color = {'haploid': 'black', 'diploid_hetero': 'gray'}
+    sorted_ploidies = sorted(set(df_evaluation.ploidy))
+    if not all([p in ploidy_to_color for p in sorted_ploidies]):
+        ploidy_to_color = get_value_to_color(sorted_ploidies, n=len(sorted_ploidies), palette="tab10")[0]
+
+    sorted_svtypes = sorted(set(df_evaluation.svtype))
+    svtype_to_color = {"tandemDuplications": "gray", "deletions": "black", "inversions": "blue", "translocations": "olive", "insertions": "red", "remaining":"magenta", "integrated":"c"}
+
+    field_to_color_dict = {"sampleID":sampleID_to_color, "ploidy": ploidy_to_color, "svtype":svtype_to_color}
+    col_colors_df = pd.DataFrame({field : {test_ID : field_to_color_dict[field][test_ID.split("|")[If]] for test_ID in sorted_testID} for If,field in enumerate(testID_fields) if field in field_to_color_dict})
+
+    #############################
+
+    ######## PLOT #######
+    
+    # define figsize 
+    figsize = (len(df.columns)*0.15, len(df)*0.35)
+
+    # get the clustermap
+    cm = sns.clustermap(df, col_cluster=False, row_cluster=False, col_colors=col_colors_df, cbar_kws={'label': accuracy_field}, xticklabels=False, square=False, figsize=figsize, cmap="rocket_r", linecolor="white", linewidths=0.5, yticklabels=df.index, vmax=1.0) # figsize=figsize, linecolor=linecolor, linewidths=linewidths, yticklabels=yticklabels
+
+    # move the heatmap to the right
+    hm_pos = cm.ax_heatmap.get_position()
+    cm.ax_heatmap.set_position([hm_pos.x0, hm_pos.y0, hm_pos.width, hm_pos.height]); hm_pos = cm.ax_heatmap.get_position()
+    hm_pos = cm.ax_heatmap.get_position()
+
+    # adjust the col colorbar proporitonal to the col colors
+    multiplier_width_colorbars = 1
+    height_col_colorbar = (hm_pos.height/len(df)) * len(col_colors_df.columns) * multiplier_width_colorbars
+    cc_pos = cm.ax_col_colors.get_position()
+    cm.ax_col_colors.set_position([hm_pos.x0, hm_pos.y0 + hm_pos.height, hm_pos.width, height_col_colorbar]); cc_pos = cm.ax_col_colors.get_position()
+    cc_pos = cm.ax_col_colors.get_position()
+
+    # adjust colorbar position
+    height_colorbar = cc_pos.height*1.5
+    width_colorbar = (hm_pos.width / len(df.columns))*3
+    x0_cbar = hm_pos.x0 - (width_colorbar*4)
+    y0_cbar = (cc_pos.y0 + cc_pos.height) - height_colorbar
+    cm.cax.set_position([x0_cbar, y0_cbar, width_colorbar, height_colorbar])
+
+    # add legend
+    def get_legend_element(facecolor, label, edgecolor="gray"): return mpatches.Patch(facecolor=facecolor, edgecolor=edgecolor, label=label)
+
+    legend_elements = []
+    for field in testID_fields:
+        if not field in field_to_color_dict: continue
+        color_dict = field_to_color_dict[field]
+
+        # header
+        legend_elements.append(get_legend_element("white", field, edgecolor="white"))
+
+        # each of the values
+        for val, color in color_dict.items(): 
+            legend_elements.append(get_legend_element(color, val, edgecolor="gray"))
+
+    cm.cax.legend(handles=legend_elements, bbox_to_anchor=(0,1), loc="upper right") 
+
+    # save
+    cm.savefig(filename)
+
+    #####################
+
 def plot_clustermap_with_annotation(df, row_colors_df, col_colors_df, filename, title="clustermap", col_cluster=False, row_cluster=False, colorbar_label="default label", adjust_position=True, legend=True, idxs_separator_pattern="_", texts_to_strip={"L001"}, default_label_legend="control", df_annotations=None, cmap=sns.color_palette("RdBu_r", 50), ylabels_graphics_df=None, grid_lines=True, add_to_legend_x=1, figsize=None, multiplier_width_colorbars=1, vmax=None, vmin=None, size_annot=8, color_bar_x0_position_add=0):
 
     """Takes a df were the index is the annotation and the cols are samples. It will be saved under filename. ylabels_graphics_df can be a df containing fontweight and color for each index value in df"""
@@ -10207,7 +10312,7 @@ def getPlots_filtering_accuracy_across_genomes_and_ploidies(df_cross_benchmark, 
 ######################################################
 
 
-def get_and_report_filtering_accuracy_across_genomes_and_ploidies(df_benchmark, genomeID_to_knownSVdict, outdir, PlotsDir, reference_genome, replace=False, consider_integrated_filtering=True, threads=4, run_in_parallel=False):
+def get_and_report_filtering_accuracy_across_genomes_and_ploidies(df_benchmark, genomeID_to_knownSVdict, outdir, PlotsDir, reference_genome, replace=False, consider_integrated_filtering=True, threads=4, run_in_parallel=False, keep_simulation_files=False):
 
     """This function takes a df that has the benchmarking info (each line is a set of filtering parameters) and a "genomeID" and "ploidy" fields, which indicate the unique genomes. The idea is to pick, for each genomeID and ploidy combination, the best filtering set (highest Fscore) for the others simulations. If the genomeID is not in df_benchmark.genomeID it will run the whole gridss pipeline for the desired filtering sets, considering known_genomes_withSV_and_shortReads_table """
 
@@ -10287,6 +10392,35 @@ def get_and_report_filtering_accuracy_across_genomes_and_ploidies(df_benchmark, 
         knownSVdict = genomeID_to_knownSVdict[genomeID]
         processing_dir = "%s/%s_%s"%(cross_benchmarking_files_dir, genomeID, ploidy); make_folder(processing_dir)
         genomeIDandPlody_to_info[(genomeID, ploidy)] = {"test_SVdict":knownSVdict, "outdir":processing_dir, "df_filters_train":df_best_filters, "test_gridss_info_dict":test_gridss_info_dict, "sorted_bam":df_ben_int.sorted_bam.iloc[0], "median_coverage":df_ben_int.median_coverage.iloc[0], "median_insert_size":df_ben_int.median_insert_size.iloc[0], "median_insert_size_sd":df_ben_int.median_insert_size_sd.iloc[0]}
+
+        # keep files of the simulations
+        if keep_simulation_files is True:
+            print_if_verbose("Keeping files")
+
+            # checks
+            if len(df_best_filters[['gridss_maxcoverage', 'gridss_regionsToIgnoreBed']].drop_duplicates())!=1: 
+                raise ValueError("there should be only one maxcov, reg to ignore")
+
+
+            # define folder
+            simulation_files_dir = "%s/simulation_files"%outdir; make_folder(simulation_files_dir)
+
+            # save certain files
+            fileprefix = "%s/genome=%s-ploidy=%s"%(simulation_files_dir, genomeID, ploidy)
+            files_dict = genomeIDandPlody_to_info[(genomeID, ploidy)]
+
+            best_filters_r = df_best_filters.iloc[0]
+            files_transfer = [(files_dict["sorted_bam"], "%s.aligned_reads.bam.sorted"%fileprefix), 
+                              (files_dict["test_gridss_info_dict"][best_filters_r.gridss_regionsToIgnoreBed][best_filters_r.gridss_maxcoverage], "%s.gridss_output.vcf"%fileprefix)]
+
+            files_transfer += [(SVfile, "%s.simulated_SVs.%s.tab"%(fileprefix, svtype)) for svtype, SVfile in knownSVdict.items()]
+
+            for origin_f, target_f in files_transfer:
+                rsync_file(origin_f, target_f)
+
+            # save a dict with sequencing features
+            dict_sequencing_features = {f : files_dict[f]  for f in ["median_coverage", "median_insert_size", "median_insert_size_sd"]}
+            save_object(dict_sequencing_features, "%s.sequencing_features.py"%fileprefix)
 
     ###########################################################################################
 
@@ -10393,7 +10527,7 @@ def get_sorted_bam_subsetChroms(sorted_bam, chromosomes_set, replace=False, thre
     return subset_sorted_bam
 
 
-def get_best_parameters_for_GridssClove_run(sorted_bam, reference_genome, outdir, aligner, threads=4, replace=False, n_simulated_genomes=2, mitochondrial_chromosome="mito_C_glabrata_CBS138", simulation_ploidies=["haploid", "diploid_homo", "diploid_hetero", "ref:2_var:1", "ref:3_var:1", "ref:4_var:1", "ref:5_var:1", "ref:9_var:1", "ref:19_var:1", "ref:99_var:1"], range_filtering_benchmark="theoretically_meaningful", nvars=100, real_bedpe_breakpoints=None, median_insert_size=250, median_insert_size_sd=0, tmpdir=None, simulation_chromosomes=None, max_max_time_rearrangement_random_SVsim=100000, max_fraction_shortest_chr_to_consider_random_SVsim=1.0):
+def get_best_parameters_for_GridssClove_run(sorted_bam, reference_genome, outdir, aligner, threads=4, replace=False, n_simulated_genomes=2, mitochondrial_chromosome="mito_C_glabrata_CBS138", simulation_ploidies=["haploid", "diploid_homo", "diploid_hetero", "ref:2_var:1", "ref:3_var:1", "ref:4_var:1", "ref:5_var:1", "ref:9_var:1", "ref:19_var:1", "ref:99_var:1"], range_filtering_benchmark="theoretically_meaningful", nvars=100, real_bedpe_breakpoints=None, median_insert_size=250, median_insert_size_sd=0, tmpdir=None, simulation_chromosomes=None, max_max_time_rearrangement_random_SVsim=100000, max_fraction_shortest_chr_to_consider_random_SVsim=1.0, keep_simulation_files=False):
 
     """This finds the optimum parameters for running GRIDSS clove and returns them. The parameters are equivalent to the run_GridssClove_optimising_parameters function"""
 
@@ -10653,7 +10787,7 @@ def get_best_parameters_for_GridssClove_run(sorted_bam, reference_genome, outdir
     print_if_verbose("getting report of the accuracies between simulations")
     print_with_runtime("getting report of the accuracies between simulations")
 
-    df_cross_benchmark_best, best_f = get_and_report_filtering_accuracy_across_genomes_and_ploidies(df_benchmark_all, genomeID_to_knownSVdict, outdir_benchmarking, PlotsDir_benchmarking, reference_genome, replace=replace, consider_integrated_filtering=True, threads=threads)
+    df_cross_benchmark_best, best_f = get_and_report_filtering_accuracy_across_genomes_and_ploidies(df_benchmark_all, genomeID_to_knownSVdict, outdir_benchmarking, PlotsDir_benchmarking, reference_genome, replace=replace, consider_integrated_filtering=True, threads=threads, keep_simulation_files=keep_simulation_files)
 
     # write this df
     df_cross_benchmark_best.to_csv("%s/df_cross_benchmark_best.tab"%(outdir_benchmarking), sep="\t", header=True, index=False)
@@ -13499,6 +13633,7 @@ def run_CNV_calling_HMMcopy(outdir, replace, threads, df_coverage, ploidy, refer
 
         # debug the fact that there are not enough regions. If so set everything to relative_CN==1
         if len(df_coverage_genome)<min_number_of_regions_CNVcalling: 
+            print_if_verbose("WARNING: there are <%i regions for CNV calling, skipping..."%min_number_of_regions_CNVcalling)
 
             # get relative_CN as 1
             df_CNperWindow_HMMcopy_genome = df_coverage_genome[["chromosome", "start", "end", "corrected_relative_coverage"]]
@@ -13780,6 +13915,7 @@ def run_CNV_calling_AneuFinder(outdir, replace, threads, df_coverage, ploidy, re
 
         # debug the fact that there are not enough regions. If so set everything to relative_CN==1
         if len(df_coverage_genome)<min_number_of_regions_CNVcalling: 
+            print_if_verbose("WARNING: there are <%i regions for CNV calling, skipping..."%min_number_of_regions_CNVcalling)
 
             # get relative_CN as 1
             df_CNperWindow_AneuFinder_genome = df_coverage_genome[["chromosome", "start", "end", "corrected_relative_coverage"]]
@@ -15375,7 +15511,7 @@ def get_df_coverage_with_fraction_repeats_per_window(df_coverage, repeats_table,
         df_coverage[bed_fields].to_csv(coverage_bed, sep="\t", header=False, index=False)
 
         bedmap_outfile = "%s/outfile_bedmap.txt"%tmpdir
-        bedmap_stderr = "%s/bedma.stderr"%tmpdir
+        bedmap_stderr = "%s/bedmap.stderr"%tmpdir
         run_cmd("%s --delim '\t' --bp-ovr 1 --bases-uniq-f %s %s > %s 2>%s"%(bedmap, coverage_bed, repeats_bed, bedmap_outfile, bedmap_stderr))
 
         # add the fraction 
@@ -15393,7 +15529,7 @@ def get_df_coverage_with_fraction_repeats_per_window(df_coverage, repeats_table,
     return load_object(df_coverage_file)[final_fields]
 
 
-def run_CNV_calling(sorted_bam, reference_genome, outdir, threads, replace, mitochondrial_chromosome, window_size, ploidy, plot_correlation=True, bg_sorted_bam_CNV=None, cnv_calling_algs={"HMMcopy", "AneuFinder", "CONY"}, skip_coverage_correction=False, average_cov_measure="median", max_fraction_N_bases=1.0, repeats_table=None, max_fraction_repeats=1.0, min_median_mappability=0.0):
+def run_CNV_calling(sorted_bam, reference_genome, outdir, threads, replace, mitochondrial_chromosome, window_size, ploidy, plot_correlation=True, bg_sorted_bam_CNV=None, cnv_calling_algs={"HMMcopy", "AneuFinder", "CONY"}, skip_coverage_correction=False, average_cov_measure="median", max_fraction_N_bases=1.0, repeats_table=None, max_fraction_repeats=1.0, min_median_mappability=0.0, skip_CNV_calling=False):
 
     """This function takes a sorted bam and runs several programs on it to get the copy-number variation results. It is important that the sorted_bam contains no duplicates. It will correct bu GC content, mappability and distance to the telomere. All coverage will be corrected by GC content, mappability and the distance to the telomere, which will be calculated also taking into account breakpoint information. 
 
@@ -15496,7 +15632,7 @@ def run_CNV_calling(sorted_bam, reference_genome, outdir, threads, replace, mito
         # init the cnv_calling fields
         relative_CN_fields = []
         
-        if "AneuFinder" in cnv_calling_algs:
+        if "AneuFinder" in cnv_calling_algs and skip_CNV_calling is False:
 
             # this is from a 2020 paper of CNV and antifungal drugs in C. albicans
 
@@ -15529,7 +15665,7 @@ def run_CNV_calling(sorted_bam, reference_genome, outdir, threads, replace, mito
 
         ######## RUN CONY ########
 
-        if "CONY" in cnv_calling_algs:
+        if "CONY" in cnv_calling_algs and skip_CNV_calling is False:
 
             # This is a recent paper that shows very high accuracy
 
@@ -15563,7 +15699,7 @@ def run_CNV_calling(sorted_bam, reference_genome, outdir, threads, replace, mito
 
         ####### RUN HMMCOPY, SIMILARLY TO A RECENT C. glabrata PAPER #######
 
-        if "HMMcopy" in cnv_calling_algs:
+        if "HMMcopy" in cnv_calling_algs and skip_CNV_calling is False:
 
             # This is based on "Understand the genomic diversity and evolution of fungal pathogen Candida glabrata by genome-wide analysis of genetic variations"
 
@@ -15586,11 +15722,16 @@ def run_CNV_calling(sorted_bam, reference_genome, outdir, threads, replace, mito
             relative_CN_fields.append("relative_CN_HMMcopy")
             files_folders_remove += [HMMcopy_outdir, df_CNperWindow_HMMcopy_file]
 
-        if len(relative_CN_fields)==0: raise ValueError("you should have some values in relative_CN_fields")
-
         ####################################################################
 
+        # add the CNV calling
+        if skip_CNV_calling is True: 
+            relative_CN_fields = ["relative_CN_HMMcopy", "relative_CN_CONY", "relative_CN_AneuFinder"]
+            for f in relative_CN_fields: df_coverage[f] = 1.0
+
         ###### PLOT THE CALLING OF ALL PROGRAMS ######
+
+        if len(relative_CN_fields)==0: raise ValueError("you should have some values in relative_CN_fields")
 
         PlotsDir = "%s/plots"%outdir; make_folder(PlotsDir)
         df_plot = cp.deepcopy(df_coverage)
@@ -15656,6 +15797,9 @@ def run_CNV_calling(sorted_bam, reference_genome, outdir, threads, replace, mito
 
                 # get only the df_plot which is under some CNV
                 df_plot = df_plot[(df_plot[xfield]!=1.0) | (df_plot[yfield]!=1.0)]
+                if len(df_plot)==0: 
+                    print_if_verbose("WARNING: there are no regions with CNV by any algorithm (%s vs %s), skipping..."%(xfield, yfield))
+                    continue
 
                 # get the plot and jitter. This sets to a maximum of 3
                 df_plot = df_plot.sort_values(by=[xfield, yfield])
@@ -22194,7 +22338,7 @@ def check_that_reads_are_compressed(r1, r2):
 
 
 
-def get_set_args_for_perSVade_module(module_name, scripts_dir):
+def get_set_args_for_perSVade_module(module_name, scripts_dir, tmpdir_module):
 
     """Gets a set with the arguments of a given module"""
 
@@ -22203,13 +22347,17 @@ def get_set_args_for_perSVade_module(module_name, scripts_dir):
     else: tmpdir = "%s/.perSVade_tmp"%(os.environ["HOME"])
     make_folder(tmpdir)
 
+    # make
+    make_folder(tmpdir_module)
+
     # execute the module's help
-    help_std = "%s/moudule_%s_help.txt"%(tmpdir, module_name)
+    help_std = "%s/moudule_%s_help.txt"%(tmpdir_module, module_name)
     run_cmd("%s/perSVade %s -h > %s 2>&1"%(scripts_dir, module_name, help_std))
     lines_help = [l.rstrip().lstrip() for l in open(help_std, "r").readlines()]
     set_args = {tuple([x.split()[0] for x in l.split(",") if x.split()[0].startswith("-")]) for l in lines_help if l.startswith("-")}
 
     if len(set_args)==0: raise ValueError("too few args for module %s"%module_name)
+    delete_folder(tmpdir_module)
 
     return set_args
 
@@ -22772,3 +22920,41 @@ def get_bcftools_mpileup_output(ref, mpileup_output, threads, sorted_bam):
         # keep
         os.rename(mpileup_output_tmp, mpileup_output)
 
+def get_df_evaluation_analyze_SV_parameters(input_sorted_bam, input_gridss_vcf, SV_dict, dict_sequencing_features, ref_genome, test_dir, gridss_blacklisted_regions, gridss_maxcoverage, gridss_filters_dict, max_rel_coverage_to_consider_del, min_rel_coverage_to_consider_dup, parameterID, sampleID, genomeID, ploidy):
+
+    """gets an evaluation df for one set of parameters"""
+
+    # link files
+    sorted_bam = "%s/aligned_reads.bam.sorted"%test_dir
+    soft_link_files(input_sorted_bam, sorted_bam)
+    
+    gridss_vcf = "%s/gridss_output.vcf"%test_dir
+    soft_link_files(input_gridss_vcf, gridss_vcf)
+
+    linked_genome = "%s/reference_genome.fasta"%test_dir
+    for suffix_g in ["", ".chr_to_len.py", ".fai", ".repeats.tab"]:
+        soft_link_files(ref_genome+suffix_g, linked_genome+suffix_g)
+
+    # get parms
+    median_coverage = dict_sequencing_features["median_coverage"]
+    median_insert_size = dict_sequencing_features["median_insert_size"]
+    median_insert_size_sd = dict_sequencing_features["median_insert_size_sd"]
+
+    # index bam
+    if file_is_empty(sorted_bam+".bai"):
+        index_bam(sorted_bam, threads=1)
+
+    # get the SVs
+    predicted_svtype_to_SVtable, df_gridss = run_gridssClove_given_filters(sorted_bam, linked_genome, test_dir, median_coverage, replace=False, threads=1, gridss_blacklisted_regions=gridss_blacklisted_regions, gridss_VCFoutput=gridss_vcf, gridss_maxcoverage=gridss_maxcoverage, median_insert_size=median_insert_size, median_insert_size_sd=median_insert_size_sd, gridss_filters_dict=gridss_filters_dict, run_in_parallel=False, max_rel_coverage_to_consider_del=max_rel_coverage_to_consider_del, min_rel_coverage_to_consider_dup=min_rel_coverage_to_consider_dup, replace_FromGridssRun=False)
+
+    # get the benchmarking df
+    fileprefix_benchmark = "%s.benchmarking"%test_dir
+    df_evaluation = benchmark_processedSVs_against_knownSVs_inHouse(predicted_svtype_to_SVtable, SV_dict, fileprefix_benchmark, replace=False, add_integrated_benchmarking=True)
+
+    # keep
+    df_evaluation["parameterID"] = parameterID
+    df_evaluation["sampleID"] = sampleID
+    df_evaluation["genomeID"] = genomeID 
+    df_evaluation["ploidy"] = ploidy
+
+    return df_evaluation

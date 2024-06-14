@@ -48,6 +48,7 @@ if len(sys.argv)==1 or sys.argv[1] in help_args:
         run_several_modules         Workflow to run several modules in a sequential manner for one sample
         get_stats_optimization      Generate table with insert size, median coverage and read length for various bam files
         integrate_several_samples   Integrates the variant calls of several samples
+        analyze_SV_parameters       Analyzes how different SV parameters (e.g. obtained with optimize_parameters) perform across samples
 
     Usage:
 
@@ -58,7 +59,7 @@ if len(sys.argv)==1 or sys.argv[1] in help_args:
 else:
 
     # define the modules
-    available_modules = {"trim_reads_and_QC", "align_reads", "infer_repeats", "find_homologous_regions", "call_SVs", "find_knownSVs_regions", "optimize_parameters", "call_CNVs", "integrate_SV_CNV_calls", "annotate_SVs", "call_small_variants", "annotate_small_vars", "get_cov_genes", "run_several_modules", "get_stats_optimization", "integrate_several_samples"}
+    available_modules = {"trim_reads_and_QC", "align_reads", "infer_repeats", "find_homologous_regions", "call_SVs", "find_knownSVs_regions", "optimize_parameters", "call_CNVs", "integrate_SV_CNV_calls", "annotate_SVs", "call_small_variants", "annotate_small_vars", "get_cov_genes", "run_several_modules", "get_stats_optimization", "integrate_several_samples", "analyze_SV_parameters"}
     module = sys.argv[1]
 
     # define script of this module
@@ -74,5 +75,30 @@ else:
     # run script
     else: 
         print("Running module %s..."%module)
+
+        # get the outdir to define PERSVADE_TMPDIR
+        if not "PERSVADE_TMPDIR" in os.environ:
+            
+            # get the outdir
+            all_args = sys.argv[2:]
+            outdir_Is = [I for I,a in enumerate(all_args) if a in {"-o", "--outdir"}] 
+            if len(outdir_Is)!=1: raise ValueError("you should provide -o / -outdir")
+            outdir = all_args[outdir_Is[0]+1]
+
+            # make the tmpdir and set
+            tmpdir_perSVade = "%s/.perSVade_tmpdir"%outdir
+            fun.make_folder(outdir)
+            fun.delete_folder(tmpdir_perSVade)
+            fun.make_folder(tmpdir_perSVade)
+            os.environ["PERSVADE_TMPDIR"] = tmpdir_perSVade
+
+        else:
+            tmpdir_perSVade = None
+
+        # run
         fun.run_cmd_simple_noError("%s %s"%(module_script, " ".join(sys.argv[2:])))
+
+        # clean
+        if not tmpdir_perSVade is None:
+            fun.delete_folder(tmpdir_perSVade)
 

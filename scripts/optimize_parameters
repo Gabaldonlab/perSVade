@@ -61,6 +61,7 @@ parser.add_argument("--range_filtering_benchmark", dest="range_filtering_benchma
 parser.add_argument("--aligner", dest="aligner", default='bwa_mem', type=str, help="The aligner algorithm for the short reads. It should map the used to generate the --sortedbam. It can be any of 'hisat2', 'hisat2_no_spliced', 'segemehl', 'bowtie2', 'bowtie2_local', 'bwa_mem'. Most of the testing of perSVade was done on bwa_mem. For 'hisat2', 'hisat2_no_spliced', and 'segemehl', the bam files get the secondary alignments removed. In addition, for segemehl the bam file will not contain unmapped reads, as these create compatibility problems.")
 parser.add_argument("--max_max_time_rearrangement_random_SVsim", dest="max_max_time_rearrangement_random_SVsim", default=100000, type=int, help="The maximum time, in seconds, to allocate to the simulations of random SVS. This is interesting because the random SV simulation pipeline halts sometimes, and it has to be broken.")
 parser.add_argument("--max_fraction_shortest_chr_to_consider_random_SVsim", dest="max_fraction_shortest_chr_to_consider_random_SVsim", default=1.0, type=float, help="The maximum fraction of the size of the smallest chromosome to consider, in bp, for SVs. This is interesting because the random SV simulation pipeline halts sometimes, and it has to be broken.")
+parser.add_argument("--keep_simulation_files", dest="keep_simulation_files", action="store_true", default=False, help="Do not remove the simulations' bam files and selected parameters.")
 
 # general optional args
 parser.add_argument("--max_median_insert_size", dest="max_median_insert_size", default=10000, type=int, help="This module calculates the median insert size of the input sorted bam. This value is expected to be low (i.e. < 1000). If it is very high it suggests that the input .bam is somehow corrupt. This argument allows you to control what is considered as a very high insert size (default 10,000 bp). For example, if you want to allow a higher threshold you may specify '--max_median_insert_size 20000'.")
@@ -172,7 +173,7 @@ if median_insert_size>opt.max_median_insert_size: raise ValueError("The median i
 # get the optimised parameters
 parameter_optimisation_dir = "%s/parameter_optimisation"%SVdetection_outdir; fun.make_folder(parameter_optimisation_dir)
 
-gridss_blacklisted_regions, gridss_maxcoverage, gridss_filters_dict, max_rel_coverage_to_consider_del, min_rel_coverage_to_consider_dup, df_cross_benchmark_best = fun.get_best_parameters_for_GridssClove_run(sorted_bam, opt.ref, parameter_optimisation_dir, opt.aligner, threads=opt.threads, replace=opt.replace, n_simulated_genomes=opt.nsimulations, mitochondrial_chromosome=opt.mitochondrial_chromosome, simulation_ploidies=simulation_ploidies, range_filtering_benchmark=opt.range_filtering_benchmark, nvars=opt.nvars, real_bedpe_breakpoints=real_bedpe_breakpoints, median_insert_size=median_insert_size, median_insert_size_sd=median_insert_size_sd, tmpdir=opt.tmpdir, simulation_chromosomes=opt.simulation_chromosomes, max_max_time_rearrangement_random_SVsim=opt.max_max_time_rearrangement_random_SVsim, max_fraction_shortest_chr_to_consider_random_SVsim=opt.max_fraction_shortest_chr_to_consider_random_SVsim)
+gridss_blacklisted_regions, gridss_maxcoverage, gridss_filters_dict, max_rel_coverage_to_consider_del, min_rel_coverage_to_consider_dup, df_cross_benchmark_best = fun.get_best_parameters_for_GridssClove_run(sorted_bam, opt.ref, parameter_optimisation_dir, opt.aligner, threads=opt.threads, replace=opt.replace, n_simulated_genomes=opt.nsimulations, mitochondrial_chromosome=opt.mitochondrial_chromosome, simulation_ploidies=simulation_ploidies, range_filtering_benchmark=opt.range_filtering_benchmark, nvars=opt.nvars, real_bedpe_breakpoints=real_bedpe_breakpoints, median_insert_size=median_insert_size, median_insert_size_sd=median_insert_size_sd, tmpdir=opt.tmpdir, simulation_chromosomes=opt.simulation_chromosomes, max_max_time_rearrangement_random_SVsim=opt.max_max_time_rearrangement_random_SVsim, max_fraction_shortest_chr_to_consider_random_SVsim=opt.max_fraction_shortest_chr_to_consider_random_SVsim, keep_simulation_files=opt.keep_simulation_files)
 
 # write these optimal parameters
 json_file = "%s/optimized_parameters.json"%opt.outdir
@@ -202,6 +203,10 @@ for f in os.listdir(opt.outdir):
 for f in os.listdir(parameter_optimisation_dir): 
     file_path = "%s/%s"%(parameter_optimisation_dir, f)
     os.rename(file_path, "%s/%s"%(opt.outdir, f))
+
+# keep the simulation files
+if opt.keep_simulation_files is True:
+	os.rename("%s/benchmarking_all_filters_for_all_genomes_and_ploidies/simulation_files"%opt.outdir, "%s/simulation_files"%opt.outdir)
 
 # remove specific dirs
 for f in [reference_genome_dir, SVdetection_outdir]: fun.delete_folder(f)
