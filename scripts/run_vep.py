@@ -121,8 +121,8 @@ if fun.file_is_empty(outfile_vep_raw):
 
     # define the backbone_cmd
     vep_std = "%s.std"%outfile_vep_raw_tmp
-    cmd = '%s --input_file %s --format "vcf" --output_file %s --fasta %s -v --force_overwrite --tab --fields "Uploaded_variation,Location,Allele,Gene,Feature,Feature_type,Consequence,cDNA_position,CDS_position,Protein_position,Amino_acids,Codons,Existing_variation,Extra" --gff %s > %s 2>&1'%(vep, opt.input_vcf, outfile_vep_raw_tmp, opt.ref, gff_clean_compressed, vep_std)
 
+    cmd = '%s --input_file %s --format "vcf" --output_file %s --fasta %s -v --force_overwrite --tab --fields "Uploaded_variation,Location,Allele,Gene,Feature,Feature_type,Consequence,cDNA_position,CDS_position,Protein_position,Amino_acids,Codons,Existing_variation,Extra" --gff %s > %s 2>&1'%(vep, opt.input_vcf, outfile_vep_raw_tmp, opt.ref, gff_clean_compressed, vep_std) # --plugin Blosum62
     fun.run_cmd(cmd)
 
     # check that there are no errors in the output
@@ -181,8 +181,6 @@ mitochondrial_chromosomes_set = set(opt.mitochondrial_chromosome.split(","))
 # define the types of variants that are affected by the genetic code
 genCode_affected_vars = {'stop_retained_variant', 'inframe_deletion', 'inframe_insertion', 'frameshift_variant', 'synonymous_variant', 'missense_variant', 'stop_gained', 'stop_lost', 'protein_altering_variant'}
 
-
-
 # define the idxs of each type of genes
 typeGenes_to_idx = {"mito": vep_df.apply(lambda row: row["Location"].split(":")[0] in mitochondrial_chromosomes_set and len(set(row["Consequence"].split(",")).intersection(genCode_affected_vars))>0, axis=1),
 
@@ -208,11 +206,15 @@ for typeGenes, idx_affected_rows in typeGenes_to_idx.items():
     stop_codons = set([codon for codon in ["".join(s) for s in itertools.product(["A", "C", "T", "G"], repeat=3)] if str(Seq.Seq(codon).translate(table = genCode))=="*"])
 
     # modify the rows if there's something to modify
-    if len(affected_df)>0: affected_df[["Amino_acids","Consequence"]] = affected_df.apply(lambda r: fun.modify_DF_cols(r, genCode, stop_codons, genCode_affected_vars), axis=1)
+    if len(affected_df)>0: 
+        affected_df[["Amino_acids","Consequence"]] = affected_df.apply(lambda r: fun.modify_DF_cols(r, genCode, stop_codons, genCode_affected_vars), axis=1)
 
     # keep
     all_df = all_df.append(affected_df)
 
+
+# add the BLOSUM62 score for missense variants
+all_df["BLOSUM62_score"] = all_df.apply(fun.get_BLOSUM62_score_missense_variants, axis=1)
 
 #### CHECK THAT ALL THE VARIANTS HAVE BEEN ANNOTATED ####
 

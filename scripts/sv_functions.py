@@ -26,6 +26,7 @@ try:
     from math import ceil
     from Bio.Seq import Seq
     from Bio.SeqRecord import SeqRecord
+    from Bio.SubsMat import MatrixInfo
     import pickle
     import cylowess 
     import itertools
@@ -61,6 +62,8 @@ try:
     import psutil
     from sklearn.utils import resample
 
+    warnings.filterwarnings("ignore", category=FutureWarning)
+    warnings.filterwarnings("ignore", category=UserWarning)
 
     # import plotly 
     import plotly.offline as off_py
@@ -586,7 +589,36 @@ def modify_DF_cols(row, genetic_code, stop_codons, genCode_affected_vars):
     consequences.update(set(row["Consequence"].split(",")).difference(genCode_affected_vars))
 
     # return the aa and the consequences
-    return pd.Series({"Amino_acids": "%s/%s"%(aa_ref, aa_alt), "Consequence": ",".join(list(consequences))})
+    return pd.Series({"Amino_acids": "%s/%s"%(aa_ref, aa_alt), "Consequence": ",".join(list(consequences))  })
+
+def get_BLOSUM62_score_missense_variants(r):
+
+    """adds the blosum62 score """
+
+    # Blosum consequences
+    if "missense_variant" in r.Consequence.split(","):
+
+        # get aminoacids
+        aa_ref, aa_alt = r.Amino_acids.split("/")
+        if aa_ref==aa_alt: raise ValueError("aa can't be the same")
+
+        # check aas
+        matrix_dict = MatrixInfo.blosum62
+        all_considered_aa = set.union(*[set(x) for x in matrix_dict.keys()])
+        if aa_ref not in all_considered_aa: raise ValueError("unconsidered aa_ref: %s"%aa_ref)
+        if aa_alt not in all_considered_aa: raise ValueError("unconsidered aa_alt: %s"%aa_alt)
+
+        # define the substitution tuple
+        possible_subs_tuples = {(aa_ref, aa_alt), (aa_alt, aa_ref)}.intersection(set(matrix_dict.keys()))
+        if len(possible_subs_tuples)!=1: raise ValueError("there should be only one subs tuple in the matrix")
+        subs_tuple = next(iter(possible_subs_tuples))
+
+        # get the score
+        return cp.deepcopy(int(matrix_dict[subs_tuple]))
+       
+    # no score
+    else:
+        return 0
 
 def id_generator(size=10, chars=string.ascii_uppercase + string.digits, already_existing_ids=set()):
 
@@ -8041,7 +8073,6 @@ def set_position_to_max(pos, maxPos):
     if pos>maxPos: return maxPos
     else: return pos
 
-
 def get_insert_size_distribution(sorted_bam, replace=False, threads=4):
 
     """Takes a bam file of aligned paired end reads and retuns the mean and SD insert size of the library."""
@@ -8061,7 +8092,17 @@ def get_insert_size_distribution(sorted_bam, replace=False, threads=4):
         # run the calculation of insert sizes
         picard_insertSize_std = "%s.generating.std"%outfile_tmp
         print_if_verbose("calculating insert size distribution. The std is in %s"%picard_insertSize_std)
-        run_cmd("%s CollectInsertSizeMetrics HISTOGRAM_FILE=%s INPUT=%s OUTPUT=%s > %s 2>&1"%(picard_exec, hist_file, sampled_bam, outfile_tmp, picard_insertSize_std), env=EnvName_picard)
+
+        picard_jar = "%s/share/picard-2.18.26-0/picard.jar"%(picard_EnvDir)
+        if "JAVA_ARGS_CollectInsertSizeMetrics" in os.environ:
+            java_args = os.environ["JAVA_ARGS_CollectInsertSizeMetrics"]
+
+        else:
+            print_if_verbose("WARNING: There are no java arguments passed to java for the picard CollectInsertSizeMetrics run. If you want to set any args (e.g. -Xmx64g), you should set them by specifying an env variable 'JAVA_ARGS_CollectInsertSizeMetrics'. For instance, run 'export JAVA_ARGS_CollectInsertSizeMetrics=\"-Xmx64g\" before perSVade. This may be essential for handling reference geneoms with lots of contigs.")
+            java_args = ""
+
+        run_cmd("java %s -jar %s CollectInsertSizeMetrics HISTOGRAM_FILE=%s INPUT=%s OUTPUT=%s > %s 2>&1"%(java_args, picard_jar, hist_file, sampled_bam, outfile_tmp, picard_insertSize_std), env=EnvName_picard)
+        #run_cmd("%s CollectInsertSizeMetrics HISTOGRAM_FILE=%s INPUT=%s OUTPUT=%s > %s 2>&1"%(picard_exec, hist_file, sampled_bam, outfile_tmp, picard_insertSize_std), env=EnvName_picard) # old -> error with too many scaffolds
         remove_file(picard_insertSize_std)
         remove_file(sampled_bam)
 
@@ -9862,28 +9903,7 @@ def plot_heatmap_analyze_SV_parameters(df_evaluation, filename, accuracy_field):
     testID_fields = ["sampleID", "genomeID", "ploidy", "svtype"]
     df_evaluation["test_ID"] = df_evaluation[testID_fields].apply(lambda r: "|".join(r), axis=1)
 
-    # check that the IDs of SVs are consistent with different samples
-    for sID_A in sorted(set(df_evaluation.sampleID)):
-        for sID_B in sorted(set(df_evaluation.sampleID)):
-
-            ID_to_setIDs = {ID : set.union(*df_evaluation[df_evaluation.sampleID==ID].true_positives_predictedIDs.apply(lambda x: set(x.split("||")))) for ID in [IDs_A, IDs_B]}
-
-            dakjdahadgadhjadgjagdjhdg
-
-            print(ID_to_setIDs)
-
-            adkahghjdga
-
-
-    #'TP_predictedIDs',
-    #'false_negatives_knownIDs'
-
-    print(df_evaluation, df_evaluation.keys())
-
-    adjhgjdahgadd
-
     # get squared dataframe
-
     df = df_evaluation.sort_values(by=["parameterID"] + testID_fields).pivot(index="parameterID", columns="test_ID", values=accuracy_field)
     sorted_testID = sorted(df.columns)
 
@@ -9911,7 +9931,7 @@ def plot_heatmap_analyze_SV_parameters(df_evaluation, filename, accuracy_field):
     figsize = (len(df.columns)*0.15, len(df)*0.35)
 
     # get the clustermap
-    cm = sns.clustermap(df, col_cluster=False, row_cluster=False, col_colors=col_colors_df, cbar_kws={'label': accuracy_field}, xticklabels=False, square=False, figsize=figsize, cmap="rocket_r", linecolor="white", linewidths=0.5, yticklabels=df.index, vmax=1.0) # figsize=figsize, linecolor=linecolor, linewidths=linewidths, yticklabels=yticklabels
+    cm = sns.clustermap(df, col_cluster=False, row_cluster=False, col_colors=col_colors_df, cbar_kws={'label': accuracy_field, "orientation":"horizontal"}, xticklabels=False, square=False, figsize=figsize, cmap="rocket_r", linecolor="white", linewidths=0.5, yticklabels=df.index, vmax=1.0) # figsize=figsize, linecolor=linecolor, linewidths=linewidths, yticklabels=yticklabels
 
     # move the heatmap to the right
     hm_pos = cm.ax_heatmap.get_position()
@@ -9926,10 +9946,10 @@ def plot_heatmap_analyze_SV_parameters(df_evaluation, filename, accuracy_field):
     cc_pos = cm.ax_col_colors.get_position()
 
     # adjust colorbar position
-    height_colorbar = cc_pos.height*1.5
-    width_colorbar = (hm_pos.width / len(df.columns))*3
-    x0_cbar = hm_pos.x0 - (width_colorbar*4)
-    y0_cbar = (cc_pos.y0 + cc_pos.height) - height_colorbar
+    height_colorbar = cc_pos.height*0.5
+    width_colorbar = (hm_pos.width / len(df.columns))*14
+    x0_cbar = hm_pos.x0 + hm_pos.width - width_colorbar
+    y0_cbar = hm_pos.y0 - height_colorbar - (cc_pos.height*0.25)
     cm.cax.set_position([x0_cbar, y0_cbar, width_colorbar, height_colorbar])
 
     # add legend
@@ -9945,9 +9965,10 @@ def plot_heatmap_analyze_SV_parameters(df_evaluation, filename, accuracy_field):
 
         # each of the values
         for val, color in color_dict.items(): 
+            if not val in set(df_evaluation[field]): continue
             legend_elements.append(get_legend_element(color, val, edgecolor="gray"))
 
-    cm.cax.legend(handles=legend_elements, bbox_to_anchor=(0,1), loc="upper right") 
+    cm.ax_col_colors.legend(handles=legend_elements, bbox_to_anchor=(0,1), loc="upper right") 
 
     # save
     cm.savefig(filename)
@@ -20011,7 +20032,7 @@ def run_perSVade_severalSamples(paths_df, cwd, common_args, threads=4, sampleID_
     else: return True
 
 
-def get_bed_df_from_variantID(varID):
+def get_bed_df_from_variantID(varID, CNV_overlap_only_based_on_pct):
 
     """Takes a variant ID, such as the ones in SV_CNV vcf 'INFO_variantID'. It returns a df with all chromosome-start-end information that should be matched to be considered as the same variant.
 
@@ -20027,6 +20048,10 @@ def get_bed_df_from_variantID(varID):
         start = int(varID.split("|")[1].split(":")[1].split("-")[0])
         end = int(varID.split("|")[1].split(":")[1].split("-")[1])
         type_overlap = "both" # this means that both the positions and fraction of overlap should be matching
+        
+        # exception if set
+        if CNV_overlap_only_based_on_pct is True and  svtype in {"coverageDUP", "coverageDEL"}:
+            type_overlap = "pct"
 
         dict_bed = {0 : {"chromosome":chrom, "start":start, "end":end, "ID":varID, "type_overlap":type_overlap}}
 
@@ -20151,7 +20176,7 @@ def get_set_variants_overlapping(Iq, nvars, varID_q, varID_to_bedIDs, bedID_to_t
 
     return overlapping_vars
 
-def get_SV_CNV_df_with_common_variantID_acrossSamples(SV_CNV, outdir, pct_overlap, tol_bp, threads):
+def get_SV_CNV_df_with_common_variantID_acrossSamples(SV_CNV, outdir, pct_overlap, tol_bp, threads, CNV_overlap_only_based_on_pct=False):
 
     """
     Takes a SV_CNV df and returns it with the field 'variantID_across_samples'. It uses bedmap to be particularly efficient. The basis of this is that if two variants are of the same type and overlap by pct_overlap or tol_bp they are called to be the same.
@@ -20173,7 +20198,7 @@ def get_SV_CNV_df_with_common_variantID_acrossSamples(SV_CNV, outdir, pct_overla
         print("There are %i unique SV_CNVs"%len(all_variantIDs))
 
         # create a bed with all the regions that need to be matching in order to be considered the same
-        df_bed_all = pd.concat(map(get_bed_df_from_variantID, all_variantIDs)).sort_values(by=["chromosome", "start", "end"])
+        df_bed_all = pd.concat(map(lambda x: get_bed_df_from_variantID(x, CNV_overlap_only_based_on_pct), all_variantIDs)).sort_values(by=["chromosome", "start", "end"])
         df_bed_all.index = list(range(0, len(df_bed_all)))
 
         # write the bed
@@ -20185,7 +20210,7 @@ def get_SV_CNV_df_with_common_variantID_acrossSamples(SV_CNV, outdir, pct_overla
         print_if_verbose("running bedmap")
 
         # define the stderr
-        bedmap_stderr = "%s/running_bedmap_.stderr"%outdir
+        bedmap_stderr = "%s/running_bedmap.stderr"%outdir
 
         # run bedmap tol_bp
         bedmap_outfile = "%s/bedmap_outfile_range.txt"%outdir
@@ -20236,7 +20261,7 @@ def get_SV_CNV_df_with_common_variantID_acrossSamples(SV_CNV, outdir, pct_overla
     bedID_to_typeOverlapF = dict("IDs_overlap_" + df_bed_all.set_index("ID")["type_overlap"])
 
     # define a dict that represents the important fields of df_overlap
-    typeOverlapF_to_bedID_to_overlappingBedIDs  = {"IDs_overlap_both" : dict(df_overlap.IDs_overlap_both), "IDs_overlap_pos" : dict(df_overlap.IDs_overlap_pos)}
+    typeOverlapF_to_bedID_to_overlappingBedIDs  = {"IDs_overlap_both" : dict(df_overlap.IDs_overlap_both), "IDs_overlap_pos" : dict(df_overlap.IDs_overlap_pos), "IDs_overlap_pct" : dict(df_overlap.IDs_overlap_fraction)}
 
     # get varID_to_overlapping_varIDs
     print_if_verbose("iterating to generate varID_to_overlapping_varIDs on %i threads"%threads)
@@ -20252,13 +20277,9 @@ def get_SV_CNV_df_with_common_variantID_acrossSamples(SV_CNV, outdir, pct_overla
         pool.terminate()
 
     varID_to_overlapping_varIDs = dict(zip(sorted_varIDs, list_sets_overlappingVars))
+    print_if_verbose("There are %i/%i IDs with one other overlapping var"%(sum(list(map(lambda x: len(x)>1, varID_to_overlapping_varIDs.values()))), len(varID_to_overlapping_varIDs)))
 
-    # print
-    """
-    for varID, o_varIDs in varID_to_overlapping_varIDs.items(): 
-        if "coverage" not in varID: print(varID, o_varIDs)
 
-    """
     #################################################
 
     ########## ADD THE variantID_across_samples ##########

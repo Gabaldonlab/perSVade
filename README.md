@@ -9,4 +9,4 @@ perSVade runs structural variation (SV), small variant (SNPs and IN/DELs) and re
 
 The SV calling pipeline finds breakpoints with  [GRIDSS](https://github.com/PapenfussLab/gridss) and summarizes them into complex structural variants with [CLOVE](https://github.com/PapenfussLab/clove), with some added features. perSVade provides an automated benchmarking and parameter selection for these methods in any genome or sequencing run. This is useful for species without reccommended running and filtering parameters. In addition, it provides an automated report of the SV calling accuracy on simulations, useful to assess the confidence of the results. 
 
-Check the [wiki](https://github.com/Gabaldonlab/perSVade/wiki) in order to install and use the pipeline.
+Check the [wiki](https://github.com/Gabaldonlab/perSVade/wiki) in order to install and use the pipeline. Also, check our [video tutorial](https://www.youtube.com/watch?v=Nve8LGJ7AC0) for a quick introduction to perSVade.

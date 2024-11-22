@@ -81,9 +81,13 @@ else:
             
             # get the outdir
             all_args = sys.argv[2:]
-            outdir_Is = [I for I,a in enumerate(all_args) if a in {"-o", "--outdir"}] 
-            if len(outdir_Is)!=1: raise ValueError("you should provide -o / -outdir")
-            outdir = all_args[outdir_Is[0]+1]
+            if module=="run_several_modules":
+                outdir = all_args[1]
+
+            else:
+                outdir_Is = [I for I,a in enumerate(all_args) if a in {"-o", "--outdir"}] 
+                if len(outdir_Is)!=1: raise ValueError("you should provide -o / -outdir")
+                outdir = all_args[outdir_Is[0]+1]
 
             # make the tmpdir and set
             tmpdir_perSVade = "%s/.perSVade_tmpdir"%outdir

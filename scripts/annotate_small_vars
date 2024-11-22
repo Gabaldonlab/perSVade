@@ -166,7 +166,7 @@ df_vep["consequences_set"] = df_vep.Consequence.apply(lambda x: set(str(x).split
 df_vep["is_protein_altering"] = df_vep.Consequence.apply(fun.get_is_protein_altering_consequence)
 
 # generate a table that has all the variant annotation info
-varSpec_fields = ['#Uploaded_variation', 'Gene', 'Feature', 'Feature_type', 'Consequence', 'cDNA_position', 'CDS_position', 'Protein_position', 'Amino_acids', 'Codons', 'is_snp', 'is_protein_altering']
+varSpec_fields = ['#Uploaded_variation', 'Gene', 'Feature', 'Feature_type', 'Consequence', 'cDNA_position', 'CDS_position', 'Protein_position', 'Amino_acids', 'Codons', 'is_snp', 'is_protein_altering', "BLOSUM62_score"]
 
 # write the final vars
 fun.print_with_runtime("write annotations")

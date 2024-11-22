@@ -155,7 +155,7 @@ df_parms = pd.DataFrame(parms_dict).transpose().reset_index(drop=True)
 parm_fields = sorted(set(df_parms.keys()).difference({"parameterID"}))
 df_parms["parms_str"] = df_parms[parm_fields].apply(lambda r: "_".join(["%s=%s"%(f, r[f]) for f in parm_fields]), axis=1)
 
-# chhecks
+# checks
 default_gridss_blacklisted_regions, default_gridss_maxcoverage = fun.get_SVcalling_parameters("default")[0:2]
 if not all(df_parms.gridss_blacklisted_regions==default_gridss_blacklisted_regions): 
     raise ValueError("gridss_blacklisted_regions should be %s"%default_gridss_blacklisted_regions)
@@ -176,8 +176,13 @@ parms_str_to_rep_parmID = dict(df_SV_parameters_unique.set_index("parms_str").pa
 df_SV_parameters["rep_parameterID"] = df_SV_parameters.parms_str.apply(lambda x: parms_str_to_rep_parmID[x])
 fun.print_if_verbose("There are %i/%i unique parameters"%(len(df_SV_parameters_unique), len(df_SV_parameters)))
 
-#check_code_for_bugs_all_samples_get_same_accuracy
+# save
+fun.save_df_as_tab(df_SV_parameters[["parameterID", "rep_parameterID", "parameters_json"]], "%s/SV_parameters.tab"%opt.outdir)
 
+# add extra, unique parameters
+if not "default" in df_SV_parameters.parameterID:
+    df_extra_parms = pd.DataFrame({"parameterID":["default"], "parameters_json":["default"]})
+    df_SV_parameters_unique = pd.concat([df_SV_parameters_unique, df_extra_parms])
 
 # get the evaluation
 df_evaluation_all_file = "%s/df_evaluation_unique_parameters.tab"%opt.outdir
@@ -241,13 +246,66 @@ fun.print_if_verbose("Accuracy heatmaps")
 for accuracy_field in ["Fvalue", "precision", "recall"]:
     fun.plot_heatmap_analyze_SV_parameters(df_evaluation_all, "%s/heatmap_parameters_%s.pdf"%(opt.outdir, accuracy_field), accuracy_field)
 
+# sort parameters from less to more conservative
+
+# keep df
+df_parms_initial = df_parms.copy()
+
+# init with the general filters of perSVade
+sorting_fields = ["max_rel_coverage_to_consider_del", "min_rel_coverage_to_consider_dup", "gridss_blacklisted_regions", "gridss_maxcoverage"]
+ascending_list = [False, True, True, True]
+
+# add the gridss filterings
+gridss_sorting_fields = ["min_Nfragments", "min_af", "min_af_EitherSmallOrLargeEvent", "wrong_FILTERtags", "min_QUAL", "filter_noReadPairs", "filter_noSplitReads", "min_size", "filter_overlappingRepeats", "maximum_strand_bias", "maximum_microhomology", "maximum_lenght_inexactHomology", "dif_between_insert_and_del", "range_filt_DEL_breakpoints", "max_to_be_considered_small_event", "min_length_inversions", "filter_polyGC", "wrong_INFOtags"]
+sorting_fields += gridss_sorting_fields
+
+# rename some fields to be numeric, as defined in fun.g_filterName_to_filterValue_to_Number
+non_numeric_fields = {"wrong_FILTERtags", "filter_polyGC", "wrong_INFOtags", "filter_noReadPairs", "filter_noSplitReads", "filter_overlappingRepeats", "range_filt_DEL_breakpoints"}
+for f in non_numeric_fields: 
+    df_parms[f] = df_parms[f].apply(lambda x: fun.g_filterName_to_filterValue_to_Number[f][x])
+    if any(pd.isna(df_parms[f])): raise ValueError("nans in %s"%f)
+
+# add the ascendings
+for f in gridss_sorting_fields:
+    if f in non_numeric_fields: ascending_list.append(True)
+    else:
+
+        template_sorted_vals = fun.g_filterName_to_filtersList[f]
+        if template_sorted_vals==sorted(template_sorted_vals): ascending_list.append(True)
+        elif template_sorted_vals==list(reversed(sorted(template_sorted_vals))): ascending_list.append(False)
+        else: raise ValueError("invalid %s"%template_sorted_vals)
+
+# convert to floats
+for f in gridss_sorting_fields:
+    df_parms[f] = df_parms[f].apply(float)  
+
+# add the parameter ID
+sorting_fields.append("parameterID")
+ascending_list.append(True)
+
+print(sorting_fields, set(df_parms_initial["min_Nfragments"]))
 
 
+# check that you are considering all fields
+missing_fields = set(df_parms.keys()).difference(set(sorting_fields).union({"parms_str"}))
+if len(missing_fields)>0: raise ValueError("missing_fields: %s"%missing_fields)
 
-print(df_evaluation_all)
+# get the sorted filters filters
+df_parms_sorted = df_parms[sorting_fields].sort_values(by=sorting_fields, ascending=ascending_list)
+sorted_parameters = list(df_parms_sorted.parameterID)
 
-dakjghdkdgdajagdjadgjadgh
+# print the sorted parameters
+changing_fields = [f for f in sorting_fields if len(set(df_parms_initial[f]))>=2 and f!="parameterID"]
+print("These are the sorted parameters from least to most conservative (only showing changing fields)\n:", 
+    df_parms_initial.set_index("parameterID").loc[sorted_parameters][changing_fields])
 
+print("These are the fixed parameters:\n", "\n".join(["%s=%s"%(f, df_parms_initial[f].iloc[0]) for f in sorting_fields if len(set(df_parms_initial[f]))==1]))
+
+# write the least and most conservative parameters
+for parm_name, parm_idx in [("less_conservative", 0), ("more_conservative", -1)]:
+    parmID = sorted_parameters[parm_idx]
+    origin_json = df_SV_parameters[df_SV_parameters.parameterID==parmID].iloc[0].parameters_json
+    fun.rsync_file(origin_json, "%s/%s_parameters_%s.json"%(opt.outdir, parm_name, parmID))
 
 ########################
 
@@ -267,6 +325,7 @@ dakjghdkdgdajagdjadgjadgh
 
 # clean
 fun.delete_folder(tmpdir)
+fun.delete_folder(reference_genome_dir)
 
 # wite final file
 fun.generate_final_file_report_one_module(final_file, start_time, time.time())
