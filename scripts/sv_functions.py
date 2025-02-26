@@ -22907,8 +22907,15 @@ def get_bcftools_mpileup_output(ref, mpileup_output, threads, sorted_bam):
         #mpileup_output_tmp = "%s.tmp"%mpileup_output
         #run_cmd('%s mpileup -a "AD,DP" -O b -f %s -o %s --threads %i %s'%(bcftools, ref, mpileup_output_tmp, threads, sorted_bam))
 
-        # parallelized per chromosome
+        # define all chroms
         all_chroms = sorted(set(get_chr_to_len(ref).keys()))
+
+        # define the chroms in bam
+        chroms_bam =  set(str(subprocess.check_output("samtools view %s | cut -f3 | uniq"%sorted_bam, shell=True)).split("'")[1].split("\\n")).difference({""})
+        if len(chroms_bam.difference(set(all_chroms)))>0: raise ValueError("unexpected chroms in bam")
+
+        # parallelized per chromosome
+        all_chroms = [c for c in all_chroms if c in chroms_bam]
         chrom_to_mpileup_output = {chrom : "%s.%s.mpileup.bcf"%(mpileup_output, chrom) for chrom in all_chroms}
         inputs_fn = [(ref, chrom_to_mpileup_output[chrom], sorted_bam, chrom) for chrom in all_chroms]
 
