@@ -102,7 +102,7 @@ if len(not_allowed_features)>0:  print("WARNING: %s are features not parsed by V
 print("If something goes wrong you may want to validate that your GFF is ok (gt gff3validator gff)")
 n_exons = sum(df_gff.type_feature=="exon")
 n_mRNAs = sum(df_gff.type_feature=="mRNA")
-if n_exons<n_mRNAs: raise ValueError("Each mRNA must have at least one exon in the provided gff")
+if n_exons<n_mRNAs: raise ValueError("Each mRNA must have at least one exon in the provided gff. n_exons=%s, n_mRNAs=%s"%(n_exons, n_mRNAs))
 
 ##########################################
 

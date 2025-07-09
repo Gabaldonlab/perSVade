@@ -59,7 +59,7 @@ parser.add_argument("--gff", dest="gff", required=True, type=str, help="The gff 
 # target regions
 parser.add_argument("--target_regions", dest="target_regions", default=None, type=str, help="A bed file with target regions. Genes overlapping these target regions will be drawn. It should have 'chromosome', 'start' and 'end' . If none of --target_regions or --target_genes are specified, all variants will be drawn.")
 parser.add_argument("--target_genes", dest="target_genes", default=None, type=str, help="A string of comma sepparated genes ro draw. Only these genes and variants related to them will be shown. If not indicated, all genes will be shown. If none of --target_regions or --target_genes are specified, all variants will be drawn.")
-parser.add_argument("--sample_group_labels", dest="sample_group_labels", default="sample", type=str, help="A comma-sepparated string of the labels related to the different cathegories of 'bgcolor' from inout_data.")
+parser.add_argument("--sample_group_labels", dest="sample_group_labels", default="sample", type=str, help="A comma-sepparated string of the labels related to the different cathegories of 'bgcolor' from input_data.")
 
 parser.add_argument("-thr", "--threads", dest="threads", default=16, type=int, help="Number of threads, Default: 16")
 parser.add_argument("--fraction_y_domain_by_gene_browser", dest="fraction_y_domain_by_gene_browser", default=0.3, type=float, help="The fraction of the yaxis taken by the gene browser")

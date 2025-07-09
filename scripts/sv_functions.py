@@ -17625,6 +17625,7 @@ def get_correct_gff_and_gff_with_biotype(gff, replace=False):
         df_gff3 = pd.read_csv(correct_gff, skiprows=list(range(len(starting_lines))), sep="\t", names=["chromosome", "source", "type_feature", "start", "end", "score", "strand", "phase", "attributes"])
 
         def add_biotype(row):
+            if pd.isna(row["attributes"]): print("WARNING: 'attributes' is NaN in %s, which may cause errors"%dict(row))
             if "biotype" not in row["attributes"] and "gene_biotype" not in row["attributes"]: row["attributes"] += ";biotype=%s"%row["type_feature"]
             return row["attributes"]
 
@@ -22805,7 +22806,11 @@ def generate_table_changing_SVs_vs_background(paths_df, comparisons_df, outdir, 
                         vars_sample = set(SV_df[SV_df.sampleID==sampleID].variantID_across_samples)
                         SV_df_bgs = SV_df[(SV_df.sampleID.isin(bg_samples)) & ~(SV_df.variantID_across_samples.isin(vars_sample)) & ~(SV_df[field_overlaps_set].apply(lambda x: sampleID in x))]
                         var_to_samples = SV_df_bgs[["variantID_across_samples", "sampleID"]].drop_duplicates().groupby("variantID_across_samples").apply(lambda df_v: set(df_v.sampleID))
-                        lost_vars = set(var_to_samples[var_to_samples==bg_samples].index)
+
+                        if len(var_to_samples)==0:
+                            lost_vars = set()
+                        else:
+                            lost_vars = set(var_to_samples[var_to_samples==bg_samples].index)
 
                         # define the variants of the bg samples
                         def get_df_one_variant_multiple_samples(df_v):
@@ -22911,8 +22916,9 @@ def get_bcftools_mpileup_output(ref, mpileup_output, threads, sorted_bam):
         all_chroms = sorted(set(get_chr_to_len(ref).keys()))
 
         # define the chroms in bam
-        chroms_bam =  set(str(subprocess.check_output("samtools view %s | cut -f3 | uniq"%sorted_bam, shell=True)).split("'")[1].split("\\n")).difference({""})
-        if len(chroms_bam.difference(set(all_chroms)))>0: raise ValueError("unexpected chroms in bam")
+        chroms_bam =  set(str(subprocess.check_output("samtools view %s | cut -f3 | uniq"%sorted_bam, shell=True)).split("'")[1].split("\\n")).difference({"", "*"})
+        strange_bam_chroms = chroms_bam.difference(set(all_chroms))
+        if len(strange_bam_chroms)>0: raise ValueError("unexpected chroms in bam: %s"%strange_bam_chroms)
 
         # parallelized per chromosome
         all_chroms = [c for c in all_chroms if c in chroms_bam]
@@ -22986,3 +22992,60 @@ def get_df_evaluation_analyze_SV_parameters(input_sorted_bam, input_gridss_vcf, 
     df_evaluation["ploidy"] = ploidy
 
     return df_evaluation
+
+
+
+def get_fraction_coverage_by_exact_overlap(r):
+
+    """Gets fraction coverage by exact overlap"""
+    
+    longest_seq = max([r.ref_seq_len, r.query_seq_len])
+
+    if r.query_seq in r.ref_seq: return r.query_seq_len / longest_seq
+    elif r.ref_seq in r.query_seq: return r.ref_seq_len / longest_seq
+    else: return -1
+
+def get_fraction_coverage_global_aln_small_seqs(r, parms_dict, max_len=500):
+
+    """Gets a coverage for small seqs"""
+
+
+    if r.fraction_coverage!=-1: # already set
+        return r.fraction_coverage
+
+    elif r.query_seq_len<=max_len and r.ref_seq_len<=max_len: # short seq
+        #start_time = time.time()
+
+        # align
+        alignment = pairwise2.align.globalxx(r.ref_seq, r.query_seq, one_alignment_only=True)[0]
+        seq1_list = np.array(list(alignment[0]))
+        seq2_list = np.array(list(alignment[1]))
+
+        # get chunks of sequences that have an identity above the min, resembling blast
+        n_positions_covered = 0
+        for seq_idx in chunks(range(len(seq1_list)), 25):
+            n_identical_matches = sum(seq1_list[seq_idx] == seq2_list[seq_idx])
+            n_aln_sites = len(seq_idx)
+
+            if (n_identical_matches / n_aln_sites)>=parms_dict["min_identity_aln"]:
+                n_positions_covered += n_aln_sites
+
+        #print("aln len: %i. aln took %.3fs"%(len(alignment[0]), time.time()-start_time))
+        return n_positions_covered / len(seq1_list)
+
+    else: # long, unset seq
+        return -1
+
+def get_fraction_coverage_or_0_if_missmatch(r, min_fraction_overlap):
+
+    """Gets the fraction overlap to 0 if the len does not allow for it"""
+
+    longest_seq = max([r.ref_seq_len, r.query_seq_len])
+    if any([(len_seq/longest_seq)<min_fraction_overlap for len_seq in [r.ref_seq_len, r.query_seq_len]]): # not len overlapping
+        return -2
+
+    elif r.fraction_coverage!=-1: # already set
+        return r.fraction_coverage
+
+    else:
+        return -1
