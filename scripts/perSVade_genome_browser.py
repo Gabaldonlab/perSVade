@@ -46,6 +46,10 @@ Takes a table with the paths to several genome variation analyses. It generates 
     - smallVars_vcf: a vcf containing the small variants.
     - smallVars_var_annotation: The annotation with VEP of smallVars_vcf
     - bgcolor: The background color of each sample (as a color or HEX). It can be a set of ',' sepparated colors, in which case several colors will be drawn as columns.
+
+The main bottleneck of this script is the reading and filtering of the variant calling and annotation files. The filtered datasets are saved in '<outdir>/cache_files/', including '<samples>_SV_CNV.tab', '<samples>_SV_CNV_annot.tab', '<samples>_small_vars.tab' and/or '<samples>_small_vars_annot.tab', so that if you re-run the pipeline on the same variant datasets but different visualization parameters (--gff, --target_regions, --fraction_y_domain_by_gene_browser, ...) it is much faster.
+
+Also, another observed bottleneck comes from the fact that the input variant files contain all of them. You may pre-filter the datasets, e.g. keeping only variants affecting regions of interest, for a faster run.
 """
               
 parser = argparse.ArgumentParser(description=description, formatter_class=RawTextHelpFormatter)
@@ -67,7 +71,7 @@ parser.add_argument("--replace", dest="replace", action="store_true", help="Repl
 parser.add_argument("--only_affected_genes", dest="only_affected_genes", action="store_true", help="add only the affected genes in the browser")
 parser.add_argument("--vcf_fields_onHover", dest="vcf_fields_onHover", default="all", type=str, help="A comma-sepparated string of the interesting fields of the vcf to show. If you want fields from the 'INFO', set them as 'INFO_<field>'.")
 parser.add_argument("-mchr", "--mitochondrial_chromosome", dest="mitochondrial_chromosome", default="mito_C_glabrata_CBS138", type=str, help="The name of the mitochondrial chromosome. This is important if you have mitochondrial proteins for which to annotate the impact of nonsynonymous variants, as the mitochondrial genetic code is different. This should be the same as in the gff. If there is no mitochondria just put 'no_mitochondria'. If there is more than one mitochindrial scaffold, provide them as comma-sepparated IDs.")
-parser.add_argument("--gff_annotation_fields", dest="gff_annotation_fields", default="upmost_parent,ANNOTATION_product,ANNOTATION_Note", type=str, help="A comma-sepparated string of the interesting fields of the gff (it can include fields in the annotation by starting with 'ANNOTATION_') to add to the browser. By default, it will draw the upmost_parent of each feature, which is usually the ID of the corresponding gene.")
+parser.add_argument("--gff_annotation_fields", dest="gff_annotation_fields", default="upmost_parent,ANNOTATION_product,ANNOTATION_Note", type=str, help="A comma-sepparated string of the interesting fields of the gff (it can include fields in the annotation column (last of the gff) by starting with 'ANNOTATION_') to add to the browser. By default, it will draw the upmost_parent of each feature, which is usually the ID of the corresponding gene.")
 parser.add_argument("--interesting_features", dest="interesting_features", default="all", type=str, help="A comma-sepparated string of the interesting features of the gff to draw.")
 parser.add_argument("--gffID_to_hoverText", dest="gffID_to_hoverText", default=None, type=str, help="A tab sepparated file that has 'ID' and 'description' for some of the gff rows (related through the ID from annotation of the gff). For those IDs in whcich this is provided the description will override the hover text defined by interesting_features.")
 
@@ -94,6 +98,9 @@ data_dir = "%s/cache_files"%opt.outdir
 if opt.replace is True: fun.delete_folder(data_dir)
 fun.make_folder(data_dir)
 
+# clean previous files in cache dir
+gfun.clean_cache_dir_browser(data_dir)
+
 # gff
 new_gff = "%s/annotations.gff"%data_dir
 fun.soft_link_files(opt.gff, new_gff)
@@ -118,6 +125,9 @@ df["bgcolor"] = df.bgcolor.apply(lambda x: x.split(","))
 
 # load the gff df
 df_gff = fun.load_gff3_intoDF(opt.gff)
+
+# discard a few features
+df_gff = df_gff[~df_gff.feature.isin({"contig", "chromosome", "scaffold"})].copy()
 
 # add the gffID_to_hoverText
 if opt.gffID_to_hoverText is not None:
@@ -184,7 +194,7 @@ samples_colors_df = pd.DataFrame({sample_label : {sampleID : bgcolor[I] for samp
 
 # define the vcf_fields_onHover (by default it will only display certain fields)
 if opt.vcf_fields_onHover!="all": opt.vcf_fields_onHover = set(opt.vcf_fields_onHover.split(","))
-else: opt.vcf_fields_onHover = {"#CHROM", "POS", "INFO_BREAKEND_overlaps_repeats", "INFO_BREAKEND_real_AF", "INFO_BREAKENDIDs", "INFO_BREAKEND_coordinates", "INFO_BREAKEND_FILTER"}
+else: opt.vcf_fields_onHover = {"ID", "#CHROM", "POS", "INFO_variantID", "INFO_BREAKEND_overlaps_repeats", "INFO_BREAKEND_real_AF", "INFO_BREAKENDIDs", "INFO_BREAKEND_coordinates", "INFO_BREAKEND_FILTER", "FORMAT", "SAMPLE"}
 
 # define the gff_annotation_fields. These are extra fields of the gff_df that are written
 gff_annotation_fields = set(opt.gff_annotation_fields.split(","))
@@ -197,19 +207,19 @@ else: interesting_features = set(opt.interesting_features.split(","))
 min_cov, max_cov = [float(x) for x in opt.coverage_range.split(",")]
 
 # get the browser
+print("Getting browser...")
 filename = "%s/genome_variation_browser.html"%opt.outdir
 gfun.get_genome_variation_browser(df, samples_colors_df, target_regions, target_genes, df_gff, filename, data_dir, opt.reference_genome, threads=opt.threads, sample_group_labels=opt.sample_group_labels.split(","), only_affected_genes=opt.only_affected_genes, vcf_fields_onHover=opt.vcf_fields_onHover, replace=opt.replace, mitochondrial_chromosome=opt.mitochondrial_chromosome, gff_annotation_fields=gff_annotation_fields, fraction_y_domain_by_gene_browser=opt.fraction_y_domain_by_gene_browser, interesting_features=interesting_features, min_cov=min_cov, max_cov=max_cov)
 print("genome variation browser was written into %s"%filename)
 
-
-
-
+# clean cahe
+print("cleaning cache...")
+gfun.clean_cache_dir_browser(data_dir)
+print("finished...")
 
 """
 these are the sv_cnv .vcf all INFO tags
-
 {'INFO_QUAL', 'INFO_len_inserted_sequence_min', 'INFO_any_overlaps_repeats', 'INFO_bpIDs', 'INFO_best_FILTER', '#CHROM', 'INFO_length_inexactHomology_mean', 'POS', 'INFO_END', 'INFO_length_event_mean', 'INFO_BREAKEND_overlaps_repeats', 'INFO_SVTYPE', 'INFO_length_microHomology_max', 'INFO_BREAKEND_allele_frequency_SmallEvent', 'INFO_FILTER', 'INFO_allele_frequency_SmallEvent_mean', 'INFO_RELCOVERAGE_NEIGHBOR', 'INFO_length_event_max', 'INFO_allele_frequency', 'INFO_allele_frequency_max', 'INFO_BREAKPOINTIDs', 'INFO_worse_FILTER', 'INFO_real_AF_min', 'INFO_length_inexactHomology_min', 'INFO_QUAL_min', 'INFO_real_AF_max', 'INFO_len_inserted_sequence_max', 'INFO_QUAL_mean', 'INFO_allele_frequency_mean', 'INFO_length_event_min', 'INFO_length_inexactHomology', 'INFO_BREAKEND_QUAL', 'INFO_length_microHomology_mean', 'INFO_RELCOVERAGE', 'INFO_has_poly16GC', 'INFO_BREAKEND_FILTER', 'INFO_REGION_SPEARMANP', 'INFO_length_microHomology', 'ALT', 'INFO_real_AF_mean', 'INFO_length_inexactHomology_max', 'INFO_BREAKEND_length_microHomology', 'INFO_all_FILTERs', 'INFO_allele_frequency_min', 'INFO_BREAKEND_length_inexactHomology', 'INFO_allele_frequency_SmallEvent_max', 'INFO_REGION_PEARSONP', 'ID', 'INFO_BREAKEND_has_poly16GC', 'INFO_REGION_ABS_PEARSONR', 'INFO_BREAKEND_coordinates', 'INFO_REGION_ABS_SPEARMANR', 'INFO_length_microHomology_min', 'INFO_BREAKEND_real_AF', 'INFO_overlaps_repeats', 'INFO_allele_frequency_SmallEvent', 'INFO_allele_frequency_SmallEvent_min', 'INFO_BREAKEND_len_inserted_sequence', 'INFO_BREAKEND_allele_frequency', 'INFO_BREAKEND_length_event', 'INFO_real_AF', 'INFO_len_inserted_sequence_mean', 'INFO_BREAKENDIDs', 'INFO_BPS_TYPE', 'INFO_variantID', 'INFO_BREAKPOINTID', 'INFO_QUAL_max'}
-
 """
 
 

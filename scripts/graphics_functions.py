@@ -95,38 +95,53 @@ def get_integrated_vars_df(df, cache_dir, target_regions, target_genes, gff_df):
         SV_CNV = pd.DataFrame()
         SV_CNV_annot = pd.DataFrame()
 
+        # check if all annotations are the same
+        already_parsed_small_var_annot = set()
+        already_parsed_SV_CNV_annot = set()
+
         # go through each sample
-        for sampleID, r in df.iterrows():
+        for Is, (sampleID, r) in enumerate(df.iterrows()):
+            print("adding sample %s"%sampleID)
 
             # small vars
             if "smallVars_vcf" in r.keys():
 
-                # get dfs
+                # get vars
                 vcf = fun.get_vcf_df_with_INFO_as_single_fields(fun.get_df_and_header_from_vcf(r["smallVars_vcf"])[0])
-                annotation = pd.read_csv(r["smallVars_var_annotation"], sep="\t")
-
-                # add to df
                 vcf["sampleID"] = sampleID
-
                 small_vars = small_vars.append(vcf)
-                small_vars_annot = small_vars_annot.append(annotation)
+
+                # annot
+                if not r["smallVars_var_annotation"] in already_parsed_small_var_annot:
+                    annotation = pd.read_csv(r["smallVars_var_annotation"], sep="\t")
+                    small_vars_annot = small_vars_annot.append(annotation)
+                    already_parsed_small_var_annot.add(r["smallVars_var_annotation"])
 
             # SVs
             if "SV_CNV_vcf" in df.keys():
 
-                # get dfs
+                # get vars
                 vcf = fun.get_vcf_df_with_INFO_as_single_fields(fun.get_df_and_header_from_vcf(r["SV_CNV_vcf"])[0])
-                annotation = pd.read_csv(r["SV_CNV_var_annotation"], sep="\t")
-
-                # add to df
                 vcf["sampleID"] = sampleID
-
                 SV_CNV = SV_CNV.append(vcf)
-                SV_CNV_annot = SV_CNV_annot.append(annotation)
+
+                # annot
+                if not r["SV_CNV_var_annotation"] in already_parsed_SV_CNV_annot:
+                    annotation = pd.read_csv(r["SV_CNV_var_annotation"], sep="\t")
+                    SV_CNV_annot = SV_CNV_annot.append(annotation)
+                    already_parsed_SV_CNV_annot.add(r["SV_CNV_var_annotation"])
 
         # drop duplicates from the annotations
+        print("Saving...")
         small_vars_annot = small_vars_annot.drop_duplicates()
         SV_CNV_annot = SV_CNV_annot.drop_duplicates()
+
+        # keep only annotations of variants
+        if len(small_vars_annot)>0:
+            small_vars_annot = small_vars_annot[small_vars_annot["#Uploaded_variation"].isin(set(small_vars.ID))].copy()
+
+        if len(SV_CNV_annot)>0:
+            SV_CNV_annot = SV_CNV_annot[SV_CNV_annot["#Uploaded_variation"].isin(set(SV_CNV.ID))].copy()
 
         # save each of them
         fun.save_df_as_tab(small_vars, small_vars_file)
@@ -145,10 +160,12 @@ def get_integrated_vars_df(df, cache_dir, target_regions, target_genes, gff_df):
         return small_vars, small_vars_annot, SV_CNV, SV_CNV_annot
 
     # load them
+    print("loading vars dfs...")
     small_vars = fun.get_tab_as_df_or_empty_df(small_vars_file)
     small_vars_annot = fun.get_tab_as_df_or_empty_df(small_vars_annot_file)
     SV_CNV = fun.get_tab_as_df_or_empty_df(SV_CNV_file)
     SV_CNV_annot = fun.get_tab_as_df_or_empty_df(SV_CNV_annot_file)
+    print("filtering...")
 
     #######################################
 
@@ -861,6 +878,10 @@ def add_smallVars_to_fig(fig, small_vars, small_vars_annot, chrom_to_Xoffset, sa
     # add the var_annotation_str
     small_vars_annot["var_annotation_str"] = small_vars_annot.Gene.apply(str) + ": " + small_vars_annot.string_rep_variant + ": " +  small_vars_annot.Feature_productDescription
 
+    # add missings
+    if not "overlaps_repeats" in small_vars_annot.columns: 
+        small_vars_annot["overlaps_repeats"] = False
+
     # add some interesting fields that are related to collapsing the small_vars_annot
     small_vars[["is_protein_altering", "var_annotation_str", "overlaps_repeats"]] = small_vars.apply(get_annotation_info_small_vars_r, small_vars_annot=small_vars_annot, axis=1)
 
@@ -1258,7 +1279,9 @@ def get_genome_variation_browser(df_data, samples_colors_df, target_regions, tar
     #gff_df = gff_df[gff_df.upmost_parent_feature.isin({"gene", "pseudogene"})]
 
     # get all the variant dfs, already filtering out
+    print("Getting vars...")
     small_vars, small_vars_annot, SV_CNV, SV_CNV_annot = get_integrated_vars_df(df_data, cache_dir, target_regions, target_genes, gff_df)
+    print("Variants generated, Plotting...")
 
     # check that there are some vars to plot
     #if len(small_vars)==0 and len(SV_CNV)==0: raise ValueError("there are no variants to represent.")
@@ -1412,6 +1435,21 @@ def get_genome_variation_browser(df_data, samples_colors_df, target_regions, tar
     off_py.plot(fig, filename=filename, auto_open=False, config=config)
 
     return fig
+
+def clean_cache_dir_browser(data_dir):
+
+    """Cleans cache dir"""
+
+    files_remove = {"subwindows.bed", "target_regions.bed", "variants_locations.bed"}
+
+    for f in os.listdir(data_dir):
+        if f.startswith("annotations.gff") or f.startswith("reference_genome.fasta") or f.startswith("coverage_df") or f in files_remove: 
+            fun.remove_file(data_dir+"/"+f)
+
+
+
+
+
 
     
 

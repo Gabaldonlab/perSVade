@@ -315,7 +315,8 @@ consequence_to_abbreviation  = {'frameshift_variant':"FS",
                                  'intergenic_variant':"ig", 
                                  'incomplete_terminal_codon_variant':"incTermCodonVar",
                                  "coding_sequence_variant":"codSeqVar",
-                                 '':"empty"}
+                                 '':"empty",
+                                 '-':"empty"}
 
 # define a set of priorities of the variants                                                   
 var_to_IDX  =  {'frameshift_variant':0,
@@ -342,7 +343,9 @@ var_to_IDX  =  {'frameshift_variant':0,
                 'non_coding_transcript_exon_variant':16,
                 'non_coding_transcript_variant':17,
                 'intergenic_variant':18,
-                '':19}
+                '':19,
+                '-':20
+                }
 
 # map each type of variant to either CDS position, Codons or Protein_position, Amino_acids
 info_codons = ("c", "CDS_position", "Codons")
@@ -373,7 +376,8 @@ protVar_to_info =  {'frameshift_variant':info_aa,
                              'intergenic_variant':info_spliciingAndNoncoding,
                              "coding_sequence_variant":info_codons,
                              "incomplete_terminal_codon_variant":info_spliciingAndNoncoding,
-                             "":info_spliciingAndNoncoding}
+                             "":info_spliciingAndNoncoding,
+                             "-":info_spliciingAndNoncoding}
 
 # define the strings that have to be considered as NaN in the VCF parsing
 vcf_strings_as_NaNs = ['', '#N/A', '#N/A N/A', '#NA', '-1.#IND', '-1.#QNAN', '-NaN', '-nan', '1.#IND', '1.#QNAN', 'N/A', 'NULL', 'NaN', 'n/a', 'nan', 'null']
@@ -4560,7 +4564,7 @@ def write_clove_df_into_bedORbedpe_files_like_RSVSim(df_clove, fileprefix, refer
     # return the df_clove and the remaining SVs
     return df_clove, svtype_to_svfile
 
-def run_gridssClove_given_filters(sorted_bam, reference_genome, working_dir, median_coverage, replace=True, threads=4, gridss_blacklisted_regions="", gridss_VCFoutput="", gridss_maxcoverage=50000, median_insert_size=250, median_insert_size_sd=0, gridss_filters_dict=default_filtersDict_gridss, tol_bp=50, run_in_parallel=True, max_rel_coverage_to_consider_del=0.2, min_rel_coverage_to_consider_dup=1.8, replace_FromGridssRun=False, define_insertions_based_on_coverage=False):
+def run_gridssClove_given_filters(sorted_bam, reference_genome, working_dir, median_coverage, replace=True, threads=4, gridss_blacklisted_regions="", gridss_VCFoutput="", gridss_maxcoverage=50000, median_insert_size=250, median_insert_size_sd=0, gridss_filters_dict=default_filtersDict_gridss, tol_bp=50, run_in_parallel=True, max_rel_coverage_to_consider_del=0.2, min_rel_coverage_to_consider_dup=1.8, replace_FromGridssRun=False, define_insertions_based_on_coverage=False, previous_gridss_output=None):
 
     """This function runs gridss and clove with provided filtering and parameters. This can be run at the end of a parameter optimisation process. It returns a dict mapping each SV to a table, and a df with the gridss.
 
@@ -4591,6 +4595,18 @@ def run_gridssClove_given_filters(sorted_bam, reference_genome, working_dir, med
 
     # edit the replace, regarding if filtering from the run of GRIDSS
     if replace is True and replace_FromGridssRun is False: replace_FromGridssRun = True
+
+    # set the previous_gridss_output
+    if not previous_gridss_output is None:
+
+        # checks
+        df_gridss_previous = load_single_sample_VCF(previous_gridss_output)
+        strange_chroms_previous = set(df_gridss_previous["#CHROM"]).difference(set(get_chr_to_len(reference_genome)))
+        if len(strange_chroms_previous)>0:
+            raise ValueError("The file %s has chromosomes that are not in the reference, suggesting it is incorrect"%previous_gridss_output)
+
+        # set to the working_dir to skip gridss running
+        soft_link_files(previous_gridss_output, "%s/gridss_output.raw.vcf"%working_dir)
 
     # first obtain the gridss output if it is not provided
     if file_is_empty(gridss_VCFoutput) or replace is True: gridss_VCFoutput = run_gridss_and_annotateSimpleType(sorted_bam, reference_genome, working_dir, replace=replace, threads=threads, blacklisted_regions=gridss_blacklisted_regions, maxcoverage=gridss_maxcoverage)
