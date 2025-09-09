@@ -738,7 +738,7 @@ def get_weigthed_median(df, field, weight_field, type_algorithm="fast"):
     df[weight_field] = df[weight_field].apply(int)
 
     # check
-    if max(df[weight_field])==1 or min(df[weight_field])<0: 
+    if max(df[weight_field])==1 or min(df[weight_field])<0:
         raise ValueError("this function can't be applied here. %s"%(df[weight_field]))
 
     # unefficient calc
@@ -775,13 +775,15 @@ def get_median_coverage(coverage_df, mitochondrial_chromosome, coverage_field="m
     if "#chrom" in coverage_df.keys(): chrom_f = "#chrom"
     elif "chromosome" in coverage_df.keys(): chrom_f = "chromosome"
 
+    # return empty
+    if all(coverage_df[coverage_field]==0): return 0.0
+
     # define the set
     mitochondrial_chromosomes = set(mitochondrial_chromosome.split(","))
 
     # get the nuclear and not 0 idx
     if all([c in mitochondrial_chromosomes for c in set(coverage_df[chrom_f])]): idx = (coverage_df[coverage_field]>0)
     else: idx = (~coverage_df[chrom_f].isin(mitochondrial_chromosomes)) & (coverage_df[coverage_field]>0)
-
     df = coverage_df[idx]
 
     # get the len
@@ -15355,7 +15357,11 @@ def get_df_coverage_with_relative_coverage_and_for_each_typeGenome(df_coverage, 
     # add the relative coverage
     coverage_field_windows = "%scov_1"%average_cov_measure
     median_coverage = get_median_coverage(df_coverage, mitochondrial_chromosome, coverage_field=coverage_field_windows)
-    df_coverage["relative_coverage"] = df_coverage[coverage_field_windows]/median_coverage
+
+    if median_coverage==0:
+    	df_coverage["relative_coverage"] = 0.0
+    else:
+    	df_coverage["relative_coverage"] = df_coverage[coverage_field_windows]/median_coverage
 
     # define chroms
     all_chromosomes = set(get_chr_to_len(reference_genome))
@@ -15775,6 +15781,7 @@ def run_CNV_calling(sorted_bam, reference_genome, outdir, threads, replace, mito
 
         # add the plot position to the df_plot
         all_chromosomes, chrom_to_Xoffset = get_chrom_to_Xoffset_plot(reference_genome)
+        df_plot["chromosome"] = df_plot["chromosome"].apply(str)
         df_plot["Xoffset_plot"] = df_plot.chromosome.apply(lambda c: chrom_to_Xoffset[c])
         df_plot["plot_positionX"] = df_plot.start + df_plot.Xoffset_plot
 
