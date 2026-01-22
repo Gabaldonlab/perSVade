@@ -50,6 +50,7 @@ parser.add_argument("-f2", "--fastq2", dest="fastq2", required=True, help="The R
 parser.add_argument("-r", "--ref", dest="ref", required=True, help="Reference genome. It has to end with .fasta.")
 
 parser.add_argument("--min_chromosome_len", dest="min_chromosome_len", default=100000, type=int, help="The minimum length to consider chromosomes from the provided fasta for calculating the window length (used in may steps of perSVade to parallelize across fractions of the genome).")
+parser.add_argument("--predefined_window_l", dest="predefined_window_l", default=None, type=int, help="Window length to be used to parallelize across fractions of the genome. It overrides --min_chromosome_len")
 parser.add_argument("--skip_marking_duplicates", dest="skip_marking_duplicates", default=False, action="store_true", help="Don't mark the duplicate reads in the .bam file. This can save you some time.")
 parser.add_argument("--replace", dest="replace", action="store_true", help="Re-run all the steps by deleting the output directory.")
 parser.add_argument("--verbose", dest="verbose", action="store_true", default=False, help="Print a verbose log.")
@@ -129,7 +130,10 @@ fun.check_that_reads_are_compressed(opt.fastq1, opt.fastq2)
 
 # prepare the reference genome and the window length
 opt.ref, reference_genome_dir = fun.prepare_reference_genome_for_perSVade(opt.ref, opt.outdir, "no_mitochondria", None, opt.replace)
-fun.window_l = fun.get_perSVade_window_l(opt.ref, "no_mitochondria", opt.min_chromosome_len)
+
+# define the window_l
+if opt.predefined_window_l is None: fun.window_l = fun.get_perSVade_window_l(opt.ref, "no_mitochondria", opt.min_chromosome_len)
+else: fun.window_l = int(opt.predefined_window_l)
 
 # define the dest bam files
 bamfile = "%s/aligned_reads.bam"%opt.outdir

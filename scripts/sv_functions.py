@@ -1318,7 +1318,7 @@ def check_sorted_bam_has_correct_insert_sizes(input_sorted_bam, replace, threads
     npairs_insertSizeCalculation = sum(df_collectInsertSizes.READ_PAIRS.apply(int))
 
     # get the 1% of the number of pairs
-    npairs_1pct = count_number_read_pairs(sorted_bam, replace=replace, threads=threads)/100
+    npairs_1pct = count_number_read_pairs(sorted_bam, replace=replace, threads=threads, only_mapped=True)/100
 
     # debug if the fraction of read pairs used for insert size calculation is very low
     pct_reads_InsertSize = (npairs_insertSizeCalculation/npairs_1pct)*100
@@ -1719,8 +1719,13 @@ def align_short_reads(fastq1, fastq2, ref, outdir, bamfile, sorted_bam, index_ba
             print_if_verbose("the sorting bam std is in %s. Running on %i threads and %iMb RAM/thread"%(bam_sort_std, threads, max_MbRAM_per_thread))
             cmd_sort = "%s sort --threads %i -m %iM -o %s %s > %s 2>&1"%(samtools, threads, max_MbRAM_per_thread, sorted_bam_tmp, bamfile_MarkedDuplicates, bam_sort_std); run_cmd(cmd_sort)
 
+            # calculate the number of mapped reads
+            n_reads_mapped = int(str(subprocess.check_output("samtools view -F4 %s | cut -f1 | head | wc -l"%sorted_bam_tmp, shell=True)).split("'")[1].split("\\n")[0])
+            print_if_verbose("There are %i mapped reads"%n_reads_mapped)
+            
             # check that the sorted bam has correct insert sizes
-            check_sorted_bam_has_correct_insert_sizes(sorted_bam_tmp, replace, threads)
+            if n_reads_mapped>0:
+                check_sorted_bam_has_correct_insert_sizes(sorted_bam_tmp, replace, threads)
 
             # remove files
             for f in [bam_sort_std, bamfile_MarkedDuplicates, bamfile]: remove_file(f)
@@ -5235,6 +5240,7 @@ def run_trimmomatic(reads1, reads2, replace=False, threads=1):
         # check that the reads are correct
         #check_that_paired_reads_are_correct(trimmed_reads1, trimmed_reads2)
 
+
     # clean unnecessary files
     for raw_reads in [reads1, reads2]:
         directory = get_dir(raw_reads)
@@ -5244,7 +5250,8 @@ def run_trimmomatic(reads1, reads2, replace=False, threads=1):
 
             # same prefix, different file, remove
             filepath = "%s/%s"%(directory, f)
-            if f.startswith(raw_file) and f not in {raw_file, "%s.trimmed.fastq.gz"%raw_file} and os.path.isfile(filepath): remove_file(filepath)
+            if f.startswith(raw_file) and f not in {raw_file, "%s.trimmed.fastq.gz"%raw_file} and os.path.isfile(filepath):
+                remove_file(filepath)
 
     return trimmed_reads1, trimmed_reads2
 
@@ -8107,6 +8114,20 @@ def get_insert_size_distribution(sorted_bam, replace=False, threads=4):
         print_if_verbose("getting 1pct of the reads to calculate insert size")
         sampled_bam = downsample_bamfile_keeping_pairs(sorted_bam, fraction_reads=0.01, replace=replace, threads=threads)
 
+        # get the number of reads mapped in the sampled bam
+        n_reads_mapped_sampled = int(str(subprocess.check_output("samtools view -F4 %s | cut -f1 | head | wc -l"%sampled_bam, shell=True)).split("'")[1].split("\\n")[0])
+
+        # define the input
+        if os.path.getsize(sorted_bam)<20000 or n_reads_mapped_sampled==0:
+            input_CollectInsertSizeMetrics = sorted_bam
+
+        else:
+            input_CollectInsertSizeMetrics = sampled_bam
+            
+        # print for debugging        
+        print_if_verbose("size sorted_bam:", os.path.getsize(sorted_bam), "input metrics:", input_CollectInsertSizeMetrics, "n_reads_mapped (max 10)", n_reads_mapped_sampled)
+        #print(sorted_bam)
+
         # run the calculation of insert sizes
         picard_insertSize_std = "%s.generating.std"%outfile_tmp
         print_if_verbose("calculating insert size distribution. The std is in %s"%picard_insertSize_std)
@@ -8119,11 +8140,14 @@ def get_insert_size_distribution(sorted_bam, replace=False, threads=4):
             print_if_verbose("WARNING: There are no java arguments passed to java for the picard CollectInsertSizeMetrics run. If you want to set any args (e.g. -Xmx64g), you should set them by specifying an env variable 'JAVA_ARGS_CollectInsertSizeMetrics'. For instance, run 'export JAVA_ARGS_CollectInsertSizeMetrics=\"-Xmx64g\" before perSVade. This may be essential for handling reference geneoms with lots of contigs.")
             java_args = ""
 
-        run_cmd("java %s -jar %s CollectInsertSizeMetrics HISTOGRAM_FILE=%s INPUT=%s OUTPUT=%s > %s 2>&1"%(java_args, picard_jar, hist_file, sampled_bam, outfile_tmp, picard_insertSize_std), env=EnvName_picard)
+        insertSize_cmd = "java %s -jar %s CollectInsertSizeMetrics HISTOGRAM_FILE=%s INPUT=%s OUTPUT=%s > %s 2>&1"%(java_args, picard_jar, hist_file, input_CollectInsertSizeMetrics, outfile_tmp, picard_insertSize_std)
+        #print_if_verbose("Insert size cmd:\n%s\n"%insertSize_cmd)
+        run_cmd(insertSize_cmd, env=EnvName_picard)
         #run_cmd("%s CollectInsertSizeMetrics HISTOGRAM_FILE=%s INPUT=%s OUTPUT=%s > %s 2>&1"%(picard_exec, hist_file, sampled_bam, outfile_tmp, picard_insertSize_std), env=EnvName_picard) # old -> error with too many scaffolds
+
+        if file_is_empty(outfile_tmp): raise ValueError("cannot be empty %s"%outfile_tmp)
         remove_file(picard_insertSize_std)
         remove_file(sampled_bam)
-
         os.rename(outfile_tmp, outfile)
 
     # get stats
@@ -8274,7 +8298,7 @@ def get_read_length(bamfile, threads=4, nreads=5000, replace=False):
     return int(np.median([int(l.strip()) for l in open(readlen_dist_file, "r").readlines()]))
 
 
-def count_number_read_pairs(bamfile, replace=False, threads=4):
+def count_number_read_pairs(bamfile, replace=False, threads=4, only_mapped=False):
 
     """counts the total number of reads of a bamfile"""
 
@@ -8289,8 +8313,15 @@ def count_number_read_pairs(bamfile, replace=False, threads=4):
         remove_file(read_count_stderr)
 
         os.rename(read_count_file_tmp, read_count_file)
-
-    return [int(l.split()[0]) for l in open(read_count_file, "r").readlines() if " read1" in l][0]
+        
+    # get the # reads
+    if only_mapped is True:
+        lines_mapped = [int(l.split()[0]) for l in open(read_count_file, "r").readlines() if "itself and mate mapped" in l]
+        if len(lines_mapped)!=1: raise ValueError("should be 1")
+        return lines_mapped[0]
+        
+    else:
+        return [int(l.split()[0]) for l in open(read_count_file, "r").readlines() if " read1" in l][0]
 
 
 
@@ -15359,9 +15390,9 @@ def get_df_coverage_with_relative_coverage_and_for_each_typeGenome(df_coverage, 
     median_coverage = get_median_coverage(df_coverage, mitochondrial_chromosome, coverage_field=coverage_field_windows)
 
     if median_coverage==0:
-    	df_coverage["relative_coverage"] = 0.0
+        df_coverage["relative_coverage"] = 0.0
     else:
-    	df_coverage["relative_coverage"] = df_coverage[coverage_field_windows]/median_coverage
+        df_coverage["relative_coverage"] = df_coverage[coverage_field_windows]/median_coverage
 
     # define chroms
     all_chromosomes = set(get_chr_to_len(reference_genome))

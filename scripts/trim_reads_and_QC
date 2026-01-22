@@ -143,7 +143,8 @@ trimmed_reads1, trimmed_reads2 = fun.run_trimmomatic(dest_fastq1, dest_fastq2, r
 
 # remove unnecessary files
 for f in os.listdir(reads_dir): 
-    if f not in {fun.get_file(trimmed_reads1), fun.get_file(trimmed_reads2)}: fun.delete_file_or_folder("%s/%s"%(reads_dir, f))
+    if f not in {fun.get_file(trimmed_reads1), fun.get_file(trimmed_reads2), "raw_reads1.fastq.gz_fastqc_dir", "raw_reads2.fastq.gz_fastqc_dir"}: 
+        fun.delete_file_or_folder("%s/%s"%(reads_dir, f))
 
 # run FASTQC
 fun.print_with_runtime("Running FASTQC")
@@ -161,7 +162,7 @@ fastqc_report_2 = fun.run_fastqc(trimmed_reads2, opt.replace, opt.threads)
 
 # move the reads into outdir
 def get_zip_from_html(x): return "%s.zip"%(x.rstrip(".html"))
-for origin_path, dest_file in [(trimmed_reads1, "trimmed_reads1.fastq.gz"), (trimmed_reads2, "trimmed_reads2.fastq.gz"), (fastqc_report_1, "trimmed_reads1_fastqcReport.html"), (fastqc_report_2, "trimmed_reads2_fastqcReport.html"), (get_zip_from_html(fastqc_report_1), "trimmed_reads1_fastqc.zip"), (get_zip_from_html(fastqc_report_2), "trimmed_reads2_fastqc.zip")]:
+for origin_path, dest_file in [(trimmed_reads1, "trimmed_reads1.fastq.gz"), (trimmed_reads2, "trimmed_reads2.fastq.gz"), (fastqc_report_1, "trimmed_reads1_fastqcReport.html"), (fastqc_report_2, "trimmed_reads2_fastqcReport.html"), (get_zip_from_html(fastqc_report_1), "trimmed_reads1_fastqc.zip"), (get_zip_from_html(fastqc_report_2), "trimmed_reads2_fastqc.zip"), (reads_dir+"/raw_reads1.fastq.gz_fastqc_dir", "raw_reads1_fastqcDir"), (reads_dir+"/raw_reads2.fastq.gz_fastqc_dir", "raw_reads2_fastqcDir")]:
     os.rename(origin_path, "%s/%s"%(opt.outdir, dest_file))
 
 # clean
