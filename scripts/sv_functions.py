@@ -61,6 +61,7 @@ try:
     import scipy.stats as stats
     import psutil
     from sklearn.utils import resample
+    from io import StringIO
 
     warnings.filterwarnings("ignore", category=FutureWarning)
     warnings.filterwarnings("ignore", category=UserWarning)
@@ -239,6 +240,9 @@ ninja_dir = "%s/bin"%RepeatMasker_EnvDir
 # CONDA_ACTIVATING_CMD = "conda activate %s;"%EnvName
 #bcftools_latest = "%s && conda activate %s_bcftools_1.10.2_env && bcftools"%(SOURCE_CONDA_CMD, EnvName)
 #bcftools_latest_cmd = "%s && conda activate %s_bcftools_1.10.2_env && bcftools"%(SOURCE_CONDA_CMD, EnvName)
+
+# other vars
+precalculated_median_coverage = None
 
 
 # scripts that are of this pipeline
@@ -766,6 +770,8 @@ def get_weigthed_median(df, field, weight_field, type_algorithm="fast"):
 def get_median_coverage(coverage_df, mitochondrial_chromosome, coverage_field="mediancov_1"):
 
     """This function takes a coverage df and calculates the median for those non-0 coverage windows. It will return the median coverage weighted by length """
+    
+    if not precalculated_median_coverage is None: return precalculated_median_coverage 
 
     # keep
     if len(coverage_df)==0: raise ValueError("there should be some data in the coverage_df")
@@ -3079,7 +3085,7 @@ def simulate_SVs_in_genome(reference_genome, mitochondrial_chromosome, outdir, n
 
     ############################################################
 
-def get_mosdepth_coverage_per_windows_output_likeBamStats(fileprefix, sorted_bam, windows_bed, replace=False, extra_threads=0, chromosome_id="", average_cov_measure="median"):
+def get_mosdepth_coverage_per_windows_output_likeBamStats(fileprefix, sorted_bam, windows_bed, replace=False, extra_threads=0, chromosome_id="", average_cov_measure="median", thresholds_str="1"):
 
     """This function uses mosdepth to get the coverage for some regions in bed for a sorted_bam """
 
@@ -3101,16 +3107,17 @@ def get_mosdepth_coverage_per_windows_output_likeBamStats(fileprefix, sorted_bam
 
         # get the cmd
         mosdepth_std = "%s.generating.std"%fileprefix_tmp
-        #print_if_verbose("running mosdepth. The std is in %s "%mosdepth_std)
+        print_if_verbose("running mosdepth. The std is in %s "%mosdepth_std)
         use_median_str = {"median":"--use-median", "mean":""}[average_cov_measure] # to define median
 
         if chromosome_id=="": chrom_str = ""
-        else: chrom_str = "--chrom %s"%chromosome_id
+        else: chrom_str = "--chrom '%s'"%chromosome_id
 
-        cmd = "%s --threads %i --by %s --no-per-base --fast-mode --thresholds 1 %s %s %s %s > %s 2>&1"%(mosdepth, extra_threads, windows_1_based, use_median_str, chrom_str, fileprefix_tmp, sorted_bam, mosdepth_std) # mosdepth does not look at internal cigar operations or correct mate overlaps (recommended for most use-cases). It is also faster
+        cmd = "%s --threads %i --by %s --no-per-base --fast-mode --thresholds %s %s %s %s %s > %s 2>&1"%(mosdepth, extra_threads, windows_1_based, thresholds_str, use_median_str, chrom_str, fileprefix_tmp, sorted_bam, mosdepth_std) # mosdepth does not look at internal cigar operations or correct mate overlaps (recommended for most use-cases). It is also faster
 
         # run 
         run_cmd(cmd)
+        #print_if_verbose("cleaning files...")
         remove_file(mosdepth_std)
 
         # remove the 1-based file
@@ -3122,29 +3129,33 @@ def get_mosdepth_coverage_per_windows_output_likeBamStats(fileprefix, sorted_bam
         # keep
         os.rename(regions_file_tmp, regions_file)
         os.rename(thresholds_file_tmp, thresholds_file)
+        
 
     # get as dfs
+    #print_if_verbose("post-mosdepth parsing...")
     df_regions = pd.read_csv(regions_file, sep="\t", header=-1, names=["#chrom",  "start", "end", "%scov_1"%average_cov_measure]).drop_duplicates(subset=["#chrom",  "start", "end"])
-    df_thresholds = pd.read_csv(thresholds_file, sep="\t").drop_duplicates(subset=["#chrom",  "start", "end"])
-
+    df_thresholds = pd.read_csv(thresholds_file, sep="\t").drop_duplicates(subset=["#chrom",  "start", "end"]) # will have one col per thresholds_str (1X, 2X, 3X, ...)
+    
     # add the number of basepairs in each region that are covered by at least one
-    try: df = df_regions.merge(df_thresholds, on=["#chrom",  "start", "end"], validate="one_to_one").rename(columns={"1X":"nbp_more_than_1x"})
+    try: 
+        rename_dict = {"%sX"%t: "nbp_more_than_%sx"%t for t in thresholds_str.split(",")}
+        df = df_regions.merge(df_thresholds, on=["#chrom",  "start", "end"], validate="one_to_one").rename(columns=rename_dict)
+    
     except:
         print_if_verbose("!!!!!!!!regions:%s, \n thresholds:%s, \n prefix:%s"%(regions_file, thresholds_file, fileprefix))
         raise ValueError("There was an error with joining the mosdepth outputs")
 
+    # define function
     def convert_to_float(x):
-        
         """Takes a number and converts to float, and 0 if NaN"""
-
         if pd.isna(x): return 0.0
         else: return float(x)
 
-
     # add some trivial info
     df["length"] = df.end - df.start
-    df["nocoveragebp_1"] = df.length - df.nbp_more_than_1x
-    df["percentcovered_1"] = 100 - ((df.nocoveragebp_1/df.length) * 100).apply(convert_to_float)
+    for t in thresholds_str.split(","):
+        df["nocoveragebp_%s"%t] = df.length - df["nbp_more_than_%sx"%t]
+        df["percentcovered_%s"%t] = 100 - ((df["nocoveragebp_%s"%t]/df.length) * 100).apply(convert_to_float)
 
     # get as 0-based
     df["start"] = df.start - 1
@@ -3161,12 +3172,13 @@ def get_file_size(file, factor_size=1e9):
     
     return (os.stat(file).st_size)/factor_size
 
-def generate_coverage_per_window_file_parallel(reference_genome, destination_dir, sorted_bam, windows_file="none", replace=False, run_in_parallel=True, delete_bams=True, threads=4, average_cov_measure="median"):
+def generate_coverage_per_window_file_parallel(reference_genome, destination_dir, sorted_bam, windows_file="none", replace=False, run_in_parallel=True, delete_bams=True, threads=4, average_cov_measure="median", thresholds_str="1"):
 
     """Takes a reference genome and a sorted bam and runs a calculation of coverage per window (with bamstats04_jar) in parallel for sorted_bam, writing results under ddestination_dir. if window_file is provided then it is used. If not, it generates a file with non overlappping windows of length window_l"""
 
     # in the case that you have provided a window file
     if windows_file=="none":
+        print_if_verbose("Generating windows file...")
 
         make_folder(destination_dir)
 
@@ -3229,14 +3241,20 @@ def generate_coverage_per_window_file_parallel(reference_genome, destination_dir
 
         # define a prefix
         mosdepth_outprefix = "%s.generating"%coverage_file
-
+        
+        # define the chromosome_id, depending on if it is running on a single chrom
+        #chroms_calculation = sorted(set(pd.read_csv(windows_file, sep="\t", header=None, names=["chromosome", "start", "end"])["chromosome"]))
+        #if len(chroms_calculation)==1: chromosome_id = chroms_calculation[0]
+        #else: chromosome_id = ""
+            
         # run mosdepth
-        all_df =  get_mosdepth_coverage_per_windows_output_likeBamStats(mosdepth_outprefix, sorted_bam, windows_file, replace=replace, extra_threads=threads, chromosome_id="", average_cov_measure=average_cov_measure)
-
-        # get only the important fields
-        bamstats_fields = ["#chrom", "start", "end", "length", "%scov_1"%average_cov_measure, "nocoveragebp_1", "percentcovered_1"]
+        all_df =  get_mosdepth_coverage_per_windows_output_likeBamStats(mosdepth_outprefix, sorted_bam, windows_file, replace=replace, extra_threads=threads, chromosome_id="", average_cov_measure=average_cov_measure, thresholds_str=thresholds_str)
+        
+        # get only the important fields        
+        print_if_verbose("keeping certain fields")
+        bamstats_fields = ["#chrom", "start", "end", "length", "%scov_1"%average_cov_measure] + make_flat_listOflists([["nocoveragebp_"+t, "percentcovered_"+t] for t in thresholds_str.split(",")])
         all_df[bamstats_fields]
-
+        
         # check that it is not empty
         if len(all_df)==0: raise ValueError("There is no proper coverage calculation for %s on windows %s"%(sorted_bam, windows_file))
 
@@ -13336,7 +13354,7 @@ def remove_smallVarsCNV_nonEssentialFiles(outdir, ploidy):
 
                              }
 
-            if f not in files_to_keep: files_to_remove.append(file)
+            if f not in files_to_keep and not f.endswith("_keep_fields.tab"): files_to_remove.append(file)
 
     for f in files_to_remove: delete_file_or_folder(f)
 
@@ -15113,6 +15131,9 @@ def get_df_coverage_with_corrected_coverage(df_coverage, reference_genome, outdi
 
             # filter
             df_coverage = df_coverage[df_coverage.median_mappability>=min_median_mappability].copy()
+            
+        # check that there are no 0s
+        if len(df_coverage)==0: raise ValueError("can't have 0 windows after filtering")
 
         # add the raw distance to the telomere, in linear space
         chr_to_len = get_chr_to_len(reference_genome)
@@ -15387,8 +15408,9 @@ def get_df_coverage_with_relative_coverage_and_for_each_typeGenome(df_coverage, 
 
     # add the relative coverage
     coverage_field_windows = "%scov_1"%average_cov_measure
+    if len(df_coverage)==0: raise ValueError("there should be some coverage")
     median_coverage = get_median_coverage(df_coverage, mitochondrial_chromosome, coverage_field=coverage_field_windows)
-
+    
     if median_coverage==0:
         df_coverage["relative_coverage"] = 0.0
     else:
@@ -15449,17 +15471,20 @@ def get_df_coverage_with_uncorrected_normalized_coverage(df_coverage, reference_
         
         # filter per mappability
         df_coverage = df_coverage[df_coverage.median_mappability>=min_median_mappability].copy()
+        
+        # add fields if possible
+        if len(df_coverage)>0:
+                
+            # add the relative coverage and relative coverage to the genome to each df
+            df_coverage["chromosome"] = df_coverage.chromosome.apply(str)
+            df_coverage = get_df_coverage_with_relative_coverage_and_for_each_typeGenome(df_coverage, reference_genome, mitochondrial_chromosome, average_cov_measure=average_cov_measure)
 
-        # add the relative coverage and relative coverage to the genome to each df
-        df_coverage["chromosome"] = df_coverage.chromosome.apply(str)
-        df_coverage = get_df_coverage_with_relative_coverage_and_for_each_typeGenome(df_coverage, reference_genome, mitochondrial_chromosome, average_cov_measure=average_cov_measure)
+            # define a unique index
+            df_coverage.index = list(range(0, len(df_coverage)))
 
-        # define a unique index
-        df_coverage.index = list(range(0, len(df_coverage)))
-
-        # define the corrected relative coverage as the same one
-        def set_to_max_cov(x): return min([10.0, x])
-        df_coverage["corrected_relative_coverage"] = df_coverage.relative_coverage_to_genome.copy().apply(set_to_max_cov)
+            # define the corrected relative coverage as the same one
+            def set_to_max_cov(x): return min([10.0, x])
+            df_coverage["corrected_relative_coverage"] = df_coverage.relative_coverage_to_genome.copy().apply(set_to_max_cov)
 
         # save
         save_df_as_tab(df_coverage, outfile_final)
@@ -15507,31 +15532,34 @@ def get_df_coverage_with_corrected_coverage_background(df_coverage, df_coverage_
 
         # filter per mappability
         df_coverage = df_coverage[df_coverage.median_mappability>=min_median_mappability].copy()
+        
+        # add fields
+        if len(df_coverage)>0:
 
-        # add the relative coverage and relative coverage to the genome to each df
-        df_coverage = get_df_coverage_with_relative_coverage_and_for_each_typeGenome(df_coverage, reference_genome, mitochondrial_chromosome)
-        df_coverage_bg = get_df_coverage_with_relative_coverage_and_for_each_typeGenome(df_coverage_bg, reference_genome, mitochondrial_chromosome)
+            # add the relative coverage and relative coverage to the genome to each df
+            df_coverage = get_df_coverage_with_relative_coverage_and_for_each_typeGenome(df_coverage, reference_genome, mitochondrial_chromosome)
+            df_coverage_bg = get_df_coverage_with_relative_coverage_and_for_each_typeGenome(df_coverage_bg, reference_genome, mitochondrial_chromosome)
 
-        # define a unique index
-        df_coverage.index = list(range(0, len(df_coverage)))
-        df_coverage_bg.index = list(range(0, len(df_coverage_bg)))
+            # define a unique index
+            df_coverage.index = list(range(0, len(df_coverage)))
+            df_coverage_bg.index = list(range(0, len(df_coverage_bg)))
 
-        # add the realtive coverage to the genome of the background sample
-        df_coverage = df_coverage.merge(df_coverage_bg[["chromosome", "start", "end", "relative_coverage_to_genome"]], on=["chromosome", "start", "end"], how="left", validate="one_to_one", suffixes=("", "_background"))
+            # add the realtive coverage to the genome of the background sample
+            df_coverage = df_coverage.merge(df_coverage_bg[["chromosome", "start", "end", "relative_coverage_to_genome"]], on=["chromosome", "start", "end"], how="left", validate="one_to_one", suffixes=("", "_background"))
 
-        # add the corrected_relative_coverage so by normalising the coverage relative to the genome by the same one in the background. If the coverage in the bg is 0 we'll also set the coverage of the current to 0. The corrected relative coaverage will be maxed at 10.0
-        def get_corrected_relative_coverage_bg(r):
+            # add the corrected_relative_coverage so by normalising the coverage relative to the genome by the same one in the background. If the coverage in the bg is 0 we'll also set the coverage of the current to 0. The corrected relative coaverage will be maxed at 10.0
+            def get_corrected_relative_coverage_bg(r):
 
-            # get the vals
-            cov = r.relative_coverage_to_genome
-            cov_bg = r.relative_coverage_to_genome_background
+                # get the vals
+                cov = r.relative_coverage_to_genome
+                cov_bg = r.relative_coverage_to_genome_background
 
-            if cov_bg>0: return cov/cov_bg
-            elif cov_bg==0: return 0.0 # if the reference is deleted, set also as deleted the relative coverage
-            else: raise ValueError("the coverages %.2f and %.2f are not valid"%(cov, cov_bg))
+                if cov_bg>0: return cov/cov_bg
+                elif cov_bg==0: return 0.0 # if the reference is deleted, set also as deleted the relative coverage
+                else: raise ValueError("the coverages %.2f and %.2f are not valid"%(cov, cov_bg))
 
-        def set_to_max_cov(x): return min([10.0, x])
-        df_coverage["corrected_relative_coverage"] = df_coverage.apply(get_corrected_relative_coverage_bg, axis=1).apply(set_to_max_cov)
+            def set_to_max_cov(x): return min([10.0, x])
+            df_coverage["corrected_relative_coverage"] = df_coverage.apply(get_corrected_relative_coverage_bg, axis=1).apply(set_to_max_cov)
 
         # save
         save_df_as_tab(df_coverage, outfile_final)
@@ -15573,19 +15601,23 @@ def get_df_coverage_with_fraction_repeats_per_window(df_coverage, repeats_table,
         #if len(repeats_df)!=len(set(repeats_df.unique_repID)): raise ValueError("not unique ID")
         if any(repeats_df.start<0): raise ValueError("there can't be negative starts")
         if not all(repeats_df.start<repeats_df.end): raise ValueError("end has to be after start")
-
+        
+        # get inside 
+        curdir = os.getcwd()
+        os.chdir(tmpdir)
+        
         # generate bed with repeat regions
-        repeats_bed = "%s/repeats.bed"%tmpdir
+        repeats_bed = "./repeats.bed"
         bed_fields = ["chromosome", "start", "end"]
         repeats_df[bed_fields].sort_values(by=bed_fields).to_csv(repeats_bed, sep="\t", header=False, index=False) # ["unique_repID", "rep_score"]
 
         # add the fraction of repeats as a bed
-        coverage_bed = "%s/coverage.bed"%tmpdir
+        coverage_bed = "./coverage.bed"
         df_coverage = df_coverage.sort_values(by=bed_fields)
         df_coverage[bed_fields].to_csv(coverage_bed, sep="\t", header=False, index=False)
 
-        bedmap_outfile = "%s/outfile_bedmap.txt"%tmpdir
-        bedmap_stderr = "%s/bedmap.stderr"%tmpdir
+        bedmap_outfile = "./outfile_bedmap.txt"
+        bedmap_stderr = "./bedmap.stderr"
         run_cmd("%s --delim '\t' --bp-ovr 1 --bases-uniq-f %s %s > %s 2>%s"%(bedmap, coverage_bed, repeats_bed, bedmap_outfile, bedmap_stderr))
 
         # add the fraction 
@@ -15595,6 +15627,9 @@ def get_df_coverage_with_fraction_repeats_per_window(df_coverage, repeats_table,
         if any(df_coverage.fraction_repeats>1): raise ValueError("fraction can't be >1")
         if len(df_coverage)!=original_cov_len: raise ValueError("len changed")
         check_that_df_fields_have_noNaNs(df_coverage, list(df_coverage.keys()))
+        
+        # move back
+        os.chdir(curdir)
 
         # save
         save_object(df_coverage, df_coverage_file)
@@ -15624,7 +15659,7 @@ def run_CNV_calling(sorted_bam, reference_genome, outdir, threads, replace, mito
 
         # make a df with windows of the genome
         df_coverage = get_coverage_df_for_windows_of_genome(sorted_bam, reference_genome, outdir, replace, threads, window_size, average_cov_measure=average_cov_measure)
-
+                
         # sort df
         df_coverage["chromosome"] = df_coverage.chromosome.apply(str)
         df_coverage = df_coverage.sort_values(by=["chromosome", "start", "end"])
@@ -15643,7 +15678,7 @@ def run_CNV_calling(sorted_bam, reference_genome, outdir, threads, replace, mito
 
         else:
             df_coverage["fraction_repeats"] = 0.0
-
+            
         # filter windows
         original_df_cov_len = len(df_coverage)
         df_coverage = df_coverage[(df_coverage.fraction_N_bases<=max_fraction_N_bases) & (df_coverage.fraction_repeats<=max_fraction_repeats)].copy()
@@ -15654,8 +15689,11 @@ def run_CNV_calling(sorted_bam, reference_genome, outdir, threads, replace, mito
         chroms_one_window = sorted(chrom_to_nwindows[chrom_to_nwindows<2].index)
         chr_to_len = get_chr_to_len(reference_genome)
 
-        if len(chroms_one_window)>0: raise ValueError("There are %i chromosomes with <2 windows for CNV calling. These are the chroms and their lengths:\n\n%s\n\n Note that all chromosomes should have at least 2 windows for CNV calling. Reduce the window size (--window_size_CNVcalling) to include these or remove them from the reference genome before re-running this module (call_CNVs)."%(len(chroms_one_window), "\n".join(["%s (%i bp)"%(c, chr_to_len[c]) for c in chroms_one_window])))
-        
+        # throw error if you have to correct the coverage or you have to perform CNV calling
+        if len(chroms_one_window)>0 and (skip_coverage_correction is False or skip_CNV_calling is False): 
+            
+            raise ValueError("There are %i chromosomes with <2 windows for CNV calling. These are the chroms and their lengths:\n\n%s\n\n Note that all chromosomes should have at least 2 windows for CNV calling. Reduce the window size (--window_size_CNVcalling) to include these or remove them from the reference genome before re-running this module (call_CNVs)."%(len(chroms_one_window), "\n".join(["%s (%i bp)"%(c, chr_to_len[c]) for c in chroms_one_window])))
+            
         # add the files to remove
         files_folders_remove.append("%s/coverage_per_windows_%ibp.tab"%(outdir, window_size))
 
@@ -15687,6 +15725,17 @@ def run_CNV_calling(sorted_bam, reference_genome, outdir, threads, replace, mito
             df_coverage = get_df_coverage_with_uncorrected_normalized_coverage(df_coverage, reference_genome, outdir, replace, threads, mitochondrial_chromosome, average_cov_measure, min_median_mappability)
 
         else: raise ValueError("invalid args --skip_coverage_correction, --bg_sorted_bam_CNV")
+        
+        # debug and clean when there are no windows
+        if len(df_coverage)==0:
+            print("WARNING: There are no windows passing the coverage thresholds, skipping CNV calling!!!")
+                            
+            for f in files_folders_remove:
+                remove_file(f)
+                delete_folder(f)
+                
+            pd.DataFrame(columns=["chromosome", "start", "end"]).to_csv(final_df_coverage_file, sep="\t", header=True, index=False)    
+            return pd.DataFrame()
 
         # check that there are no NaNs and other checks
         if any(pd.isna(df_coverage.corrected_relative_coverage)): raise ValueError("There should be no NaNs in 'corrected_relative_coverage' ")
@@ -15698,7 +15747,7 @@ def run_CNV_calling(sorted_bam, reference_genome, outdir, threads, replace, mito
         
         # log
         print_if_verbose("Keeping %i/%i windows after filtering those that have low mappability"%(len(df_coverage), original_df_cov_len))
-
+        
         ############################################################
 
         ######## RUN ANEUFINDER ########
@@ -16480,9 +16529,11 @@ def get_vcf_with_joined_multialleles_diploid(input_vcf, output_vcf, reference_ge
 
         ####### EDITING GT #######
         print_if_verbose("finding consensus genotype")
-
+        
         # load into vcf
-        noMultiAlt_vcf = get_vcf_as_df_simple_oneSample(input_vcf_only_knownGT).set_index("ID", drop=False)
+        noMultiAlt_vcf = get_vcf_as_df_simple_oneSample(input_vcf_only_knownGT)
+        if len(noMultiAlt_vcf)==0: noMultiAlt_vcf = pd.DataFrame(columns=["ID", "GT"]) # debug empty        
+        noMultiAlt_vcf = noMultiAlt_vcf.set_index("ID", drop=False)
         vcf_df = get_vcf_as_df_simple_oneSample(output_vcf_tmp)
 
         if len(noMultiAlt_vcf)!=len(set(noMultiAlt_vcf.index)): raise ValueError("There are duplicate records in the split alleles")
@@ -16492,8 +16543,12 @@ def get_vcf_with_joined_multialleles_diploid(input_vcf, output_vcf, reference_ge
         var_to_GTaf = dict(noMultiAlt_vcf.GT.apply(lambda x: GT_to_fractionReads[x]))
 
         # get new GT
-        vcf_df["GT"] = vcf_df.apply(lambda r: get_consensus_GT_row_multialleles_diploid(r, var_to_GTaf), axis=1)
-
+        if len(vcf_df)>0:
+            vcf_df["GT"] = vcf_df.apply(lambda r: get_consensus_GT_row_multialleles_diploid(r, var_to_GTaf), axis=1)
+            
+        else:
+            vcf_df = pd.DataFrame(columns=["#CHROM",  "POS", "ID", "REF", "ALT", "QUAL", "FILTER", "INFO", "FORMAT", "GT", "DP", "AF", "AD"])
+            
         # debug
         df_noGT = vcf_df[vcf_df["GT"]=="."]
         if len(df_noGT)>0: print_if_verbose("WARNING: There are %i/%i loci that can't have an assigned GT. These will be skipped"%(len(df_noGT), len(vcf_df)))
@@ -22938,21 +22993,69 @@ def get_bcftools_mpileup_output_one_chrom(ref, mpileup_output_chrom, sorted_bam,
 
         # get bam for one chromosome
         sorted_bam_chrom = get_sorted_bam_one_chromosome(sorted_bam, chrom, threads=1)
-
-        # run
+        
+        # calculate the number of properly paired reads
+        n_properly_paired = [int(l.split()[0]) for l in get_command_stdout("samtools flagstat %s"%sorted_bam_chrom).split("\\n") if "properly paired" in l][0]
+                
+        # get mpileup with header
         mpileup_output_chrom_header = "%s.header"%mpileup_output_chrom
         run_cmd('%s mpileup -a "AD,DP" --output-type u -f %s -o %s %s'%(bcftools, ref_chrom, mpileup_output_chrom_header, sorted_bam_chrom))
 
-        mpileup_output_chrom_tmp = "%s.tmp"%mpileup_output_chrom
-        run_cmd("%s view %s | egrep -v '^#' > %s"%(bcftools, mpileup_output_chrom_header, mpileup_output_chrom_tmp))
-
-        # keep header also
+        # keep header
         mpileup_output_chrom_only_header = "%s.only_header"%mpileup_output_chrom
         run_cmd("%s view %s | egrep '^#' > %s"%(bcftools, mpileup_output_chrom_header, mpileup_output_chrom_only_header))
+                
+        # extract mpileup lines
+        mpileup_output_chrom_tmp = "%s.tmp"%mpileup_output_chrom
+        if n_properly_paired>0:
+            run_cmd("%s view %s | egrep -v '^#' > %s"%(bcftools, mpileup_output_chrom_header, mpileup_output_chrom_tmp))
+            
+        else:
+            run_cmd("touch %s"%mpileup_output_chrom_tmp)
 
         # clean and keep
         for f in [ref_chrom, ref_chrom+".fai", sorted_bam_chrom, sorted_bam_chrom+".bai", mpileup_output_chrom_header]: remove_file(f)
         os.rename(mpileup_output_chrom_tmp, mpileup_output_chrom)
+
+
+def get_command_stdout(cmd, env=EnvName, skip_rstrip=False, get_raw_str=False):
+    SOURCE_CONDA_CMD = "source %s/etc/profile.d/conda.sh"%CondaDir
+    cmd_prefix = "%s && conda activate %s &&"%(SOURCE_CONDA_CMD, env)
+    cmd_to_run = "%s %s"%(cmd_prefix, cmd)
+    str_output_initial = str(subprocess.check_output(cmd_to_run, shell=True))
+
+    if get_raw_str is True: return str_output_initial
+
+    # split
+    str_output = str_output_initial.split("'")[1]
+
+    if skip_rstrip is True:
+        return str_output
+
+    else:
+        return str_output.rstrip("\\n")
+    
+def load_bash_cmd_output_into_df(cmd, write_file=None, env=EnvName, header_cols=None):
+
+    """loads bash cmd output into df"""
+
+    # parse on the fly
+    if write_file is None:
+
+        # get text
+        text_df = "\n".join(map(lambda l: l.replace("\\t", "\t"), get_command_stdout(cmd, env=env).split("\\n")))
+
+        # get df
+        if header_cols is None:
+            return pd.read_csv(StringIO(text_df), sep="\t")
+        else:
+            return pd.read_csv(StringIO(text_df), sep="\t", header=None, names=header_cols)
+
+    else:
+
+        # write and read
+        run_cmd(cmd + " > %s"%write_file, env=env)
+        return pd.read_csv(write_file, sep="\t")
 
 def get_bcftools_mpileup_output(ref, mpileup_output, threads, sorted_bam):
 
@@ -22973,9 +23076,17 @@ def get_bcftools_mpileup_output(ref, mpileup_output, threads, sorted_bam):
         chroms_bam =  set(str(subprocess.check_output("samtools view %s | cut -f3 | uniq"%sorted_bam, shell=True)).split("'")[1].split("\\n")).difference({"", "*"})
         strange_bam_chroms = chroms_bam.difference(set(all_chroms))
         if len(strange_bam_chroms)>0: raise ValueError("unexpected chroms in bam: %s"%strange_bam_chroms)
-
+        
+        # load the idxstats
+        df_stats = load_bash_cmd_output_into_df("samtools idxstats %s"%sorted_bam, header_cols=["chrom", "chrom_len", "mapped_segments", "unmapped_segments"])
+        df_stats = df_stats[df_stats.chrom!="*"].copy()
+        df_stats = df_stats[df_stats.mapped_segments>0].copy()
+        df_stats = df_stats[df_stats.chrom.isin(chroms_bam)].copy()
+        if sorted(df_stats.chrom)!=sorted(chroms_bam): raise ValueError("shold be same chroms")
+        
         # parallelized per chromosome
-        all_chroms = [c for c in all_chroms if c in chroms_bam]
+        #all_chroms = [c for c in all_chroms if c in chroms_bam]
+        all_chroms = sorted(df_stats.chrom)
         chrom_to_mpileup_output = {chrom : "%s.%s.mpileup.bcf"%(mpileup_output, chrom) for chrom in all_chroms}
         inputs_fn = [(ref, chrom_to_mpileup_output[chrom], sorted_bam, chrom) for chrom in all_chroms]
 
@@ -22990,10 +23101,11 @@ def get_bcftools_mpileup_output(ref, mpileup_output, threads, sorted_bam):
             # close the pool
             pool.close()
             pool.terminate()
-
+            
         # merge all in one        
         print_if_verbose("Merging mpileups...")
         mpileup_output_tmp = "%s.tmp"%mpileup_output
+        print(all_chroms)
         header_file = "%s.only_header"%(chrom_to_mpileup_output[all_chroms[0]])
         run_cmd("cat '%s' %s > %s"%(header_file, " ".join(["'%s'"%chrom_to_mpileup_output[c] for c in all_chroms]), mpileup_output_tmp))
 

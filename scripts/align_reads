@@ -56,6 +56,7 @@ parser.add_argument("--replace", dest="replace", action="store_true", help="Re-r
 parser.add_argument("--verbose", dest="verbose", action="store_true", default=False, help="Print a verbose log.")
 parser.add_argument("--aligner", dest="aligner", default='bwa_mem', type=str, help="The aligner algorithm for the short reads. It should map the used to generate the --sortedbam. It can be any of 'hisat2', 'hisat2_no_spliced', 'segemehl', 'bowtie2', 'bowtie2_local', 'bwa_mem'. Most of the testing of perSVade was done on bwa_mem. For 'hisat2', 'hisat2_no_spliced', 'segemehl', the bam files get the secondary alignments removed. In addition, for segemehl the bam file will not contain unmapped reads, as these create compatibility problems.")
 parser.add_argument("--skip_coverage_calculation", dest="skip_coverage_calculation", default=False, action="store_true", help="Don't calc cov")
+parser.add_argument("--coverage_thresholds", dest="coverage_thresholds", default='1', type=str, help="Comma-sepparated thresholds to run average coverage calculations on. Default is '1'")
 
 # resources
 parser.add_argument("--fraction_available_mem", dest="fraction_available_mem", default=None, type=float, help="This pipeline calculates the available RAM for several steps, and it may not work well in some systems (i.e. HPC clusters). This parameter allows you to correct possible errors. If --fraction_available_mem is not provided (default behavior), this pipeline will calculate the available RAM by filling the memory, which may give errors. If you want to use all the available memory you should specify --fraction_available_mem 1.0. See the FAQ 'How does the --fraction_available_mem work?' from https://github.com/Gabaldonlab/perSVade/wiki/8.-FAQs for more info.")
@@ -126,7 +127,8 @@ if opt.tmpdir is not None:
     if not os.path.isdir(opt.tmpdir): raise ValueError("The folder that you specified with --tmpdir does not exist")
 
 # check that the reads are compressed
-fun.check_that_reads_are_compressed(opt.fastq1, opt.fastq2)
+if opt.fastq1!="none" and opt.fastq2!="none":
+	fun.check_that_reads_are_compressed(opt.fastq1, opt.fastq2)
 
 # prepare the reference genome and the window length
 opt.ref, reference_genome_dir = fun.prepare_reference_genome_for_perSVade(opt.ref, opt.outdir, "no_mitochondria", None, opt.replace)
@@ -145,7 +147,8 @@ if opt.skip_marking_duplicates is True: bwa_mem_MarkDuplicates = False
 else: bwa_mem_MarkDuplicates = True
 
 # check that the reads are different (this generated errors in the insert size calculation)
-fun.check_that_paired_reads_are_different(opt.fastq1, opt.fastq2, "%s/checking_that_reads_are_different"%opt.outdir)
+if opt.fastq1!="none" and opt.fastq2!="none":
+	fun.check_that_paired_reads_are_different(opt.fastq1, opt.fastq2, "%s/checking_that_reads_are_different"%opt.outdir)
 
 # align reads and mark duplicates
 fun.print_with_runtime("Aligning reads")
@@ -161,7 +164,7 @@ if opt.skip_coverage_calculation is False:
 	# run cov
 	fun.print_with_runtime("Calculating coverage per window")
 	destination_dir = "%s.calculating_windowcoverage"%sorted_bam
-	coverage_file = fun.generate_coverage_per_window_file_parallel(opt.ref, destination_dir, sorted_bam, windows_file="none", replace=opt.replace, run_in_parallel=True, delete_bams=True)
+	coverage_file = fun.generate_coverage_per_window_file_parallel(opt.ref, destination_dir, sorted_bam, windows_file="none", replace=opt.replace, run_in_parallel=True, delete_bams=True, thresholds_str=opt.coverage_thresholds)
 
 	# keep
 	os.rename(coverage_file, "%s/%s"%(opt.outdir, fun.get_file(coverage_file)))

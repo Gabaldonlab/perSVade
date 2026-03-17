@@ -79,7 +79,7 @@ parser.add_argument("--outdir_callCNVs", dest="outdir_callCNVs", default=None, h
 parser.add_argument("--replace", dest="replace", action="store_true", help="Re-run all the steps by deleting the output directory.")
 parser.add_argument("--verbose", dest="verbose", action="store_true", default=False, help="Print a verbose log.")
 parser.add_argument("--skip_PASS_generation", dest="skip_PASS_generation", action="store_true", help="Do not generate the PASS files.")
-
+parser.add_argument("--fields_keep", dest="fields_keep", default=None, help="The path to a file with a list of the fields to keep from the file variant_calling_ploidy<p>.tab. If provided, this pipeline will write an extra such .tab file with only these files.")
 
 # resources
 parser.add_argument("--fraction_available_mem", dest="fraction_available_mem", default=None, type=float, help="This pipeline calculates the available RAM for several steps, and it may not work well in some systems (i.e. HPC clusters). This parameter allows you to correct possible errors. If --fraction_available_mem is not provided (default behavior), this pipeline will calculate the available RAM by filling the memory, which may give errors. If you want to use all the available memory you should specify --fraction_available_mem 1.0. See the FAQ 'How does the --fraction_available_mem work?' from https://github.com/Gabaldonlab/perSVade/wiki/8.-FAQs for more info.")
@@ -164,12 +164,20 @@ all_expected_callers = {"freebayes", "HaplotypeCaller", "bcftools"}
 strange_callers = callers.difference(all_expected_callers)
 if len(strange_callers)>0 or len(callers)==0: raise ValueError("the --callers argument is empty or wrong. These are the strange callers: %s"%strange_callers)
 
+        
 # check the min_AF
 if opt.min_AF<=1 and opt.min_AF>=0: min_AF = float(opt.min_AF)
 else: raise ValueError("The value provided in --min_AF is incorrect")
 
 # if pooled seq is specified, just use freebayes
 if opt.pooled_sequencing is True: callers = {"freebayes"}
+
+# debug if there are no mapped reads
+df_map_stats = fun.load_bash_cmd_output_into_df("samtools idxstats %s"%sorted_bam, header_cols=["chrom", "chrom_len", "mapped_segments", "unmapped_segments"])
+df_map_stats = df_map_stats[(df_map_stats.chrom!="*") & (df_map_stats.mapped_segments>0)].copy()
+if len(df_map_stats)==0: 
+    print("WARNING: No mapped reads in bam")
+    callers = set()
 
 #### VARIANT CALLING #######
 
@@ -266,7 +274,7 @@ if opt.stop_before_VariantIntegration is True:
 variantInfo_table = "%s/variant_calling_ploidy%i.tab"%(opt.outdir, opt.ploidy)
 
 # debug the case in which there are no variants called by any program (only write an empty table)
-if all([len(fun.get_vcf_as_df_simple_oneSample(v))==0 for v in filtered_vcf_results]):
+if all([len(fun.get_vcf_as_df_simple_oneSample(v))==0 for v in filtered_vcf_results]) or len(filtered_vcf_results)==0:
     print("WARNING: There are no variants in any vcfs. Writing empty file %s and exiting..."%variantInfo_table)
 
     # write empty df with some generic fields
@@ -286,6 +294,31 @@ merged_vcf_all = fun.merge_several_vcfsSameSample_into_oneMultiSample_vcf(filter
 # get the variants in a tabular format
 df_variants = fun.write_variantInfo_table(merged_vcf_all, variantInfo_table, replace=opt.replace)
 
+# keep certain fields only
+if not opt.fields_keep is None:
+    print("Writing subset of fields...")
+    target_fields_keep = list(map(lambda l: l.strip(), open(opt.fields_keep, "r").readlines()))    
+    variantInfo_table_keep = variantInfo_table + ".%i_keep_fields.tab"%len(target_fields_keep)
+    
+    if fun.file_is_empty(variantInfo_table_keep):
+        
+        # keep df to write
+        df_variants_keep = df_variants.copy()
+            
+        # re-define some fields if some of the callers do not output anything
+        alg_to_short_alg = {"freebayes":"fb", "bcftools":"bt", "HaplotypeCaller":"HC"}
+        algs_0_vars = {alg_to_short_alg[fun.get_program_that_called_vcf(vcf_f)] for vcf_f in filtered_vcf_results if len(fun.load_bash_cmd_output_into_df(f"cat {vcf_f} | egrep -v '^##'"))==0}
+        algs_0_vars.update({alg_to_short_alg[alg] for alg in all_expected_callers if not alg in callers}) # add missings
+        missing_fields_0_vars = {f for f in target_fields_keep if f.split("_")[0] in algs_0_vars and not f in df_variants_keep.keys()}
+        field_to_empty_val = {"readsCovVar":0, "DP":0, "FILTER":".", "QUAL":0.0, "fractionReadsCov":0.0, "GT":"."}
+        
+        for f in missing_fields_0_vars:
+            df_variants_keep[f] = field_to_empty_val["_".join(f.split("_")[1:])]
+            
+        # write
+        df_variants_keep[target_fields_keep].copy().to_csv(variantInfo_table_keep+".tmp", sep="\t", index=False, header=True)
+        os.rename(variantInfo_table_keep+".tmp", variantInfo_table_keep)
+        
 # define the used programs as a list
 all_programs = sorted(callers)
 
@@ -384,7 +417,7 @@ for minPASS_algs in [1, 2, 3]:
 
         # write the split with split multialleles
         open(simplified_vcf_PASSalgs_tmp, "w").write("\n".join(header_lines) + "\n" + df_PASS[vcf_fields].to_csv(sep="\t", index=False, header=True))
-        
+                
         # write the split with joined multialleles
         if opt.ploidy==2 and opt.pooled_sequencing is False: fun.get_vcf_with_joined_multialleles_diploid(simplified_vcf_PASSalgs_tmp, simplified_vcf_PASSalgs_multialleleles, opt.ref, replace=opt.replace, threads=opt.threads)
 
