@@ -59,6 +59,8 @@ parser.add_argument("--replace", dest="replace", action="store_true", help="Re-r
 parser.add_argument("--verbose", dest="verbose", action="store_true", default=False, help="Print a verbose log.")
 parser.add_argument("--min_chromosome_len", dest="min_chromosome_len", default=100000, type=int, help="The minimum length to consider chromosomes from the provided fasta for calculating the window length (used in may steps of perSVade to parallelize across fractions of the genome).")
 parser.add_argument("--Gb_per_thread", dest="Gb_per_thread", default=8, type=int, help="# Gb per thread, for parallel running.")
+parser.add_argument("--SVtypes_plots", dest="SVtypes_plots", default=None, type=str, help="Comma-sepparated SVtypes to plot.")
+parser.add_argument("--min_val_heatmaps", dest="min_val_heatmaps", default=None, type=float, help="Min val for heatmaps.")
 
 # resources
 parser.add_argument("--fraction_available_mem", dest="fraction_available_mem", default=None, type=float, help="This pipeline calculates the available RAM for several steps, and it may not work well in some systems (i.e. HPC clusters). This parameter allows you to correct possible errors. If --fraction_available_mem is not provided (default behavior), this pipeline will calculate the available RAM by filling the memory, which may give errors. If you want to use all the available memory you should specify --fraction_available_mem 1.0. See the FAQ 'How does the --fraction_available_mem work?' from https://github.com/Gabaldonlab/perSVade/wiki/8.-FAQs for more info.")
@@ -244,7 +246,7 @@ df_evaluation_all = fun.get_tab_as_df_or_empty_df(df_evaluation_all_file)
 # plot heatmap 
 fun.print_if_verbose("Accuracy heatmaps")
 for accuracy_field in ["Fvalue", "precision", "recall"]:
-    fun.plot_heatmap_analyze_SV_parameters(df_evaluation_all, "%s/heatmap_parameters_%s.pdf"%(opt.outdir, accuracy_field), accuracy_field)
+    fun.plot_heatmap_analyze_SV_parameters(df_evaluation_all, "%s/heatmap_parameters_%s.pdf"%(opt.outdir, accuracy_field), accuracy_field, opt.SVtypes_plots, opt.min_val_heatmaps, opt.SV_parameters)
 
 # sort parameters from less to more conservative
 

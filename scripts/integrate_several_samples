@@ -84,6 +84,7 @@ parser.add_argument("--CNV_overlap_only_based_on_pct", dest="CNV_overlap_only_ba
 
 parser.add_argument("--replace", dest="replace", action="store_true", help="Re-run all the steps by deleting the output directory.")
 parser.add_argument("--verbose", dest="verbose", action="store_true", default=False, help="Print a verbose log.")
+parser.add_argument("--gzip_output", dest="gzip_output", default=False, action="store_true", help="Gzips the output.")
 
 # resources
 parser.add_argument("--fraction_available_mem", dest="fraction_available_mem", default=None, type=float, help="This pipeline calculates the available RAM for several steps, and it may not work well in some systems (i.e. HPC clusters). This parameter allows you to correct possible errors. If --fraction_available_mem is not provided (default behavior), this pipeline will calculate the available RAM by filling the memory, which may give errors. If you want to use all the available memory you should specify --fraction_available_mem 1.0. See the FAQ 'How does the --fraction_available_mem work?' from https://github.com/Gabaldonlab/perSVade/wiki/8.-FAQs for more info.")
@@ -185,7 +186,13 @@ fun.print_with_runtime("Running perSVade %s into %s with %.3f Gb of RAM and %i c
 #### PREPARE INPUTS ####
 
 # prepare the reference genome
+fun.print_if_verbose("Preparing ref genome...")
 opt.ref, reference_genome_dir = fun.prepare_reference_genome_for_perSVade(opt.ref, opt.outdir, opt.mitochondrial_chromosome, None, opt.replace)
+chrom_names = set(fun.get_chr_to_len(opt.ref).keys())
+if any(map(lambda c: any([x in c for x in ["<>", "|", ":"]]), chrom_names)): raise ValueError("there can't be : or | in chrom names")
+
+# get window length
+fun.print_if_verbose("Preparing window len...")
 fun.window_l = fun.get_perSVade_window_l(opt.ref, opt.mitochondrial_chromosome, opt.min_chromosome_len)
 
 # prepare the repeats file
@@ -250,23 +257,55 @@ if "integrate_SV_CNV_calls_outdir" in fields_paths_df:
             print("WARNING: You are keeping all SV_CNV variant fields (columns), which is not optimal. You may tune this with --fields_SV_CNVs")
 
         else: fields_SV_CNVs = list(map(lambda l: l.strip(), open(opt.fields_SV_CNVs).readlines()))
-
+        
+        # if the inputs are in .gz, redefine them
+        if all((paths_df.integrate_SV_CNV_calls_outdir + "/SV_and_CNV_variant_calling.vcf").apply(fun.file_is_empty)) and all(~(paths_df.integrate_SV_CNV_calls_outdir + "/SV_and_CNV_variant_calling.vcf.gz").apply(fun.file_is_empty)):
+            print("inputs as gz, uncompressing them...")
+            
+            # link in parallel for all folders
+            linked_integrate_SV_CNV_calls_outdirs = tmpdir + "/linked_integrate_SV_CNV_calls_outdirs"; fun.make_folder(linked_integrate_SV_CNV_calls_outdirs)
+            sID_to_linked_outdir = {sID: linked_integrate_SV_CNV_calls_outdirs + "/outdir_%s"%sID  for sID in sorted(paths_df.sampleID)}
+            sID_to_outdir = dict(paths_df.set_index("sampleID").integrate_SV_CNV_calls_outdir)
+            
+            with multiproc.Pool(opt.threads) as pool:
+                pool.starmap(fun.soft_link_folders, [(sID_to_outdir[sID], sID_to_linked_outdir[sID]) for sID in sorted(paths_df.sampleID)])
+                pool.close()
+                pool.terminate()
+                
+            # redefine
+            paths_df["integrate_SV_CNV_calls_outdir"] = paths_df.sampleID.apply(lambda s: sID_to_linked_outdir[s])
+                
+            # uncompress the vcfs
+            inputs_fn_decompressing = [(x,) for x in paths_df.integrate_SV_CNV_calls_outdir + "/SV_and_CNV_variant_calling.vcf.gz"]
+            with multiproc.Pool(opt.threads) as pool:
+                pool.starmap(fun.gunzip_file, inputs_fn_decompressing)
+                pool.close()
+                pool.terminate()
+                
         # get the concatenated SVs with 'sampleID'
         fun.print_with_runtime("Loading vcfs of single samples...")
-        inputs_fn = [(r.sampleID, "%s/SV_and_CNV_variant_calling.vcf"%r.integrate_SV_CNV_calls_outdir, fields_SV_CNVs) for I,r in paths_df.iterrows()]
+        SV_CNVs_df_file = tmpdir + "/SV_CNVs_df_integrated.py"
+        if fun.file_is_empty(SV_CNVs_df_file):
+            inputs_fn = [(r.sampleID, "%s/SV_and_CNV_variant_calling.vcf"%r.integrate_SV_CNV_calls_outdir, fields_SV_CNVs) for I,r in paths_df.iterrows()]
 
-        with multiproc.Pool(opt.threads) as pool:
-            SV_CNVs_df = pd.concat(pool.starmap(fun.load_SV_CNV_df_from_vcf_one_sample_keep_fields, inputs_fn)) 
-            pool.close()
-            pool.terminate()
-
+            with multiproc.Pool(opt.threads) as pool:
+                SV_CNVs_df = pd.concat(pool.starmap(fun.load_SV_CNV_df_from_vcf_one_sample_keep_fields, inputs_fn)) 
+                pool.close()
+                pool.terminate()
+            
+            fun.print_if_verbose("saving df...")
+            fun.save_object(SV_CNVs_df, SV_CNVs_df_file)
+        
+        fun.print_if_verbose("loading df...")
+        SV_CNVs_df = fun.load_object(SV_CNVs_df_file)
+                
         # add common ID
         fun.print_with_runtime("Add 'variantID_across_samples'...")
         outdir_common_variantID_acrossSamples = "%s/getting_common_variantID"%tmpdir
         fun.delete_folder(outdir_common_variantID_acrossSamples)
 
-        SV_CNVs_df = fun.get_SV_CNV_df_with_common_variantID_acrossSamples(SV_CNVs_df, outdir_common_variantID_acrossSamples, opt.pct_overlap/100, opt.tol_bp, opt.threads, CNV_overlap_only_based_on_pct=opt.CNV_overlap_only_based_on_pct)
-
+        SV_CNVs_df = fun.get_SV_CNV_df_with_common_variantID_acrossSamples(SV_CNVs_df, outdir_common_variantID_acrossSamples, opt.pct_overlap/100, opt.tol_bp, opt.threads, CNV_overlap_only_based_on_pct=opt.CNV_overlap_only_based_on_pct, ref_genome=opt.ref)
+        
         # print stats
         var_to_nsamples = SV_CNVs_df.groupby("variantID_across_samples").apply(lambda x: len(set(x.sampleID)))
         fun.print_with_runtime("There are %i/%i SVs/CNVs that are in >1 sample"%(len(set(var_to_nsamples[var_to_nsamples>1].index)), len(set(SV_CNVs_df.variantID_across_samples))))
@@ -276,9 +315,13 @@ if "integrate_SV_CNV_calls_outdir" in fields_paths_df:
 
         # save
         fun.save_df_as_tab(SV_CNVs_df, SV_CNVs_file)
-
+        
     # save as vcf for variant annotation
     fun.convert_tab_variant_file_to_vcf_for_annotation(SV_CNVs_file, "%s/integrated_SVs_CNVs_annotation_fields.vcf"%opt.outdir)
+    
+    # gzip outputs
+    print(opt.gzip_output)
+    error_of_gzipping
 
 # create changing SVs file
 if "call_SVs_outdir" in fields_paths_df:
@@ -309,6 +352,7 @@ if "call_CNVs_outdir" in fields_paths_df:
 
 # clean
 fun.delete_folder(tmpdir)
+fun.delete_folder(opt.outdir+"/reference_genome_dir")
 
 # wite final file
 fun.generate_final_file_report_one_module(final_file, start_time, time.time())

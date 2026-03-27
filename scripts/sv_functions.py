@@ -404,7 +404,7 @@ g_meaningful_FILTER_tags = ("NO_ASSEMBLY", "INSUFFICIENT_SUPPORT", "LOW_QUAL")
 g_min_Nfragments_l = [1, 2, 3, 4, 5, 8, 10, 15, 20, 30]
 g_min_af_l = [0.0, 0.01, 0.05, 0.1, 0.2, 0.5, 0.9, 0.99]
 g_min_af_EitherSmallOrLargeEvent_l = [0.0, 0.05, 0.1, 0.2, 0.5, 0.9, 0.99]
-g_wrong_FILTERtags_l = [("",), ("NO_ASSEMBLY",), ("NO_ASSEMBLY", "INSUFFICIENT_SUPPORT"), ("NO_ASSEMBLY", "LOW_QUAL"), ("LOW_QUAL", "INSUFFICIENT_SUPPORT"), g_meaningful_FILTER_tags, g_all_FILTER_tags] 
+g_wrong_FILTERtags_l = [("",), ("NO_ASSEMBLY",), ("NO_ASSEMBLY", "INSUFFICIENT_SUPPORT"), ("NO_ASSEMBLY", "LOW_QUAL"), ("LOW_QUAL", "INSUFFICIENT_SUPPORT"), ('INSUFFICIENT_SUPPORT', 'LOW_QUAL'), g_meaningful_FILTER_tags, g_all_FILTER_tags] 
 g_filter_polyGC_l = [False, True]
 g_filter_noSplitReads_l = [False, True]
 g_filter_noReadPairs_l = [False, True]
@@ -1913,10 +1913,21 @@ def format_translocation_row_simulateSV(r, chr_to_len, start_pos=1):
         # map each END to the coordinates
         coords_df = cp.deepcopy(pd.DataFrame({end : {field :  r["%s%s"%(field, end)] for field in important_fields} for end in {"A", "B"}}).transpose()) # columns are the coords and the index is each end
 
-        # add the breakpoint
-        coords_df["breakpoint"] = coords_df.apply(lambda c: sorted({c["End"], c["Start"]}.difference({start_pos, chr_to_len[c["Chr"]]}))[0], axis=1)
+        # add the breakpoint coordinate
+        def get_breakpoint_coord(c):
+            coords_no_chrom_boundaries = sorted({c["End"], c["Start"]}.difference({start_pos, chr_to_len[c["Chr"]]}))
+            if len(coords_no_chrom_boundaries)>0: # there is one coordinate in he middle of the chromosome
+                return coords_no_chrom_boundaries[0]
+            
+            elif (c["Start"], c["End"]) in {(start_pos, start_pos), (chr_to_len[c["Chr"]], chr_to_len[c["Chr"]])}: # if it affects a chrom boundary, set it
+                return start_pos
+            
+            else:
+                raise ValueError("%s is invalid due to %s"%(dict(r), dict(c)))
+            
+        coords_df["breakpoint"] = coords_df.apply(get_breakpoint_coord, axis=1) # problematic line
         coords_df = coords_df.set_index("Chr", drop=False)
-
+        
         # add the segment which is copied (3end or 5end)
         start_to_segment = {**{start_pos:"5end"}, **{s:"3end" for s in set(coords_df["Start"]).difference({start_pos})}}
         coords_df["segment"] = coords_df.Start.apply(lambda x: start_to_segment[x])
@@ -3401,8 +3412,8 @@ def load_single_sample_VCF(path):
         print_if_verbose("running load_single_sample_VCF")
 
         # load the df
-        df = pd.read_csv(path, sep="\t", header = len([l for l in open(path, "r") if l.startswith("##")]))
-
+        df = pd.read_csv(path, sep="\t", header = len([l for l in open(path, "r") if l.startswith("##")])) # old
+        
         # change the name of the last column, which is the actual sample data
         df = df.rename(columns={df.keys()[-1]: "DATA"})
 
@@ -4396,7 +4407,11 @@ def write_clove_df_into_bedORbedpe_files_like_RSVSim(df_clove, fileprefix, refer
 
     """
     #print_if_verbose("getting SVs from clove")
-
+    
+    # debug to only include problematic chroms
+    #debug_chroms = {"GWHEUUU00000003.1_3", "Oleur061Scf0769_2966_212337-226849"}
+    #df_clove = df_clove[(df_clove["#CHROM"].isin(debug_chroms)) | (df_clove["chromosome"].isin(debug_chroms))].copy()
+    
     # initialize as a copy
     df_clove_initial = cp.deepcopy(df_clove)
     df_clove = cp.deepcopy(df_clove)
@@ -4429,11 +4444,13 @@ def write_clove_df_into_bedORbedpe_files_like_RSVSim(df_clove, fileprefix, refer
     if any([x in set(df_clove.SVTYPE) for x in {"ITX1", "ITX2", "IVD", "INVTX1", "INVTX2"}]) and "translocations" in svtypes_to_consider:
 
         # balanced translocations 5with5
+        print_if_verbose("balanced translocations 5with5")
         df_balTRA_5with5_or_3with3 = get_bedpeDF_for_clovebalTRA_5with5_or_3with3(df_clove, tol_bp=tol_bp) # here the index is not balanced
         considered_idxs += make_flat_listOflists(df_balTRA_5with5_or_3with3.index); df_clove = df_clove.loc[set(df_clove.index).difference(set(considered_idxs))]
         series_considered_idxs["balTRA_5with5_or_3with3"] = make_flat_listOflists(df_balTRA_5with5_or_3with3.index)
 
         # balanced translocations 5with3 (these are the ones with an IVD field, assigned by clove)
+        print_if_verbose("df_balTRA_5with3_IVD")
         df_balTRA_5with3_IVD = df_clove[(df_clove.SVTYPE=="IVD") & ((df_clove.START - df_clove.END)<=tol_bp)].apply(lambda r: get_bedpe_for_clovebalTRA_5with3(r, chr_to_len), axis=1)
         considered_idxs += list(df_balTRA_5with3_IVD.index); df_clove = df_clove.loc[set(df_clove.index).difference(set(considered_idxs))]
         series_considered_idxs["balTRA_5with3_IVD"] = list(df_balTRA_5with3_IVD.index)
@@ -4450,6 +4467,7 @@ def write_clove_df_into_bedORbedpe_files_like_RSVSim(df_clove, fileprefix, refer
         important_fields = ["ChrA", "StartA", "EndA", "ChrB", "StartB", "EndB", "Balanced"]
         translocations_dfs =  [df_balTRA_5with5_or_3with3, df_balTRA_5with3]
         if any([len(d)>0 for d in translocations_dfs]): 
+            print_if_verbose("Merging translocations...")
 
             # non empty df
             df_tra = pd.concat([d[important_fields] for d in translocations_dfs if all([f in d.keys() for f in important_fields])], sort=True)
@@ -4479,7 +4497,7 @@ def write_clove_df_into_bedORbedpe_files_like_RSVSim(df_clove, fileprefix, refer
         #print_if_verbose("There are %i translocations"%len(df_tra))
 
     #############################
-
+    
     ####### INVERSIONS ##########
     if "CIV" in set(df_clove.SVTYPE) and "inversions" in svtypes_to_consider:
 
@@ -4640,10 +4658,14 @@ def run_gridssClove_given_filters(sorted_bam, reference_genome, working_dir, med
     ##### GET A LIST OF FILTERED BREAKPOINTS ########
     #################################################
 
-    
     # get the output of gridss into a df
-    print_if_verbose("getting gridss")
-    df_gridss = add_info_to_gridssDF(load_single_sample_VCF(gridss_VCFoutput), reference_genome, median_insert_size=median_insert_size, median_insert_size_sd=median_insert_size_sd) # this is a dataframe with some info
+    print_if_verbose("getting gridss")    
+    gridss_VCFoutput_with_added_info = gridss_VCFoutput + ".added_info.py"
+    if file_is_empty(gridss_VCFoutput_with_added_info):
+        df_gridss = add_info_to_gridssDF(load_single_sample_VCF(gridss_VCFoutput), reference_genome, median_insert_size=median_insert_size, median_insert_size_sd=median_insert_size_sd) # this is a dataframe with some info
+        save_object(df_gridss, gridss_VCFoutput_with_added_info)
+        
+    df_gridss = load_object(gridss_VCFoutput_with_added_info)
 
     # filter according to gridss_filters_dict
     print_if_verbose("filtering gridss")
@@ -4672,33 +4694,46 @@ def run_gridssClove_given_filters(sorted_bam, reference_genome, working_dir, med
     # write
     df_bedpe.to_csv(raw_bedpe_file, sep="\t", header=False, index=False)
     print_if_verbose("there are %i breakpoints"%len(df_bedpe))
-
+    
     ###################################
 
     #################################################
     #################################################
     #################################################
-
-    # run clove without checking filtering
+    
+    # generate df_clove
+    print_if_verbose("Running clove...")
+    df_clove_file = working_dir + "/df_clove_final.py"
     outfile_clove = "%s.clove.vcf"%(raw_bedpe_file)
-    run_clove_filtered_bedpe(raw_bedpe_file, outfile_clove, sorted_bam, replace=replace_FromGridssRun, median_coverage=median_coverage, median_coverage_dev=1, check_coverage=False) #  REPLACE debug
+    if file_is_empty(df_clove_file):
 
-    # add the filter of coverage to the clove output
-    df_clove = get_clove_output_with_coverage(outfile_clove, reference_genome, sorted_bam, median_coverage, replace=replace_FromGridssRun, run_in_parallel=run_in_parallel, delete_bams=run_in_parallel, threads=threads)
+        # run clove without checking filtering
+        run_clove_filtered_bedpe(raw_bedpe_file, outfile_clove, sorted_bam, replace=replace_FromGridssRun, median_coverage=median_coverage, median_coverage_dev=1, check_coverage=False) #  REPLACE debug
 
-    if len(df_clove)==0: return {}, df_gridss
+        # add the filter of coverage to the clove output
+        df_clove = get_clove_output_with_coverage(outfile_clove, reference_genome, sorted_bam, median_coverage, replace=replace_FromGridssRun, run_in_parallel=run_in_parallel, delete_bams=run_in_parallel, threads=threads)
 
-    # define the coverage filtering based on the type_coverage_to_filterTANDEL
-    df_clove["coverage_FILTER"] = df_clove.apply(lambda r: get_covfilter_cloveDF_row_according_to_SVTYPE(r, max_rel_coverage_to_consider_del=max_rel_coverage_to_consider_del, min_rel_coverage_to_consider_dup=min_rel_coverage_to_consider_dup, coverage_field="mean_rel_coverage_to_neighbor"), axis=1)
+        if len(df_clove)==0: return {}, df_gridss
 
+        # define the coverage filtering based on the type_coverage_to_filterTANDEL
+        df_clove["coverage_FILTER"] = df_clove.apply(lambda r: get_covfilter_cloveDF_row_according_to_SVTYPE(r, max_rel_coverage_to_consider_del=max_rel_coverage_to_consider_del, min_rel_coverage_to_consider_dup=min_rel_coverage_to_consider_dup, coverage_field="mean_rel_coverage_to_neighbor"), axis=1)
+                
+        # save
+        save_object(df_clove, df_clove_file)
+        
+    df_clove = load_object(df_clove_file)
+    
     # annotated clove 
+    print_if_verbose("Getting RSVSim-like files")
     fileprefix = "%s.structural_variants"%outfile_clove
-
     remaining_df_clove, svtype_to_SVtable = write_clove_df_into_bedORbedpe_files_like_RSVSim(df_clove, fileprefix, reference_genome, sorted_bam, tol_bp=tol_bp, replace=replace_FromGridssRun, svtypes_to_consider={"insertions", "deletions", "inversions", "translocations", "tandemDuplications", "remaining"}, run_in_parallel=run_in_parallel, define_insertions_based_on_coverage=define_insertions_based_on_coverage)
 
     # merge the coverage files in one
     #merge_coverage_per_window_files_in_one(sorted_bam)
-
+    
+    # remove a couple of temporary files
+    for f in [df_clove_file, gridss_VCFoutput_with_added_info]: remove_file(f)
+    
     return svtype_to_SVtable, df_gridss
 
 
@@ -7705,8 +7740,13 @@ def get_svtype_to_svfile_and_df_gridss_from_call_SVs_outdir(outdir, reference_ge
     """This function takes from the call_SVs outdir the svdict and the df_gridss"""
 
     # define the vcf
-    gridss_vcf = "%s/gridss_output.raw.vcf"%outdir 
-
+    gridss_vcf = "%s/gridss_output.raw.vcf"%outdir
+    
+    # uncompress if provided as compressed 
+    if file_is_empty(gridss_vcf) and not file_is_empty(gridss_vcf+".gz"):
+        run_cmd(f"gunzip -c {gridss_vcf}.gz > {gridss_vcf}.tmp")
+        os.rename(gridss_vcf+".tmp", gridss_vcf)
+                
     # get the SV files
     svtype_to_svfile = {svtype : "%s/%s.tab"%(outdir, svtype)  for svtype in {"insertions", "deletions", "tandemDuplications", "translocations", "inversions"}}
     svtype_to_svfile["remaining"] = "%s/unclassified_SVs.tab"%outdir 
@@ -9956,7 +9996,7 @@ def get_benchmarking_df_for_testSVs_from_trainSV_filterSets(test_SVdict, outdir,
 ################# GRAPHICS FUNCTIONS #################
 ######################################################
 
-def plot_heatmap_analyze_SV_parameters(df_evaluation, filename, accuracy_field):
+def plot_heatmap_analyze_SV_parameters(df_evaluation, filename, accuracy_field, SVtypes_plots, min_val_heatmaps, SV_parameters_table):
 
     """plots the heatmap analyzing SV paramteres for different optimize paramteters sets"""
 
@@ -9965,6 +10005,13 @@ def plot_heatmap_analyze_SV_parameters(df_evaluation, filename, accuracy_field):
     # keep
     df_evaluation = df_evaluation.copy()
     df_evaluation = df_evaluation[df_evaluation.svtype!="remaining"].copy()
+    
+    # filter out some
+    if not SVtypes_plots is None:
+        set_SVtypes_plots = set(SVtypes_plots.split(","))
+        strage_set_SVtypes_plots = set_SVtypes_plots.difference(set(df_evaluation.svtype))
+        if len(strage_set_SVtypes_plots)>0: raise ValueError("invalid --SVtypes_plots: %s"%strage_set_SVtypes_plots)
+        df_evaluation = df_evaluation[df_evaluation.svtype.isin(set_SVtypes_plots)].copy()
 
     # add test ID
     testID_fields = ["sampleID", "genomeID", "ploidy", "svtype"]
@@ -9973,8 +10020,12 @@ def plot_heatmap_analyze_SV_parameters(df_evaluation, filename, accuracy_field):
     # get squared dataframe
     df = df_evaluation.sort_values(by=["parameterID"] + testID_fields).pivot(index="parameterID", columns="test_ID", values=accuracy_field)
     sorted_testID = sorted(df.columns)
-
-
+    
+    # sort by parameters as provided in --SV_parameters
+    sorted_parameters = [p for p in pd.read_csv(SV_parameters_table, sep="\t")[["parameterID", "parameters_json"]].parameterID if p in set(df.index)]
+    if not "default" in sorted_parameters and "default" in set(df_evaluation.parameterID): sorted_parameters += ["default"]
+    df = df.loc[sorted_parameters].copy()
+    
     # define visual mappings
     sorted_samples = sorted(set(df_evaluation.sampleID))
     sampleID_to_color = get_value_to_color(sorted_samples, n=len(sorted_samples), palette="tab20")[0]
@@ -9998,7 +10049,7 @@ def plot_heatmap_analyze_SV_parameters(df_evaluation, filename, accuracy_field):
     figsize = (len(df.columns)*0.15, len(df)*0.35)
 
     # get the clustermap
-    cm = sns.clustermap(df, col_cluster=False, row_cluster=False, col_colors=col_colors_df, cbar_kws={'label': accuracy_field, "orientation":"horizontal"}, xticklabels=False, square=False, figsize=figsize, cmap="rocket_r", linecolor="white", linewidths=0.5, yticklabels=df.index, vmax=1.0) # figsize=figsize, linecolor=linecolor, linewidths=linewidths, yticklabels=yticklabels
+    cm = sns.clustermap(df, col_cluster=False, row_cluster=False, col_colors=col_colors_df, cbar_kws={'label': accuracy_field, "orientation":"horizontal"}, xticklabels=False, square=False, figsize=figsize, cmap="rocket_r", linecolor="white", linewidths=0.5, yticklabels=df.index, vmax=1.0, vmin=min_val_heatmaps) # figsize=figsize, linecolor=linecolor, linewidths=linewidths, yticklabels=yticklabels
 
     # move the heatmap to the right
     hm_pos = cm.ax_heatmap.get_position()
@@ -11076,7 +11127,18 @@ def run_GridssClove_optimising_parameters(sorted_bam, reference_genome, outdir, 
 
     return outdir_gridss_final
 
+def gunzip_file(file_gz):
+    
+    """Gunzips file in place"""
 
+    if not file_gz.endswith(".gz"): raise ValueError("should end with gz")
+    uncompressed_file = ".".join(file_gz.split(".")[0:-1])
+    
+    if file_is_empty(uncompressed_file):
+        
+        run_cmd(f"gunzip -c {file_gz} > {uncompressed_file}.tmp")
+        os.rename(uncompressed_file+".tmp", uncompressed_file)
+        
 def generate_jobarray_file(jobs_filename, name):
     
     """ 
@@ -20141,7 +20203,46 @@ def run_perSVade_severalSamples(paths_df, cwd, common_args, threads=4, sampleID_
 
     else: return True
 
-
+def can_be_chrom_pos_str(pos_str):
+    
+    """returns whether it is a possible <chrom>:<pos> or <chrom>:<start-end> str"""
+    
+    if pos_str.count(":")!=1:
+        return False
+    
+    return all([x.isdigit() for x in pos_str.split(":")[1].split("-")])
+    
+def get_SV_locations_split_into_two_positions(locations_str):
+    
+    """"Gets locations split into two positions"""
+    
+    # identify the positions in the string that have it
+    slash_positions = [pos for pos, char in enumerate(locations_str) if char == "-"] 
+    
+    # handle it
+    if len(locations_str)==0:
+        raise ValueError("should have some -")
+    
+    elif len(locations_str)==1:
+        return locations_str.split("-")
+    
+    else:
+        if locations_str.count(":")!=2: raise ValueError("should have 2 :")
+        
+        candidate_split_locations = []
+        for slash_p in slash_positions:
+            
+            posA = locations_str[0:slash_p]
+            posB = locations_str[slash_p+1:]
+            
+            if all([can_be_chrom_pos_str(pos) for pos in [posA, posB]]):
+                candidate_split_locations.append((posA, posB))
+                
+        if len(candidate_split_locations)!=1: 
+            raise ValueError("invalid %s"%locations_str)
+        
+        return candidate_split_locations[0]
+                
 def get_bed_df_from_variantID(varID, CNV_overlap_only_based_on_pct):
 
     """Takes a variant ID, such as the ones in SV_CNV vcf 'INFO_variantID'. It returns a df with all chromosome-start-end information that should be matched to be considered as the same variant.
@@ -20166,9 +20267,15 @@ def get_bed_df_from_variantID(varID, CNV_overlap_only_based_on_pct):
         dict_bed = {0 : {"chromosome":chrom, "start":start, "end":end, "ID":varID, "type_overlap":type_overlap}}
 
     elif svtype.endswith("like"):
+            
+        # old way, assuming no '-' in chrom names
+        # posA, posB = varID.split("|")[1].split("-") # this does not work if there are '-' in chrom names
+        
+        # new way allowing '-' in chrom names. E.g. INVTX2like|GWHEUUU00000023.1_23:25907656-Oleur061Scf2071_6098_727773-797441:431
+        locations_str =  varID.split("|")[1] # GWHEUUU00000023.1_23:25907656-Oleur061Scf2071_6098_727773-797441:431
+        posA, posB = get_SV_locations_split_into_two_positions(locations_str)
 
-        posA, posB = varID.split("|")[1].split("-")
-
+        # processing
         chromA = "%s_%s"%(svtype, posA.split(":")[0])
         chromB = "%s_%s"%(svtype, posB.split(":")[0])
 
@@ -20184,7 +20291,7 @@ def get_bed_df_from_variantID(varID, CNV_overlap_only_based_on_pct):
                     1 : {"chromosome":chromB, "start":startB, "end":endB, "ID":varID+"-B", "type_overlap":type_overlap}}
 
     elif svtype=="CVT":
-
+        
         posA, posB = varID.split("|")[1:]
 
         chromA = "%s_%s"%(svtype, posA.split(":")[0])
@@ -20202,9 +20309,8 @@ def get_bed_df_from_variantID(varID, CNV_overlap_only_based_on_pct):
                     1 : {"chromosome":chromB, "start":startB, "end":endB, "ID":varID+"-B", "type_overlap":type_overlap}}
                         
     elif svtype in {"INS"}:
-
         regionA, posB, typeIns = varID.split("|")[1:]
-
+  
         chromA = "%s_%s_%s"%(svtype, typeIns, regionA.split(":")[0])
         startA, endA = [int(x) for x in regionA.split(":")[1].split("-")]
 
@@ -20219,10 +20325,10 @@ def get_bed_df_from_variantID(varID, CNV_overlap_only_based_on_pct):
     # complex inverted duplication. A region is duplicated, inverted and inserted into another region of the genome. This applies also to complex inverted translocations (intrachromosomal (CVT) or interchromosomal (IVT)). A regions is cut, duplicated, inverted and inserted into anothe region of the genome
 
     elif svtype in {"CVD", "IVT"}:
-
+                        
         # get the region A nd the posB
         regionA, posB = varID.split("|")[1:]
-
+        
         chromA = "%s_%s"%(svtype, regionA.split(":")[0])
         startA, endA = [int(x) for x in regionA.split(":")[1].split("-")]
 
@@ -20235,9 +20341,9 @@ def get_bed_df_from_variantID(varID, CNV_overlap_only_based_on_pct):
                     1 : {"chromosome":chromB, "start":startB, "end":endB, "ID":varID+"-B", "type_overlap":"pos"}}
 
 
-    elif svtype in {"TRA"}:
-
-        posA, posB = varID.split("|")[1].split("<>")
+    elif svtype in {"TRA"}:        
+        # example: TRA|CACTIH010002655.1_28931_3499-16756:0-1496<>GWHEUUU00000004.1_4:7275698-76925950
+        posA, posB = varID.split("|")[1].split("<>") # CACTIH010002655.1_28931_3499-16756:0-1496 & GWHEUUU00000004.1_4:7275698-76925950
 
         chromA = "TRA_%s"%(posA.split(":")[0])
         chromB = "TRA_%s"%(posB.split(":")[0])
@@ -20286,7 +20392,20 @@ def get_set_variants_overlapping(Iq, nvars, varID_q, varID_to_bedIDs, bedID_to_t
 
     return overlapping_vars
 
-def get_SV_CNV_df_with_common_variantID_acrossSamples(SV_CNV, outdir, pct_overlap, tol_bp, threads, CNV_overlap_only_based_on_pct=False):
+
+def get_real_chrom_name_from_bed_row_SV(r):
+    
+    """Gets the real chrom name"""
+    
+    split_chrom = r.chromosome.split("_")
+    
+    if r.ID.startswith("INS|"):
+        return "_".join(split_chrom[2:])
+
+    else:
+        return "_".join(split_chrom[1:])
+        
+def get_SV_CNV_df_with_common_variantID_acrossSamples(SV_CNV, outdir, pct_overlap, tol_bp, threads, CNV_overlap_only_based_on_pct=False, ref_genome=None):
 
     """
     Takes a SV_CNV df and returns it with the field 'variantID_across_samples'. It uses bedmap to be particularly efficient. The basis of this is that if two variants are of the same type and overlap by pct_overlap or tol_bp they are called to be the same.
@@ -20310,7 +20429,17 @@ def get_SV_CNV_df_with_common_variantID_acrossSamples(SV_CNV, outdir, pct_overla
         # create a bed with all the regions that need to be matching in order to be considered the same
         df_bed_all = pd.concat(map(lambda x: get_bed_df_from_variantID(x, CNV_overlap_only_based_on_pct), all_variantIDs)).sort_values(by=["chromosome", "start", "end"])
         df_bed_all.index = list(range(0, len(df_bed_all)))
-
+        
+        # check that beds chrom and coordinates are reasonable
+        if not ref_genome is None:
+            print_if_verbose("checking chromosomes...")
+            expected_chroms = set(map(lambda c: c.id, SeqIO.parse(ref_genome, "fasta")))
+            bed_chroms_real = set(df_bed_all.apply(get_real_chrom_name_from_bed_row_SV, axis=1))
+            
+            strange_chroms = bed_chroms_real.difference(expected_chroms)
+            if len(strange_chroms)>0:
+                raise ValueError("unexpected chroms in bed: %s"%strange_chroms)
+        
         # write the bed
         variants_bed = "%s/variants_regions.bed"%outdir
         df_bed_all[["chromosome", "start", "end", "ID"]].to_csv(variants_bed, sep="\t", index=False, header=False)
@@ -22494,7 +22623,7 @@ def get_set_args_for_perSVade_module(module_name, scripts_dir, tmpdir_module):
 
 
 
-def get_sequencing_parameters_dict_one_sampleID(sampleID, input_sorted_bam, tmpdir_bams, replace, threads, max_median_insert_size, reference_genome, mitochondrial_chromosome):
+def get_sequencing_parameters_dict_one_sampleID(sampleID, input_sorted_bam, tmpdir_bams, replace, threads, max_median_insert_size, reference_genome, mitochondrial_chromosome, predefined_coverage_file):
 
     """Calculates seq parameters for one sampleID. It returns them as a dict"""
 
@@ -22510,13 +22639,18 @@ def get_sequencing_parameters_dict_one_sampleID(sampleID, input_sorted_bam, tmpd
     # get read length
     read_length = get_read_length(sorted_bam, threads=threads, replace=replace)
 
-
     # init dict
     parms_dict = {"sampleID":sampleID, "median_insert_size":median_insert_size, "median_insert_size_sd":median_insert_size_sd, "read_length":read_length}
 
     # get coverage
-    outdir_coverage_calculation = "%s/%s_coverage_per_regions%ibp"%(tmpdir_bams, sampleID, window_l); make_folder(outdir_coverage_calculation)
-    df_coverage = pd.read_csv(generate_coverage_per_window_file_parallel(reference_genome, outdir_coverage_calculation, sorted_bam, windows_file="none", replace=replace, threads=threads), sep="\t")
+    if predefined_coverage_file is None:
+        outdir_coverage_calculation = "%s/%s_coverage_per_regions%ibp"%(tmpdir_bams, sampleID, window_l); make_folder(outdir_coverage_calculation)
+        df_coverage = pd.read_csv(generate_coverage_per_window_file_parallel(reference_genome, outdir_coverage_calculation, sorted_bam, windows_file="none", replace=replace, threads=threads), sep="\t")
+        
+    else:
+        df_coverage = pd.read_csv(predefined_coverage_file, sep="\t")[["#chrom", "start", "end", "mediancov_1"]].copy()
+        
+    # get median coverage
     median_coverage_all = get_median_coverage(df_coverage, mitochondrial_chromosome)
 
     # define the set of each type of chromosomes
@@ -22613,7 +22747,7 @@ def convert_tab_variant_file_to_vcf_for_annotation(input_tab_file, vcf_file):
 def load_SV_CNV_df_from_vcf_one_sample_keep_fields(sampleID, SV_CNV_vcf, fields_SV_CNVs="all"):
 
     """Gets a SV_CNV_vcf as a df, formats INFO fields and adds sampleID. Onlu keeps fields_SV_CNVs. Inspired by get_integrated_SV_CNV_df_severalSamples (initial part)"""
-
+    
     # load vcf as df
     vcf_df = get_vcf_df_with_INFO_as_single_fields(get_df_and_header_from_vcf(SV_CNV_vcf)[0])
 
