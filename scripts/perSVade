@@ -49,6 +49,7 @@ if len(sys.argv)==1 or sys.argv[1] in help_args:
         get_stats_optimization      Generate table with insert size, median coverage and read length for various bam files
         integrate_several_samples   Integrates the variant calls of several samples
         analyze_SV_parameters       Analyzes how different SV parameters (e.g. obtained with optimize_parameters) perform across samples
+        call_SVs_unclassified       Process output of 'call_SVs' and generate SVs in the format of unclassified_SVs.tab
 
     Usage:
 
@@ -59,7 +60,7 @@ if len(sys.argv)==1 or sys.argv[1] in help_args:
 else:
 
     # define the modules
-    available_modules = {"trim_reads_and_QC", "align_reads", "infer_repeats", "find_homologous_regions", "call_SVs", "find_knownSVs_regions", "optimize_parameters", "call_CNVs", "integrate_SV_CNV_calls", "annotate_SVs", "call_small_variants", "annotate_small_vars", "get_cov_genes", "run_several_modules", "get_stats_optimization", "integrate_several_samples", "analyze_SV_parameters"}
+    available_modules = {"trim_reads_and_QC", "align_reads", "infer_repeats", "find_homologous_regions", "call_SVs", "find_knownSVs_regions", "optimize_parameters", "call_CNVs", "integrate_SV_CNV_calls", "annotate_SVs", "call_small_variants", "annotate_small_vars", "get_cov_genes", "run_several_modules", "get_stats_optimization", "integrate_several_samples", "analyze_SV_parameters", "call_SVs_unclassified"}
     module = sys.argv[1]
 
     # define script of this module

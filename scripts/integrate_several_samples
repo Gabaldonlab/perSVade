@@ -289,23 +289,60 @@ if "integrate_SV_CNV_calls_outdir" in fields_paths_df:
             inputs_fn = [(r.sampleID, "%s/SV_and_CNV_variant_calling.vcf"%r.integrate_SV_CNV_calls_outdir, fields_SV_CNVs) for I,r in paths_df.iterrows()]
 
             with multiproc.Pool(opt.threads) as pool:
-                SV_CNVs_df = pd.concat(pool.starmap(fun.load_SV_CNV_df_from_vcf_one_sample_keep_fields, inputs_fn)) 
+                SV_CNVs_df_initial = pd.concat(pool.starmap(fun.load_SV_CNV_df_from_vcf_one_sample_keep_fields, inputs_fn)) 
                 pool.close()
                 pool.terminate()
-            
+                
+            # filter (debugging)
+            #SV_CNVs_df_initial = SV_CNVs_df_initial[SV_CNVs_df_initial.INFO_variantID.apply(lambda x: x.split("|")[0])=="TRA"].copy()
+        
+            # save
             fun.print_if_verbose("saving df...")
-            fun.save_object(SV_CNVs_df, SV_CNVs_df_file)
+            fun.save_object(SV_CNVs_df_initial, SV_CNVs_df_file)
         
         fun.print_if_verbose("loading df...")
-        SV_CNVs_df = fun.load_object(SV_CNVs_df_file)
+        SV_CNVs_df_initial = fun.load_object(SV_CNVs_df_file)
                 
-        # add common ID
-        fun.print_with_runtime("Add 'variantID_across_samples'...")
-        outdir_common_variantID_acrossSamples = "%s/getting_common_variantID"%tmpdir
-        fun.delete_folder(outdir_common_variantID_acrossSamples)
-
-        SV_CNVs_df = fun.get_SV_CNV_df_with_common_variantID_acrossSamples(SV_CNVs_df, outdir_common_variantID_acrossSamples, opt.pct_overlap/100, opt.tol_bp, opt.threads, CNV_overlap_only_based_on_pct=opt.CNV_overlap_only_based_on_pct, ref_genome=opt.ref)
+        # add common ID, for each variant type
+        if "INFO_specificSVtype" in set(SV_CNVs_df_initial.keys()): raise ValueError("invalid")
+        SV_CNVs_df_initial["INFO_specificSVtype"] = SV_CNVs_df_initial.INFO_variantID.apply(lambda x: x.split("|")[0])
+        SV_CNVs_df = pd.DataFrame()
         
+        for specific_SV_type, SV_CNVs_df_initial_SVtype in SV_CNVs_df_initial.groupby("INFO_specificSVtype"):
+            fun.print_with_runtime("Add 'variantID_across_samples' for %s..."%specific_SV_type)
+            
+            SV_CNVs_df_wCommonVarID_file = "%s/SV_CNVs_df_wCommonVarID_%s.py"%(tmpdir, specific_SV_type)
+            if fun.file_is_empty(SV_CNVs_df_wCommonVarID_file):
+                
+                outdir_common_variantID_acrossSamples = "%s/getting_common_variantID_%s"%(tmpdir, specific_SV_type)
+                fun.delete_folder(outdir_common_variantID_acrossSamples)
+                SV_CNVs_df_wCommonVarID = fun.get_SV_CNV_df_with_common_variantID_acrossSamples(SV_CNVs_df_initial_SVtype.drop(["INFO_specificSVtype"], axis=1), outdir_common_variantID_acrossSamples, opt.pct_overlap/100, opt.tol_bp, opt.threads, CNV_overlap_only_based_on_pct=opt.CNV_overlap_only_based_on_pct, ref_genome=opt.ref)
+                
+                fun.save_object(SV_CNVs_df_wCommonVarID, SV_CNVs_df_wCommonVarID_file)
+            SV_CNVs_df_wCommonVarID = fun.load_object(SV_CNVs_df_wCommonVarID_file)
+                
+            SV_CNVs_df = pd.concat([SV_CNVs_df, SV_CNVs_df_wCommonVarID]).reset_index(drop=True)
+            
+        # resort dfs
+        fun.print_if_verbose("Checks...")
+        sort_fields = ["sampleID", "ID"]
+        SV_CNVs_df_initial = SV_CNVs_df_initial.sort_values(by=sort_fields).reset_index(drop=True)
+        SV_CNVs_df = SV_CNVs_df.sort_values(by=sort_fields).reset_index(drop=True)
+                    
+        # check merges
+        fun.check_no_nans_in_df(SV_CNVs_df[sort_fields + ["variantID_across_samples"]])
+        
+        if sorted(SV_CNVs_df_initial.drop(["INFO_specificSVtype"], axis=1).keys())!=sorted(SV_CNVs_df.drop(["variantID_across_samples"], axis=1).keys()):
+            raise ValueError("keys should be the same")
+
+        if len(SV_CNVs_df)!=len(SV_CNVs_df[sort_fields].drop_duplicates()):
+            raise ValueError("should be unique")
+        
+        for f in SV_CNVs_df.keys():
+            if f=="variantID_across_samples": continue
+            if not all(SV_CNVs_df[f].apply(str)==SV_CNVs_df_initial[f].apply(str)):
+                raise ValueError("vals should be the same for %s"%f)
+                                
         # print stats
         var_to_nsamples = SV_CNVs_df.groupby("variantID_across_samples").apply(lambda x: len(set(x.sampleID)))
         fun.print_with_runtime("There are %i/%i SVs/CNVs that are in >1 sample"%(len(set(var_to_nsamples[var_to_nsamples>1].index)), len(set(SV_CNVs_df.variantID_across_samples))))
@@ -318,10 +355,6 @@ if "integrate_SV_CNV_calls_outdir" in fields_paths_df:
         
     # save as vcf for variant annotation
     fun.convert_tab_variant_file_to_vcf_for_annotation(SV_CNVs_file, "%s/integrated_SVs_CNVs_annotation_fields.vcf"%opt.outdir)
-    
-    # gzip outputs
-    print(opt.gzip_output)
-    error_of_gzipping
 
 # create changing SVs file
 if "call_SVs_outdir" in fields_paths_df:
@@ -350,9 +383,21 @@ if "call_CNVs_outdir" in fields_paths_df:
 ########## CLEAN OUTPUT ##########
 ##################################
 
+# gzip outputs
+files_remove_end = []
+if opt.gzip_output is True:
+    fun.print_if_verbose("Gzipping outputs...")
+    
+    for f in os.listdir(opt.outdir):
+        if f.endswith(".tab") or f.endswith(".vcf"):
+            file_f = f"{opt.outdir}/{f}"
+            fun.get_gzipped_file(file_f)
+            files_remove_end.append(file_f)
+
 # clean
 fun.delete_folder(tmpdir)
 fun.delete_folder(opt.outdir+"/reference_genome_dir")
+for f in files_remove_end: fun.remove_file(f)
 
 # wite final file
 fun.generate_final_file_report_one_module(final_file, start_time, time.time())

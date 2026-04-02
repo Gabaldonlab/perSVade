@@ -1,0 +1,210 @@
+#!/usr/bin/env python
+
+#!/usr/bin/env python
+
+######################################
+############# DEFINE ENV #############
+######################################
+
+# general module imports
+import argparse, os, re
+from argparse import RawTextHelpFormatter
+import copy as cp
+import pickle
+import string
+import shutil 
+import random
+import sys
+from shutil import copyfile
+import time
+
+# get the cwd were all the scripts are 
+CWD = "/".join(__file__.split("/")[0:-1]); sys.path.insert(0, CWD)
+
+# define the module name
+module_name = __file__.split("/")[-1]
+
+# define the EnvDir where the environment is defined
+EnvDir = "/".join(sys.executable.split("/")[0:-2])
+
+# import functions
+import sv_functions as fun
+
+# import perSVade-specific modules
+import numpy as np
+import pandas as pd
+
+######################################
+######################################
+######################################
+
+
+#################################### 
+############## ARGS ################
+####################################
+
+description = """
+This module takes the output of 'call_SVs' (through --outdir_callSVs) and generates SV files that are all in the format of unclassified_SVs.tab. This is useful to have SV calls in a format that is not biased by clove.
+"""
+
+# mandatory args
+parser = argparse.ArgumentParser(description=description, formatter_class=RawTextHelpFormatter)
+parser.add_argument("-o", "--outdir", dest="outdir", action="store", required=True, help="Output directory.")
+parser.add_argument("--outdir_callSVs", dest="outdir_callSVs", required=True, help="The path to the output directory of the 'call_SVs' module.")
+parser.add_argument("-r", "--ref", dest="ref", required=True, help="Reference genome. It has to end with .fasta.")
+parser.add_argument("-mchr", "--mitochondrial_chromosome", dest="mitochondrial_chromosome", required=True, type=str, help="The name of the mitochondrial chromosome. If there is no mitochondria just put 'no_mitochondria'. If there is more than one mitochindrial scaffold, provide them as comma-sepparated IDs, like '--mitochondrial_chromosome chr_mito_1,chr_mito_2'.")
+
+# genral optional args
+parser.add_argument("--replace", dest="replace", action="store_true", help="Re-run all the steps by deleting the output directory.")
+parser.add_argument("--verbose", dest="verbose", action="store_true", default=False, help="Print a verbose log.")
+parser.add_argument("--min_chromosome_len", dest="min_chromosome_len", default=100000, type=int, help="The minimum length to consider chromosomes from the provided fasta for calculating the window length (used in may steps of perSVade to parallelize across fractions of the genome).")
+
+# resources
+parser.add_argument("--fraction_available_mem", dest="fraction_available_mem", default=None, type=float, help="This pipeline calculates the available RAM for several steps, and it may not work well in some systems (i.e. HPC clusters). This parameter allows you to correct possible errors. If --fraction_available_mem is not provided (default behavior), this pipeline will calculate the available RAM by filling the memory, which may give errors. If you want to use all the available memory you should specify --fraction_available_mem 1.0. See the FAQ 'How does the --fraction_available_mem work?' from https://github.com/Gabaldonlab/perSVade/wiki/8.-FAQs for more info.")
+parser.add_argument("-thr", "--threads", dest="threads", default=16, type=int, help="Number of threads, Default: 16")
+parser.add_argument("--fractionRAM_to_dedicate", dest="fractionRAM_to_dedicate", type=float,  default=0.5, help="This is the fraction of the available memory that will be used by several java programs that require a heap size. By default we set this to 0.5 to not overload the system.")
+
+opt = parser.parse_args()
+
+####################################
+####################################
+####################################
+
+#################################
+########### MAIN CODE ###########
+#################################
+
+
+# remove outdir if replace, and set replace to False
+if opt.replace is True: fun.delete_folder(opt.outdir)
+opt.replace = False
+
+# make the outdir
+fun.make_folder(opt.outdir)
+
+# exit if the final file exists
+final_file = "%s/perSVade_finished_file.txt"%opt.outdir
+
+if not fun.file_is_empty(final_file): 
+    fun.print_with_runtime("WARNING: %s exists, suggesting that perSVade was already  run in this folder. Remove this file if you want this command to work. Exiting..."%final_file)
+    sys.exit(0)
+
+# define the start time
+start_time = time.time()
+
+# define the verbosity. If opt.verbose is False, none of the 'print' statements of sv_functions will have an effect
+fun.printing_verbose_mode = opt.verbose
+
+# define a file that will contain all the cmds ran
+fun.log_file_all_cmds = "%s/all_cmds.txt"%opt.outdir
+if fun.file_is_empty(fun.log_file_all_cmds): open(fun.log_file_all_cmds, "w").write("# These are all the cmds:\n")
+
+# prepare the reference genome
+opt.ref, reference_genome_dir = fun.prepare_reference_genome_for_perSVade(opt.ref, opt.outdir, opt.mitochondrial_chromosome, None, opt.replace)
+fun.window_l = fun.get_perSVade_window_l(opt.ref, opt.mitochondrial_chromosome, opt.min_chromosome_len)
+
+####### SET RESOURCES ########
+
+# define the fraction of RAM to dedicate
+if opt.fractionRAM_to_dedicate>0.95: raise ValueError("You are using >95 pct of the systems RAM, which is dangerous")
+fun.fractionRAM_to_dedicate = opt.fractionRAM_to_dedicate
+
+# define the fraction of available mem
+fun.fraction_available_mem = opt.fraction_available_mem
+if opt.fraction_available_mem is None: fun.print_with_runtime("WARNING: You did not specify how much RAM should be used through --fraction_available_mem. perSVade will calculate this by filling the memory, which may be dangerous. If you want to use all the allocated memory you should specify --fraction_available_mem 1.0")
+
+# print the available resources
+real_available_threads = fun.get_available_threads(opt.outdir)
+if opt.threads>real_available_threads:  fun.print_with_runtime("WARNING: There are %i available threads, and you required %i."%(real_available_threads, opt.threads))
+
+available_Gb_RAM = fun.get_availableGbRAM(opt.outdir)
+fun.print_with_runtime("Running perSVade %s into %s with %.3f Gb of RAM and %i cores"%(module_name, opt.outdir, available_Gb_RAM, opt.threads))
+
+# make a tmpdir
+tmpdir = opt.outdir + "/tmp"
+fun.make_folder(tmpdir)
+
+##############################
+
+# link certain files in outdir
+for fname in ["gridss_output.filt.bedpe", "gridss_output.filt.vcf", "gridss_output.raw.vcf"]:
+    
+    if not fun.file_is_empty("%s/%s"%(opt.outdir_callSVs, fname)):
+        file_link = fname
+    elif fun.file_is_empty("%s/%s"%(opt.outdir_callSVs, fname)) and not fun.file_is_empty("%s/%s.gz"%(opt.outdir_callSVs, fname)):
+        file_link = fname + ".gz"
+    else:
+        raise ValueError("%s should exist"%fname)
+    
+    fun.soft_link_files("%s/%s"%(opt.outdir_callSVs, file_link), "%s/%s"%(opt.outdir, file_link))
+    
+# define the bedpe file
+filt_bedpe = opt.outdir + "/gridss_output.filt.bedpe"
+if fun.file_is_empty(filt_bedpe) and not fun.file_is_empty(filt_bedpe+".gz"):
+    filt_bedpe = filt_bedpe+".gz"
+    
+# generate clove output with only unclassified events
+fun.print_if_verbose("Getting clove file...")
+outfile_clove = opt.outdir + "/clove_output.vcf"
+fun.generate_clove_vcf_manually_no_integration(filt_bedpe, outfile_clove, opt.outdir_callSVs + "/clove_output.vcf", opt.ref)
+
+# get the clove df
+df_clove_file = tmpdir + "/df_clove_final.py"
+if fun.file_is_empty(df_clove_file):
+    fun.print_if_verbose("Getting clove df...")
+
+    # add the filter of coverage to the clove output
+    df_clove = fun.get_clove_output_with_coverage(outfile_clove, opt.ref, None, None, replace=False, run_in_parallel=True, delete_bams=True, threads=opt.threads)
+    
+    # check
+    if len(df_clove)==0: raise ValueError("No vars in clove.")
+
+    # define the coverage filtering based on the type_coverage_to_filterTANDEL
+    df_clove["coverage_FILTER"] = df_clove.SVTYPE.isin({"TAN", "DEL"}).map({True:"FAIL", False:"PASS"})
+    fun.check_no_nans_series(df_clove["coverage_FILTER"])
+    
+    # save
+    fun.save_object(df_clove, df_clove_file)
+    
+df_clove = fun.load_object(df_clove_file)
+
+# generate the unclassified bps
+fun.print_with_runtime("Getting RSVSim-like files")
+fileprefix = "%s.structural_variants"%outfile_clove
+fun.write_clove_df_into_bedORbedpe_files_like_RSVSim(df_clove, fileprefix, opt.ref, None, tol_bp=-1, replace=False, svtypes_to_consider={"insertions", "deletions", "inversions", "translocations", "tandemDuplications", "remaining"}, run_in_parallel=True, define_insertions_based_on_coverage=False)
+
+# check
+unclassified_file = fileprefix + ".remaining.tab" 
+df_unclassified = fun.get_tab_as_df_or_empty_df(unclassified_file)
+if any(df_unclassified.ID!=df_clove.ID):
+    raise ValueError("should be same")
+
+# clean
+for f in os.listdir(opt.outdir):
+    file_path = opt.outdir + "/" + f
+    if file_path.startswith(fileprefix):
+        if file_path!=unclassified_file: 
+            fun.remove_file(file_path)
+    
+#################################
+#################################
+#################################
+
+##################################
+########## CLEAN OUTPUT ##########
+##################################
+
+# clean
+os.rename(unclassified_file, opt.outdir+"/unclassified_SVs.tab")
+fun.delete_folder(reference_genome_dir)
+fun.delete_folder(tmpdir)
+
+# wite final file
+fun.generate_final_file_report_one_module(final_file, start_time, time.time())
+
+# print the message
+fun.print_with_runtime("perSVade %s finished correctly"%module_name)
+
+##################################
+##################################
+##################################

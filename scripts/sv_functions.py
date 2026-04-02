@@ -767,11 +767,12 @@ def get_weigthed_median(df, field, weight_field, type_algorithm="fast"):
     return median
 
 
-def get_median_coverage(coverage_df, mitochondrial_chromosome, coverage_field="mediancov_1"):
+def get_median_coverage(coverage_df, mitochondrial_chromosome, coverage_field="mediancov_1", use_precalculated_cov=True):
 
     """This function takes a coverage df and calculates the median for those non-0 coverage windows. It will return the median coverage weighted by length """
     
-    if not precalculated_median_coverage is None: return precalculated_median_coverage 
+    if not precalculated_median_coverage is None and use_precalculated_cov is True: 
+        return precalculated_median_coverage 
 
     # keep
     if len(coverage_df)==0: raise ValueError("there should be some data in the coverage_df")
@@ -1085,8 +1086,10 @@ def simulate_testing_reads_on_genome(genome, window_l=2000, npairs=50000, read_l
         windows_bed = "%s/windows_file.bed"%outdir
         run_cmd("%s makewindows -g %s.fai -w %i > %s"%(bedtools, genome, window_l, windows_bed))
         df_windows = pd.read_csv(windows_bed, sep="\t", header=-1, names=["chromosome", "start", "end"])
-        df_windows["predicted_relative_coverage"] = random.sample(list(np.linspace(0.5, 2, 10000)), len(df_windows))
-
+        #df_windows["predicted_relative_coverage"] = random.sample(list(np.linspace(0.5, 2, 10000)), len(df_windows))
+        list_rel_cov = list(np.linspace(0.5, 2, 10000))
+        df_windows["predicted_relative_coverage"] = list(map(lambda x: random.choice(list_rel_cov), range(len(df_windows))))
+        
         # simulate reads
         simulate_readPairs_per_window(df_windows, genome, npairs, outdir_reads, read_length, median_insert_size, median_insert_size_sd, replace=False, threads=threads) 
 
@@ -4202,23 +4205,34 @@ def get_clove_output_with_coverage(outfile_clove, reference_genome, sorted_bam, 
 
         # get the regions of TANDEL and INS that should be renamed
         df_TANDEL = df_clove[df_clove.SVTYPE.isin(tanDEL_svtypes)].rename(columns={"#CHROM":"chromosome", "POS":"start", "END":"end"})[["chromosome", "start", "end"]]
-
         df_INS = df_clove[df_clove.SVTYPE.isin(ins_svtypes)].rename(columns={"CHR2":"chromosome", "START":"start", "END":"end"})[["chromosome", "start", "end"]]
-
         df_TANDELINS = df_TANDEL.append(df_INS)
         
+        # keep unique regions
+        df_TANDELINS = df_TANDELINS[["chromosome", "start", "end"]].drop_duplicates()
+    
+        # get it    
         if len(df_TANDELINS)>0:
+            
+            # if there is a bam provided, calculate the coverage based on it
+            if not sorted_bam is None:
 
-            # define a bed with these regions
-            bed_TANDELINS_regions = "%s.TANDELINS.bed"%outfile_clove
+                # define a bed with these regions
+                bed_TANDELINS_regions = "%s.TANDELINS.bed"%outfile_clove
 
-            # define a coverage df
-            coverage_df = get_df_with_coverage_per_windows_relative_to_neighbor_regions(df_TANDELINS, bed_TANDELINS_regions, reference_genome, sorted_bam, df_clove, median_coverage, replace=replace, run_in_parallel=run_in_parallel, delete_bams=delete_bams, threads=threads, validate_all_coverage_already_calculated=validate_all_coverage_already_calculated, only_generate_regions_coverage=only_generate_regions_coverage)
-         
+                # define a coverage df
+                coverage_df = get_df_with_coverage_per_windows_relative_to_neighbor_regions(df_TANDELINS, bed_TANDELINS_regions, reference_genome, sorted_bam, df_clove, median_coverage, replace=replace, run_in_parallel=run_in_parallel, delete_bams=delete_bams, threads=threads, validate_all_coverage_already_calculated=validate_all_coverage_already_calculated, only_generate_regions_coverage=only_generate_regions_coverage)
+            
+            # else, set 'empty coverage' vals
+            else:
+                coverage_df = df_TANDELINS.copy()
+                for f in ["target_coverage", "relative_coverage_target", "5_coverage", "relative_coverage_5", "3_coverage", "relative_coverage_3", "coverage_rel_to_5", "coverage_rel_to_3", "mean_rel_coverage_to_neighbor", "closestTo1_rel_coverage_to_neighbor"]:
+                    coverage_df[f] = 0.0
+                    
         else: coverage_df = pd.DataFrame(columns=['chromosome', 'start', 'end', 'target_coverage', 'relative_coverage_target', '5_coverage', 'relative_coverage_5', '3_coverage', 'relative_coverage_3', 'coverage_rel_to_5', 'coverage_rel_to_3', 'mean_rel_coverage_to_neighbor', 'closestTo1_rel_coverage_to_neighbor'])
 
         if only_generate_regions_coverage is True: return 
-
+        
         # initialize merge
         merged_df = pd.DataFrame()
 
@@ -4239,7 +4253,10 @@ def get_clove_output_with_coverage(outfile_clove, reference_genome, sorted_bam, 
                 merged_df_svtype = svtype_df_clove.merge(coverage_df, left_on=coord_fields, right_on=["chromosome", "start", "end"], how="left")
 
                 # check that it is correct
-                if len(merged_df_svtype)!=len(svtype_df_clove) or any(pd.isna(merged_df_svtype.target_coverage)): raise ValueError("There is an error with the merge")
+                if len(merged_df_svtype)!=len(svtype_df_clove) or any(pd.isna(merged_df_svtype.target_coverage)): 
+                    print(svtypeName, "len is diff", len(merged_df_svtype)!=len(svtype_df_clove), "merged", len(merged_df_svtype), "svtype", len(svtype_df_clove))
+                    print("any nans", any(pd.isna(merged_df_svtype.target_coverage)))                    
+                    raise ValueError("There is an error with the merge")
             else: 
 
                 # initialize as clove
@@ -7411,6 +7428,200 @@ def format_svDF(svDF, svtype="unknown", interesting_chromosomes="all", sampleNam
     svDF["IDstring"] = svDF.apply(lambda r: get_IDstring_for_svDF_r(r, svtype), axis=1)
 
     return svDF
+
+def get_clove_r_from_bedpe_r(bedpe_r):
+    
+    """Gets the clove row from the bedpe one."""
+    
+    # init with simple fields
+    clove_dict = {"#CHROM":bedpe_r.chrA, "POS":bedpe_r.startA, "REF":"", "QUAL":bedpe_r.QUAL, "ID":bedpe_r.ID, "FORMAT":"", "FILTER":"FAIL"}
+    
+    # init the INFO with simple fields 
+    info_dict = {"CHR2":bedpe_r.chrB, "END":bedpe_r.startB, "SUPPORT":"1,1"}
+
+    # add the SVtype (DEL, TAN, INV1, INV2, ITX1, ITX2, INVTX1, INVTX2)
+    if bedpe_r.chrA==bedpe_r.chrB and bedpe_r.orientationA=="+" and bedpe_r.orientationB=="-":
+        info_dict["SVTYPE"] = "DEL"
+        
+    elif bedpe_r.chrA==bedpe_r.chrB and bedpe_r.orientationA=="-" and bedpe_r.orientationB=="+":
+        info_dict["SVTYPE"] = "TAN"    
+
+    elif bedpe_r.chrA==bedpe_r.chrB and bedpe_r.orientationA=="+" and bedpe_r.orientationB=="+":
+        info_dict["SVTYPE"] = "INV1"    
+            
+    elif bedpe_r.chrA==bedpe_r.chrB and bedpe_r.orientationA=="-" and bedpe_r.orientationB=="-":
+        info_dict["SVTYPE"] = "INV2"    
+    
+    elif bedpe_r.chrA!=bedpe_r.chrB and bedpe_r.orientationA=="+" and bedpe_r.orientationB=="-":
+        info_dict["SVTYPE"] = "ITX1"        
+    
+    elif bedpe_r.chrA!=bedpe_r.chrB and bedpe_r.orientationA=="-" and bedpe_r.orientationB=="+":
+        info_dict["SVTYPE"] = "ITX2"        
+    
+    elif bedpe_r.chrA!=bedpe_r.chrB and bedpe_r.orientationA=="+" and bedpe_r.orientationB=="+":
+        info_dict["SVTYPE"] = "INVTX1"        
+    
+    elif bedpe_r.chrA!=bedpe_r.chrB and bedpe_r.orientationA=="-" and bedpe_r.orientationB=="-":
+        info_dict["SVTYPE"] = "INVTX2"        
+       
+    else:
+        raise ValueError("invalid SVtype for %s"%bedpe_r.ID)
+    
+    # add ADP
+    if info_dict["SVTYPE"] in {"DEL", "TAN"}:
+        info_dict["ADP"] = "-1.0"
+        
+    # define the INFO str
+    if info_dict["SVTYPE"] in {"DEL", "TAN"}:
+        sorted_INFO_fields = ["SVTYPE", "CHR2", "END", "ADP", "SUPPORT"]
+    else:
+        sorted_INFO_fields = ["SVTYPE", "CHR2", "END", "SUPPORT"]
+    
+    clove_dict["INFO"] = ";".join(["%s=%s"%(f, info_dict[f]) for f in sorted_INFO_fields])
+    
+    # add the "ALT"
+    clove_dict["ALT"] = {"DEL":"<DEL>", "TAN":"<TAN>", "INV1":"<INV>", "INV2":"<INV>", "ITX1":"<TRA>", "ITX2":"<TRA>", "INVTX1":"<INV>", "INVTX2":"<INV>"}[info_dict["SVTYPE"]]
+            
+    # return 
+    return pd.Series(clove_dict)
+
+
+def get_simulated_small_bam(outdir, ref_genome):
+    
+    """Simulates small bam"""
+    
+    simulated_bam = outdir + "/simulated_reads.bam"
+    if file_is_empty(simulated_bam):
+        
+        # make it
+        delete_folder(outdir)
+        make_folder(outdir)
+        
+        # define a genome that has a chunk of each chrom in ref genome
+        chroms_list = []
+        bases = ['A', 'C', 'T', 'G']
+        for Ic,c in enumerate(get_chr_to_len(ref_genome).keys()):
+            random.seed(Ic)
+            chroms_list.append(SeqRecord(Seq(''.join(random.choices(bases, k=500))), id=c, name="", description=""))
+            
+        # get the genome for simulating
+        sim_genome = "%s/genome_sim.fasta"%outdir
+        SeqIO.write(chroms_list[0:10], sim_genome, "fasta")
+
+        # get some simulated reads
+        reads1, reads2 = simulate_testing_reads_on_genome(sim_genome, window_l=200, npairs=1000, read_length=50, median_insert_size=15, median_insert_size_sd=5, threads=50, replace=False)
+
+        # get the genome for mapping
+        full_genome = "%s/genome.fasta"%outdir
+        SeqIO.write(chroms_list, full_genome, "fasta")
+        
+        # get a sorted bam
+        sorted_bam = get_sorted_bam_test(reads1, reads2, full_genome, replace=False)
+        os.rename(sorted_bam, simulated_bam)
+        
+    return simulated_bam
+    
+def generate_clove_vcf_manually_no_integration(bedpe_file, outfile_clove, integrated_outfile_clove, ref_genome):
+    
+    """Generates manually expected clove file from a bedpe, checking that is similar to the one in integrated_outfile_clove"""
+    
+    if file_is_empty(outfile_clove):
+        print_with_runtime("Getting clove-like vcf...")
+        
+        # define tmpdir
+        tmpdir = outfile_clove+".gen"; make_folder(tmpdir)
+        
+        # load bedpe
+        df_bedpe = pd.read_csv(bedpe_file, sep="\t", header=None, names=["chrA", "startA", "endA", "chrB", "startB", "endB", "ID", "QUAL", "orientationA", "orientationB"])
+        if len(df_bedpe)!=len(set(df_bedpe.ID)): raise ValueError("ID should be unique")
+        
+        # checks
+        check_no_nans_in_df(df_bedpe)
+        if not all(df_bedpe.orientationA.isin({"-", "+"})): raise ValueError("bad orientation A")
+        if not all(df_bedpe.orientationB.isin({"-", "+"})): raise ValueError("bad orientation B")
+        if not all(df_bedpe.startA<df_bedpe.endA): raise ValueError("start A should be end")
+        if not all(df_bedpe.startB<df_bedpe.endB): raise ValueError("start B should be end")
+        
+        # define fields
+        outfile_clove_tmp = outfile_clove+".tmp.vcf"
+        vcf_fields = ["#CHROM",  "POS", "ID", "REF", "ALT", "QUAL", "FILTER", "INFO", "FORMAT"]
+
+        # get the clove vcf
+        print_with_runtime("writing vcf...")
+        df_vcf = df_bedpe.apply(get_clove_r_from_bedpe_r, axis=1)
+        vcf_lines = df_vcf[vcf_fields].to_csv(sep="\t", header=True, index=False)
+        header_lines = ["##fileformat=VCFv4.2"]                    
+        open(outfile_clove_tmp, "w").write("\n".join(header_lines) + "\n" + vcf_lines)
+        
+        # re-run clove for checks
+        print_with_runtime("Checking...")
+        simulated_bam = get_simulated_small_bam(tmpdir+"/bam_simulation", ref_genome) # to avoid coverage calculation
+        
+        if bedpe_file.endswith(".gz"):
+            bedpe_file_clove = tmpdir + "/uncompressed_bps.bedpe"
+            run_cmd("gunzip -c %s > %s"%(bedpe_file, bedpe_file_clove))
+        else:
+            bedpe_file_clove = bedpe_file
+        
+        re_ran_clove_outfile = tmpdir + "/re-ran_clove_output.vcf"
+        re_ran_clove_std = "%s.std"%re_ran_clove_outfile
+        if file_is_empty(re_ran_clove_outfile):
+            run_cmd("%s -jar %s -i %s BEDPE -o %s.tmp.vcf -r -b %s -c 10 1 > %s 2>&1"%(JAVA, clove, bedpe_file_clove, re_ran_clove_outfile, simulated_bam, re_ran_clove_std)) 
+            os.rename(re_ran_clove_outfile+".tmp.vcf", re_ran_clove_outfile)
+            
+        df_clove_intergrated_reRan = pd.read_csv(re_ran_clove_outfile, sep="\t", comment="#", header=None, names=vcf_fields)
+        
+        # load dfs for checks
+        df_clove = pd.read_csv(outfile_clove_tmp, sep="\t", comment="#", header=None, names=vcf_fields)
+        df_clove_intergrated = pd.read_csv(integrated_outfile_clove, sep="\t", comment="#", header=None, names=vcf_fields)
+                
+        # add fields
+        df_clove["INFO_dict"] = df_clove.INFO.apply(lambda x: {s.split("=")[0]: s.split("=")[1] for s in x.split(";")})
+        df_clove["CHR2"] = df_clove.INFO_dict.apply(lambda x: x["CHR2"])
+        df_clove["SVTYPE"] = df_clove.INFO_dict.apply(lambda x: x["SVTYPE"])
+        df_clove["END"] = df_clove.INFO_dict.apply(lambda x: int(x["END"]))
+        
+        # general checks
+        if len(df_clove_intergrated_reRan)!=len(df_clove_intergrated): raise ValueError("should be the same length")       
+
+        df_clove_same_chr = df_clove[(df_clove["#CHROM"]==df_clove["CHR2"])].copy()
+        if not all(df_clove_same_chr.POS<df_clove_same_chr.END): raise ValueError("invalid coords")
+        
+        df_clove_intergrated["set_IDs"] = df_clove_intergrated.ID.apply(lambda x: set(re.split("\+|\-", x)))  
+        df_clove_intergrated_reRan["set_IDs"] = df_clove_intergrated_reRan.ID.apply(lambda x: set(re.split("\+|\-", x)))  
+        allIDs_integrated = set.union(*df_clove_intergrated["set_IDs"])
+        
+        if len(allIDs_integrated.difference(set(df_clove.ID)))>0:
+            raise ValueError("all IDs from clove should be in allIDs_integrated")
+        
+        if set.union(*df_clove_intergrated_reRan["set_IDs"])!=allIDs_integrated:
+            raise ValueError("should be all the same IDs")
+        
+        # check the discarded IDs
+        discarded_IDs = set(df_clove.ID).difference(allIDs_integrated)
+        print("WARNING: Discarded IDs:\n---", df_bedpe[df_bedpe.ID.isin(discarded_IDs)], "\n---")
+        
+        for Id, clove_disc in df_clove[df_clove.ID.isin(discarded_IDs)].iterrows():
+            bedpe_disc = df_bedpe[df_bedpe.ID==clove_disc.ID].iloc[0]
+            if clove_disc["#CHROM"]!=clove_disc["CHR2"]: raise ValueError("unfiltered IDs should be from same chrom")
+            if not clove_disc.SVTYPE in {"TAN", "DEL"}: raise ValueError("shold be TAN / DEL")
+            
+        fraction_discarded = len(discarded_IDs)/len(df_clove)
+        if fraction_discarded>0.05:
+            raise ValueError(">5% discarded events, suggesting issues")
+
+        # check same fields
+        non_integrated_IDs = set(df_clove_intergrated[df_clove_intergrated["set_IDs"].apply(len)==1].ID)
+        df_clove = df_clove[df_clove.ID.isin(non_integrated_IDs)].copy().sort_values(by=["ID"]).reset_index(drop=True).drop(["REF", "FORMAT"], axis=1)
+        df_clove_intergrated = df_clove_intergrated[df_clove_intergrated.ID.isin(non_integrated_IDs)].copy().sort_values(by=["ID"]).reset_index(drop=True).drop(["REF", "FORMAT", "set_IDs"], axis=1)
+        
+        for f in  ["#CHROM",  "POS", "ID", "ALT", "QUAL", "FILTER", "INFO"]:
+            if not all(df_clove[f]==df_clove_intergrated[f]):
+                raise ValueError("differences in %s"%f)
+            
+        # keep
+        delete_folder(tmpdir)
+        os.rename(outfile_clove_tmp, outfile_clove)
 
 def get_sampleID_to_svtype_to_svDF_filtered(sampleID_to_svtype_to_file, sampleID_to_dfGRIDSS, sampleID_to_parentIDs={}, breakend_info_to_keep=['#CHROM', 'POS', 'other_coordinates', 'allele_frequency', 'allele_frequency_SmallEvent', 'real_AF', 'FILTER', 'inserted_sequence', 'has_poly16GC', 'length_inexactHomology', 'length_microHomology', 'QUAL', 'overlaps_repeats', 'REF']):
 
@@ -15492,7 +15703,7 @@ def get_df_coverage_with_relative_coverage_and_for_each_typeGenome(df_coverage, 
     df_coverage["type_genome"] = df_coverage.chromosome.apply(get_type_genome)
 
     # calculate the median of each genome
-    type_genome_to_median_relativeCov = {type_genome : get_median_coverage(df_coverage[df_coverage.type_genome==type_genome], mitochondrial_chromosome, coverage_field="relative_coverage") for type_genome in ["gDNA", "mtDNA"] if sum(df_coverage.type_genome==type_genome)>0}
+    type_genome_to_median_relativeCov = {type_genome : get_median_coverage(df_coverage[df_coverage.type_genome==type_genome], mitochondrial_chromosome, coverage_field="relative_coverage", use_precalculated_cov=False) for type_genome in ["gDNA", "mtDNA"] if sum(df_coverage.type_genome==type_genome)>0}
 
     # add to the df the relative_coverage_to_genome
     df_coverage["median_relative_coverage_genome"] = df_coverage.type_genome.apply(lambda x: type_genome_to_median_relativeCov[x])
@@ -20344,7 +20555,7 @@ def get_bed_df_from_variantID(varID, CNV_overlap_only_based_on_pct):
     elif svtype in {"TRA"}:        
         # example: TRA|CACTIH010002655.1_28931_3499-16756:0-1496<>GWHEUUU00000004.1_4:7275698-76925950
         posA, posB = varID.split("|")[1].split("<>") # CACTIH010002655.1_28931_3499-16756:0-1496 & GWHEUUU00000004.1_4:7275698-76925950
-
+        
         chromA = "TRA_%s"%(posA.split(":")[0])
         chromB = "TRA_%s"%(posB.split(":")[0])
 
@@ -20352,10 +20563,12 @@ def get_bed_df_from_variantID(varID, CNV_overlap_only_based_on_pct):
         locationsA = {int(x) for x in posA.split(":")[1].split("-")}.difference({0})
         locationsB = {int(x) for x in posB.split(":")[1].split("-")}.difference({0})
 
-        startA = min(locationsA)
+        if len(locationsA)>0: startA = min(locationsA)
+        else: startA = 0 # all zeros
         endA = startA + 1
 
-        startB = min(locationsB)
+        if len(locationsB)>0: startB = min(locationsB)
+        else: startB = 0 # all zeros        
         endB = startB + 1
 
         type_overlap = "pos" # this means that only the position should be mapping
@@ -20412,6 +20625,7 @@ def get_SV_CNV_df_with_common_variantID_acrossSamples(SV_CNV, outdir, pct_overla
     """
 
     print_if_verbose("running get_SV_CNV_df_with_common_variantID_acrossSamples")
+    #print(SV_CNV)
     make_folder(outdir)
 
     # define the df_overlap and df_bed_all files
@@ -22707,7 +22921,7 @@ def convert_tab_variant_file_to_vcf_for_annotation(input_tab_file, vcf_file):
 
     print_if_verbose("Generating vcf for variant annotation")
     if file_is_empty(vcf_file):
-
+        
         # load vars df and keep some fields
         df_vars = get_tab_as_df_or_empty_df(input_tab_file).rename(columns={"#Uploaded_variation":"ID"})
 
@@ -23151,6 +23365,19 @@ def get_bcftools_mpileup_output_one_chrom(ref, mpileup_output_chrom, sorted_bam,
         for f in [ref_chrom, ref_chrom+".fai", sorted_bam_chrom, sorted_bam_chrom+".bai", mpileup_output_chrom_header]: remove_file(f)
         os.rename(mpileup_output_chrom_tmp, mpileup_output_chrom)
 
+def check_no_nans_series(x):
+
+    """Raise value error if nans"""
+
+    if any(pd.isna(x)): raise ValueError("There can't be nans in series %s"%x)
+
+def check_no_nans_in_df(df, ignore_keys=set()):
+
+    """Returns an error if there ar nans in a df"""
+
+    keys_consider = list(set(df.keys()).difference(ignore_keys))
+    if any(pd.isna(df[keys_consider]).apply(any, axis=1)): 
+        for k in keys_consider: check_no_nans_series(df[k])
 
 def get_command_stdout(cmd, env=EnvName, skip_rstrip=False, get_raw_str=False):
     SOURCE_CONDA_CMD = "source %s/etc/profile.d/conda.sh"%CondaDir
